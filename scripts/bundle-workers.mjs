@@ -41,10 +41,14 @@ const common = {
  * file, and the consumer needs no `worker.format` setting of its own. It costs ~670 kB in
  * a file nothing fetches until someone asks for a t-SNE — the worker boundary is what
  * makes jax-js lazy, so nothing is lost by making the import inside it eager.
+ *
+ * Because it is inlined, @jax-js/jax is a devDependency: no consumer ever resolves it.
+ * The bare-import assertion below is what keeps that true.
  */
 const workers = [
   { in: 'src/lib/region-editor/mask.worker.ts',            out: 'dist/fesm2022/mask.worker.js' },
   { in: 'src/lib/toolbar/segmentation/onnx-sam.worker.ts', out: 'dist/fesm2022/onnx-sam.worker.js' },
+  { in: 'src/lib/workers/spatial-math.worker.ts',          out: 'dist/fesm2022/spatial-math.worker.js' },
   {
     in: 'src/lib/spatial/tsne.worker.ts',
     out: 'dist/fesm2022/tsne.worker.js',

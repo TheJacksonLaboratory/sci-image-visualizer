@@ -1,7 +1,8 @@
 import { NapariRegionOverlay } from './napari-region-overlay';
 import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
-import { Region, Rectangle, Polygon } from '../../models/region';
+import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
+import { bezierAnchorHandles } from '../../models/bezier';
 
 /**
  * Tests for the napari-js SVG region overlay (jit-ui#102), mirroring
@@ -64,6 +65,9 @@ function fakeViewer(): FakeViewer {
   };
 }
 
+/** Half the rendered handle size (handles are centred on their vertex). */
+const HANDLE_HALF = 3.5;
+
 function svgOf(overlay: NapariRegionOverlay): SVGSVGElement {
   return (overlay as any).svg as SVGSVGElement;
 }
@@ -91,7 +95,11 @@ function triRegion(): Region {
   p.npoints = 3;
   p.xpoints = [0, 10, 5];
   p.ypoints = [0, 0, 10];
-  p.coordinates = [[0, 0], [10, 0], [5, 10]];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [5, 10],
+  ];
   p.closed = true;
   r.bounds = p;
   return r;
@@ -128,8 +136,43 @@ function donutRegion(): Region {
   p.npoints = 4;
   p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
   p.closed = true;
-  p.holes = [[[7, 7], [13, 7], [13, 13], [7, 13]]];
+  p.holes = [
+    [
+      [7, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ],
+  ];
   r.bounds = p;
+  return r;
+}
+
+/** A 2-part MultiPolygon (merge output with disjoint parts): a 0–20 square with a 7–13 hole,
+ *  and a separate 50–60 square. */
+function multiRegion(): Region {
+  const square = (x0: number, y0: number, x1: number, y1: number): Polygon => {
+    const p = new Polygon();
+    p.xpoints = [x0, x1, x1, x0];
+    p.ypoints = [y0, y0, y1, y1];
+    p.npoints = 4;
+    p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]);
+    p.closed = true;
+    return p;
+  };
+  const a = square(0, 0, 20, 20);
+  a.holes = [
+    [
+      [7, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ],
+  ];
+  const mp = new MultiPolygon();
+  mp.polygons = [a, square(50, 50, 60, 60)];
+  const r = new Region();
+  r.bounds = mp;
   return r;
 }
 
@@ -191,6 +234,51 @@ describe('NapariRegionOverlay', () => {
     overlay.setMode('none');
     expect(viewer.controlsEnabledLog.at(-1)).toBe(true); // handed back for pan/zoom
     expect(svgOf(overlay).style.pointerEvents).toBe('none');
+  });
+
+  it('reads the svg rect once per redraw, not once per vertex (review NAPARI-BOUNDARY-10)', () => {
+    for (let i = 0; i < 5; i++) store.addRegion(triRegion()); // the last one is selected
+    store.setShowShapeLabel(true);
+    const read = jest.spyOn(svgOf(overlay), 'getBoundingClientRect');
+    viewer.cameraListeners[0]();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(svgOf(overlay).querySelectorAll('polygon')).toHaveLength(5);
+  });
+
+  it('a camera move rewrites one transform and does not rebuild the regions (NAPARI-BOUNDARY-10)', () => {
+    let zoom = 1;
+    viewer.worldToCanvas = (x: number, y: number) => [x * zoom + 5, y * zoom];
+    store.addRegion(triRegion());
+    store.setSelectedShapeIndices([]); // no handles: only the regions are on screen
+    overlay.redraw();
+    const svg = svgOf(overlay);
+    const shape = svg.querySelector('polygon')!;
+    expect(shape.getAttribute('points')).toBe('0,0 10,0 5,10'); // world coordinates
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(svg, { subtree: true, childList: true, attributes: true, characterData: true });
+
+    zoom = 3;
+    viewer.cameraListeners[0]();
+    const records = observer.takeRecords();
+    observer.disconnect();
+    expect(
+      records.map((r) => [r.type, r.attributeName, (r.target as Element).getAttribute?.('data-layer')]),
+    ).toEqual([['attributes', 'transform', 'regions']]);
+    expect(svg.querySelector('polygon')).toBe(shape);
+    expect(shape.parentElement!.getAttribute('transform')).toBe('matrix(3 0 0 3 5 0)');
+  });
+
+  it("a camera move re-positions the selected region's handles in place", () => {
+    let zoom = 1;
+    viewer.worldToCanvas = (x: number, y: number) => [x * zoom, y * zoom];
+    store.addRegion(rectRegionAt(0, 0, 10, 10)); // selected → four corner handles
+    const handles = () =>
+      Array.from(svgOf(overlay).querySelectorAll('rect')).filter((el) => el.getAttribute('fill') === '#fff');
+    const before = handles();
+    zoom = 2;
+    viewer.cameraListeners[0]();
+    expect(handles()).toEqual(before); // the same nodes
+    expect(before.map((el) => Number(el.getAttribute('x')) + HANDLE_HALF)).toEqual([0, 20, 0, 20]);
   });
 
   it('camera change triggers a redraw without throwing', () => {
@@ -275,6 +363,20 @@ describe('NapariRegionOverlay', () => {
       expect(poly.npoints).toBeGreaterThan(20);
       o.destroy();
     });
+
+    it('selects with a rubber band smaller than 3 world units', () => {
+      // The "tiny marquee = click" threshold was 3 WORLD units — over half this sample —
+      // so any band drawn across it cleared the selection instead of selecting.
+      const o = tinyWorldOverlay(0.001);
+      store.addRegion(rectRegionAt(0.1, 0.1, 0.1, 0.1)); // screen ~16–32 px
+      store.addRegion(rectRegionAt(2, 2, 0.1, 0.1)); // selected, far away
+      o.setMode('select');
+      ptr(o, 'pointerdown', 100, 100); // empty space
+      ptr(o, 'pointermove', 5, 5);
+      ptr(o, 'pointerup', 5, 5);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+      o.destroy();
+    });
   });
 
   it('drawrect: a degenerate (sub-2px) drag commits nothing', () => {
@@ -343,6 +445,38 @@ describe('NapariRegionOverlay', () => {
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
 
+  /** What a bare click in select mode selects (selection cleared first). */
+  function clickSelect(x: number, y: number): number[] {
+    store.setSelectedShapeIndices([]);
+    ptr(overlay, 'pointerdown', x, y);
+    ptr(overlay, 'pointerup', x, y);
+    return store.getSelectedShapeIndices();
+  }
+
+  it("select: a click inside a donut's hole does not select the donut (as OSD)", () => {
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(donutRegion()); // index 1, hole 7–13
+    overlay.setMode('select');
+    expect(clickSelect(3, 3)).toEqual([1]); // the ring
+    expect(clickSelect(10, 10)).toEqual([]); // the hole
+  });
+
+  it('select: an open polyline is picked near its line, not by its implied interior', () => {
+    const r = triRegion();
+    const p = r.bounds as Polygon;
+    // A U: down the left, across the bottom, up the right.
+    p.xpoints = [0, 0, 40, 40];
+    p.ypoints = [0, 40, 40, 0];
+    p.npoints = 4;
+    p.closed = false;
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(r); // index 1
+    overlay.setMode('select');
+    expect(clickSelect(20, 20)).toEqual([]); // inside the U: nothing is there
+    expect(clickSelect(3, 20)).toEqual([1]); // 3 px from the left stroke
+    expect(clickSelect(20, 37)).toEqual([1]); // 3 px from the bottom stroke
+  });
+
   it('move: dragging the body translates the whole region', () => {
     // A large rect so the press point sits clear of every corner handle.
     const id = store.addRegion(rectRegionAt(0, 0, 100, 100));
@@ -404,6 +538,127 @@ describe('NapariRegionOverlay', () => {
     expect(p.xpoints[0]).toBe(3);
   });
 
+  /**
+   * A drag can end without a pointerup: the browser cancels it, capture is lost, or the
+   * overlay is torn down (a backend switch). Each must close the store batch and drop the
+   * gesture, or later edits are never emitted and the region follows a bare hover
+   * (review NAPARI-BOUNDARY-7).
+   */
+  describe('a drag that ends without a pointerup', () => {
+    function startBodyDrag(): { id: number; emits: () => number } {
+      const id = store.addRegion(rectRegionAt(0, 0, 100, 100));
+      overlay.setMode('move');
+      let n = 0;
+      store.getRegionUpdateEvent().subscribe(() => n++);
+      ptr(overlay, 'pointerdown', 50, 50);
+      ptr(overlay, 'pointermove', 53, 54);
+      return { id, emits: () => n };
+    }
+    const xOf = (id: number) => (store.getRegions().find((r) => r.id === id)!.bounds as Rectangle).x;
+
+    for (const type of ['pointercancel', 'lostpointercapture'] as const) {
+      it(`${type} closes the batch and stops the drag`, () => {
+        const { id, emits } = startBodyDrag();
+        expect(emits()).toBe(0); // batched
+        svgOf(overlay).dispatchEvent(new MouseEvent(type));
+        expect(emits()).toBe(1); // the batch was flushed
+        ptr(overlay, 'pointermove', 80, 80); // a plain hover afterwards
+        expect(xOf(id)).toBe(3); // did not follow the cursor
+        store.addRegion(rectRegion()); // later edits emit at once again
+        expect(emits()).toBe(2);
+      });
+    }
+
+    it('setMode mid-drag closes the batch', () => {
+      const { emits } = startBodyDrag();
+      overlay.setMode('select');
+      expect(emits()).toBe(1);
+    });
+
+    it('destroy mid-drag closes the batch', () => {
+      const { emits } = startBodyDrag();
+      overlay.destroy();
+      expect(emits()).toBe(1);
+      overlay = new NapariRegionOverlay(host, viewer, store); // for afterEach
+    });
+
+    it('pointercancel drops a rectangle being drawn', () => {
+      overlay.setMode('drawrect');
+      ptr(overlay, 'pointerdown', 2, 3);
+      ptr(overlay, 'pointermove', 12, 13);
+      svgOf(overlay).dispatchEvent(new MouseEvent('pointercancel'));
+      ptr(overlay, 'pointerup', 12, 13);
+      expect(store.getRegions()).toHaveLength(0);
+      expect(svgOf(overlay).querySelector('rect')).toBeNull();
+    });
+
+    it('keeps a click-placed polygon in progress across a cancelled pointer', () => {
+      overlay.setMode('drawpolygon');
+      ptr(overlay, 'pointerdown', 0, 0);
+      ptr(overlay, 'pointerdown', 20, 0);
+      svgOf(overlay).dispatchEvent(new MouseEvent('pointercancel'));
+      ptr(overlay, 'pointerdown', 10, 20);
+      ptr(overlay, 'pointerdown', 1, 1); // close
+      expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
+    });
+  });
+
+  /**
+   * The transforms speak CLIENT px, and the overlay maps them into its svg itself. With the
+   * host at the page origin (jsdom's default zero rects) a canvas-local transform would pass
+   * too, so these put the host at (100, 50) (review NAPARI-BOUNDARY-6).
+   */
+  describe('a host away from the page origin', () => {
+    const LEFT = 100;
+    const TOP = 50;
+    let offset: NapariRegionOverlay;
+
+    beforeEach(() => {
+      const v = fakeViewer();
+      // What napari-js does: client px = canvas rect origin + canvas-local px.
+      v.canvasToWorld = (cx: number, cy: number) => [cx - LEFT, cy - TOP];
+      v.worldToCanvas = (wx: number, wy: number) => [wx + LEFT, wy + TOP];
+      offset = new NapariRegionOverlay(host, v, store);
+      jest
+        .spyOn(svgOf(offset), 'getBoundingClientRect')
+        .mockReturnValue({ left: LEFT, top: TOP, x: LEFT, y: TOP, width: 400, height: 300 } as DOMRect);
+    });
+    afterEach(() => offset.destroy());
+
+    it('draws a region where the pointer drew it', () => {
+      offset.setMode('drawrect');
+      ptr(offset, 'pointerdown', LEFT + 2, TOP + 3);
+      ptr(offset, 'pointermove', LEFT + 12, TOP + 13);
+      ptr(offset, 'pointerup', LEFT + 12, TOP + 13);
+      const b = store.getRegions()[0].bounds as Rectangle;
+      expect([b.x, b.y, b.width, b.height]).toEqual([2, 3, 10, 10]);
+      const rect = svgOf(offset).querySelector('rect')!; // svg-local px
+      expect([rect.getAttribute('x'), rect.getAttribute('y')]).toEqual(['2', '3']);
+    });
+
+    it('closes a polygon on a click near its first vertex', () => {
+      offset.setMode('drawpolygon');
+      for (const [x, y] of [
+        [0, 0],
+        [20, 0],
+        [10, 20],
+        [1, 1],
+      ])
+        ptr(offset, 'pointerdown', LEFT + x, TOP + y);
+      expect((store.getRegions()[0].bounds as Polygon).xpoints).toEqual([0, 20, 10]);
+    });
+
+    it('grabs a vertex handle under the pointer', () => {
+      const id = store.addRegion(triRegion()); // selected; vertex 0 at (0,0)
+      offset.setMode('select');
+      ptr(offset, 'pointerdown', LEFT, TOP);
+      ptr(offset, 'pointermove', LEFT + 3, TOP + 4);
+      ptr(offset, 'pointerup', LEFT + 3, TOP + 4);
+      const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      expect([p.xpoints[0], p.ypoints[0]]).toEqual([3, 4]);
+    });
+  });
+
   // ── vertex add / delete ────────────────────────────────────────────────
 
   it('addpoint: clicking an edge inserts a vertex after that segment', () => {
@@ -428,6 +683,47 @@ describe('NapariRegionOverlay', () => {
     const p = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
     expect(p.xpoints.length).toBe(3);
     expect(p.xpoints).toEqual([0, 10, 0]);
+  });
+
+  it('addpoint: clicking a hole edge inserts a vertex on that ring (as OSD)', () => {
+    const id = store.addRegion(donutRegion()); // hole [[7,7],[13,7],[13,13],[7,13]]
+    overlay.setMode('addpoint');
+    ptr(overlay, 'pointerdown', 10, 7); // midpoint of hole edge 0
+    ptr(overlay, 'pointerup', 10, 7);
+    const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+    expect(p.holes![0]).toEqual([
+      [7, 7],
+      [10, 7],
+      [13, 7],
+      [13, 13],
+      [7, 13],
+    ]);
+    expect(p.npoints).toBe(4); // exterior unchanged
+  });
+
+  it('deletepoint: clicking a hole vertex removes it from that ring (as OSD)', () => {
+    const r = donutRegion();
+    (r.bounds as Polygon).holes = [
+      [
+        [7, 7],
+        [13, 7],
+        [13, 13],
+        [7, 13],
+        [9, 9],
+      ],
+    ];
+    const id = store.addRegion(r);
+    overlay.setMode('deletepoint');
+    ptr(overlay, 'pointerdown', 7, 7); // hole vertex 0
+    ptr(overlay, 'pointerup', 7, 7);
+    const p = store.getRegions().find((r2) => r2.id === id)!.bounds as Polygon;
+    expect(p.holes![0]).toEqual([
+      [13, 7],
+      [13, 13],
+      [7, 13],
+      [9, 9],
+    ]);
+    expect(p.xpoints).toEqual([0, 20, 20, 0]);
   });
 
   // ── marquee ──────────────────────────────────────────────────────────
@@ -488,6 +784,41 @@ describe('NapariRegionOverlay', () => {
     expect(after.handlesOut![0]).toEqual([20, 5]); // offset = handle - anchor(0,0)
   });
 
+  /**
+   * GeoJSON import keeps `bezier: true` without handles, and so do a clone and the vertex
+   * eraser. OSD draws those with the Catmull-Rom default, so napari has to as well
+   * (review NAPARI-BOUNDARY-3).
+   */
+  describe('a bezier region with no stored handles', () => {
+    function handlelessBezier(): Region {
+      const r = triRegion();
+      (r.bounds as Polygon).bezier = true;
+      return r;
+    }
+
+    it('draws a curve through the default handles, not a straight polygon', () => {
+      store.addRegion(handlelessBezier());
+      const path = svgOf(overlay).querySelector('path');
+      expect(path).toBeTruthy();
+      expect(path!.getAttribute('d')).toContain(' C ');
+      expect(svgOf(overlay).querySelector('polygon')).toBeNull();
+    });
+
+    it('shows and drags the default control handles', () => {
+      const id = store.addRegion(handlelessBezier()); // selected
+      overlay.setMode('select');
+      expect(svgOf(overlay).querySelectorAll('circle').length).toBeGreaterThan(0);
+      const p = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      const [h] = bezierAnchorHandles(p.xpoints, p.ypoints, true);
+      ptr(overlay, 'pointerdown', h.out[0], h.out[1]); // vertex 0's default out-handle
+      ptr(overlay, 'pointermove', 20, 5);
+      ptr(overlay, 'pointerup', 20, 5);
+      const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
+      expect(after.handlesOut![0]).toEqual([20, 5]);
+      expect(after.xpoints).toEqual([0, 10, 5]); // the anchor did not move
+    });
+  });
+
   // ── holes / donuts ───────────────────────────────────────────────────
 
   it('renders a donut as one even-odd <path>', () => {
@@ -533,6 +864,47 @@ describe('NapariRegionOverlay', () => {
     ptr(overlay, 'pointerup', 5, 6);
     const after = store.getRegions().find((r) => r.id === id)!.bounds as Polygon;
     expect(after.holeHandlesOut![0][0]).toEqual([5 - ring[0][0], 6 - ring[0][1]]);
+  });
+
+  // ── multi-part regions (review NAPARI-BOUNDARY-1) ─────────────────────
+
+  it('renders a MultiPolygon as one even-odd <path> holding every part and its holes', () => {
+    store.addRegion(multiRegion());
+    const path = svgOf(overlay).querySelector('path');
+    expect(path).toBeTruthy();
+    expect(path!.getAttribute('fill-rule')).toBe('evenodd');
+    // Two exteriors + one hole = three closed sub-paths.
+    expect(path!.getAttribute('d')!.match(/M/g)).toHaveLength(3);
+    expect(path!.getAttribute('d')).toContain('50,50');
+  });
+
+  it('select: clicking inside either part of a MultiPolygon selects it, but not inside a hole', () => {
+    store.addRegion(rectRegionAt(200, 200, 10, 10)); // index 0
+    store.addRegion(multiRegion()); // index 1
+    overlay.setMode('select');
+    const click = (x: number, y: number) => {
+      store.setSelectedShapeIndices([]);
+      ptr(overlay, 'pointerdown', x, y);
+      ptr(overlay, 'pointerup', x, y);
+      return store.getSelectedShapeIndices();
+    };
+    expect(click(3, 3)).toEqual([1]); // first part
+    expect(click(55, 55)).toEqual([1]); // second part
+    expect(click(10, 10)).toEqual([]); // the first part's hole
+    expect(click(35, 35)).toEqual([]); // between the parts
+  });
+
+  it('draws a MultiPolygon label at the top-left of all its parts', () => {
+    store.setShowShapeLabel(true);
+    const r = multiRegion();
+    r.label = 'merged';
+    store.addRegion(r);
+    overlay.redraw();
+    const text = svgOf(overlay).querySelector('text');
+    expect(text).toBeTruthy();
+    expect(text!.textContent).toBe('merged');
+    expect(text!.getAttribute('x')).toBe('0');
+    expect(text!.getAttribute('y')).toBe('-4');
   });
 
   // ── labels ─────────────────────────────────────────────────────────────

@@ -90,6 +90,7 @@ export interface SelectParamSpec {
   tooltip?: string;
 }
 
+/** One parameter a dialog tool asks for, discriminated by `type`. */
 export type ToolParamSpec = NumberParamSpec | BooleanParamSpec | SelectParamSpec;
 
 /** One selectable checkpoint. */
@@ -263,14 +264,13 @@ export function isDialogToolContribution(c: unknown): c is ToolbarDialogToolCont
 export const TOOLBAR_TOOLS = new InjectionToken<readonly ToolbarContribution[]>('TOOLBAR_TOOLS');
 
 /** Sort contributed tools into display order. */
-export function sortToolContributions<T extends { order?: number }>(
-  tools: readonly T[],
-): T[] {
+export function sortToolContributions<T extends { order?: number }>(tools: readonly T[]): T[] {
   // Stable: equal `order` keeps registration order, so a host controls ties by
   // provider order without having to invent numbers.
-  return tools.map((t, i) => ({ t, i })).sort((a, b) =>
-    (a.t.order ?? 100) - (b.t.order ?? 100) || a.i - b.i,
-  ).map(({ t }) => t);
+  return tools
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (a.t.order ?? 100) - (b.t.order ?? 100) || a.i - b.i)
+    .map(({ t }) => t);
 }
 
 /** The run tools a toolbar should actually show: those with at least one model.
@@ -297,9 +297,11 @@ export function dialogToolContributions(
   const seen = new Set<string>();
   const out: ToolbarDialogToolContribution[] = [];
   for (const t of (tools ?? []).filter(isDialogToolContribution)) {
-    if (typeof t.id !== 'string' || !t.id || typeof t.activate !== 'function'
-        || typeof t.mount !== 'function') {
-      log.warn('[visualizer] dialog tool ignored: it needs a string `id` and `activate` and `mount` functions.', t);
+    if (typeof t.id !== 'string' || !t.id || typeof t.activate !== 'function' || typeof t.mount !== 'function') {
+      log.warn(
+        '[visualizer] dialog tool ignored: it needs a string `id` and `activate` and `mount` functions.',
+        t,
+      );
       continue;
     }
     if (seen.has(t.id)) {

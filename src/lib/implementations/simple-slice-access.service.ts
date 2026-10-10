@@ -27,11 +27,13 @@ import { IImageInfo } from '../contracts/image.contract';
  */
 @Injectable({ providedIn: 'root' })
 export class SimpleSliceAccessService {
-  /** raw slice URL → already-fetched blob: URL, so a backend that opens a
-   *  URL (OSD) doesn't repeat the auth round-trip revisiting a slice (scrub
-   *  back, the small→large tier re-fetch). Shared across backends: switching
-   *  plot types on the same file (e.g. Image → Volume) reuses entries. */
-  private readonly blobUrls = new Map<string, string>();
+  /** raw slice URL → its (possibly still in-flight) blob: URL, so a backend
+   *  that opens a URL (OSD) doesn't repeat the auth round-trip revisiting a
+   *  slice (scrub back, the small→large tier re-fetch), and two concurrent
+   *  requests for one slice share a fetch (and a blob: URL). Shared across
+   *  backends: switching plot types on the same file (e.g. Image → Volume)
+   *  reuses entries. */
+  private readonly blobUrls = new Map<string, Promise<string>>();
   private currentFileName: string | undefined;
 
   constructor(private http: HttpClient) {}
@@ -53,7 +55,8 @@ export class SimpleSliceAccessService {
    *  the SAME file, and not wrongly evicted by a second backend loading the
    *  same file for a different plot type. */
   noteActiveFile(fileName: string | undefined): void {
-    if (fileName && this.currentFileName && fileName !== this.currentFileName) {
+    if (!fileName) return; // an unnamed load says nothing about the active file
+    if (this.currentFileName && fileName !== this.currentFileName) {
       this.revokeAll();
     }
     this.currentFileName = fileName;
@@ -67,10 +70,15 @@ export class SimpleSliceAccessService {
     if (rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')) return rawUrl;
     const cached = this.blobUrls.get(rawUrl);
     if (cached) return cached;
-    const blob = await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
-    const blobUrl = URL.createObjectURL(blob);
-    this.blobUrls.set(rawUrl, blobUrl);
-    return blobUrl;
+    const pending = firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' })).then((blob) =>
+      URL.createObjectURL(blob),
+    );
+    this.blobUrls.set(rawUrl, pending);
+    // A failed fetch is forgotten so the next call retries it.
+    pending.catch(() => {
+      if (this.blobUrls.get(rawUrl) === pending) this.blobUrls.delete(rawUrl);
+    });
+    return pending;
   }
 
   /** Fetch a slice's own URL and decode it as an `ImageBitmap` — for
@@ -84,14 +92,21 @@ export class SimpleSliceAccessService {
    *  via the browser. Only real server URLs go through HttpClient so the auth
    *  interceptor applies. Mirrors {@link fetchAsBlobUrl}'s blob:/data: branch. */
   async fetchAsBitmap(rawUrl: string): Promise<ImageBitmap> {
-    const blob = rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')
-      ? await (await fetch(rawUrl)).blob()
-      : await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
+    const blob =
+      rawUrl.startsWith('blob:') || rawUrl.startsWith('data:')
+        ? await (await fetch(rawUrl)).blob()
+        : await firstValueFrom(this.http.get(rawUrl, { responseType: 'blob' }));
     return createImageBitmap(blob);
   }
 
+  /** Revoke every cached blob: URL — an in-flight one once it resolves. */
   private revokeAll(): void {
-    for (const url of this.blobUrls.values()) URL.revokeObjectURL(url);
+    for (const pending of this.blobUrls.values()) {
+      pending.then(
+        (url) => URL.revokeObjectURL(url),
+        () => undefined,
+      );
+    }
     this.blobUrls.clear();
   }
 }

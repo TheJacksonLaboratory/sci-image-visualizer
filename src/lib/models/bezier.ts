@@ -60,8 +60,11 @@ export function bezierAnchorHandles(xs: number[], ys: number[], closed: boolean)
 
 /** The Catmull-Rom handles as **relative** offsets `[dx, dy]` per anchor — used
  *  to initialise a region's editable handles when bezier is turned on. */
-export function defaultHandleOffsets(xs: number[], ys: number[], closed: boolean):
-  { in: number[][]; out: number[][] } {
+export function defaultHandleOffsets(
+  xs: number[],
+  ys: number[],
+  closed: boolean,
+): { in: number[][]; out: number[][] } {
   const h = bezierAnchorHandles(xs, ys, closed);
   return {
     in: h.map((a, i) => [a.in[0] - xs[i], a.in[1] - ys[i]]),
@@ -70,8 +73,13 @@ export function defaultHandleOffsets(xs: number[], ys: number[], closed: boolean
 }
 
 /** Absolute handles from stored relative offsets (anchor + offset). */
-export function handlesFromOffsets(xs: number[], ys: number[],
-                                   inOff: number[][], outOff: number[][], closed: boolean): AnchorHandle[] {
+export function handlesFromOffsets(
+  xs: number[],
+  ys: number[],
+  inOff: number[][],
+  outOff: number[][],
+  closed: boolean,
+): AnchorHandle[] {
   const n = Math.min(xs.length, ys.length);
   const out: AnchorHandle[] = [];
   for (let i = 0; i < n; i++) {
@@ -87,8 +95,13 @@ export function handlesFromOffsets(xs: number[], ys: number[],
 
 /** A region's handles: from its stored (editable) offsets when present, else the
  *  Catmull-Rom default. The single source of truth for both rendering and export. */
-export function resolveHandles(xs: number[], ys: number[], closed: boolean,
-                               inOff?: number[][], outOff?: number[][]): AnchorHandle[] {
+export function resolveHandles(
+  xs: number[],
+  ys: number[],
+  closed: boolean,
+  inOff?: number[][],
+  outOff?: number[][],
+): AnchorHandle[] {
   if (inOff && outOff && inOff.length === xs.length && outOff.length === xs.length) {
     return handlesFromOffsets(xs, ys, inOff, outOff, closed);
   }
@@ -100,8 +113,12 @@ export function resolveHandles(xs: number[], ys: number[], closed: boolean,
  * point list by sampling each segment. The curve passes through every anchor; a
  * closed ring returns to its first point.
  */
-export function bezierCurveFromHandles(xs: number[], ys: number[],
-                                       handles: AnchorHandle[], closed: boolean): CurvePoints {
+export function bezierCurveFromHandles(
+  xs: number[],
+  ys: number[],
+  handles: AnchorHandle[],
+  closed: boolean,
+): CurvePoints {
   const n = Math.min(xs.length, ys.length);
   if (n < 3) return { xs: xs.slice(), ys: ys.slice() };
 
@@ -110,31 +127,29 @@ export function bezierCurveFromHandles(xs: number[], ys: number[],
   const segs = closed ? n : n - 1;
   for (let i = 0; i < segs; i++) {
     const j = (i + 1) % n;
-    const p0x = xs[i], p0y = ys[i];
-    const c1 = handles[i].out, c2 = handles[j].in;
-    const p3x = xs[j], p3y = ys[j];
+    const p0x = xs[i],
+      p0y = ys[i];
+    const c1 = handles[i].out,
+      c2 = handles[j].in;
+    const p3x = xs[j],
+      p3y = ys[j];
     for (let s = 0; s < SAMPLES_PER_SEGMENT; s++) {
       const t = s / SAMPLES_PER_SEGMENT;
       const u = 1 - t;
-      const w0 = u * u * u, w1 = 3 * u * u * t, w2 = 3 * u * t * t, w3 = t * t * t;
+      const w0 = u * u * u,
+        w1 = 3 * u * u * t,
+        w2 = 3 * u * t * t,
+        w3 = t * t * t;
       outX.push(w0 * p0x + w1 * c1[0] + w2 * c2[0] + w3 * p3x);
       outY.push(w0 * p0y + w1 * c1[1] + w2 * c2[1] + w3 * p3y);
     }
   }
   if (closed) {
-    outX.push(xs[0]); outY.push(ys[0]);
+    outX.push(xs[0]);
+    outY.push(ys[0]);
   } else {
-    outX.push(xs[n - 1]); outY.push(ys[n - 1]);
+    outX.push(xs[n - 1]);
+    outY.push(ys[n - 1]);
   }
   return { xs: outX, ys: outY };
-}
-
-/**
- * Flatten the smooth Catmull-Rom bezier through the anchors (no custom handles).
- * Falls back to the anchors when there are too few to form a curve.
- */
-export function bezierCurve(xs: number[], ys: number[], closed: boolean): CurvePoints {
-  const n = Math.min(xs.length, ys.length);
-  if (n < 3) return { xs: xs.slice(), ys: ys.slice() };
-  return bezierCurveFromHandles(xs, ys, bezierAnchorHandles(xs, ys, closed), closed);
 }

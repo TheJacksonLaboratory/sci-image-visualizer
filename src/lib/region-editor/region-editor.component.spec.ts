@@ -1,6 +1,7 @@
+import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { EMPTY, NEVER, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, Subject, of, throwError } from 'rxjs';
 
 import { RegionEditorComponent } from './region-editor.component';
 import { RoutingVisualizerService } from '../routing-visualizer.service';
@@ -9,10 +10,11 @@ import { MockService } from 'ng-mocks';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
 import { ShapeSelection } from '../models/shape';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
-import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
+import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
 import { PresetSet } from '../models/class-preset';
+import { pickMpp } from './region-metrics';
+import { IImageMetadata } from '../contracts/image.contract';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 import { saveAs } from 'file-saver';
@@ -28,7 +30,43 @@ class FakeMaskWorker {
   onerror: ((e: any) => void) | null = null;
   postMessage = jest.fn();
   terminate = jest.fn();
-  emit(data: any) { this.onmessage?.({ data }); }
+  emit(data: any) {
+    this.onmessage?.({ data });
+  }
+}
+
+/** Seed a 512×512 rectangle row and commit it, as the toolbar's drawing would. */
+function addRect(component: RegionEditorComponent): void {
+  const region = new Region();
+  region.bounds = Object.assign(new Rectangle(), { width: 512, height: 512 });
+  region.label = 'Region';
+  component['regions'] = [...component['regions'], region];
+  (component as any).commit();
+}
+
+/** Seed a triangle row and commit it. */
+function addPoly(component: RegionEditorComponent): void {
+  const region = new Region();
+  const p = new Polygon();
+  p.xpoints = [0, 10, 5];
+  p.ypoints = [0, 0, 10];
+  p.coordinates = [
+    [0, 0],
+    [10, 0],
+    [5, 10],
+  ];
+  p.npoints = 3;
+  region.bounds = p;
+  region.label = 'Region';
+  component['regions'] = [...component['regions'], region];
+  (component as any).commit();
+}
+
+/** Render the editor's own template only: its children and PrimeNG stay unknown elements. */
+function shallowEditor(): void {
+  TestBed.overrideComponent(RegionEditorComponent, {
+    set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },
+  });
 }
 
 describe('RegionEditorComponent', () => {
@@ -60,9 +98,9 @@ describe('RegionEditorComponent', () => {
       exportRegions: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -77,7 +115,7 @@ describe('RegionEditorComponent', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -90,120 +128,64 @@ describe('RegionEditorComponent', () => {
   });
 
   it('should initialize with empty regions when no shapes provided', () => {
-    expect(component.regions.length).toBe(0);
-  });
-
-  it('should add a rectangle region', () => {
-    component.addRectangle();
-    expect(component.regions.length).toBe(1);
-    expect(component.regions[0].bounds).toBeInstanceOf(Rectangle);
-    const rect = component.regions[0].bounds as Rectangle;
-    expect(rect.width).toBe(512);
-    expect(rect.height).toBe(512);
-  });
-
-  it('should add a polygon region with 3 default points', () => {
-    component.addPolygon();
-    expect(component.regions.length).toBe(1);
-    expect(component.regions[0].bounds).toBeInstanceOf(Polygon);
-    const poly = component.regions[0].bounds as Polygon;
-    expect(poly.npoints).toBe(3);
-    expect(poly.coordinates.length).toBe(3);
+    expect(component['regions'].length).toBe(0);
   });
 
   it('should delete a region by index', () => {
-    component.addRectangle();
-    component.addRectangle();
-    const secondBounds = component.regions[1].bounds;
-    expect(component.regions.length).toBe(2);
-    component.deleteRegion(0);
-    expect(component.regions.length).toBe(1);
+    addRect(component);
+    addRect(component);
+    const secondBounds = component['regions'][1].bounds;
+    expect(component['regions'].length).toBe(2);
+    component['deleteRegion'](0);
+    expect(component['regions'].length).toBe(1);
     // The surviving region is the one that was at index 1.
-    expect(component.regions[0].bounds).toBe(secondBounds);
+    expect(component['regions'][0].bounds).toBe(secondBounds);
   });
 
   it('should delete selected regions', () => {
-    component.addRectangle();
-    component.addPolygon();
-    component.selectedRegions = [component.regions[0]];
-    component.deleteSelectedRegions();
-    expect(component.regions.length).toBe(1);
-    expect(component.regions[0].bounds).toBeInstanceOf(Polygon);
-    expect(component.selectedRegions.length).toBe(0);
+    addRect(component);
+    addPoly(component);
+    component['selectedRegions'] = [component['regions'][0]];
+    component['deleteSelectedRegions']();
+    expect(component['regions'].length).toBe(1);
+    expect(component['regions'][0].bounds).toBeInstanceOf(Polygon);
+    expect(component['selectedRegions'].length).toBe(0);
   });
 
   it('should not delete when no regions are selected', () => {
-    component.addRectangle();
-    component.selectedRegions = [];
-    component.deleteSelectedRegions();
-    expect(component.regions.length).toBe(1);
-  });
-
-  it('should identify rectangle regions', () => {
-    const region = new Region();
-    region.bounds = new Rectangle();
-    expect(component.isRectangle(region)).toBe(true);
-  });
-
-  it('should identify polygon regions as not rectangle', () => {
-    const region = new Region();
-    region.bounds = new Polygon();
-    expect(component.isRectangle(region)).toBe(false);
+    addRect(component);
+    component['selectedRegions'] = [];
+    component['deleteSelectedRegions']();
+    expect(component['regions'].length).toBe(1);
   });
 
   it('should round rectangle lengths to multiples of 512', () => {
-    component.addRectangle();
-    const rect = component.regions[0].bounds as Rectangle;
+    addRect(component);
+    const rect = component['regions'][0].bounds as Rectangle;
     rect.width = 1000;
     rect.height = 600;
-    component.roundRectangleLengths();
-    expect(rect.width).toBe(1024);
-    expect(rect.height).toBe(512);
+    component['roundRectangleLengths']();
+    // Committed as a replacement (copy-on-write, RT-1): read the row back.
+    const rounded = component['regions'][0].bounds as Rectangle;
+    expect(rounded.width).toBe(1024);
+    expect(rounded.height).toBe(512);
   });
 
   it('should round small rectangle lengths to 0', () => {
-    component.addRectangle();
-    const rect = component.regions[0].bounds as Rectangle;
+    addRect(component);
+    const rect = component['regions'][0].bounds as Rectangle;
     rect.width = 100;
     rect.height = 200;
-    component.roundRectangleLengths();
-    expect(rect.width).toBe(0);
-    expect(rect.height).toBe(0);
-  });
-
-  it('should change shape color for regions matching selected label', () => {
-    component.addRectangle();
-    component.regions[0].label = 'tumor';
-    component.regions[0].color = '#FF0000';
-    component.labelColors.set('tumor', '#FF0000');
-    component.selectedLabelColor = 'tumor';
-
-    component.changeShapeColor({ value: '#00FF00' });
-    expect(component.shapeColor).toBe('#00FF00');
-    expect(component.regions[0].color).toBe('#00FF00');
-    expect(component.labelColors.get('tumor')).toBe('#00FF00');
-  });
-
-  it('should not change color of regions with different label', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.regions[0].label = 'tumor';
-    component.regions[0].color = '#FF0000';
-    component.regions[1].label = 'normal';
-    component.regions[1].color = '#0000FF';
-    component.labelColors.set('tumor', '#FF0000');
-    component.labelColors.set('normal', '#0000FF');
-    component.selectedLabelColor = 'tumor';
-
-    component.changeShapeColor({ value: '#00FF00' });
-    expect(component.regions[0].color).toBe('#00FF00');
-    expect(component.regions[1].color).toBe('#0000FF');
+    component['roundRectangleLengths']();
+    const rounded = component['regions'][0].bounds as Rectangle;
+    expect(rounded.width).toBe(0);
+    expect(rounded.height).toBe(0);
   });
 
   it('live-edit: every region change immediately calls plotService.setRegions with isRegionSaveOn=true', () => {
     const setRegionsSpy = mockVisualizer.setAnnotationRegions as jest.Mock;
     setRegionsSpy.mockClear();
-    component.addRectangle();
+    addRect(component);
     expect(setRegionsSpy).toHaveBeenCalled();
     const lastCall = setRegionsSpy.mock.calls[setRegionsSpy.mock.calls.length - 1];
     // Signature: setRegions(regions, showLabel, isRegionSaveOn, fillColor, append?)
@@ -211,80 +193,120 @@ describe('RegionEditorComponent', () => {
   });
 
   it('table → plot: onSelectionChanged pushes the selected regions to the contract', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
+    addRect(component);
+    addRect(component);
+    addRect(component);
     const spy = mockVisualizer.setSelectedRegions as jest.Mock;
     spy.mockClear();
-    component.selectedRegions = [component.regions[0], component.regions[2]];
-    component.onSelectionChanged();
-    expect(spy).toHaveBeenCalledWith([component.regions[0], component.regions[2]]);
+    component['selectedRegions'] = [component['regions'][0], component['regions'][2]];
+    component['onSelectionChanged']();
+    expect(spy).toHaveBeenCalledWith([component['regions'][0], component['regions'][2]]);
   });
 
   it('table → plot: clearing the selection emits an empty index array', () => {
-    component.addRectangle();
+    addRect(component);
     const spy = mockVisualizer.setSelectedRegions as jest.Mock;
     spy.mockClear();
-    component.selectedRegions = [];
-    component.onSelectionChanged();
+    component['selectedRegions'] = [];
+    component['onSelectionChanged']();
     expect(spy).toHaveBeenCalledWith([]);
   });
 
   it('deleteSelectedRegions removes every selected region and clears the plot selection', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
-    component.selectedRegions = [component.regions[0], component.regions[2]];
+    addRect(component);
+    addRect(component);
+    addRect(component);
+    component['selectedRegions'] = [component['regions'][0], component['regions'][2]];
     const setSelSpy = mockVisualizer.setSelectedRegions as jest.Mock;
     setSelSpy.mockClear();
-    component.deleteSelectedRegions();
-    expect(component.regions.length).toBe(1);
-    expect(component.selectedRegions.length).toBe(0);
+    component['deleteSelectedRegions']();
+    expect(component['regions'].length).toBe(1);
+    expect(component['selectedRegions'].length).toBe(0);
     // Last call to setSelectedShapeIndices clears the plot's highlight.
     expect(setSelSpy.mock.calls[setSelSpy.mock.calls.length - 1][0]).toEqual([]);
   });
 
   it('deleteRegion drops the deleted region from selectedRegions and re-syncs', () => {
-    component.addRectangle();
-    component.addRectangle();
-    component.addRectangle();
-    component.selectedRegions = [component.regions[0], component.regions[2]];
+    addRect(component);
+    addRect(component);
+    addRect(component);
+    component['selectedRegions'] = [component['regions'][0], component['regions'][2]];
     const setSelSpy = mockVisualizer.setSelectedRegions as jest.Mock;
     setSelSpy.mockClear();
     // Delete index 0 — also removes it from selectedRegions.
-    component.deleteRegion(0);
-    expect(component.regions.length).toBe(2);
-    expect(component.selectedRegions.length).toBe(1);
+    component['deleteRegion'](0);
+    expect(component['regions'].length).toBe(2);
+    expect(component['selectedRegions'].length).toBe(1);
     // The remaining selected region (formerly at index 2) is now at index 1.
     const lastCall = setSelSpy.mock.calls[setSelSpy.mock.calls.length - 1][0];
-    expect(lastCall).toEqual([component.regions[1]]);
+    expect(lastCall).toEqual([component['regions'][1]]);
   });
 
   it('should update label colors when label is edited', () => {
-    component.addRectangle();
-    component.regions[0].label = 'tissue';
-    component.labelRegionUpdate(component.regions[0]);
-    expect(component.labelColors.has('tissue')).toBe(true);
+    addRect(component);
+    component['regions'][0].label = 'tissue';
+    component['labelRegionUpdate'](component['regions'][0]);
+    // A colourless row takes its class colour (preset or fallback).
+    expect(component['regions'][0].color).toBe(component['colorForName']('tissue'));
   });
+
+  it('save/export propose <name>.geojson for an extension-less file name (RT-19)', () => {
+    const io = (component as any).persistence.io as RegionIoPort;
+    io.getSelectedFileName = () => 'image';
+    component['regions'] = [Object.assign(new Region(), { id: 1, bounds: new Rectangle() })];
+    component['persistRegions']();
+    expect(component['saveAsFilename']).toBe('image.geojson');
+    component['exportRois']();
+    expect(component['exportFilename']).toBe('image.geojson');
+    io.getSelectedFileName = () => 'slide.ome.tif';
+    component['persistRegions']();
+    expect(component['saveAsFilename']).toBe('slide.ome.geojson');
+  });
+
+  it('pagedRegions hands the table a stable array until regions or the page change (RT-20)', () => {
+    for (let i = 0; i < 12; i++) addRect(component);
+    const page = component['pagedRegions'];
+    expect(page).toHaveLength(10);
+    expect(component['pagedRegions']).toBe(page); // no new array per change-detection pass
+    component['onPageChange']({ first: 10, rows: 10 });
+    expect(component['pagedRegions']).toHaveLength(2);
+    expect(component['pagedRegions']).not.toBe(page);
+  });
+
+  it('rejects an imported preset file that is not a preset set, with an error toast (RT-32)', () => {
+    const api = mockVisualizer as unknown as { setPresetSet: jest.Mock };
+    api.setPresetSet = jest.fn();
+    const add = jest.spyOn(component['messageService'], 'add');
+    (component as any).applyImportedPresets('{"classes": "nope"}');
+    expect(api.setPresetSet).not.toHaveBeenCalled();
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
+  });
+
+  it('a failed region import shows its error toast in the library outlet (RT-32)', () => {
+    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
+      throw new Error('bad geojson');
+    });
+    const add = jest.spyOn(component['messageService'], 'add');
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    (component as any).applyImportedRois('garbage');
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
+  });
+
+  it('stops the save-as exists check on destroy (RT-32)', fakeAsync(() => {
+    const io = (component as any).persistence.io as RegionIoPort;
+    const exists = jest.fn(() => of(true));
+    io.roiFileExists = exists;
+    fixture.destroy();
+    component['saveAsFilename'] = 'a.geojson';
+    component['checkSaveAsFileExists']();
+    tick(500);
+    expect(exists).not.toHaveBeenCalled();
+  }));
 
   it('should show help dialog', () => {
-    expect(component.displayHelpDialog).toBe(false);
-    component.showHelp();
-    expect(component.displayHelpDialog).toBe(true);
-  });
-
-  it('should stop arrow key propagation', () => {
-    const event = new KeyboardEvent('keydown', { key: 'ArrowUp' });
-    const spy = jest.spyOn(event, 'stopPropagation');
-    component.disableArrowKeys(event);
-    expect(spy).toHaveBeenCalled();
-  });
-
-  it('should not stop non-arrow key propagation', () => {
-    const event = new KeyboardEvent('keydown', { key: 'Enter' });
-    const spy = jest.spyOn(event, 'stopPropagation');
-    component.disableArrowKeys(event);
-    expect(spy).not.toHaveBeenCalled();
+    expect(component['displayHelpDialog']).toBe(false);
+    component['showHelp']();
+    expect(component['displayHelpDialog']).toBe(true);
   });
 });
 
@@ -296,24 +318,30 @@ describe('RegionEditorComponent with shapes', () => {
     {
       name: 'shape0',
       type: 'rect',
-      x0: 100, y0: 200, x1: 612, y1: 714,
+      x0: 100,
+      y0: 200,
+      x1: 612,
+      y1: 714,
       line: { color: '#FF0000' },
-      legend: 'tumor'
+      legend: 'tumor',
     },
     {
       name: 'shape1',
       type: 'path',
       path: 'M10,20L30,40L50,60Z',
       line: { color: '#00FF00' },
-      legend: 'normal'
+      legend: 'normal',
     },
     {
       name: 'shape2',
       type: 'rect',
-      x0: 0, y0: 0, x1: 512, y1: 512,
+      x0: 0,
+      y0: 0,
+      x1: 512,
+      y1: 512,
       line: {},
-      legend: undefined
-    }
+      legend: undefined,
+    },
   ];
 
   describe('Class cell editing', () => {
@@ -324,67 +352,67 @@ describe('RegionEditorComponent with shapes', () => {
       region.name = 'shape0';
       region.label = 'legend';
       region.bounds = new Rectangle();
-      component.regions = [region];
+      component['regions'] = [region];
     });
 
     it('isEditingLabel returns false by default', () => {
-      expect(component.isEditingLabel(region)).toBe(false);
+      expect(component['isEditingLabel'](region)).toBe(false);
     });
 
     it('startEditLabel adds the region to the editing set and stops event propagation', () => {
       const event = { stopPropagation: jest.fn() } as unknown as Event;
-      component.startEditLabel(region, event);
+      component['startEditLabel'](region, event);
 
-      expect(component.isEditingLabel(region)).toBe(true);
-      expect(component.editingLabelRegions.has(region)).toBe(true);
+      expect(component['isEditingLabel'](region)).toBe(true);
+      expect(component['editingLabelRegions'].has(region)).toBe(true);
       expect(event.stopPropagation).toHaveBeenCalled();
     });
 
     it('startEditLabel works without an event argument', () => {
-      expect(() => component.startEditLabel(region)).not.toThrow();
-      expect(component.isEditingLabel(region)).toBe(true);
+      expect(() => component['startEditLabel'](region)).not.toThrow();
+      expect(component['isEditingLabel'](region)).toBe(true);
     });
 
     it('startEditLabel can track multiple regions independently', () => {
       const r2 = new Region();
       r2.name = 'shape1';
       r2.label = 'other';
-      component.regions = [region, r2];
+      component['regions'] = [region, r2];
 
-      component.startEditLabel(region);
-      component.startEditLabel(r2);
+      component['startEditLabel'](region);
+      component['startEditLabel'](r2);
 
-      expect(component.isEditingLabel(region)).toBe(true);
-      expect(component.isEditingLabel(r2)).toBe(true);
-      expect(component.editingLabelRegions.size).toBe(2);
+      expect(component['isEditingLabel'](region)).toBe(true);
+      expect(component['isEditingLabel'](r2)).toBe(true);
+      expect(component['editingLabelRegions'].size).toBe(2);
     });
 
     it('stopEditLabel(commit=false) removes the region without calling labelRegionUpdate', () => {
       const event = { stopPropagation: jest.fn() } as unknown as Event;
-      component.startEditLabel(region);
-      const spy = jest.spyOn(component, 'labelRegionUpdate');
+      component['startEditLabel'](region);
+      const spy = jest.spyOn(component as unknown as { labelRegionUpdate(): void }, 'labelRegionUpdate');
 
-      component.stopEditLabel(region, false, event);
+      component['stopEditLabel'](region, false, event);
 
-      expect(component.isEditingLabel(region)).toBe(false);
+      expect(component['isEditingLabel'](region)).toBe(false);
       expect(spy).not.toHaveBeenCalled();
       expect(event.stopPropagation).toHaveBeenCalled();
     });
 
     it('stopEditLabel(commit=true) removes the region and commits the edit', () => {
-      component.startEditLabel(region);
-      const spy = jest.spyOn(component, 'labelRegionUpdate');
+      component['startEditLabel'](region);
+      const spy = jest.spyOn(component as unknown as { labelRegionUpdate(): void }, 'labelRegionUpdate');
 
-      component.stopEditLabel(region, true);
+      component['stopEditLabel'](region, true);
 
-      expect(component.isEditingLabel(region)).toBe(false);
+      expect(component['isEditingLabel'](region)).toBe(false);
       expect(spy).toHaveBeenCalledWith(region, true);
     });
 
     it('stopEditLabel is a no-op (for the set) if the region is not in edit mode', () => {
-      expect(component.isEditingLabel(region)).toBe(false);
-      expect(() => component.stopEditLabel(region, false)).not.toThrow();
-      expect(component.editingLabelRegions.size).toBe(0);
+      expect(component['isEditingLabel'](region)).toBe(false);
+      expect(() => component['stopEditLabel'](region, false)).not.toThrow();
+      expect(component['editingLabelRegions'].size).toBe(0);
     });
   });
 
@@ -398,13 +426,13 @@ describe('RegionEditorComponent with shapes', () => {
       getSelectedRegions$: () => EMPTY,
       getImageMeta: () => EMPTY,
       setSelectedRegions: jest.fn(),
-      getAnnotationRegions: () => mockShapes.map(s => Object.assign(new ShapeSelection(), s as any).getRegion()),
+      getAnnotationRegions: () => mockShapes.map((s) => Object.assign(new ShapeSelection(), s as any).getRegion()),
       setAnnotationRegions: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -419,7 +447,7 @@ describe('RegionEditorComponent with shapes', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -428,8 +456,8 @@ describe('RegionEditorComponent with shapes', () => {
   });
 
   it('should initialize regions from rect shapes', () => {
-    expect(component.regions.length).toBe(3);
-    const rect = component.regions[0].bounds as Rectangle;
+    expect(component['regions'].length).toBe(3);
+    const rect = component['regions'][0].bounds as Rectangle;
     expect(rect.x).toBe(100);
     expect(rect.y).toBe(200);
     expect(rect.width).toBe(512);
@@ -437,7 +465,7 @@ describe('RegionEditorComponent with shapes', () => {
   });
 
   it('should initialize regions from path shapes', () => {
-    const poly = component.regions[1].bounds as Polygon;
+    const poly = component['regions'][1].bounds as Polygon;
     expect(poly.coordinates.length).toBe(3);
     expect(poly.coordinates[0]).toEqual([10, 20]);
     expect(poly.xpoints).toEqual([10, 30, 50]);
@@ -446,22 +474,24 @@ describe('RegionEditorComponent with shapes', () => {
   });
 
   it('should set region color from shape line color', () => {
-    expect(component.regions[0].color).toBe('#FF0000');
-    expect(component.regions[1].color).toBe('#00FF00');
+    expect(component['regions'][0].color).toBe('#FF0000');
+    expect(component['regions'][1].color).toBe('#00FF00');
   });
 
   it('should fall back to shapeColor when line color is missing', () => {
-    expect(component.regions[2].color).toBe('#00FFFF');
+    expect(component['regions'][2].color).toBe('#00FFFF');
   });
 
   it('should set region labels from shape legend', () => {
-    expect(component.regions[0].label).toBe('tumor');
-    expect(component.regions[1].label).toBe('normal');
+    expect(component['regions'][0].label).toBe('tumor');
+    expect(component['regions'][1].label).toBe('normal');
   });
 
-  it('should populate labelColors map from labeled regions', () => {
-    expect(component.labelColors.get('tumor')).toBe('#FF0000');
-    expect(component.labelColors.get('normal')).toBe('#00FF00');
+  it("keeps each labelled region's own colour (class colours are derived, not cached)", () => {
+    expect(component['regions'].map((r) => [r.label, r.color]).slice(0, 2)).toEqual([
+      ['tumor', '#FF0000'],
+      ['normal', '#00FF00'],
+    ]);
   });
 });
 
@@ -475,8 +505,8 @@ describe('SelectionDialogComponent with open path shape', () => {
       type: 'path',
       path: 'M10,20L30,40L50,60',
       line: { color: '#FF0000' },
-      legend: 'annotation'
-    }
+      legend: 'annotation',
+    },
   ];
 
   beforeEach(async () => {
@@ -490,13 +520,13 @@ describe('SelectionDialogComponent with open path shape', () => {
       getImageMeta: () => EMPTY,
       setSelectedRegions: jest.fn(),
       getAnnotationRegions: () =>
-        openPathShapes.map(s => Object.assign(new ShapeSelection(), s as any).getRegion()),
+        openPathShapes.map((s) => Object.assign(new ShapeSelection(), s as any).getRegion()),
       setAnnotationRegions: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -511,7 +541,7 @@ describe('SelectionDialogComponent with open path shape', () => {
           } as RegionIoPort,
         },
       ],
-      schemas: [NO_ERRORS_SCHEMA]
+      schemas: [NO_ERRORS_SCHEMA],
     }).compileComponents();
 
     fixture = TestBed.createComponent(RegionEditorComponent);
@@ -520,8 +550,8 @@ describe('SelectionDialogComponent with open path shape', () => {
   });
 
   it('should initialize open polyline with closed=false', () => {
-    expect(component.regions.length).toBe(1);
-    const poly = component.regions[0].bounds as Polygon;
+    expect(component['regions'].length).toBe(1);
+    const poly = component['regions'][0].bounds as Polygon;
     expect(poly).toBeInstanceOf(Polygon);
     expect(poly.closed).toBe(false);
     expect(poly.npoints).toBe(3);
@@ -578,9 +608,9 @@ describe('RegionEditorComponent persist / save-as', () => {
       confirm: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: mockMessageService },
@@ -594,59 +624,59 @@ describe('RegionEditorComponent persist / save-as', () => {
     component = fixture.componentInstance;
     component.ngOnInit();
 
-    component.addRectangle();
+    addRect(component);
   });
 
   // --- persistRegions (opens the save-as dialog) ---
 
   it('should open save-as dialog with default geojson filename', () => {
-    component.persistRegions();
+    component['persistRegions']();
 
-    expect(component.showSaveAsDialog).toBe(true);
-    expect(component.saveAsFilename).toBe('slide_001.geojson');
-    expect(component.saveAsFileExists).toBe(false);
+    expect(component['showSaveAsDialog']).toBe(true);
+    expect(component['saveAsFilename']).toBe('slide_001.geojson');
+    expect(component['saveAsFileExists']).toBe(false);
   });
 
   it('should not open save-as dialog when no file is selected', () => {
     (mockRegionIo.getSelectedFileName as jest.Mock).mockReturnValue(undefined);
 
-    component.persistRegions();
+    component['persistRegions']();
 
-    expect(component.showSaveAsDialog).toBe(false);
+    expect(component['showSaveAsDialog']).toBe(false);
   });
 
   it('should not open save-as dialog when there are no regions', () => {
-    component.regions = [];
+    component['regions'] = [];
 
-    component.persistRegions();
+    component['persistRegions']();
 
-    expect(component.showSaveAsDialog).toBe(false);
+    expect(component['showSaveAsDialog']).toBe(false);
   });
 
   // --- save mask (rasterize regions → PNG, jit-ui#95) ---
 
   it('opens the save-mask dialog with a basename_mask.png default and binary mode', () => {
-    component.openSaveMaskDialog();
+    component['openSaveMaskDialog']();
 
-    expect(component.showSaveMaskDialog).toBe(true);
-    expect(component.saveMaskFilename).toBe('slide_001_mask.png');
-    expect(component.maskMode).toBe('binary');
+    expect(component['showSaveMaskDialog']).toBe(true);
+    expect(component['saveMaskFilename']).toBe('slide_001_mask.png');
+    expect(component['maskMode']).toBe('binary');
   });
 
   it('keeps the whole name as the mask stem when the filename has no extension — jit-ui#100', () => {
     (mockRegionIo.getSelectedFileName as jest.Mock).mockReturnValue('slide001');
 
-    component.openSaveMaskDialog();
+    component['openSaveMaskDialog']();
 
-    expect(component.saveMaskFilename).toBe('slide001_mask.png'); // not "_mask.png"
+    expect(component['saveMaskFilename']).toBe('slide001_mask.png'); // not "_mask.png"
   });
 
   it('does not open the save-mask dialog when there are no regions', () => {
-    component.regions = [];
+    component['regions'] = [];
 
-    component.openSaveMaskDialog();
+    component['openSaveMaskDialog']();
 
-    expect(component.showSaveMaskDialog).toBe(false);
+    expect(component['showSaveMaskDialog']).toBe(false);
   });
 
   // createMaskWorker() is async (dynamic import), so the worker is wired up on a
@@ -656,12 +686,12 @@ describe('RegionEditorComponent persist / save-as', () => {
   it('confirmSaveMask runs the worker off-thread with the chosen mode, then downloads on completion', async () => {
     (saveAs as unknown as jest.Mock).mockClear();
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
 
-    component.openSaveMaskDialog();
-    component.maskMode = 'multiclass';
-    component.confirmSaveMask();
-    expect(component.maskBusy).toBe(true); // busy set synchronously
+    component['openSaveMaskDialog']();
+    component['maskMode'] = 'multiclass';
+    component['confirmSaveMask']();
+    expect(component['maskBusy']).toBe(true); // busy set synchronously
 
     await flush(); // worker resolves + wires up
 
@@ -674,24 +704,24 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     // Progress + completion messages drive the UI and the download.
     worker.emit({ type: 'progress', done: 1, total: 2 });
-    expect(component.maskProgress).toBe(50);
+    expect(component['maskProgress']).toBe(50);
     worker.emit({ type: 'done', png: new Uint8Array([1, 2, 3]) });
 
-    expect(component.maskBusy).toBe(false);
-    expect(component.showSaveMaskDialog).toBe(false);
+    expect(component['maskBusy']).toBe(false);
+    expect(component['showSaveMaskDialog']).toBe(false);
     expect(worker.terminate).toHaveBeenCalled();
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'slide_001_mask.png');
   });
 
   it('cancelSaveMask before the worker resolves terminates it and clears the busy state', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
-    component.openSaveMaskDialog();
-    component.confirmSaveMask();
-    expect(component.maskBusy).toBe(true);
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
+    component['openSaveMaskDialog']();
+    component['confirmSaveMask']();
+    expect(component['maskBusy']).toBe(true);
 
-    component.cancelSaveMask();
-    expect(component.maskBusy).toBe(false);
+    component['cancelSaveMask']();
+    expect(component['maskBusy']).toBe(false);
 
     await flush(); // worker resolves into a cancelled state → terminated, not wired
     expect(worker.terminate).toHaveBeenCalled();
@@ -702,13 +732,13 @@ describe('RegionEditorComponent persist / save-as', () => {
     (saveAs as unknown as jest.Mock).mockClear();
     (mockVisualizer.getMaskImageSize as jest.Mock).mockReturnValueOnce(null);
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
-    component.openSaveMaskDialog();
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
+    component['openSaveMaskDialog']();
 
-    component.confirmSaveMask();
+    component['confirmSaveMask']();
 
     expect(worker.postMessage).not.toHaveBeenCalled();
-    expect(component.maskBusy).toBe(false);
+    expect(component['maskBusy']).toBe(false);
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'error', summary: 'Could not create mask' }),
     );
@@ -717,14 +747,14 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   it('confirmSaveMask surfaces a worker error as a toast', async () => {
     const worker = new FakeMaskWorker();
-    (component as any).createMaskWorker = () => Promise.resolve(worker);
-    component.openSaveMaskDialog();
-    component.confirmSaveMask();
+    (component as any).maskExport.createWorker = () => Promise.resolve(worker);
+    component['openSaveMaskDialog']();
+    component['confirmSaveMask']();
     await flush();
 
     worker.emit({ type: 'error', error: 'boom' });
 
-    expect(component.maskBusy).toBe(false);
+    expect(component['maskBusy']).toBe(false);
     expect(worker.terminate).toHaveBeenCalled();
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({ severity: 'error', summary: 'Could not create mask', detail: 'boom' }),
@@ -736,35 +766,35 @@ describe('RegionEditorComponent persist / save-as', () => {
   it('should update saveAsFileExists to true when file exists', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(true));
 
-    component.saveAsFilename = 'slide_001.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFilename'] = 'slide_001.geojson';
+    component['checkSaveAsFileExists']();
     tick(500);
 
     expect(mockRegionIo.roiFileExists).toHaveBeenCalledWith('slide_001.geojson');
-    expect(component.saveAsFileExists).toBe(true);
+    expect(component['saveAsFileExists']).toBe(true);
   }));
 
   it('should update saveAsFileExists to false when file does not exist', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(false));
 
-    component.saveAsFilename = 'new_name.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFilename'] = 'new_name.geojson';
+    component['checkSaveAsFileExists']();
     tick(500);
 
-    expect(component.saveAsFileExists).toBe(false);
+    expect(component['saveAsFileExists']).toBe(false);
   }));
 
   it('should debounce rapid existence checks', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(false));
 
-    component.saveAsFilename = 'a.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFilename'] = 'a.geojson';
+    component['checkSaveAsFileExists']();
     tick(100);
-    component.saveAsFilename = 'b.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFilename'] = 'b.geojson';
+    component['checkSaveAsFileExists']();
     tick(100);
-    component.saveAsFilename = 'c.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFilename'] = 'c.geojson';
+    component['checkSaveAsFileExists']();
     tick(500);
 
     expect(mockRegionIo.roiFileExists).toHaveBeenCalledTimes(1);
@@ -774,26 +804,38 @@ describe('RegionEditorComponent persist / save-as', () => {
   it('should set saveAsFileExists to false on roiFileExist error', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(throwError(() => new Error('network')));
 
-    component.saveAsFileExists = true;
-    component.saveAsFilename = 'slide_001.geojson';
-    component.checkSaveAsFileExists();
+    component['saveAsFileExists'] = true;
+    component['saveAsFilename'] = 'slide_001.geojson';
+    component['checkSaveAsFileExists']();
     tick(500);
 
-    expect(component.saveAsFileExists).toBe(false);
+    expect(component['saveAsFileExists']).toBe(false);
+  }));
+
+  it('keeps checking after a failed existence check', fakeAsync(() => {
+    (mockRegionIo.roiFileExists as jest.Mock).mockReturnValueOnce(throwError(() => new Error('network')));
+    component['saveAsFilename'] = 'a.geojson';
+    component['checkSaveAsFileExists']();
+    tick(500);
+    (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(true));
+    component['saveAsFilename'] = 'b.geojson';
+    component['checkSaveAsFileExists']();
+    tick(500);
+    expect(component['saveAsFileExists']).toBe(true);
   }));
 
   // --- confirmSaveAs (save action) ---
 
   it('should save directly when file does not exist', fakeAsync(() => {
-    component.saveAsFilename = 'new_regions.geojson';
-    component.saveAsFileExists = false;
-    component.showSaveAsDialog = true;
+    component['saveAsFilename'] = 'new_regions.geojson';
+    component['saveAsFileExists'] = false;
+    component['showSaveAsDialog'] = true;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     tick(); // flush the deferred serialize + upload
 
-    expect(component.showSaveAsDialog).toBe(false);
-    expect(component.saveAsBusy).toBe(false);
+    expect(component['showSaveAsDialog']).toBe(false);
+    expect(component['saveAsBusy']).toBe(false);
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
       '{"type":"FeatureCollection","features":[]}',
       'new_regions.geojson',
@@ -804,14 +846,14 @@ describe('RegionEditorComponent persist / save-as', () => {
   }));
 
   it('should show overwrite confirmation when file exists', () => {
-    component.saveAsFilename = 'existing.geojson';
-    component.saveAsFileExists = true;
-    component.showSaveAsDialog = true;
+    component['saveAsFilename'] = 'existing.geojson';
+    component['saveAsFileExists'] = true;
+    component['showSaveAsDialog'] = true;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
 
     // The Save-As dialog stays open (behind the confirm dialog) until the user decides.
-    expect(component.showSaveAsDialog).toBe(true);
+    expect(component['showSaveAsDialog']).toBe(true);
     expect(mockConfirmationService.confirm).toHaveBeenCalledWith(
       expect.objectContaining({
         message: '"existing.geojson" already exists. Do you want to overwrite it?',
@@ -822,10 +864,10 @@ describe('RegionEditorComponent persist / save-as', () => {
   });
 
   it('should save after user accepts overwrite confirmation', fakeAsync(() => {
-    component.saveAsFilename = 'existing.geojson';
-    component.saveAsFileExists = true;
+    component['saveAsFilename'] = 'existing.geojson';
+    component['saveAsFileExists'] = true;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     const confirmCall = (mockConfirmationService.confirm as jest.Mock).mock.calls[0][0];
     confirmCall.accept();
     tick();
@@ -834,9 +876,7 @@ describe('RegionEditorComponent persist / save-as', () => {
       '{"type":"FeatureCollection","features":[]}',
       'existing.geojson',
     );
-    expect(mockMessageService.add).toHaveBeenCalledWith(
-      expect.objectContaining({ severity: 'success' }),
-    );
+    expect(mockMessageService.add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' }));
   }));
 
   it('saves EVERY slice as one combined z-indexed geojson for a single-file z-stack — jit-ui#93', fakeAsync(() => {
@@ -846,42 +886,44 @@ describe('RegionEditorComponent persist / save-as', () => {
     mockVisualizer.isStackMode = jest.fn(() => true);
     mockVisualizer.getStackSaveLayout = jest.fn(() => 'combined');
     mockVisualizer.getSliceAnnotationRegions = jest.fn(() => allSlices);
-    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
-      (regs: any[]) => JSON.stringify({ count: regs.length }),
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation((regs: any[]) =>
+      JSON.stringify({ count: regs.length }),
     );
 
-    component.saveAsFilename = 'stack.geojson';
-    component.saveAsFileExists = false;
+    component['saveAsFilename'] = 'stack.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     tick();
 
     expect(mockVisualizer.getSliceAnnotationRegions).toHaveBeenCalled();
     expect(mockVisualizer.getGeoJsonString).toHaveBeenCalledWith(allSlices);
-    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
-      JSON.stringify({ count: 3 }),
-      'stack.geojson',
-    );
+    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(JSON.stringify({ count: 3 }), 'stack.geojson');
   }));
 
   it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', () => {
     // Folder stack: persistRegions should skip the single-file save-as dialog
     // and write each slice's regions back to its own slice-file's geojson.
-    const s0 = new Region(); s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
-    const s2 = new Region(); s2.bounds = Object.assign(new Rectangle(), { x: 2, y: 2, width: 4, height: 4 });
-    const bySlice = new Map<number, Region[]>([[0, [s0]], [2, [s2]]]);
+    const s0 = new Region();
+    s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+    const s2 = new Region();
+    s2.bounds = Object.assign(new Rectangle(), { x: 2, y: 2, width: 4, height: 4 });
+    const bySlice = new Map<number, Region[]>([
+      [0, [s0]],
+      [2, [s2]],
+    ]);
 
     mockVisualizer.isStackMode = jest.fn(() => true);
     mockVisualizer.getStackSaveLayout = jest.fn(() => 'per-slice-file');
     mockVisualizer.getStackSaveAnnotationSlices = jest.fn(() => bySlice);
-    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation(
-      (regs: any[]) => JSON.stringify({ n: regs.length, z: regs[0]?.z }),
+    (mockVisualizer.getGeoJsonString as jest.Mock).mockImplementation((regs: any[]) =>
+      JSON.stringify({ n: regs.length, z: regs[0]?.z }),
     );
 
-    component.persistRegions();
+    component['persistRegions']();
 
     // No single-file dialog for a folder stack.
-    expect(component.showSaveAsDialog).toBe(false);
+    expect(component['showSaveAsDialog']).toBe(false);
     // One saveSliceGeoJsons call carrying both slices; each serialized on the
     // default plane (z reset to 0 — the file itself is the slice).
     expect(mockRegionIo.saveSliceGeoJsons).toHaveBeenCalledTimes(1);
@@ -892,16 +934,14 @@ describe('RegionEditorComponent persist / save-as', () => {
   });
 
   it('should show error toast when save fails', fakeAsync(() => {
-    (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(
-      throwError(() => new Error('Server error')),
-    );
-    component.saveAsFilename = 'regions.geojson';
-    component.saveAsFileExists = false;
+    (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(throwError(() => new Error('Server error')));
+    component['saveAsFilename'] = 'regions.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     tick();
 
-    expect(component.saveAsBusy).toBe(false);
+    expect(component['saveAsBusy']).toBe(false);
     expect(mockMessageService.add).toHaveBeenCalledWith(
       expect.objectContaining({
         severity: 'error',
@@ -913,35 +953,35 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   it('cancelSaveAs aborts an in-flight upload and clears the busy state', fakeAsync(() => {
     (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(NEVER); // never completes
-    component.saveAsFilename = 'regions.geojson';
-    component.saveAsFileExists = false;
+    component['saveAsFilename'] = 'regions.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     tick();
-    expect(component.saveAsBusy).toBe(true);
+    expect(component['saveAsBusy']).toBe(true);
 
-    component.cancelSaveAs();
-    expect(component.saveAsBusy).toBe(false);
+    component['cancelSaveAs']();
+    expect(component['saveAsBusy']).toBe(false);
   }));
 
   it('cancelSaveAs before the deferred timer fires aborts the save entirely — jit-ui#100', fakeAsync(() => {
-    component.saveAsFilename = 'regions.geojson';
-    component.saveAsFileExists = false;
+    component['saveAsFilename'] = 'regions.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     // Cancel BEFORE the setTimeout callback runs.
-    component.cancelSaveAs();
+    component['cancelSaveAs']();
     tick();
 
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
-    expect(component.saveAsBusy).toBe(false);
+    expect(component['saveAsBusy']).toBe(false);
   }));
 
   it('ngOnDestroy clears a pending save timer so it never uploads after teardown — jit-ui#100', fakeAsync(() => {
-    component.saveAsFilename = 'regions.geojson';
-    component.saveAsFileExists = false;
+    component['saveAsFilename'] = 'regions.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     component.ngOnDestroy();
     tick();
 
@@ -949,8 +989,8 @@ describe('RegionEditorComponent persist / save-as', () => {
   }));
 
   it('should not save when filename is empty', () => {
-    component.saveAsFilename = '   ';
-    component.confirmSaveAs();
+    component['saveAsFilename'] = '   ';
+    component['confirmSaveAs']();
 
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
     expect(mockConfirmationService.confirm).not.toHaveBeenCalled();
@@ -958,34 +998,31 @@ describe('RegionEditorComponent persist / save-as', () => {
 
   it('should not save when no file is selected', () => {
     (mockRegionIo.getSelectedFileName as jest.Mock).mockReturnValue(undefined);
-    component.saveAsFilename = 'test.geojson';
+    component['saveAsFilename'] = 'test.geojson';
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
 
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
   it('should pass custom filename to saveGeoJson', fakeAsync(() => {
-    component.saveAsFilename = 'my_custom_name.geojson';
-    component.saveAsFileExists = false;
+    component['saveAsFilename'] = 'my_custom_name.geojson';
+    component['saveAsFileExists'] = false;
 
-    component.confirmSaveAs();
+    component['confirmSaveAs']();
     tick();
 
-    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(
-      expect.any(String),
-      'my_custom_name.geojson',
-    );
+    expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(expect.any(String), 'my_custom_name.geojson');
   }));
 
   it('should trigger initial existence check when dialog opens', fakeAsync(() => {
     (mockRegionIo.roiFileExists as jest.Mock).mockReturnValue(of(true));
 
-    component.persistRegions();
+    component['persistRegions']();
     tick(500);
 
     expect(mockRegionIo.roiFileExists).toHaveBeenCalledWith('slide_001.geojson');
-    expect(component.saveAsFileExists).toBe(true);
+    expect(component['saveAsFileExists']).toBe(true);
   }));
 });
 
@@ -1029,9 +1066,9 @@ describe('RegionEditorComponent export', () => {
       saveSliceGeoJsons: jest.fn(() => of(void 0)),
     } as unknown as RegionIoPort;
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -1045,89 +1082,89 @@ describe('RegionEditorComponent export', () => {
     component = fixture.componentInstance;
     component.ngOnInit();
 
-    component.addRectangle();
+    addRect(component);
   });
 
   // --- exportRois (opens the export dialog) ---
 
   it('should open export dialog with default filename from selected image', () => {
-    component.exportRois();
+    component['exportRois']();
 
-    expect(component.showExportDialog).toBe(true);
-    expect(component.exportFilename).toBe('slide_001.geojson');
+    expect(component['showExportDialog']).toBe(true);
+    expect(component['exportFilename']).toBe('slide_001.geojson');
   });
 
   it('should default to rois.geojson when no file is selected', () => {
     (mockRegionIo.getSelectedFileName as jest.Mock).mockReturnValue(undefined);
 
-    component.exportRois();
+    component['exportRois']();
 
-    expect(component.showExportDialog).toBe(true);
-    expect(component.exportFilename).toBe('rois.geojson');
+    expect(component['showExportDialog']).toBe(true);
+    expect(component['exportFilename']).toBe('rois.geojson');
   });
 
   it('should not open export dialog when there are no regions', () => {
-    component.regions = [];
+    component['regions'] = [];
 
-    component.exportRois();
+    component['exportRois']();
 
-    expect(component.showExportDialog).toBe(false);
+    expect(component['showExportDialog']).toBe(false);
   });
 
   // --- confirmExport (download action) ---
 
   it('should download geojson with the chosen filename', () => {
-    component.exportFilename = 'my_export.geojson';
-    component.showExportDialog = true;
+    component['exportFilename'] = 'my_export.geojson';
+    component['showExportDialog'] = true;
 
-    component.confirmExport();
+    component['confirmExport']();
 
-    expect(component.showExportDialog).toBe(false);
+    expect(component['showExportDialog']).toBe(false);
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'my_export.geojson');
     const blob: Blob = (saveAs as unknown as jest.Mock).mock.calls[0][0];
     expect(blob.type).toBe('application/json');
   });
 
   it('should use custom filename entered by user', () => {
-    component.exportFilename = 'custom_regions.geojson';
+    component['exportFilename'] = 'custom_regions.geojson';
 
-    component.confirmExport();
+    component['confirmExport']();
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'custom_regions.geojson');
   });
 
   it('should not download when filename is empty', () => {
-    component.exportFilename = '   ';
+    component['exportFilename'] = '   ';
 
-    component.confirmExport();
+    component['confirmExport']();
 
     expect(saveAs).not.toHaveBeenCalled();
   });
 
   it('should not download when there are no regions', () => {
-    component.regions = [];
-    component.exportFilename = 'test.geojson';
+    component['regions'] = [];
+    component['exportFilename'] = 'test.geojson';
 
-    component.confirmExport();
+    component['confirmExport']();
 
     expect(saveAs).not.toHaveBeenCalled();
   });
 
   it('should trim whitespace from filename before downloading', () => {
-    component.exportFilename = '  padded_name.geojson  ';
+    component['exportFilename'] = '  padded_name.geojson  ';
 
-    component.confirmExport();
+    component['confirmExport']();
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'padded_name.geojson');
   });
 
   it('should close the dialog on confirm', () => {
-    component.exportFilename = 'test.geojson';
-    component.showExportDialog = true;
+    component['exportFilename'] = 'test.geojson';
+    component['showExportDialog'] = true;
 
-    component.confirmExport();
+    component['confirmExport']();
 
-    expect(component.showExportDialog).toBe(false);
+    expect(component['showExportDialog']).toBe(false);
   });
 });
 
@@ -1154,9 +1191,9 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
       exportRegions: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -1179,135 +1216,113 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   function rect(): Region {
-    const r = new Region(); r.id = 1;
-    const b = new Rectangle(); b.x = 10; b.y = 20; b.width = 30; b.height = 40;
-    r.bounds = b; return r;
+    const r = new Region();
+    r.id = 1;
+    const b = new Rectangle();
+    b.x = 10;
+    b.y = 20;
+    b.width = 30;
+    b.height = 40;
+    r.bounds = b;
+    return r;
   }
   function poly(): Region {
-    const r = new Region(); r.id = 2;
+    const r = new Region();
+    r.id = 2;
     const p = new Polygon();
-    p.xpoints = [0, 10, 10, 0]; p.ypoints = [0, 0, 10, 10];
-    p.coordinates = [[0, 0], [10, 0], [10, 10], [0, 10]]; p.npoints = 4; p.closed = true;
-    r.bounds = p; return r;
+    p.xpoints = [0, 10, 10, 0];
+    p.ypoints = [0, 0, 10, 10];
+    p.coordinates = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ];
+    p.npoints = 4;
+    p.closed = true;
+    r.bounds = p;
+    return r;
   }
 
-  it('xRectUpdate / yRectUpdate set the rectangle origin and commit', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    component.xRectUpdate(r, { value: 99 });
-    component.yRectUpdate(r, { value: 88 });
-    expect((r.bounds as Rectangle).x).toBe(99);
-    expect((r.bounds as Rectangle).y).toBe(88);
-    expect(api.setAnnotationRegions).toHaveBeenCalled();
-  });
-
-  it('widthRectUpdate recenters x by half the width delta', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
-    component.widthRectUpdate(r, { value: 50 }); // diff +20 → x = round(10 - 10) = 0
-    expect((r.bounds as Rectangle).width).toBe(50);
-    expect((r.bounds as Rectangle).x).toBe(0);
-  });
-
-  it('heightRectUpdate recenters y by half the height delta', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    (component as any).regionsCopy = [{ id: 1, bounds: { x: 10, y: 20, width: 30, height: 40 } }];
-    component.heightRectUpdate(r, { value: 60 }); // diff +20 → y = round(20 - 10) = 10
-    expect((r.bounds as Rectangle).height).toBe(60);
-    expect((r.bounds as Rectangle).y).toBe(10);
-  });
-
-  it('widthRectUpdate ignores null/undefined values', () => {
-    const r = rect();
-    (component as any).regions = [r];
-    component.widthRectUpdate(r, { value: null });
-    expect((r.bounds as Rectangle).width).toBe(30); // unchanged
-  });
-
   it('regionArea reports px² for rect + polygon, blank when degenerate', () => {
-    expect(component.regionArea(rect())).toContain('px²'); // 30·40 = 1200
-    expect(component.regionArea(poly())).toContain('px²'); // shoelace = 100
-    const degenerate = rect(); (degenerate.bounds as Rectangle).width = 0;
-    expect(component.regionArea(degenerate)).toBe('');
+    expect(component['regionArea'](rect())).toContain('px²'); // 30·40 = 1200
+    expect(component['regionArea'](poly())).toContain('px²'); // shoelace = 100
+    const degenerate = rect();
+    (degenerate.bounds as Rectangle).width = 0;
+    expect(component['regionArea'](degenerate)).toBe('');
   });
 
   it('regionArea reports physical units when mpp is known', () => {
-    (component as any).mppX = 2; (component as any).mppY = 2;
-    expect(component.regionArea(rect())).toContain('µm²'); // 1200·4 = 4800 µm²
+    component['mpp'] = { mppX: 2, mppY: 2 };
+    expect(component['regionArea'](rect())).toContain('µm²'); // 1200·4 = 4800 µm²
   });
 
-  it('pickMpp reads calibration off a non-[0] entry and squares a single axis', () => {
-    const pick = (m: any) => (component as any).pickMpp(m);
-    // Calibration on entry 1 (entry 0 unscaled) — must not be missed.
-    expect(pick([{ mppX: 0, mppY: 0 }, { mppX: 0.5, mppY: 0.5 }]))
-      .toEqual({ mppX: 0.5, mppY: 0.5 });
-    // Only mppX reported → square pixels (mppY = mppX), so it still shows µm².
-    expect(pick([{ mppX: 0.25 }])).toEqual({ mppX: 0.25, mppY: 0.25 });
-    // Genuinely unscaled → undefined → px².
-    expect(pick([{ mppX: 0, mppY: 0 }])).toEqual({ mppX: undefined, mppY: undefined });
-    expect(pick(undefined)).toEqual({ mppX: undefined, mppY: undefined });
-  });
+  // pickMpp itself is covered in region-metrics.spec.ts.
 
   it('regionArea uses physical units when calibration is on a non-[0] entry', () => {
-    const { mppX, mppY } = (component as any).pickMpp([{ mppX: 0 }, { mppX: 2, mppY: 2 }]);
-    (component as any).mppX = mppX;
-    (component as any).mppY = mppY;
-    expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
+    component['mpp'] = pickMpp([{ mppX: 0 }, { mppX: 2, mppY: 2 }] as IImageMetadata[]);
+    expect(component['regionArea'](rect())).toContain('µm²'); // would have been px² before
   });
 
   it('applyColorToSelected recolours each selected region by its class and commits', () => {
-    const a = poly(); a.label = 'Tumor';
-    const b = poly(); b.label = 'Tumor';
-    const c = rect(); c.label = 'Stroma';
+    const a = poly();
+    a.label = 'Tumor';
+    const b = poly();
+    b.label = 'Tumor';
+    const c = rect();
+    c.label = 'Stroma';
     (component as any).regions = [a, b, c];
-    component.selectedRegions = [a, b, c];
+    component['selectedRegions'] = [a, b, c];
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
-    component.classColorEdits = [
+    component['classColorEdits'] = [
       { label: 'Tumor', color: '#abcdef' },
       { label: 'Stroma', color: '#123456' },
     ];
-    component.applyColorToSelected();
-    expect(a.color).toBe('#abcdef');
-    expect(b.color).toBe('#abcdef');
-    expect(c.color).toBe('#123456');
-    expect(component.labelColors.get('Tumor')).toBe('#abcdef');
-    expect(component.labelColors.get('Stroma')).toBe('#123456');
+    component['applyColorToSelected']();
+    expect(component['regions'].map((r) => r.color)).toEqual(['#abcdef', '#abcdef', '#123456']);
+    expect(component['selectedRegions']).toEqual(component['regions']); // the selection follows the copies
     expect(spy).toHaveBeenCalled();
-    expect(component.showColorDialog).toBe(false);
+    expect(component['showColorDialog']).toBe(false);
   });
 
   it('openColorDialog builds one colour editor per unique class in the selection', () => {
-    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
-    const b = poly(); b.label = 'Tumor'; b.color = '#999999';
-    const c = poly(); c.label = 'Stroma'; c.color = '#445566';
-    const d = poly(); d.label = ''; d.color = '#778899';
-    component.selectedRegions = [a, b, c, d];
-    component.openColorDialog();
-    expect(component.classColorEdits).toEqual([
+    const a = poly();
+    a.label = 'Tumor';
+    a.color = '#112233';
+    const b = poly();
+    b.label = 'Tumor';
+    b.color = '#999999';
+    const c = poly();
+    c.label = 'Stroma';
+    c.color = '#445566';
+    const d = poly();
+    d.label = '';
+    d.color = '#778899';
+    component['selectedRegions'] = [a, b, c, d];
+    component['openColorDialog']();
+    expect(component['classColorEdits']).toEqual([
       { label: 'Tumor', color: '#112233' },
       { label: 'Stroma', color: '#445566' },
       { label: '', color: '#778899' },
     ]);
-    expect(component.showColorDialog).toBe(true);
+    expect(component['showColorDialog']).toBe(true);
   });
 
-  it('openColorDialog seeds a class picker from the persisted label colour', () => {
-    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
-    component.labelColors.set('Tumor', '#abcdef');
-    component.selectedRegions = [a];
-    component.openColorDialog();
-    expect(component.classColorEdits).toEqual([{ label: 'Tumor', color: '#abcdef' }]);
+  it('openColorDialog seeds a class picker with its class colour when the region has none', () => {
+    const a = poly();
+    a.label = 'Tumor';
+    component['selectedRegions'] = [a];
+    component['openColorDialog']();
+    expect(component['classColorEdits']).toEqual([{ label: 'Tumor', color: component['colorForName']('Tumor') }]);
   });
 
   it('selectAllRegions selects every row and syncs the plot', () => {
     (component as any).regions = [poly(), rect()];
     const spy = api.setSelectedRegions as jest.Mock;
     spy.mockClear();
-    component.selectAllRegions();
-    expect(component.selectedRegions.length).toBe(2);
+    component['selectAllRegions']();
+    expect(component['selectedRegions'].length).toBe(2);
     expect(spy).toHaveBeenCalled();
   });
 
@@ -1316,17 +1331,19 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     (component as any).regions = [r];
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
-    component.changeRegionColor(r, '#abcdef');
-    expect(r.color).toBe('#abcdef');
+    component['changeRegionColor'](r, '#abcdef');
+    expect(component['regions'][0].color).toBe('#abcdef');
+    expect(r.color).toBeUndefined(); // committed as a copy; the original is untouched (RT-1)
     expect(spy).toHaveBeenCalled();
   });
 
   it('changeRegionColor is a no-op when the colour is unchanged', () => {
-    const r = poly(); r.color = '#123456';
+    const r = poly();
+    r.color = '#123456';
     (component as any).regions = [r];
     const spy = api.setAnnotationRegions as jest.Mock;
     spy.mockClear();
-    component.changeRegionColor(r, '#123456');
+    component['changeRegionColor'](r, '#123456');
     expect(spy).not.toHaveBeenCalled();
   });
 
@@ -1344,28 +1361,30 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     const mp = new MultiPolygon();
     mp.polygons = [sq(0, 10), sq(20, 5)]; // 100 + 25
     r.bounds = mp;
-    expect(component.regionArea(r)).toBe('125 px²');
+    expect(component['regionArea'](r)).toBe('125 px²');
   });
 
   it('regionArea subtracts hole area (donut, not filled circle) — jit-ui#85', () => {
     const donut = poly(); // 10×10 exterior = 100
-    (donut.bounds as Polygon).holes = [[[3, 3], [7, 3], [7, 7], [3, 7]]]; // 4×4 hole = 16
-    expect(component.regionArea(donut)).toBe('84 px²'); // 100 − 16
-  });
-
-  it('isRectangle distinguishes rectangles from polygons', () => {
-    expect(component.isRectangle(rect())).toBe(true);
-    expect(component.isRectangle(poly())).toBe(false);
+    (donut.bounds as Polygon).holes = [
+      [
+        [3, 3],
+        [7, 3],
+        [7, 7],
+        [3, 7],
+      ],
+    ]; // 4×4 hole = 16
+    expect(component['regionArea'](donut)).toBe('84 px²'); // 100 − 16
   });
 
   it('label-edit lifecycle tracks the editing set and commits on stop', () => {
     const r = rect();
     (component as any).regions = [r];
-    expect(component.isEditingLabel(r)).toBe(false);
-    component.startEditLabel(r);
-    expect(component.isEditingLabel(r)).toBe(true);
-    component.stopEditLabel(r, true); // commit
-    expect(component.isEditingLabel(r)).toBe(false);
+    expect(component['isEditingLabel'](r)).toBe(false);
+    component['startEditLabel'](r);
+    expect(component['isEditingLabel'](r)).toBe(true);
+    component['stopEditLabel'](r, true); // commit
+    expect(component['isEditingLabel'](r)).toBe(false);
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 });
@@ -1400,20 +1419,24 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
       setSelectedRegions: jest.fn(),
       getAnnotationRegions: () => [],
       setAnnotationRegions: jest.fn((regions: Region[]) => {
-        for (const r of regions ?? []) { if (r.id == null) r.id = idc++; }
+        for (const r of regions ?? []) {
+          if (r.id == null) r.id = idc++;
+        }
       }),
       getPresetSet: () => currentSet,
       getPresetSet$: () => of(currentSet),
-      setPresetSet: jest.fn((s: PresetSet) => { currentSet = s; }),
+      setPresetSet: jest.fn((s: PresetSet) => {
+        currentSet = s;
+      }),
       upsertClass: jest.fn(),
       removeClass: jest.fn(),
       resetPresets: jest.fn(),
       setClassificationColor: jest.fn(),
     });
 
+    shallowEditor();
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      imports: [RegionEditorComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -1437,138 +1460,137 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
   });
 
   it('mirrors the preset set from the API on init', () => {
-    expect(component.presetSet.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
+    expect(component['presetSet'].classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
   });
 
   it('colorForName returns the preset colour, else a deterministic fallback', () => {
-    expect(component.colorForName('Tumor')).toBe('#FF4444');
-    const unknown = component.colorForName('Mitosis');
+    expect(component['colorForName']('Tumor')).toBe('#FF4444');
+    const unknown = component['colorForName']('Mitosis');
     expect(currentSet.fallbackPalette).toContain(unknown);
-    expect(component.colorForName('Mitosis')).toBe(unknown); // stable across calls
+    expect(component['colorForName']('Mitosis')).toBe(unknown); // stable across calls
   });
 
   it('applyPresetToRegion stamps the class + preset colour, clears the override, and commits', () => {
     const r = Object.assign(new Region(), { id: 1, label: 'x', color: '#000000', colorOverridden: true });
-    component.applyPresetToRegion(r, 'Tumor');
-    expect(r.label).toBe('Tumor');
-    expect(r.color).toBe('#FF4444');
-    expect(r.colorOverridden).toBe(false);
+    component['regions'] = [r];
+    component['applyPresetToRegion'](r, 'Tumor');
+    expect(component['regions'][0].label).toBe('Tumor');
+    expect(component['regions'][0].color).toBe('#FF4444');
+    expect(component['regions'][0].colorOverridden).toBe(false);
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
   it('applyPresetToRegion gives an unknown class a deterministic fallback colour', () => {
     const r = Object.assign(new Region(), { id: 1 });
-    component.applyPresetToRegion(r, 'Mitosis');
-    expect(r.label).toBe('Mitosis');
-    expect(currentSet.fallbackPalette).toContain(r.color);
+    component['regions'] = [r];
+    component['applyPresetToRegion'](r, 'Mitosis');
+    expect(component['regions'][0].label).toBe('Mitosis');
+    expect(currentSet.fallbackPalette).toContain(component['regions'][0].color);
   });
 
   it('selectActiveClass sets the active class and applies it to the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
     const b = Object.assign(new Region(), { id: 2 });
-    component.selectedRegions = [a, b];
-    component.selectActiveClass('Stroma');
-    expect(component.activeClass).toBe('Stroma');
-    expect(a.label).toBe('Stroma');
-    expect(b.color).toBe('#44AAFF');
+    component['regions'] = [a, b];
+    component['selectedRegions'] = [a, b];
+    component['selectActiveClass']('Stroma');
+    expect(component['activeClass']).toBe('Stroma');
+    expect(component['regions'][0].label).toBe('Stroma');
+    expect(component['regions'][1].color).toBe('#44AAFF');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
-  it('new regions inherit the active class', () => {
-    component.activeClass = 'Tumor';
-    component.addRectangle();
-    const added = component.regions[component.regions.length - 1];
-    expect(added.label).toBe('Tumor');
-  });
-
   it('openManageDialog clones the set into an isolated draft', () => {
-    component.openManageDialog();
-    expect(component.showManageDialog).toBe(true);
-    expect(component.presetDraft).toBeTruthy();
-    component.presetDraft!.classes[0].name = 'Changed';
+    component['openManageDialog']();
+    expect(component['showManageDialog']).toBe(true);
+    expect(component['presetDraft']).toBeTruthy();
+    component['presetDraft']!.classes[0].name = 'Changed';
     // mutating the draft must not touch the live set
-    expect(component.presetSet.classes[0].name).toBe('Tumor');
+    expect(component['presetSet'].classes[0].name).toBe('Tumor');
   });
 
   it('applyManageDialog drops blank/duplicate names, persists, and recolours regions', () => {
-    component.openManageDialog();
-    component.presetDraft!.classes = [
+    component['openManageDialog']();
+    component['presetDraft']!.classes = [
       { name: 'Tumor', color: '#FF0000' },
-      { name: '   ', color: '#000000' },   // blank -> dropped
+      { name: '   ', color: '#000000' }, // blank -> dropped
       { name: 'Tumor', color: '#00FF00' }, // duplicate -> dropped
       { name: 'New', color: '#123456' },
     ];
-    component.applyManageDialog(true);
+    component['applyManageDialog'](true);
     expect(api.setPresetSet).toHaveBeenCalled();
     const saved = (api.setPresetSet as jest.Mock).mock.calls[0][0] as PresetSet;
     expect(saved.classes.map((c) => c.name)).toEqual(['Tumor', 'New']);
     expect(api.setAnnotationRegions).toHaveBeenCalled();
-    expect(component.showManageDialog).toBe(false);
+    expect(component['showManageDialog']).toBe(false);
   });
 
   it('applyManageDialog de-duplicates case/whitespace variants in normalized mode', () => {
-    component.openManageDialog();
-    component.presetDraft!.matchMode = 'normalized';
-    component.presetDraft!.classes = [
+    component['openManageDialog']();
+    component['presetDraft']!.matchMode = 'normalized';
+    component['presetDraft']!.classes = [
       { name: 'Tumor', color: '#FF0000' },
       { name: '  tumor ', color: '#00FF00' }, // same key under normalization -> dropped
       { name: 'Stroma', color: '#0000FF' },
     ];
-    component.applyManageDialog(true);
+    component['applyManageDialog'](true);
     const saved = (api.setPresetSet as jest.Mock).mock.calls.at(-1)![0] as PresetSet;
     expect(saved.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma']);
   });
 
   it('deleteClass reverts its regions to the default "Region" class', () => {
-    component.presetSet = {
-      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+    component['presetSet'] = {
+      classes: [
+        { name: 'Tumor', color: '#FF4444' },
+        { name: 'Region', color: '#00FFFF' },
+      ],
+      fallbackPalette: ['#111111'],
+      autoPromote: false,
+      matchMode: 'exact',
     };
     const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444', colorOverridden: true });
     const b = Object.assign(new Region(), { id: 2, label: 'Stroma', color: '#44AAFF' });
-    component.regions = [a, b];
+    component['regions'] = [a, b];
 
-    component.deleteClass('Tumor');
+    component['deleteClass']('Tumor');
 
-    expect(a.label).toBe('Region');
-    expect(a.color).toBe('#00FFFF'); // the Region class colour
-    expect(a.colorOverridden).toBe(false);
-    expect(b.label).toBe('Stroma'); // other regions untouched
+    expect(component['regions'][0].label).toBe('Region');
+    expect(component['regions'][0].color).toBe('#00FFFF'); // the Region class colour
+    expect(component['regions'][0].colorOverridden).toBe(false);
+    expect(component['regions'][1]).toBe(b); // other regions untouched
+    expect(b.label).toBe('Stroma');
     expect(api.removeClass).toHaveBeenCalledWith('Tumor');
   });
 
   it('applyManageDialog reverts regions of a dropped class to "Region"', () => {
-    component.presetSet = {
-      classes: [{ name: 'Tumor', color: '#FF4444' }, { name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
+    component['presetSet'] = {
+      classes: [
+        { name: 'Tumor', color: '#FF4444' },
+        { name: 'Region', color: '#00FFFF' },
+      ],
+      fallbackPalette: ['#111111'],
+      autoPromote: false,
+      matchMode: 'exact',
     };
     const a = Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' });
-    component.regions = [a];
+    component['regions'] = [a];
 
-    component.openManageDialog();
-    component.presetDraft!.classes = [{ name: 'Region', color: '#00FFFF' }]; // drop Tumor
-    component.applyManageDialog(true);
+    component['openManageDialog']();
+    component['presetDraft']!.classes = [{ name: 'Region', color: '#00FFFF' }]; // drop Tumor
+    component['applyManageDialog'](true);
 
-    expect(a.label).toBe('Region');
-    expect(a.colorOverridden).toBe(false);
+    expect(component['regions'][0].label).toBe('Region');
+    expect(component['regions'][0].colorOverridden).toBe(false);
   });
 
-  it('deleting the in-use default "Region" class is disabled (helper reports it)', () => {
-    component.presetSet = {
-      classes: [{ name: 'Region', color: '#00FFFF' }],
-      fallbackPalette: ['#111111'], autoPromote: false, matchMode: 'exact',
-    };
-    component.regions = [Object.assign(new Region(), { id: 1, label: 'Region' })];
-    (component as any).recomputeClassCounts();
-    expect(component.deleteClassTooltip('Region')).toContain('cannot be removed');
-  });
+  // The delete-class tooltip / disabled state is covered in classes-panel.component.spec.ts.
 
   it('auto-adds classes found on loaded regions (not already presets), ignoring legend/empty', () => {
     const loaded = [
-      Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }),      // already a preset
+      Object.assign(new Region(), { id: 1, label: 'Tumor', color: '#FF4444' }), // already a preset
       Object.assign(new Region(), { id: 2, label: 'Optic-disc', color: '#123456' }), // new -> added
-      Object.assign(new Region(), { id: 3, label: 'legend', color: '#00FFFF' }),      // placeholder -> ignored
-      Object.assign(new Region(), { id: 4, label: '', color: '#000000' }),            // empty -> ignored
+      Object.assign(new Region(), { id: 3, label: 'legend', color: '#00FFFF' }), // placeholder -> ignored
+      Object.assign(new Region(), { id: 4, label: '', color: '#000000' }), // empty -> ignored
     ];
     (component as any).syncClassesFromRegions(loaded);
     const added = (api.upsertClass as jest.Mock).mock.calls.map((c) => c[0]);
@@ -1580,19 +1602,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(added.find((p) => p.name === 'Optic-disc').color).toBe('#123456');
   });
 
-  it('add/remove helpers mutate the draft', () => {
-    component.openManageDialog();
-    const n = component.presetDraft!.classes.length;
-    component.addPresetClass();
-    expect(component.presetDraft!.classes.length).toBe(n + 1);
-    component.removePresetClass(0);
-    expect(component.presetDraft!.classes.length).toBe(n);
-    const f = component.presetDraft!.fallbackPalette.length;
-    component.addFallbackColor();
-    expect(component.presetDraft!.fallbackPalette.length).toBe(f + 1);
-    component.removeFallbackColor(0);
-    expect(component.presetDraft!.fallbackPalette.length).toBe(f);
-  });
+  // The draft's add/remove helpers are covered in manage-classes-dialog.component.spec.ts.
 
   // ── docked Classes panel ──
   it('classCount reflects region labels', () => {
@@ -1602,9 +1612,9 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
       Object.assign(new Region(), { id: 3, label: 'Stroma' }),
     ];
     (component as any).recomputeClassCounts();
-    expect(component.classCount('Tumor')).toBe(2);
-    expect(component.classCount('Stroma')).toBe(1);
-    expect(component.classCount('Necrosis')).toBe(0);
+    expect(component['classCount']('Tumor')).toBe(2);
+    expect(component['classCount']('Stroma')).toBe(1);
+    expect(component['classCount']('Necrosis')).toBe(0);
   });
 
   it('displayClasses is ordered by region count, descending', () => {
@@ -1614,49 +1624,96 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
       Object.assign(new Region(), { id: 3, label: 'Tumor' }),
     ];
     (component as any).recomputeClassCounts();
-    expect(component.displayClasses.map((c) => c.name)).toEqual(['Stroma', 'Tumor']); // 2 before 1
+    expect(component['displayClasses'].map((c) => c.name)).toEqual(['Stroma', 'Tumor']); // 2 before 1
   });
 
   it('committing a region with a new class label adds that class', () => {
     (component as any).regions = [Object.assign(new Region(), { id: 1, label: 'BrandNewClass' })];
-    (component as any).setRegionsFromEditor();
+    (component as any).commit();
     expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'BrandNewClass' }));
   });
 
   it('setClassColor upserts the class colour and commits a recolour', () => {
-    component.setClassColor('Tumor', '#010203');
+    component['setClassColor']('Tumor', '#010203');
     expect(api.setClassificationColor).toHaveBeenCalledWith('Tumor', '#010203');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
   it('deleteClass removes the class and reverts its in-use regions to "Region"', () => {
     const t = Object.assign(new Region(), { id: 1, label: 'Tumor' });
-    component.regions = [t];
-    component.deleteClass('Tumor'); // in use -> removed, its region reverts to Region
+    component['regions'] = [t];
+    component['deleteClass']('Tumor'); // in use -> removed, its region reverts to Region
     expect(api.removeClass).toHaveBeenCalledWith('Tumor');
-    expect(t.label).toBe('Region');
+    expect(component['regions'][0].label).toBe('Region');
     (api.removeClass as jest.Mock).mockClear();
-    component.deleteClass('Necrosis'); // unused -> removed
+    component['deleteClass']('Necrosis'); // unused -> removed
     expect(api.removeClass).toHaveBeenCalledWith('Necrosis');
   });
 
   it('applyBulkClass sets the chosen class on the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
-    component.selectedRegions = [a];
-    component.bulkClass = 'Stroma';
-    component.applyBulkClass();
-    expect(a.label).toBe('Stroma');
-    expect(a.color).toBe('#44AAFF');
+    component['regions'] = [a];
+    component['selectedRegions'] = [a];
+    component['bulkClass'] = 'Stroma';
+    component['applyBulkClass']();
+    expect(component['regions'][0].label).toBe('Stroma');
+    expect(component['regions'][0].color).toBe('#44AAFF');
     expect(api.setAnnotationRegions).toHaveBeenCalled();
   });
 
   it('addAndApplyBulkClass adds a new class and sets it on the selection', () => {
     const a = Object.assign(new Region(), { id: 1 });
-    component.selectedRegions = [a];
-    component.newBulkClass = 'Mitosis';
-    component.addAndApplyBulkClass();
+    component['regions'] = [a];
+    component['selectedRegions'] = [a];
+    component['newBulkClass'] = 'Mitosis';
+    component['addAndApplyBulkClass']();
     expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'Mitosis' }));
-    expect(a.label).toBe('Mitosis');
-    expect(component.newBulkClass).toBe('');
+    expect(component['regions'][0].label).toBe('Mitosis');
+    expect(component['newBulkClass']).toBe('');
+  });
+});
+
+describe('RegionEditorComponent — OnPush', () => {
+  @Component({ standalone: true, imports: [RegionEditorComponent], template: '<region-editor></region-editor>' })
+  class HostComponent {}
+
+  it('re-renders when the viewer changes the regions (an async update, not a template event)', async () => {
+    const updates = new Subject<Region[]>();
+    let regions: Region[] = [];
+    const api = MockService(RoutingVisualizerService, {
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => updates,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      getAnnotationRegions: () => regions,
+    });
+    // Template only, no FormsModule either: the PrimeNG form controls are unknown elements here.
+    TestBed.overrideComponent(RegionEditorComponent, {
+      set: { imports: [CommonModule], schemas: [NO_ERRORS_SCHEMA] },
+    });
+    await TestBed.configureTestingModule({
+      imports: [HostComponent],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: MockService(MessageService) },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        { provide: REGION_IO_PORT, useValue: { roiFileExists: () => of(false) } as unknown as RegionIoPort },
+      ],
+    }).compileComponents();
+    const host = TestBed.createComponent(HostComponent);
+    host.detectChanges();
+    // Shallow: <region-table> is an unknown element, so its [total] lands on the DOM node.
+    const total = () => (host.nativeElement.querySelector('region-table') as { total?: number }).total;
+    expect((RegionEditorComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
+    expect(total()).toBe(0);
+
+    regions = [1, 2].map((id) => Object.assign(new Region(), { id, color: '#FF0000' }));
+    updates.next([]);
+    host.detectChanges();
+    expect(total()).toBe(2);
+    host.destroy();
   });
 });

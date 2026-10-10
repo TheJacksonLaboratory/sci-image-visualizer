@@ -1,4 +1,6 @@
-import { NapariAxesLabels, projectPoint, AxisLabelSpec } from './napari-axes-labels';
+import { projectPoint } from 'napari-js';
+
+import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 
 /** Column-major identity 4×4. */
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -66,9 +68,7 @@ describe('NapariAxesLabels', () => {
   it('hides all labels when toggled off and removes them on destroy', () => {
     const overlay = new NapariAxesLabels(host, camera3d, labels);
     overlay.setVisible(false);
-    expect(Array.from(host.querySelectorAll('span')).every((s) => s.style.display === 'none')).toBe(
-      true,
-    );
+    expect(Array.from(host.querySelectorAll('span')).every((s) => s.style.display === 'none')).toBe(true);
     overlay.setVisible(true);
     expect(host.querySelectorAll('span')[0].style.display).not.toBe('none');
     overlay.destroy();

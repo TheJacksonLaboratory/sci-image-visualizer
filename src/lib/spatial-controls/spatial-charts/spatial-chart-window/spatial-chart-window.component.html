@@ -1,0 +1,29 @@
+<!-- The detached chart. Its own non-modal, draggable, resizable window so it can be put
+     beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
+     stacking context, or it would be clipped by the panel it is meant to sit next to. -->
+<p-dialog
+  [header]="title"
+  [visible]="true"
+  (visibleChange)="closed.emit()"
+  [modal]="false"
+  [resizable]="true"
+  [draggable]="true"
+  position="right"
+  appendTo="body"
+  (onShow)="shown.emit()"
+  (onResizeEnd)="resizeEnd.emit()"
+  [style]="{ width: '34rem', height: '30rem' }"
+  [contentStyle]="{
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.25rem',
+    padding: '0.4rem 0.6rem 0.5rem',
+    flex: '1 1 auto',
+    minHeight: '0',
+    overflow: 'auto',
+  }"
+  styleClass="spatial-detached-dialog"
+>
+  <div [id]="divId" class="sx-detached-plot" [class.sx-plot-fixed]="fixedHeight"></div>
+  <ng-content></ng-content>
+</p-dialog>

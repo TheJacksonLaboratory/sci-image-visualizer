@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { encode as encodePng } from 'fast-png';
 
-import { WandService } from '../toolbar/wand/wand.service';
+import { rasterizePolygon } from '../geometry/raster';
 import { regionsToMask, MaskPart } from './mask-raster';
 
 /**
@@ -29,15 +29,11 @@ interface MaskRequest {
   regions: MaskPart[][];
 }
 
-const wand = new WandService();
-
 addEventListener('message', ({ data }: MessageEvent<MaskRequest>) => {
   try {
     const { width, height, originalWidth, originalHeight, scale, mode, sourceName, regions } = data;
-    const mask = regionsToMask(
-      regions, width, height, mode,
-      (xs, ys, w, h, holes) => wand.rasterizePolygon(xs, ys, w, h, holes),
-      (done, total) => postMessage({ type: 'progress', done, total }),
+    const mask = regionsToMask(regions, width, height, mode, rasterizePolygon, (done, total) =>
+      postMessage({ type: 'progress', done, total }),
     );
     if (!mask) {
       postMessage({ type: 'error', error: 'No regions could be rasterized.' });
@@ -54,13 +50,15 @@ addEventListener('message', ({ data }: MessageEvent<MaskRequest>) => {
     };
     if (sourceName) text.SourceImage = sourceName;
     const png = encodePng({
-      width: Math.round(width), height: Math.round(height),
-      data: mask.data, channels: 1, depth: mask.bitDepth, text,
+      width: Math.round(width),
+      height: Math.round(height),
+      data: mask.data,
+      channels: 1,
+      depth: mask.bitDepth,
+      text,
     });
     // Transfer the PNG buffer to avoid a copy.
-    (postMessage as (msg: unknown, transfer: Transferable[]) => void)(
-      { type: 'done', png }, [png.buffer],
-    );
+    (postMessage as (msg: unknown, transfer: Transferable[]) => void)({ type: 'done', png }, [png.buffer]);
   } catch (err) {
     postMessage({ type: 'error', error: (err as Error)?.message ?? String(err) });
   }

@@ -21,6 +21,7 @@ export interface ComputeProgress {
   message: string | null;
 }
 
+/** One t-SNE to compute: the PCA scores to embed and the run's parameters. */
 export interface ComputeRequest {
   /** PCA scores, row-major `nObs x nDims`. */
   scores: Float32Array;
@@ -32,13 +33,33 @@ export interface ComputeRequest {
   seed?: number;
 }
 
-/** Factory, so a test can supply a worker without a bundler. */
-export type WorkerFactory = () => Worker;
+/**
+ * Factory, so a test can supply a worker without a bundler. May be asynchronous, as the
+ * default one is: it imports the worker module on demand.
+ */
+export type WorkerFactory = () => Worker | Promise<Worker>;
 
+/**
+ * One t-SNE run in its own worker: start it, follow its progress, cancel it. Single use —
+ * a new computation takes a new run.
+ */
 export class EmbeddingComputeRun {
   private worker: Worker | null = null;
 
   private settled = false;
+
+  /**
+   * Between `run()` being called and the worker existing.
+   *
+   * The default factory imports the worker module first, and a dataset switch or a
+   * teardown can call {@link terminate} in that window. With no worker yet there is
+   * nothing to kill, so terminating bumps {@link generation} instead and the run stops
+   * itself the moment the worker arrives, before posting it any work.
+   */
+  private starting = false;
+
+  /** Bumped by {@link terminate}; a run that finds it changed across its await gives up. */
+  private generation = 0;
 
   /**
    * Settles a run that is still waiting, set for as long as one is.
@@ -72,17 +93,27 @@ export class EmbeddingComputeRun {
     meta: SpatialEmbeddingMeta,
     onProgress: (progress: ComputeProgress) => void,
   ): Promise<SpatialEmbedding | null> {
-    if (this.worker) throw new Error('a computation is already running');
-    const create = this.factory
-      ?? (await import('./tsne-worker')).createTsneWorker;
-    const worker = create();
-    this.worker = worker;
+    if (this.worker || this.starting) throw new Error('a computation is already running');
+    const generation = ++this.generation;
     this.settled = false;
+    this.starting = true;
+    let worker: Worker;
+    try {
+      // Awaited only when it IS a promise: a synchronous factory keeps the worker
+      // receiving its start message in the same tick, as callers already rely on.
+      const made = this.factory ? this.factory() : import('./tsne-worker').then((m) => m.createTsneWorker());
+      worker = made instanceof Promise ? await made : made;
+    } finally {
+      if (generation === this.generation) this.starting = false;
+    }
+    // Terminated while the worker was being created: nothing may start computing now.
+    if (generation !== this.generation) {
+      worker.terminate();
+      return null;
+    }
+    this.worker = worker;
 
-    const {
-      scores, nObs, nDims, dims,
-      perplexity = 30, iterations = 1000, seed = 0,
-    } = request;
+    const { scores, nObs, nDims, dims, perplexity = 30, iterations = 1000, seed = 0 } = request;
     let backend: string | null = null;
 
     return new Promise<SpatialEmbedding | null>((resolve, reject) => {
@@ -126,17 +157,20 @@ export class EmbeddingComputeRun {
               for (let i = 0; i < nObs; i++) plane[i] = flat[i * data.dims + d];
               planes.push(plane);
             }
-            finish(() => resolve({
-              meta: {
-                ...meta,
-                derived: true,
-                params: `PCA(${nDims}) then t-SNE, perplexity ${data.perplexity}, `
-                  + `${iterations} iterations, seed ${seed}`,
-              },
-              x: planes[0],
-              y: planes[1],
-              ...(planes[2] ? { z: planes[2] } : {}),
-            }));
+            finish(() =>
+              resolve({
+                meta: {
+                  ...meta,
+                  derived: true,
+                  params:
+                    `PCA(${nDims}) then t-SNE, perplexity ${data.perplexity}, ` +
+                    `${iterations} iterations, seed ${seed}`,
+                },
+                x: planes[0],
+                y: planes[1],
+                ...(planes[2] ? { z: planes[2] } : {}),
+              }),
+            );
             break;
           }
           case 'error':
@@ -148,9 +182,8 @@ export class EmbeddingComputeRun {
       };
       // A worker that dies takes the promise with it; without this the caller waits for
       // ever on a progress bar that has stopped moving.
-      worker.onerror = (event) => finish(
-        () => reject(new Error(`embedding worker failed: ${event.message ?? 'unknown'}`)),
-      );
+      worker.onerror = (event) =>
+        finish(() => reject(new Error(`embedding worker failed: ${event.message ?? 'unknown'}`)));
 
       // Copied, then transferred: the caller keeps its scores, and the worker gets the
       // buffer without a structured clone.
@@ -183,6 +216,9 @@ export class EmbeddingComputeRun {
    * settled here, with null, because nothing is left to deliver the answer.
    */
   terminate(): void {
+    // Also reaches a run still waiting for its worker — see `starting`.
+    this.generation++;
+    this.starting = false;
     const abandon = this.abandon;
     this.abandon = null;
     this.worker?.terminate();
@@ -191,6 +227,6 @@ export class EmbeddingComputeRun {
   }
 
   get running(): boolean {
-    return this.worker !== null && !this.settled;
+    return (this.starting || this.worker !== null) && !this.settled;
   }
 }

@@ -1,0 +1,30 @@
+// Shared by the charts panel and its control rows (each its own component, so each @uses
+// this): a wrapping row of controls, and the small hint text under them.
+
+.sx-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+
+  // As in the controls panel: the host element is inline, and `styleClass` only
+  // reaches PrimeNG's inner div — so the host has to be sized here.
+  p-dropdown {
+    flex: 1 1 8rem;
+    min-width: 0;
+  }
+}
+
+:host ::ng-deep .sx-controls p-dropdown .p-dropdown {
+  width: 100%;
+}
+
+.sx-hint {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary, #6c757d);
+  line-height: 1.35;
+}
+
+.sx-warn {
+  color: var(--orange-600, #c2410c);
+}

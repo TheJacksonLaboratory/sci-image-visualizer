@@ -4,15 +4,6 @@
   "lib": {
     "entryFile": "src/index.ts"
   },
-  "assets": [
-    "src/lib/assets"
-  ],
-  "allowedNonPeerDependencies": [
-    "@jax-js/jax",
-    "cellpose-js",
-    "fast-png",
-    "napari-js",
-    "openseadragon",
-    "plotly.js-dist-min"
-  ]
+  "assets": ["src/lib/assets", "src/lib/styles"],
+  "allowedNonPeerDependencies": ["cellpose-js", "fast-png", "napari-js", "openseadragon", "plotly.js-dist-min"]
 }

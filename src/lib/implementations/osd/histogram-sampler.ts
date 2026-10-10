@@ -1,9 +1,9 @@
 import { HttpClient } from '@angular/common/http';
-import { Observable, firstValueFrom, from, of } from 'rxjs';
-import { timeout } from 'rxjs/operators';
+import { Observable, from, of } from 'rxjs';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { buildTileUrl, fetchTileRgba } from './tile-client';
+import { httpFetchJson, nativeHistogram, timeoutSignal } from '../tile-server';
 import { histogram256, maxRgb } from '../../contracts/intensity';
 
 /**
@@ -34,22 +34,27 @@ export interface HistogramSamplerHost {
   /** Histograms landed — nudge the pane to re-read (its retry window may have
    *  lapsed). */
   onChannelHistogramsSampled(): void;
-  /** A grayscale auto-window was measured from full-res tiles — seed the
-   *  Intensity channel (or re-invalidate if the user already windowed). */
-  onGrayWindowSampled(min: number, max: number): void;
+  /** A grayscale auto-window was measured from slice `z`'s full-res tiles —
+   *  seed the Intensity channel (or re-invalidate if the user already
+   *  windowed). Background-preloaded slices report too; the host decides. */
+  onGrayWindowSampled(min: number, max: number, z: number): void;
 }
 
 export class HistogramSampler {
   /** 256-bin intensity histogram per z-slice, from sampled tiles. */
   private sliceHistograms = new Map<number, IHistogram[]>();
-  /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}`. */
+  /** Native-bit-depth histograms from `/histogram`, keyed
+   *  `${infoB64}|${z}|${channel}|${bins}`. */
   private nativeHistograms = new Map<string, IHistogram>();
-  /** Per-app-load cache-buster for `/histogram` — the server marks the
-   *  response cacheable for 24h, and a hard refresh can't bust a post-load
-   *  XHR. A token stable within a session but new on each full load keeps the
-   *  in-session dedup (via `nativeHistograms`) while always reflecting the
-   *  live backend after a reload. */
-  private readonly histCacheBuster = Date.now();
+  /** Bumped by {@link clear}. Every async sampler captures it before its first
+   *  `await` and drops its result if it changed: tile sampling and the native
+   *  fetch can take tens of seconds, and a run for the previous image must not
+   *  write that image's histogram, auto-window or native histogram into the
+   *  next one. */
+  private generation = 0;
+  /** Slices whose tile sampling is in flight, so a scrub back to one (or a
+   *  background preload of it) doesn't fetch its tiles again. */
+  private readonly inFlight = new Set<number>();
 
   constructor(
     private http: HttpClient,
@@ -63,8 +68,16 @@ export class HistogramSampler {
     return this.sliceHistograms.get(z)?.[channelIndex] ?? null;
   }
 
+  /** Whether slice z is already sampled or being sampled (tile samplers only
+   *  run once per slice until {@link clear}). */
+  private sampledOrPending(z: number): boolean {
+    return this.sliceHistograms.has(z) || this.inFlight.has(z);
+  }
+
   /** Drop everything (teardown / image switch). */
   clear(): void {
+    this.generation++;
+    this.inFlight.clear();
     this.sliceHistograms.clear();
     this.nativeHistograms.clear();
   }
@@ -75,6 +88,9 @@ export class HistogramSampler {
    * luminance. Fire-and-forget.
    */
   async computeMultiChannelHistograms(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
+    if (this.sampledOrPending(z)) return;
+    const gen = this.generation;
+    this.inFlight.add(z);
     try {
       const t = d.tileSize;
       // Sample the COARSEST real level (per-channel tiles exist only at real
@@ -115,11 +131,17 @@ export class HistogramSampler {
         }
       }
       await Promise.all(jobs);
-      this.sliceHistograms.set(z, counts.map((c) => histogram256(c)));
+      if (gen !== this.generation) return; // cleared meanwhile (image switch)
+      this.sliceHistograms.set(
+        z,
+        counts.map((c) => histogram256(c)),
+      );
       this.host.onChannelHistogramsSampled();
     } catch (err) {
       // Leave histograms unset (the pane shows empty) — but say why.
       console.warn('[viz:histogram] multichannel histogram sampling failed', err);
+    } finally {
+      if (gen === this.generation) this.inFlight.delete(z);
     }
   }
 
@@ -137,7 +159,10 @@ export class HistogramSampler {
    * only). Fire-and-forget; failures leave the window unset (identity 0..255).
    */
   async computeImageWindow(d: SampledDescriptor, infoB64: string, z: number): Promise<void> {
+    if (this.sampledOrPending(z)) return;
     const gray = this.host.isGrayscale();
+    const gen = this.generation;
+    this.inFlight.add(z);
     try {
       const t = d.tileSize;
       // Sample full-resolution when the grid is small (accurate for the grayscale
@@ -190,17 +215,21 @@ export class HistogramSampler {
           }
         }),
       );
+      if (gen !== this.generation) return; // cleared meanwhile (image switch)
       // Cache per-channel histograms: grayscale → [intensity]; RGB → [R, G, B].
       this.sliceHistograms.set(
-        z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
+        z,
+        gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
       );
       // Grayscale auto-window — only from full-res samples (coarsest averaging
       // is inaccurate); the host seeds the channel or re-invalidates.
       if (gray && fullRes && max > min && (min > 0 || max < 255)) {
-        this.host.onGrayWindowSampled(min, max);
+        this.host.onGrayWindowSampled(min, max, z);
       }
     } catch (err) {
       console.warn('[viz:window] per-image window compute failed — using identity 0..255', err);
+    } finally {
+      if (gen === this.generation) this.inFlight.delete(z);
     }
   }
 
@@ -227,7 +256,8 @@ export class HistogramSampler {
       }
     }
     this.sliceHistograms.set(
-      z, gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
+      z,
+      gray ? [histogram256(cR)] : [histogram256(cR), histogram256(cG!), histogram256(cB!)],
     );
     this.host.onChannelHistogramsSampled();
   }
@@ -237,9 +267,7 @@ export class HistogramSampler {
    * each already-decoded channel plane's own pixels (no tile server). One
    * histogram per channel, so the pane's per-channel selector works serverlessly.
    */
-  computeSimpleMultichannelHistograms(
-    z: number, planes: Array<{ data: Uint8ClampedArray | Uint8Array }>,
-  ): void {
+  computeSimpleMultichannelHistograms(z: number, planes: Array<{ data: Uint8ClampedArray | Uint8Array }>): void {
     this.sliceHistograms.set(
       z,
       planes.map((p) => {
@@ -258,47 +286,45 @@ export class HistogramSampler {
   /**
    * Native-bit-depth histogram for >8-bit images, from the server `/histogram`
    * endpoint (the 8-bit canvas tiles can't carry 16-bit values). Cached per
-   * slice+channel for the session.
+   * image+slice+channel+bin count until {@link clear}.
    */
   native$(infoB64: string, z: number, channel: number, bins: number): Observable<IHistogram | null> {
-    const key = `${z}|${channel}`;
+    const key = `${infoB64}|${z}|${channel}|${bins}`;
     const cached = this.nativeHistograms.get(key);
     if (cached) return of(cached);
     return from(this.fetchNative(infoB64, z, channel, bins, key));
   }
 
-  /** Fetch + cache one channel's native histogram from `GET /histogram`. */
+  /** Fetch + cache one channel's native histogram from `GET /histogram`
+   *  (the shared jit-service client, which adds the per-app-load cache-buster
+   *  that defeats the server's 24 h cache). */
   private async fetchNative(
-    infoB64: string, z: number, channel: number, bins: number, key: string,
+    infoB64: string,
+    z: number,
+    channel: number,
+    bins: number,
+    key: string,
   ): Promise<IHistogram | null> {
-    const url = `${this.api}histogram?info=${infoB64}&channel=${channel}&z=${z}&bins=${bins}&_=${this.histCacheBuster}`;
+    const gen = this.generation;
     try {
       // HttpClient calls get auth via the Angular interceptor (unlike OSD's own
       // ajax tile loader, which needs authHeaders) — mirror the other fetches.
-      const hi = await firstValueFrom(
-        this.http
-          .get<{
-            bitDepth: number; rangeMin: number; rangeMax: number;
-            observedMin: number; observedMax: number; binWidth: number; counts: number[];
-          }>(url)
-          .pipe(timeout(45000)),
-      );
-      if (!hi || !hi.counts) return null;
-      const out: IHistogram = {
-        // Native bin left-edges: rangeMin + i*binWidth.
-        bins: hi.counts.map((_, i) => hi.rangeMin + i * hi.binWidth),
-        counts: hi.counts,
-        max: hi.counts.reduce((m, c) => (c > m ? c : m), 0),
-        bitDepth: hi.bitDepth,
-        rangeMin: hi.rangeMin,
-        rangeMax: hi.rangeMax,
-        observedMin: hi.observedMin,
-        observedMax: hi.observedMax,
-      };
+      const req = timeoutSignal(undefined, 45000);
+      const out = await nativeHistogram(
+        httpFetchJson(this.http),
+        this.api,
+        infoB64,
+        { z, channel, bins },
+        req.signal,
+      ).finally(req.done);
+      if (!out) return null; // 202 (still caching) → null; the pane retries
+      // Cleared meanwhile (image switch): the histogram belongs to the previous
+      // image — don't cache it or hand it to the pane (null → the pane retries).
+      if (gen !== this.generation) return null;
       this.nativeHistograms.set(key, out);
       return out;
     } catch (err) {
-      // 202 (still caching) or a transient error → null; the pane retries.
+      // A transient error → null; the pane retries.
       console.warn('[viz:histogram] native histogram fetch failed', err);
       return null;
     }

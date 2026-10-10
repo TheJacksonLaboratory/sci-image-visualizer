@@ -1,11 +1,23 @@
+import { NgZone } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
-import { Viewer } from 'napari-js';
+import { MultiChannelImageView, Viewer } from 'napari-js';
+import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
+import { bitmapToLuminance } from './napari-tile-client';
+import { Image2dScene } from './napari-image-2d-scene';
+import type { SceneContext } from './napari-scene';
+import {
+  ContrastWindowCache,
+  encodeSpatial3dContinuous,
+  encodeSpatialContinuous,
+} from './napari-spatial-encoding';
+import { Spatial2dScene } from './napari-spatial-2d-scene';
+import type { SpatialSession } from './napari-spatial-scene';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
@@ -17,18 +29,23 @@ import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
-import {
-  CategoricalColumn, ContinuousColumn, SpatialDataset,
-} from '../../contracts/spatial-dataset.contract';
+import { CategoricalColumn, ContinuousColumn, SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
+import * as spatialEncoding from '../../spatial/spatial-encoding';
+import { SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
+import type { CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { isPackedFrame, PackedFrame } from '../../toolbar/tool-kit/frame-pixels';
+
+jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 const imageInfo = (over: Partial<IImageInfo> = {}): IImageInfo =>
   ({ urls: ['u0', 'u1'], isGrayscale: true, isStack: true, ...over }) as unknown as IImageInfo;
 
 /** A spatial dataset with `count` observations on a diagonal, 27.5 px spot radius. */
 const spatialDataset = (count = 3): SpatialDataset => ({
-  id: 'demo', name: 'Demo',
+  id: 'demo',
+  name: 'Demo',
   observations: {
     count,
     x: Float32Array.from({ length: count }, (_, i) => i * 10),
@@ -116,18 +133,16 @@ describe('NapariVisualizerService', () => {
       .mockResolvedValue({ width: 64, height: 48, close: () => undefined });
 
     // jsdom has no canvas 2d context — the channel readback (drawImage + getImageData) needs one.
-    jest
-      .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockImplementation(
-        () =>
-          ({
-            drawImage: () => undefined,
-            clearRect: () => undefined,
-            getImageData: (_x: number, _y: number, w: number, h: number) => ({
-              data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
-            }),
-          }) as unknown as CanvasRenderingContext2D,
-      );
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          drawImage: () => undefined,
+          clearRect: () => undefined,
+          getImageData: (_x: number, _y: number, w: number, h: number) => ({
+            data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
+          }),
+        }) as unknown as CanvasRenderingContext2D,
+    );
 
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
@@ -170,6 +185,8 @@ describe('NapariVisualizerService', () => {
       // published (`requiresSpatialData`), so a host with no spatial data never
       // sees it even though the backend can render it.
       PlotType.SPATIAL_OMICS,
+      // plot() mounts it too; it was missing from the list (NAPARI-SVC-27).
+      PlotType.SPATIAL_OMICS_3D,
     ]);
   });
 
@@ -199,6 +216,50 @@ describe('NapariVisualizerService', () => {
     service.setReverseScale(true);
     service.setImageMeta([]);
     expect(await firstValueFrom(service.getReverseScale())).toBe(true);
+  });
+
+  describe('setActiveTool', () => {
+    type Internals = {
+      viewer: unknown;
+      canvasTools: { activeId: string | null };
+      tools: {
+        coordTransform: unknown;
+        pixelsStale: boolean;
+        pixelTools: Set<string>;
+        armReadback(delay?: number): void;
+      };
+    };
+    const internals = () => service as unknown as Internals;
+
+    it('arms nothing before a plot, but still records the pixel tool', () => {
+      service.setActiveTool('wand', { sensitivity: 2 });
+      expect(internals().canvasTools.activeId).toBeNull();
+      expect([...internals().tools.pixelTools]).toEqual(['wand']);
+    });
+
+    it('disables the camera, refreshes the readback and arms the tool', () => {
+      const setControlsEnabled = jest.fn();
+      internals().viewer = { setControlsEnabled };
+      internals().tools.coordTransform = {};
+      const arm = jest.spyOn(internals().tools, 'armReadback').mockImplementation(() => undefined);
+
+      service.setActiveTool('brush', { size: 8 });
+      expect(setControlsEnabled).toHaveBeenLastCalledWith(false);
+      expect(arm).toHaveBeenCalledWith(0);
+      expect(internals().canvasTools.activeId).toBe('brush');
+
+      // The eraser re-reads only a stale readback; zoom-to-box never reads pixels.
+      arm.mockClear();
+      internals().tools.pixelsStale = false;
+      service.setActiveTool('eraseVertex', { radius: 4 });
+      service.setActiveTool('zoomToBox');
+      expect(arm).not.toHaveBeenCalled();
+      expect(internals().tools.pixelTools.size).toBe(0);
+
+      service.setActiveTool('drawrect'); // a region mode: disarm only
+      expect(internals().canvasTools.activeId).toBeNull();
+      internals().viewer = null;
+    });
   });
 
   it('tool controls are safe no-ops before a plot is mounted', async () => {
@@ -280,6 +341,369 @@ describe('NapariVisualizerService', () => {
     getSpy.mockRestore();
   });
 
+  it("never reads a previous image's descriptor for a stack that has none", async () => {
+    // Regression (NAPARI-SVC-2): the descriptor cache survived an image switch, so a
+    // tiled:false stack opened after a tiled 16-bit image got that image's µm/pixel (a
+    // scale bar it does not have) and its bit depth (a /histogram fetch for the wrong file).
+    const fetchMock = globalThis.fetch as jest.Mock;
+    fetchMock.mockImplementation((url: string) => {
+      if (url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 1,
+              channels: 1,
+              realLevels: 1,
+              mppX: 0.5,
+              channelInfo: [{ bitDepth: 16 }],
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    const scaleBar = () => (service as unknown as { scene: { scaleBar: unknown } | null }).scene?.scaleBar ?? null;
+    const div = document.createElement('div');
+    div.id = 'stale-desc-host';
+    document.body.appendChild(div);
+
+    const tiled = await service.load(imageInfo(), 0);
+    await service.plot('stale-desc-host', tiled, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    expect(scaleBar()).not.toBeNull();
+
+    const getSpy = jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
+    const stack = imageInfo({ tiled: false, urls: ['https://x/a.png', 'https://x/b.png'] });
+    const loaded = await service.load(stack, 0);
+    await service.plot('stale-desc-host', loaded, stack, 600, PlotType.NAPARI_IMAGE);
+    expect(scaleBar()).toBeNull();
+
+    fetchMock.mockClear();
+    await firstValueFrom(service.getHistogram$(0, 256));
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('histogram'))).toBe(false);
+
+    getSpy.mockRestore();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('decodes a colour plane to BT.601 luminance, not to its red channel', () => {
+    // Regression (NAPARI-SVC-4): an RGB composite (an H&E surface, or the composite overview a
+    // channel falls back to) became the RED channel's relief, while the volume path used
+    // luminance. A grey pixel must still decode to itself exactly.
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          drawImage: () => undefined,
+          getImageData: () => ({
+            data: new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255, 100, 100, 100, 255, 255, 255, 255, 255]),
+          }),
+        }) as unknown as CanvasRenderingContext2D,
+    );
+    const decode = bitmapToLuminance({ width: 4, height: 1, close: () => undefined } as unknown as ImageBitmap);
+    expect(Array.from(decode.data)).toEqual([76, 29, 100, 255]);
+  });
+
+  describe('the /tiles/info poll', () => {
+    type Internals = { tileClient: { ensureDescriptor(info?: unknown): Promise<unknown> } };
+    const ensure = () => (service as unknown as Internals).tileClient.ensureDescriptor();
+    const PENDING = Symbol('pending');
+    /** The poll's result if it settles within a few ticks, else PENDING. */
+    const settled = (p: Promise<unknown>) =>
+      Promise.race([p, new Promise((r) => setTimeout(() => r(PENDING), 50))]);
+    const infoCalls = () =>
+      (globalThis.fetch as jest.Mock).mock.calls.filter((c) => String(c[0]).includes('tiles/info'));
+    const answer = (status: number, body?: unknown) =>
+      Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
+
+    it('gives up at once on a status that is not "still caching"', async () => {
+      // Regression (NAPARI-SVC-3): a 404 from a server without /tiles/info was polled like a
+      // 202 for two minutes — and every serial caller then waited its own two minutes.
+      (globalThis.fetch as jest.Mock).mockImplementation(() => answer(404));
+      expect(await settled(ensure())).toBeNull();
+      // Remembered for the scene: the next caller does not ask again.
+      expect(await settled(ensure())).toBeNull();
+      expect(infoCalls()).toHaveLength(1);
+    });
+
+    it('shares one poll between concurrent callers', async () => {
+      let release!: () => void;
+      (globalThis.fetch as jest.Mock).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                ok: true,
+                status: 200,
+                json: () =>
+                  Promise.resolve({
+                    width: 8,
+                    height: 8,
+                    tileSize: 512,
+                    levels: [{ res: 0, width: 8, height: 8 }],
+                  }),
+              });
+          }),
+      );
+      const a = ensure();
+      const b = ensure();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(infoCalls()).toHaveLength(1);
+      release();
+      expect(await a).toEqual(await b);
+      expect(await a).not.toBeNull();
+    });
+
+    it('stops polling when the scene is reset', async () => {
+      // 202 forever: a cold source. A reset must end the poll rather than leave it running
+      // (and its eventual answer landing) under the next scene.
+      (globalThis.fetch as jest.Mock).mockImplementation(() => answer(202));
+      const poll = ensure();
+      await new Promise((r) => setTimeout(r, 0));
+      service.reset();
+      expect(await settled(poll)).toBeNull();
+    });
+  });
+
+  it('computes a spatial contrast window once per (vector, lo, hi, log) (SPATIAL-12)', () => {
+    const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
+    // The 2D markers' and the 3D cloud's encoders share the spatial session's window cache.
+    const windows = (service as unknown as { spatial: { contrastWindows: ContrastWindowCache } }).spatial
+      .contrastWindows;
+    const lut: [number, number, number][] = [
+      [0, 0, 0],
+      [255, 255, 255],
+    ];
+    const s = {
+      encodeSpatialContinuous: (v: Float32Array, view: SpatialViewState) =>
+        encodeSpatialContinuous(v, view, lut, windows),
+    };
+    const encode3d = (v: Float32Array, view: SpatialViewState) => encodeSpatial3dContinuous(v, view, lut, windows);
+    const vector = new Float32Array([1, 5, 2, 8, 3]);
+    const view = { opacity: 1 } as SpatialViewState;
+    s.encodeSpatialContinuous(vector, view);
+    s.encodeSpatialContinuous(vector, { ...view, opacity: 0.5 }); // an opacity change: same window
+    expect(sort).toHaveBeenCalledTimes(1);
+    s.encodeSpatialContinuous(vector, { ...view, percentileClip: [0.05, 0.95] }); // a new clip
+    s.encodeSpatialContinuous(new Float32Array(vector), view); // a new vector
+    expect(sort).toHaveBeenCalledTimes(3);
+    encode3d(vector, { ...view, logScale: true }); // log: a window of its own
+    encode3d(vector, { ...view, logScale: true });
+    expect(sort).toHaveBeenCalledTimes(4);
+    sort.mockRestore();
+  });
+
+  it('rejects an aborted load with an AbortError and keeps the recorded image (CORE-11)', async () => {
+    const first = await service.load(imageInfo(), 0);
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(service.load({ ...imageInfo(), fileName: 'other.tif' }, 0, ctl.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect((service as unknown as { loaded: unknown }).loaded).toBe(first);
+  });
+
+  it('cache-busts the native /histogram request like the OSD backend (OSD-PLOTLY-15)', async () => {
+    // Regression: napari's /histogram URL lacked the per-app-load `_=` token, so after a
+    // reload the server's 24 h-cached answer was shown instead of the live one.
+    (globalThis.fetch as jest.Mock).mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            bitDepth: 16,
+            rangeMin: 0,
+            rangeMax: 2,
+            observedMin: 0,
+            observedMax: 2,
+            binWidth: 1,
+            counts: [1, 2, 3],
+          }),
+      }),
+    );
+    type Internals = {
+      tileClient: { fetchNativeHistogram(ch: number, bins: number, z: number, key: string): Promise<unknown> };
+    };
+    const h = await (service as unknown as Internals).tileClient.fetchNativeHistogram(1, 3, 0, 'k');
+    expect(h).toMatchObject({ bins: [0, 1, 2], max: 3, bitDepth: 16 });
+    const url = String((globalThis.fetch as jest.Mock).mock.calls.at(-1)[0]);
+    expect(url).toContain('histogram?info=INFO&channel=1&z=0&bins=3');
+    expect(url).toMatch(/&_=\d+$/);
+  });
+
+  it('hands the pixel tools the readback as a packed frame, without per-pixel arrays (NAPARI-SVC-23)', () => {
+    // A 2560×1440 readback: the old path built 3.7 M [r,g,b] arrays from it.
+    const px = { width: 2560, height: 1440, channels: 4, data: new Uint8ClampedArray(2560 * 1440 * 4) };
+    type Internals = {
+      viewer: unknown;
+      tools: { lastPixels: unknown; lastPixelsRect: unknown; cachedImageData(): CachedImageData | null };
+    };
+    const internals = service as unknown as Internals;
+    internals.viewer = {};
+    internals.tools.lastPixels = px;
+    internals.tools.lastPixelsRect = { x: 10, y: 20, width: 1280, height: 2880 };
+    const cached = internals.tools.cachedImageData()!;
+    expect(isPackedFrame(cached.frames[0])).toBe(true);
+    expect((cached.frames[0] as PackedFrame).data).toBe(px.data); // the readback itself, not a copy
+    expect(cached).toMatchObject({ width: 2560, height: 1440, ratios: [0.5, 2], originX: 10, originY: 20 });
+    expect(internals.tools.cachedImageData()).toBe(cached); // cached until the readback changes
+  });
+
+  it('reads the canvas back after a pan only while a pixel tool needs it', async () => {
+    // Regression (NAPARI-SVC-26): every 2D camera change armed a full-canvas GPU readback,
+    // pixel tool or not; the only always-needed output, viewportChange$, needs just the rect.
+    const div = document.createElement('div');
+    div.id = 'lazy-readback-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('lazy-readback-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    type Internals = {
+      viewer: { camera: { changed: { connect(l: () => void): () => void } } };
+      tools: { install2dInteraction(v: unknown, h: HTMLElement): void };
+    };
+    const internals = service as unknown as Internals;
+    // The stub camera never emits: capture the listeners the 2D interaction installs.
+    const listeners: Array<() => void> = [];
+    internals.viewer.camera.changed.connect = (l) => {
+      listeners.push(l);
+      return () => undefined;
+    };
+    internals.tools.install2dInteraction(internals.viewer, div);
+    const pan = () => listeners.forEach((l) => l());
+    const settle = () => new Promise((r) => setTimeout(r, 300));
+    await settle();
+    const readback = jest.spyOn(Viewer.prototype, 'readDisplayedPixels');
+    const viewports: unknown[] = [];
+    const sub = service
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe((r) => viewports.push(r));
+
+    pan();
+    await settle();
+    expect(readback).not.toHaveBeenCalled();
+    expect(viewports).toHaveLength(1);
+
+    service.setWandMode(true);
+    await settle();
+    readback.mockClear();
+    pan();
+    await settle();
+    expect(readback).toHaveBeenCalledTimes(1);
+
+    service.setWandMode(false);
+    readback.mockClear();
+    pan();
+    await settle();
+    expect(readback).not.toHaveBeenCalled();
+
+    sub.unsubscribe();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('keeps the per-pointermove work outside the Angular zone, and its output inside', async () => {
+    // Regression (NAPARI-SVC-25): napari-js's render loop, every pointermove over the plot and
+    // every readback timer ran inside the zone, so each one triggered app-wide change detection.
+    // (Native async/await drops the zone across awaits under Jest, so what is checked here is
+    // WHERE the service asks to run things, not the ambient zone.)
+    const zone = TestBed.inject(NgZone);
+    let outsideDepth = 0;
+    const outside = jest.spyOn(zone, 'runOutsideAngular').mockImplementation((fn) => {
+      outsideDepth++;
+      try {
+        return fn();
+      } finally {
+        outsideDepth--;
+      }
+    });
+    const registeredOutside: Record<string, boolean> = {};
+    const add = HTMLElement.prototype.addEventListener;
+    jest.spyOn(HTMLElement.prototype, 'addEventListener').mockImplementation(function (
+      this: HTMLElement,
+      type: string,
+      ...rest: unknown[]
+    ) {
+      if (this.id === 'zone-host') registeredOutside[type] = outsideDepth > 0;
+      return (add as (...a: unknown[]) => void).call(this, type, ...rest);
+    });
+    const div = document.createElement('div');
+    div.id = 'zone-host';
+    document.body.appendChild(div);
+    dataset$.next(spatialDataset());
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('zone-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS);
+    // The viewer (so its rAF loop and canvas listeners) and the hover listeners: outside.
+    expect(outside.mock.results.some((r) => r.value instanceof Viewer)).toBe(true);
+    expect(registeredOutside['pointermove']).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+
+    // A pan reported from outside the zone still reaches subscribers inside it.
+    const listeners: Array<() => void> = [];
+    const internals = service as unknown as {
+      viewer: { camera: { changed: { connect(l: () => void): () => void } } };
+      tools: { install2dInteraction(v: unknown, h: HTMLElement): void };
+    };
+    internals.viewer.camera.changed.connect = (l) => {
+      listeners.push(l);
+      return () => undefined;
+    };
+    internals.tools.install2dInteraction(internals.viewer, div);
+    const emittedInZone: boolean[] = [];
+    const sub = service
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
+    listeners.forEach((l) => l());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emittedInZone).toEqual([true]);
+
+    sub.unsubscribe();
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  describe('PNG export', () => {
+    async function mounted() {
+      const div = document.createElement('div');
+      div.id = 'png-host';
+      document.body.appendChild(div);
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('png-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+      return () => {
+        service.unsubscribe();
+        document.body.removeChild(div);
+      };
+    }
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    it('saves the screenshot through file-saver', async () => {
+      // Regression (NAPARI-SVC-30): the object URL was revoked synchronously after a.click(),
+      // which some browsers treat as cancelling the download.
+      const done = await mounted();
+      (saveAs as unknown as jest.Mock).mockClear();
+      service.downloadImage();
+      await settle();
+      expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'napari-js.png');
+      done();
+    });
+
+    it('reports a failed screenshot instead of leaving an unhandled rejection', async () => {
+      const done = await mounted();
+      jest.spyOn(Viewer.prototype, 'screenshot').mockRejectedValue(new Error('device lost'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      service.downloadImage();
+      await settle();
+      expect(warn).toHaveBeenCalledWith('[napari-js] PNG export failed', expect.any(Error));
+      done();
+    });
+  });
+
   it('plot() returns false when the target element is missing', async () => {
     const loaded = await service.load(imageInfo(), 0);
     expect(await service.plot('nope', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(false);
@@ -287,13 +711,21 @@ describe('NapariVisualizerService', () => {
 
   describe('image tiles on the loading badge', () => {
     type Internals = {
-      host: HTMLElement | null;
-      loadingBadge: { text: string } | null;
-      imageTilesGeneration: number;
-      buildTiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: number): {
-        fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
+      badge: { attach(host: HTMLElement): void; readonly text: string; begin(source: 'Image'): () => void };
+      lifetime: AbortController;
+      tileClient: {
+        tiledSource(
+          desc: unknown,
+          channel: number | undefined,
+          channels: 1 | 4,
+          scene: AbortSignal,
+          onTile: () => () => void,
+        ): { fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown> };
       };
     };
+    /** The image layer's source as a render builds it: its tiles count on the badge. */
+    const tiledSource = (scene: AbortSignal) =>
+      internals.tileClient.tiledSource(desc, undefined, 4, scene, () => internals.badge.begin('Image'));
     const desc = { width: 64, height: 48, tileSize: 512, levels: [{ res: 0, width: 64, height: 48 }] };
     const key = { level: 0, col: 0, row: 0, z: 0 };
     let release: () => void;
@@ -301,55 +733,56 @@ describe('NapariVisualizerService', () => {
 
     beforeEach(() => {
       internals = service as unknown as Internals;
-      internals.host = document.createElement('div');
+      internals.badge.attach(document.createElement('div'));
       // Hold the tile's response until the test releases it.
       (globalThis.fetch as jest.Mock).mockImplementation(
-        () => new Promise((resolve) => {
-          release = () => resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
-        }),
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+          }),
       );
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const tile = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await tile;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
-    it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+    it("a tile that lands after a reset leaves the new scene's count alone", async () => {
+      const stale = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
-      internals.host = document.createElement('div');
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      internals.badge.attach(document.createElement('div'));
+      const fresh = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await fresh;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
-    it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration);
+    it("a disposed source's request after a reset never counts toward the new scene", async () => {
+      const disposed = tiledSource(internals.lifetime.signal);
       service.reset();
-      internals.host = document.createElement('div');
+      internals.badge.attach(document.createElement('div'));
       const late = disposed.fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text ?? '').toBe('');
+      expect(internals.badge.text).toBe('');
       release();
       await late;
-      const fresh = internals.buildTiledSource(desc, undefined, 4, internals.imageTilesGeneration).fetchTile(key);
+      const fresh = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
-      expect(internals.loadingBadge?.text).toBe('Image reloading…');
+      expect(internals.badge.text).toBe('Image reloading…');
       release();
       await fresh;
-      expect(internals.loadingBadge?.text).toBe('');
+      expect(internals.badge.text).toBe('');
     });
 
     it('a plot superseded while its descriptor is in flight builds no source for the new scene', async () => {
@@ -363,18 +796,21 @@ describe('NapariVisualizerService', () => {
       (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
         if (url.includes('tiles/info')) {
           const answer = { ok: true, status: 200, json: () => Promise.resolve(descriptor) };
-          if (infoCalls++ === 0) return new Promise((resolve) => { releaseInfo = () => resolve(answer); });
+          if (infoCalls++ === 0)
+            return new Promise((resolve) => {
+              releaseInfo = () => resolve(answer);
+            });
           return Promise.resolve(answer);
         }
         return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
       });
-      const built = jest.spyOn(internals, 'buildTiledSource');
+      const built = jest.spyOn(internals.tileClient, 'tiledSource');
 
       const loaded = await service.load(imageInfo(), 0);
       const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
       while (infoCalls === 0) await new Promise((r) => setTimeout(r, 0));
       expect(await service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(true);
-      const scene = internals.imageTilesGeneration;
+      const scene = internals.lifetime.signal;
       const builtByNew = built.mock.calls.length;
       expect(builtByNew).toBeGreaterThan(0);
       expect(built.mock.calls.every((c) => c[3] === scene)).toBe(true);
@@ -382,7 +818,7 @@ describe('NapariVisualizerService', () => {
       releaseInfo();
       await old;
       expect(built.mock.calls.length).toBe(builtByNew);
-      expect(internals.loadingBadge?.text ?? '').toBe('');
+      expect(internals.badge.text).toBe('');
       service.unsubscribe();
       document.body.removeChild(div);
     });
@@ -416,7 +852,9 @@ describe('NapariVisualizerService', () => {
       { index: 0, name: 'v', color: '#00ff00', min: 20, max: 200, gamma: 2, visible: true } as IChannelState,
     ]);
     expect(volLayer.contrastLimits).toEqual([20, 200]);
-    expect(volLayer.gamma).toBe(2);
+    // The store's gamma is the ImageJ exponent (t^(1/γ), as OSD draws it); napari-js applies
+    // t^γ, so the layer gets the reciprocal (NAPARI-BOUNDARY-2).
+    expect(volLayer.gamma).toBe(0.5);
     // Channel colour tints the volume (no explicit colormap selected) — regression.
     expect(volLayer.colormap.name).toContain('00ff00');
 
@@ -449,11 +887,7 @@ describe('NapariVisualizerService', () => {
     expect(ok).toBe(true);
     expect(addSurface).toHaveBeenCalled();
     // addSurface(vertices, faces, values, opts) with real typed-array mesh geometry (heightField).
-    const [vertices, faces, values] = addSurface.mock.calls[0] as [
-      Float32Array,
-      Uint32Array,
-      Float32Array,
-    ];
+    const [vertices, faces, values] = addSurface.mock.calls[0] as [Float32Array, Uint32Array, Float32Array];
     expect(vertices).toBeInstanceOf(Float32Array);
     expect(faces).toBeInstanceOf(Uint32Array);
     expect(values).toBeInstanceOf(Float32Array);
@@ -467,7 +901,7 @@ describe('NapariVisualizerService', () => {
     ]);
     expect(addSurface.mock.calls.length).toBeGreaterThan(beforeWindow); // geometry rebuilt
     expect(latest().contrastLimits).toEqual([30, 210]);
-    expect(latest().gamma).toBe(1.5);
+    expect(latest().gamma).toBeCloseTo(1 / 1.5, 10); // ImageJ γ → napari-js γ
     expect(latest().colormap.name).toContain('00ff00');
 
     // A colour-only edit (invert) updates the existing layer's colormap in place — NO rebuild.
@@ -481,6 +915,109 @@ describe('NapariVisualizerService', () => {
     await Promise.resolve();
     expect(addSurface.mock.calls.length).toBeGreaterThan(beforeInvert);
 
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('keeps the orbit pose across a surface rebuild (fit3d: once frames only the first)', async () => {
+    // The stub's addSurface never frames; give it napari-js 0.14's behaviour (frame through the
+    // fit policy), so this pins that the rebuild leaves the camera to the policy alone.
+    type FitViewer = {
+      shouldFit3D(): boolean;
+      camera3d: { target: [number, number, number]; distance: number };
+    };
+    const addSurface = Viewer.prototype.addSurface;
+    jest.spyOn(Viewer.prototype, 'addSurface').mockImplementation(function (this: Viewer, ...args) {
+      const layer = addSurface.apply(this, args);
+      const v = this as unknown as FitViewer;
+      if (v.shouldFit3D()) {
+        v.camera3d.target = [0.5, 0.5, 0.5];
+        v.camera3d.distance = 2.5;
+      }
+      return layer;
+    });
+    const div = document.createElement('div');
+    div.id = 'surf-pose-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-pose-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    const cam = (service as unknown as { viewer: FitViewer }).viewer.camera3d;
+    expect(cam.distance).toBe(2.5); // the first build framed
+
+    cam.target = [7, 8, 9];
+    cam.distance = 42;
+    store.setChannelStates([
+      { index: 0, name: 's', color: '#00ff00', min: 30, max: 210, gamma: 1, visible: true } as IChannelState,
+    ]);
+    service.setZIndex(1);
+    await Promise.resolve();
+    expect(cam.target).toEqual([7, 8, 9]);
+    expect(cam.distance).toBe(42);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('re-frames the 3D camera on every 3D layer through napari-js', async () => {
+    const fit = jest.spyOn(Viewer.prototype, 'fitToLayers');
+    const div = document.createElement('div');
+    div.id = 'reset-cam-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    for (const type of [PlotType.NAPARI_SURFACE, PlotType.NAPARI_VOLUME, PlotType.NAPARI_SCATTER3D]) {
+      await service.plot('reset-cam-host', loaded, imageInfo(), 600, type);
+      fit.mockClear();
+      service.getSurface3dControls()?.resetSurfaceCamera();
+      expect(fit).toHaveBeenCalledTimes(1);
+    }
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('a superseded surface preload neither caches its planes nor ends the progress bar', async () => {
+    // Regression (NAPARI-SVC-8): a channel switch starts a second preload while the first is
+    // in flight. The first one's late planes (the OLD band) landed in the cache the second had
+    // just cleared, and whichever finished first hid the progress bar.
+    type Plane = { data: Uint8Array; width: number; height: number };
+    type Scene = {
+      planes: Map<number, Plane>;
+      preloadPlanes(): Promise<void>;
+      fetchPlane(z: number, maxGrid: number): Promise<Plane>;
+    };
+    const scene = () => (service as unknown as { scene: Scene }).scene;
+    const div = document.createElement('div');
+    div.id = 'surf-preload-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('surf-preload-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+
+    const held: Array<(p: Plane) => void> = [];
+    const internals = scene();
+    jest
+      .spyOn(internals, 'fetchPlane')
+      .mockImplementation(() => new Promise<Plane>((resolve) => held.push(resolve)));
+    const plane = (v: number): Plane => ({ data: new Uint8Array([v]), width: 1, height: 1 });
+    const loading = jest.fn();
+    const sub = service.isStackLoading().subscribe(loading);
+
+    const old = internals.preloadPlanes();
+    await Promise.resolve();
+    const oldFetches = held.splice(0);
+    const fresh = internals.preloadPlanes();
+    await Promise.resolve();
+    const freshFetches = held.splice(0);
+
+    oldFetches.forEach((r) => r(plane(1)));
+    await old;
+    expect([...internals.planes.values()].some((p) => p.data[0] === 1)).toBe(false);
+    expect(loading).toHaveBeenLastCalledWith(true);
+
+    freshFetches.forEach((r) => r(plane(2)));
+    await fresh;
+    expect([...internals.planes.values()].map((p) => p.data[0])).toEqual([2, 2]);
+    expect(loading).toHaveBeenLastCalledWith(false);
+
+    sub.unsubscribe();
     service.unsubscribe();
     document.body.removeChild(div);
   });
@@ -583,6 +1120,221 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('keeps the region-centroid points after a slice change on the stitched path', async () => {
+    // Regression (NAPARI-SVC-7): without a descriptor a slice change re-renders the image, and
+    // the render clears the layer list — the points went with it and nothing re-added them.
+    jest
+      .spyOn(regionStore, 'getRegions')
+      .mockReturnValue([{ bounds: { x: 10, y: 20, width: 4, height: 6 } }] as never);
+    // No /tiles/info on this server → the stitched (single-level) path.
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes('tiles/info')
+          ? { ok: false, status: 404 }
+          : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+      ),
+    );
+    const div = document.createElement('div');
+    div.id = 'scatter2d-stitch-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('scatter2d-stitch-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER);
+    const points = () =>
+      (
+        service as unknown as {
+          viewer: { layers: { items: readonly { faceColor?: unknown }[] } };
+        }
+      ).viewer.layers.items.filter((l) => l.faceColor !== undefined);
+    expect(points()).toHaveLength(1);
+
+    service.setZIndex(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(points()).toHaveLength(1);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it("hands napari-js the reciprocal of the store's (ImageJ) gamma on the 2D image", async () => {
+    // Regression (NAPARI-BOUNDARY-2): OSD draws t^(1/γ) and napari-js t^γ, and the same slider
+    // value went to both — so γ = 2 brightened the image under OSD and darkened it here.
+    const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+    const update = jest.spyOn(MultiChannelImageView.prototype, 'updateChannel');
+    store.setChannelStates([
+      { index: 0, name: 'g', color: '#ffffff', min: 0, max: 255, gamma: 2, visible: true },
+    ] as IChannelState[]);
+    const div = document.createElement('div');
+    div.id = 'gamma-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('gamma-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    expect((render.mock.calls.at(-1)![1] as unknown as { gamma: number }[])[0].gamma).toBe(0.5);
+
+    store.setChannelStates([
+      { index: 0, name: 'g', color: '#ffffff', min: 0, max: 255, gamma: 4, visible: true },
+    ] as IChannelState[]);
+    expect((update.mock.calls.at(-1) as unknown as [number, { gamma: number }])[1].gamma).toBe(0.25);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it("composites the navigator thumbnail in the user's channel tints and visibility", async () => {
+    // Regression (NAPARI-SVC-12): the thumbnail used the server's default channel colours, so a
+    // recoloured or hidden channel still showed in its default colour.
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes('tiles/info')
+          ? {
+              ok: true,
+              status: 200,
+              json: () =>
+                Promise.resolve({
+                  width: 64,
+                  height: 48,
+                  tileSize: 512,
+                  z: 1,
+                  channels: 2,
+                  multichannel: true,
+                  realLevels: 1,
+                  channelInfo: [{ color: '#ff0000' }, { color: '#00ff00' }],
+                  levels: [{ res: 0, width: 64, height: 48 }],
+                }),
+            }
+          : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+      ),
+    );
+    // Record what the composite tints each channel with.
+    const fills: string[] = [];
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
+      () =>
+        ({
+          drawImage: () => undefined,
+          clearRect: () => undefined,
+          fillRect: () => undefined,
+          getImageData: (_x: number, _y: number, w: number, h: number) => ({
+            data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
+          }),
+          set fillStyle(v: string) {
+            fills.push(v);
+          },
+          globalCompositeOperation: 'source-over',
+        }) as unknown as CanvasRenderingContext2D,
+    );
+    store.setChannelStates([
+      { index: 0, name: 'a', color: '#0000ff', min: 0, max: 255, gamma: 1, visible: true },
+      { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: false },
+    ] as IChannelState[]);
+    const div = document.createElement('div');
+    div.id = 'nav-tint-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('nav-tint-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fills.filter((f) => f !== '#000')).toEqual(['#0000ff']);
+
+    // A recolour reaches the thumbnail without a re-plot (and without re-fetching).
+    fills.length = 0;
+    const fetches = (globalThis.fetch as jest.Mock).mock.calls.length;
+    store.setChannelStates([
+      { index: 0, name: 'a', color: '#ff00ff', min: 0, max: 255, gamma: 1, visible: true },
+      { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: true },
+    ] as IChannelState[]);
+    expect(fills.filter((f) => f !== '#000')).toEqual(['#ff00ff', '#00ff00']);
+    expect((globalThis.fetch as jest.Mock).mock.calls.length).toBe(fetches);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('drives the orbit camera from the zoom buttons in a 3D scene', async () => {
+    // Regression (NAPARI-SVC-13): zoomIn/zoomOut only ever set the 2D camera's zoom, which
+    // changes nothing visible at ndisplay 3 — yet +/- and the buttons are bound for every type.
+    const div = document.createElement('div');
+    div.id = 'zoom-3d-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('zoom-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    const viewer = (
+      service as unknown as {
+        viewer: { dims: { ndisplay?: number }; camera: { zoom: number }; camera3d: { zoomBy?: jest.Mock } };
+      }
+    ).viewer;
+    // The stub models neither; napari-js 0.14 has both.
+    viewer.dims.ndisplay = 3;
+    viewer.camera3d.zoomBy = jest.fn();
+
+    service.zoomIn();
+    service.zoomOut();
+    // zoomBy scales the orbit DISTANCE, so zooming in shrinks it.
+    expect(viewer.camera3d.zoomBy.mock.calls.map((c) => c[0])).toEqual([1 / 1.3, 1.3]);
+    expect(viewer.camera.zoom).toBe(1);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it("keeps the newest slice's histogram sample when an older fetch lands late", async () => {
+    // Regression (NAPARI-SVC-10): every tiled slice change fired a sample refresh with no
+    // token, so a slower request for an older slice overwrote the newer one's samples.
+    type Plane = { data: Uint8Array; width: number; height: number };
+    const tileClient = (
+      service as unknown as {
+        tileClient: { fetchChannelData(info: unknown, z: number, ch?: number, budget?: number): Promise<Plane> };
+      }
+    ).tileClient;
+    // The image scene reads only the tile client and the image from its context here.
+    const internals = new Image2dScene({ tiles: tileClient, info: () => undefined } as unknown as SceneContext);
+    internals.imageMode = 'multichannel';
+    const held = new Map<number, Array<(p: Plane) => void>>();
+    jest.spyOn(tileClient, 'fetchChannelData').mockImplementation(
+      (_info, z) =>
+        new Promise<Plane>((resolve) => {
+          held.set(z, [...(held.get(z) ?? []), resolve]);
+        }),
+    );
+    const plane = (v: number): Plane => ({ data: new Uint8Array([v]), width: 1, height: 1 });
+    const desc = { channels: 2 };
+
+    const older = internals.refreshHistogramSamples(0, desc);
+    const newer = internals.refreshHistogramSamples(1, desc);
+    await Promise.resolve();
+    // Both channels of a slice are fetched together, not one after the other.
+    expect(held.get(1)).toHaveLength(2);
+    held.get(1)!.forEach((r) => r(plane(1)));
+    await newer;
+    held.get(0)?.forEach((r) => r(plane(0)));
+    await older;
+    expect([...internals.histSamples.values()].map((d) => d[0])).toEqual([1, 1]);
+  });
+
+  it('a slice change in a 3D scene never renders the 2D image into it', async () => {
+    // Regression (NAPARI-SVC-9): setZIndex chose its branch by whichever layer handle was
+    // non-null, so a 3D scatter, or a surface whose mesh was not built yet, fell through to
+    // the 2D render — tiles fetched and 2D layers built into the 3D viewer.
+    const render = jest.spyOn(Image2dScene.prototype, 'render');
+    const div = document.createElement('div');
+    div.id = 'z-3d-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+
+    await service.plot('z-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SCATTER3D);
+    service.setZIndex(1);
+    await Promise.resolve();
+    expect(render).not.toHaveBeenCalled();
+
+    await service.plot('z-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
+    // As during the preload, or after a first build that failed.
+    (service as unknown as { scene: { layer: unknown } }).scene.layer = null;
+    service.setZIndex(0);
+    await Promise.resolve();
+    expect(render).not.toHaveBeenCalled();
+    expect(loaded.z).toBe(0);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('mounts a 3D scatter voxel cloud via addPoints3D', async () => {
     const addPoints3d = jest.spyOn(
       Viewer.prototype as unknown as { addPoints3D: (...a: unknown[]) => unknown },
@@ -630,9 +1382,7 @@ describe('NapariVisualizerService', () => {
     service.setResolutionScale(8);
     expect(service.getResolutionScale()).toBe(8);
     await service.plot('surf-decimate-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
-    const coarseVerts = (
-      addSurface.mock.calls[addSurface.mock.calls.length - 1][0] as Float32Array
-    ).length;
+    const coarseVerts = (addSurface.mock.calls[addSurface.mock.calls.length - 1][0] as Float32Array).length;
     expect(coarseVerts).toBeLessThan(defaultVerts);
 
     service.unsubscribe();
@@ -652,7 +1402,12 @@ describe('NapariVisualizerService', () => {
           status: 200,
           json: () =>
             Promise.resolve({
-              width: 16000, height: 19000, tileSize: 512, z: 1, channels: 3, multichannel: true,
+              width: 16000,
+              height: 19000,
+              tileSize: 512,
+              z: 1,
+              channels: 3,
+              multichannel: true,
               realLevels: 1, // only res 0 is per-channel; the rest are composite overviews
               levels: [
                 { res: 0, width: 16000, height: 19000 }, // huge real level (~1178 tiles)
@@ -670,9 +1425,13 @@ describe('NapariVisualizerService', () => {
       .mockResolvedValue({ width: 250, height: 297, close: () => undefined });
 
     // channel 1 at a small (surface ¼) tile budget, WITH composite fallback allowed.
-    await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number, allowCompositeFallback: boolean) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3, true);
+    await (
+      service as unknown as {
+        tileClient: {
+          fetchSlice: (info: unknown, z: number, c: number, b: number, fallback: boolean) => Promise<unknown>;
+        };
+      }
+    ).tileClient.fetchSlice(undefined, 0, 1, 3, true);
 
     expect(tileUrls.length).toBeGreaterThan(0);
     // Dropped to the composite (no &channel=) rather than stitching the huge per-channel level…
@@ -696,7 +1455,12 @@ describe('NapariVisualizerService', () => {
           status: 200,
           json: () =>
             Promise.resolve({
-              width: 2000, height: 2000, tileSize: 512, z: 1, channels: 3, multichannel: true,
+              width: 2000,
+              height: 2000,
+              tileSize: 512,
+              z: 1,
+              channels: 3,
+              multichannel: true,
               realLevels: 1, // per-channel only at res 0 (16 tiles > budget); small composite exists
               levels: [
                 { res: 0, width: 2000, height: 2000 },
@@ -713,9 +1477,11 @@ describe('NapariVisualizerService', () => {
       .mockResolvedValue({ width: 250, height: 250, close: () => undefined });
 
     // Default call (allowCompositeFallback omitted → false): the volume path.
-    await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3);
+    await (
+      service as unknown as {
+        tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
+      }
+    ).tileClient.fetchSlice(undefined, 0, 1, 3);
 
     // Stayed on the requested channel (never dropped to the composite), so channels stay distinct.
     expect(tileUrls.length).toBeGreaterThan(0);
@@ -732,8 +1498,14 @@ describe('NapariVisualizerService', () => {
           status: 200,
           json: () =>
             Promise.resolve({
-              width: 64, height: 48, tileSize: 512, z: 1, channels: 3, multichannel: true,
-              realLevels: 1, levels: [{ res: 0, width: 64, height: 48 }],
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 1,
+              channels: 3,
+              multichannel: true,
+              realLevels: 1,
+              levels: [{ res: 0, width: 64, height: 48 }],
             }),
         });
       }
@@ -741,9 +1513,11 @@ describe('NapariVisualizerService', () => {
       return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
     });
 
-    await (service as unknown as {
-      fetchSlice: (z: number, c: number, b: number) => Promise<unknown>;
-    }).fetchSlice(0, 1, 3);
+    await (
+      service as unknown as {
+        tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
+      }
+    ).tileClient.fetchSlice(undefined, 0, 1, 3);
 
     expect(tileUrls.some((u) => u.includes('channel=1'))).toBe(true);
   });
@@ -844,7 +1618,12 @@ describe('NapariVisualizerService', () => {
           status: 200,
           json: () =>
             Promise.resolve({
-              width: 1024, height: 768, tileSize: 2048, z: 2, channels: 1, realLevels: 1,
+              width: 1024,
+              height: 768,
+              tileSize: 2048,
+              z: 2,
+              channels: 1,
+              realLevels: 1,
               levels: [{ res: 0, width: 1024, height: 768 }], // one big tile → dims track maxSlice
             }),
         });
@@ -869,7 +1648,11 @@ describe('NapariVisualizerService', () => {
       addVolume.mockClear();
       await service.plot('vol-invariant-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
       const [, w, h, d, opts] = addVolume.mock.calls[0] as [
-        unknown, number, number, number, { voxelSize: [number, number, number] },
+        unknown,
+        number,
+        number,
+        number,
+        { voxelSize: [number, number, number] },
       ];
       const vs = opts.voxelSize;
       return [w * vs[0], h * vs[1], d * vs[2]];
@@ -893,23 +1676,27 @@ describe('NapariVisualizerService', () => {
     const loaded = await service.load(imageInfo(), 0);
     await service.plot('vol-zscale-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
 
-    const svc = service as unknown as {
-      volumeView: { layers: { voxelSize: readonly [number, number, number] }[] };
-      axesLayer: { depth: number };
-      setVolumeZScale: (f: number) => void;
-    };
-    const baseVsZ = svc.volumeView.layers[0].voxelSize[2];
-    const baseDepth = svc.axesLayer.depth;
+    const svc = (
+      service as unknown as {
+        scene: {
+          view: { layers: { voxelSize: readonly [number, number, number] }[] };
+          gizmo: { layer: { depth: number } };
+          setZScale: (f: number) => void;
+        };
+      }
+    ).scene;
+    const baseVsZ = svc.view.layers[0].voxelSize[2];
+    const baseDepth = svc.gizmo.layer.depth;
 
-    svc.setVolumeZScale(2); // taller
-    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 2, 5);
-    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 2, 5);
+    svc.setZScale(2); // taller
+    expect(svc.view.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 2, 5);
+    expect(svc.gizmo.layer.depth).toBeCloseTo(baseDepth * 2, 5);
     // XY voxel scale is untouched by a Z-height change.
-    expect(svc.volumeView.layers[0].voxelSize[0]).toBeGreaterThan(0);
+    expect(svc.view.layers[0].voxelSize[0]).toBeGreaterThan(0);
 
-    svc.setVolumeZScale(0.5); // flatter (relative to base, not the previous 2×)
-    expect(svc.volumeView.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 0.5, 5);
-    expect(svc.axesLayer.depth).toBeCloseTo(baseDepth * 0.5, 5);
+    svc.setZScale(0.5); // flatter (relative to base, not the previous 2×)
+    expect(svc.view.layers[0].voxelSize[2]).toBeCloseTo(baseVsZ * 0.5, 5);
+    expect(svc.gizmo.layer.depth).toBeCloseTo(baseDepth * 0.5, 5);
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -988,7 +1775,8 @@ describe('NapariVisualizerService', () => {
       // above 96, so the cloud drew flat with nothing said.
       const palette = (n: number) => ({
         meta: {
-          kind: 'categorical', name: 'wide',
+          kind: 'categorical',
+          name: 'wide',
           categories: Array.from({ length: n }, (_, i) => `c${i}`),
           colors: Array.from({ length: n }, () => '#123456'),
         },
@@ -1020,16 +1808,20 @@ describe('NapariVisualizerService', () => {
 
       /** Where the identity-projection stub puts observation `i` on the canvas. */
       const screenOf = (i: number) => {
-        const p = (service as unknown as {
-          getSpatialScreenProjection(o: unknown): Float32Array;
-        }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+        const p = (
+          service as unknown as {
+            getSpatialScreenProjection(o: unknown): Float32Array;
+          }
+        ).getSpatialScreenProjection(spatialDataset3d(3).observations);
         return [p[i * 2], p[i * 2 + 1]] as [number, number];
       };
 
       it('names the class under the cursor in the cloud', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -1049,7 +1841,9 @@ describe('NapariVisualizerService', () => {
         // or the tooltip keeps reporting a cell that is no longer on screen.
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -1067,12 +1861,58 @@ describe('NapariVisualizerService', () => {
         await hover(x, y);
         expect(tip()?.style.display).toBe('none');
       });
+
+      it('selects the class the tooltip names when markers overlap on screen', async () => {
+        // Regression (NAPARI-SVC-5): the tooltip picked the FRONT-most marker, the click the
+        // one nearest the cursor's centre ignoring depth — so in a dense cloud a click selected
+        // an occluded cell's class while the tooltip named the one drawn over it.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Front', 'Back'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1]),
+        });
+        // The front marker comes FIRST: a depth-blind "later point wins" tie rule picks the
+        // one behind it.
+        const stacked: SpatialDataset = {
+          ...spatialDataset3d(2),
+          observations: {
+            count: 2,
+            x: new Float32Array([0, 0]),
+            y: new Float32Array([0, 0]),
+            z: new Float32Array([5, 50]),
+            radius: 27.5,
+          },
+        };
+        await mount3d(stacked);
+        // A projection with depth: w = z + 1, so both markers land on the canvas centre and
+        // observation 0 (z = 5) is in front of observation 1 (z = 50).
+        (
+          service as unknown as { viewer: { camera3d: { viewProjection: () => number[] } } }
+        ).viewer.camera3d.viewProjection = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1];
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        const [x, y] = screenOf(0);
+        await hover(x, y);
+        expect(tip()?.textContent).toContain('Front');
+
+        host().dispatchEvent(new MouseEvent('pointerdown', { clientX: x, clientY: y, bubbles: true }));
+        host().dispatchEvent(new MouseEvent('pointerup', { clientX: x, clientY: y, bubbles: true }));
+        expect(Array.from(TestBed.inject(SpatialSelectionStore).current().mask)).toEqual([1, 0]);
+      });
     });
 
     describe('screen projection', () => {
-      const projected = () => (service as unknown as {
-        getSpatialScreenProjection(o: unknown): Float32Array | null;
-      }).getSpatialScreenProjection(spatialDataset3d(3).observations);
+      const projected = () =>
+        (
+          service as unknown as {
+            getSpatialScreenProjection(o: unknown): Float32Array | null;
+          }
+        ).getSpatialScreenProjection(spatialDataset3d(3).observations);
 
       it('is indexed by OBSERVATION, not by draw order', async () => {
         // The ROI selection reads this array as `[x0, y0, x1, y1, …]` per
@@ -1104,10 +1944,14 @@ describe('NapariVisualizerService', () => {
     describe('camera', () => {
       /** The pose a user would have set by orbiting and dollying the canvas. */
       const POSE = { azimuth: 1.1, elevation: 0.4, distance: 4242, target: [7, 8, 9] };
-      const cam = () => (service as unknown as {
-        viewer: { camera3d: { azimuth: number; elevation: number; distance: number;
-          target: [number, number, number] } };
-      }).viewer.camera3d;
+      const cam = () =>
+        (
+          service as unknown as {
+            viewer: {
+              camera3d: { azimuth: number; elevation: number; distance: number; target: [number, number, number] };
+            };
+          }
+        ).viewer.camera3d;
       const setPose = () => {
         const c = cam();
         c.azimuth = POSE.azimuth;
@@ -1118,7 +1962,9 @@ describe('NapariVisualizerService', () => {
       const pose = () => {
         const c = cam();
         return {
-          azimuth: c.azimuth, elevation: c.elevation, distance: c.distance,
+          azimuth: c.azimuth,
+          elevation: c.elevation,
+          distance: c.distance,
           target: [...c.target],
         };
       };
@@ -1154,7 +2000,9 @@ describe('NapariVisualizerService', () => {
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['A', 'B'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
@@ -1211,7 +2059,9 @@ describe('NapariVisualizerService', () => {
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['A', 'B'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['A', 'B'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 0, 0, 1, 1, 1]),
@@ -1222,7 +2072,8 @@ describe('NapariVisualizerService', () => {
         setPose();
 
         TestBed.inject(SpatialSelectionStore).set({
-          mask: new Uint8Array([1, 0, 1, 0, 1, 0]), count: 3,
+          mask: new Uint8Array([1, 0, 1, 0, 1, 0]),
+          count: 3,
         });
         await flush();
         expect(pose()).toEqual({ ...POSE, target: [...POSE.target] });
@@ -1246,9 +2097,11 @@ describe('NapariVisualizerService', () => {
         // The SAME layer, hidden — not a rebuild, and not removed from the scene.
         expect(cloud(addPoints3D.mock.results.map((r) => r.value)).visible).toBe(false);
         expect(addPoints3D.mock.calls.length).toBe(built);
-        const inScene = (service as unknown as {
-          viewer: { layers: { items: readonly { name?: string }[] } };
-        }).viewer.layers.items.filter((l) => l.name === 'observations');
+        const inScene = (
+          service as unknown as {
+            viewer: { layers: { items: readonly { name?: string }[] } };
+          }
+        ).viewer.layers.items.filter((l) => l.name === 'observations');
         expect(inScene).toHaveLength(1);
 
         store.setSpatialView({ showPoints: true });
@@ -1296,7 +2149,12 @@ describe('NapariVisualizerService', () => {
         await flush();
         expect(volume.opacity).toBe(0.9);
         // The backdrop's opacity is its own — the cloud keeps the markers' value.
-        expect(named(addPoints3D.mock.results.map((r) => r.value), 'observations').opacity).toBe(1);
+        expect(
+          named(
+            addPoints3D.mock.results.map((r) => r.value),
+            'observations',
+          ).opacity,
+        ).toBe(1);
         expect(addVolume.mock.calls.length).toBe(1); // a property, not a rebuild
       });
 
@@ -1399,6 +2257,24 @@ describe('NapariVisualizerService', () => {
         expect(mapLayers(addVolume)).toHaveLength(1);
       });
 
+      it('draws the map again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): the key outlived reset(), so the new viewer's
+        // ensureGeneMapVolume saw "already built" and never added the layer.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
+        await mount3d(sectioned());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await mount3d(sectioned());
+        const inScene = (
+          service as unknown as {
+            viewer: { layers: { items: readonly { name?: string }[] } };
+          }
+        ).viewer.layers.items.filter((l) => l.name?.startsWith('gene map'));
+        expect(inScene).toHaveLength(1);
+      });
+
       it('draws the sheets additively on the reference volume’s own lattice', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
@@ -1466,8 +2342,10 @@ describe('NapariVisualizerService', () => {
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
         store.setSpatialView({
-          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
-          geneMapVolume: true, geneMapSection: 0,
+          geneMap: true,
+          colorBy: { kind: 'feature', name: 'Ttr' },
+          geneMapVolume: true,
+          geneMapSection: 0,
         });
         await flush();
 
@@ -1475,7 +2353,8 @@ describe('NapariVisualizerService', () => {
         const filled = (data: Uint8Array, k: number) =>
           Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
         const data = addVolume.mock.calls
-          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+          .filter((c) => /gene map/.test(String(c[4]?.name)))
+          .at(-1)![0] as Uint8Array;
         // Every imaged plane contributed, not just section 0: plane 5 is the last
         // section, and with section 0 alone it would fall outside the sampled
         // range and be zeroed.
@@ -1489,7 +2368,9 @@ describe('NapariVisualizerService', () => {
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
         store.setSpatialView({
-          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' }, geneMapSection: 0,
+          geneMap: true,
+          colorBy: { kind: 'feature', name: 'Ttr' },
+          geneMapSection: 0,
         });
         await flush();
 
@@ -1497,7 +2378,8 @@ describe('NapariVisualizerService', () => {
         const filled = (data: Uint8Array, k: number) =>
           Array.from(data.slice(k * plane, (k + 1) * plane)).some((v) => v > 0);
         const one = addVolume.mock.calls
-          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+          .filter((c) => /gene map/.test(String(c[4]?.name)))
+          .at(-1)![0] as Uint8Array;
         // Section 0 is z = 400 -> plane 1, and no other section is drawn.
         expect(filled(one, 1)).toBe(true);
         expect(filled(one, 3)).toBe(false);
@@ -1506,7 +2388,8 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ geneMapSection: 99 });
         await flush();
         const clamped = addVolume.mock.calls
-          .filter((c) => /gene map/.test(String(c[4]?.name))).at(-1)![0] as Uint8Array;
+          .filter((c) => /gene map/.test(String(c[4]?.name)))
+          .at(-1)![0] as Uint8Array;
         // The LAST section, drawn — not an empty volume.
         expect(filled(clamped, 5)).toBe(true);
         expect(filled(clamped, 1)).toBe(false);
@@ -1570,8 +2453,9 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
         await flush();
         const inScene = () =>
-          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
-            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+          (
+            service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } }
+          ).viewer.layers.items.filter((l) => l.name?.startsWith('gene map')).length;
         expect(inScene()).toBe(1);
 
         store.setSpatialView({ geneMap: false });
@@ -1599,7 +2483,9 @@ describe('NapariVisualizerService', () => {
       /** Three categories: A x3, B x2, C x1 — so the ranking is observable. */
       const column = {
         meta: {
-          kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+          kind: 'categorical',
+          name: 'region',
+          categories: ['A', 'B', 'C'],
           colors: ['#ff0000', '#00ff00', '#0000ff'],
         },
         codes: new Uint16Array([0, 0, 0, 1, 1, 2]),
@@ -1629,9 +2515,7 @@ describe('NapariVisualizerService', () => {
 
         const layers = densityLayers(addVolume);
         // One per category, ranked by cell count — A (3), B (2), C (1).
-        expect(layers.map((l) => l.name)).toEqual([
-          'density · A', 'density · B', 'density · C',
-        ]);
+        expect(layers.map((l) => l.name)).toEqual(['density · A', 'density · B', 'density · C']);
         // Additive so overlapping territories both read; translucent so the
         // interior is visible rather than only the brightest shell.
         expect(layers[0].blending).toBe('additive');
@@ -1680,13 +2564,53 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ densityVolume: true });
         await flush();
         const inScene = () =>
-          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
-            .viewer.layers.items).filter((l) => l.name?.startsWith('density · ')).length;
+          (
+            service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } }
+          ).viewer.layers.items.filter((l) => l.name?.startsWith('density · ')).length;
         expect(inScene()).toBe(1);
 
         store.setSpatialView({ densityVolume: false });
         await flush();
         expect(inScene()).toBe(0);
+      });
+
+      it('draws the volumes again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): densityKey outlived reset(), so on the new viewer
+        // ensureDensityVolumes returned early and the clouds were gone until a toggle.
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        store.setSpatialView({ densityVolume: true });
+        await flush();
+
+        await mount3d(clustered());
+        const inScene = (
+          service as unknown as {
+            viewer: { layers: { items: readonly { name?: string }[] } };
+          }
+        ).viewer.layers.items.filter((l) => l.name?.startsWith('density · '));
+        expect(inScene).toHaveLength(1);
+      });
+
+      it("rasterises off the main thread's critical path, latest key wins (SPATIAL-19)", async () => {
+        // The rasterisation is async now (a worker past the threshold). Two changes in one
+        // tick: the superseded field must not land on screen beside the newer one…
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        await mount3d(clustered());
+        const inScene = () =>
+          (
+            service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } }
+          ).viewer.layers.items.filter((l) => l.name?.startsWith('density · ')).length;
+        store.setSpatialView({ densityVolume: true });
+        store.setSpatialView({ densitySmoothing: 3 });
+        await flush();
+        expect(inScene()).toBe(1);
+
+        // …and a rebuild that leaves the field's key alone while it is computing must not
+        // strand it (the key is already taken, so nothing would ever draw it again).
+        store.setSpatialView({ densitySmoothing: 2 });
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        expect(inScene()).toBe(1);
       });
 
       it('re-rasterises for a different selection of the same size', async () => {
@@ -1699,14 +2623,12 @@ describe('NapariVisualizerService', () => {
 
         // Two DIFFERENT selections, same count: keyed on the count alone this
         // looks unchanged, and the previous ROI's fields stay on screen.
-        TestBed.inject(SpatialSelectionStore)
-          .set({ mask: Uint8Array.from([1, 1, 0, 0, 0, 0]), count: 2 });
+        TestBed.inject(SpatialSelectionStore).set({ mask: Uint8Array.from([1, 1, 0, 0, 0, 0]), count: 2 });
         await flush();
         const afterFirst = densityLayers(addVolume).length;
         expect(afterFirst).toBeGreaterThan(built);
 
-        TestBed.inject(SpatialSelectionStore)
-          .set({ mask: Uint8Array.from([0, 0, 0, 0, 1, 1]), count: 2 });
+        TestBed.inject(SpatialSelectionStore).set({ mask: Uint8Array.from([0, 0, 0, 0, 1, 1]), count: 2 });
         await flush();
         expect(densityLayers(addVolume).length).toBeGreaterThan(afterFirst);
       });
@@ -1736,11 +2658,7 @@ describe('NapariVisualizerService', () => {
       const layers = await mount3d();
       expect(addPoints3D).toHaveBeenCalled();
       // x = i*10, y = i*20, z = i*30, laid out x-fastest.
-      expect(Array.from(named(layers, 'observations').positions)).toEqual([
-        0, 0, 0,
-        10, 20, 30,
-        20, 40, 60,
-      ]);
+      expect(Array.from(named(layers, 'observations').positions)).toEqual([0, 0, 0, 10, 20, 30, 20, 40, 60]);
     });
 
     it('draws nothing when the observations have no z', async () => {
@@ -1769,7 +2687,9 @@ describe('NapariVisualizerService', () => {
       // neighbour's blend.
       const column: CategoricalColumn = {
         meta: {
-          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          kind: 'categorical',
+          name: 'region',
+          categories: ['A', 'B'],
           colors: ['#ff0000', '#0000ff'],
         },
         codes: new Uint16Array([0, 1, 0]),
@@ -1795,8 +2715,8 @@ describe('NapariVisualizerService', () => {
         const t = (value - lo) / (hi - lo);
         return lut[Math.max(0, Math.min(255, Math.round(t * 255)))];
       };
-      expect(colourOf(1)).toEqual([255, 0, 0]);   // category A
-      expect(colourOf(2)).toEqual([0, 0, 255]);   // category B
+      expect(colourOf(1)).toEqual([255, 0, 0]); // category A
+      expect(colourOf(2)).toEqual([0, 0, 255]); // category B
     });
 
     it('refuses to colour more categories than the LUT can hold apart', async () => {
@@ -1805,7 +2725,9 @@ describe('NapariVisualizerService', () => {
       const categories = Array.from({ length: 200 }, (_, i) => `c${i}`);
       const column: CategoricalColumn = {
         meta: {
-          kind: 'categorical', name: 'many', categories,
+          kind: 'categorical',
+          name: 'many',
+          categories,
           colors: categories.map(() => '#ff0000'),
         },
         codes: new Uint16Array([0, 1, 2]),
@@ -1867,6 +2789,60 @@ describe('NapariVisualizerService', () => {
       expect(overlay).not.toBeNull();
       expect(() => overlay?.setMode('drawrect')).not.toThrow();
       expect(() => overlay?.setMode('none')).not.toThrow();
+    });
+
+    it('hands the region overlay CLIENT pixels both ways, wherever the canvas sits', async () => {
+      // Regression (NAPARI-BOUNDARY-6): the 3D screen-space adapter returned canvas-local px
+      // from worldToCanvas while the overlay expects client px (it subtracts its own rect), so
+      // with the canvas anywhere but the page origin the lasso was drawn offset from the cursor.
+      await mount3d();
+      const internals = service as unknown as {
+        canvas: HTMLCanvasElement;
+        viewer: unknown;
+        tools: {
+          screenSpaceViewer(v: unknown): {
+            canvasToWorld(x: number, y: number): [number, number];
+            worldToCanvas(x: number, y: number): [number, number];
+          };
+        };
+      };
+      jest
+        .spyOn(internals.canvas, 'getBoundingClientRect')
+        .mockReturnValue({ left: 100, top: 50, width: 300, height: 150 } as DOMRect);
+      const screen = internals.tools.screenSpaceViewer(internals.viewer);
+      expect(screen.canvasToWorld(130, 70)).toEqual([30, 20]);
+      expect(screen.worldToCanvas(30, 20)).toEqual([130, 70]);
+    });
+
+    it('an orbit clears only the regions drawn in 3D, not the ones it found', async () => {
+      // Regression (NAPARI-SVC-11): every camera change with any region present emptied the
+      // app-wide RegionStore — including the image's own regions, which have nothing to do
+      // with a screen-space lasso.
+      await mount3d();
+      regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
+      const [found] = regionStore.getRegions();
+      // Re-install the 3D interaction on a viewer whose orbit the test can drive (the stub's
+      // camera never emits).
+      let orbit!: () => void;
+      const viewer = {
+        camera3d: {
+          changed: {
+            connect: (l: () => void) => {
+              orbit = l;
+              return () => undefined;
+            },
+          },
+        },
+        setControlsEnabled: () => undefined,
+      };
+      (
+        service as unknown as { tools: { install3dInteraction(v: unknown, h: HTMLElement): void } }
+      ).tools.install3dInteraction(viewer, document.getElementById('spatial3d-host')!);
+      regionStore.addRegion({ bounds: { x: 10, y: 10, width: 5, height: 5 } } as never);
+      expect(regionStore.getRegions()).toHaveLength(2);
+
+      orbit();
+      expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id]);
     });
 
     it('projects observations to canvas pixels through the 3D camera', async () => {
@@ -1939,8 +2915,7 @@ describe('NapariVisualizerService', () => {
 
         expect(named(layers, 'observations')).toBeDefined();
         // ...and unoffset, since there is no box to sit inside.
-        expect(named(layers, 'observations').positions[3])
-          .toBeCloseTo(spatialDataset3d().observations.x[1], 3);
+        expect(named(layers, 'observations').positions[3]).toBeCloseTo(spatialDataset3d().observations.x[1], 3);
         expect(warn).toHaveBeenCalled();
         warn.mockRestore();
       });
@@ -1953,11 +2928,15 @@ describe('NapariVisualizerService', () => {
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(spatialDatasetVolume());
         TestBed.inject(SpatialSelectionStore).set({
-          mask: Uint8Array.from([0, 1, 0]), count: 1,
+          mask: Uint8Array.from([0, 1, 0]),
+          count: 1,
         });
         await flush();
 
-        const cloud = named(addPoints3D.mock.results.map((r) => r.value), 'observations');
+        const cloud = named(
+          addPoints3D.mock.results.map((r) => r.value),
+          'observations',
+        );
         const obs = spatialDataset3d().observations;
         // The highlighted point is entry 1 of the SAME position array.
         expect(cloud.alphas![1]).toBe(1);
@@ -1981,8 +2960,7 @@ describe('NapariVisualizerService', () => {
       // A bar labelled in microns over unknown units reads as a measurement, and
       // is worse than no bar at all.
       await mount3d(spatialDataset3d());
-      expect(document.getElementById('spatial3d-host')?.textContent ?? '')
-        .not.toMatch(/µm|nm|mm|cm/);
+      expect(document.getElementById('spatial3d-host')?.textContent ?? '').not.toMatch(/µm|nm|mm|cm/);
     });
 
     it('highlights a selection with a per-point alpha, in the one layer', async () => {
@@ -1996,7 +2974,8 @@ describe('NapariVisualizerService', () => {
       expect(cloud.alphas).toBeNull(); // nothing selected: uniformly opaque
 
       TestBed.inject(SpatialSelectionStore).set({
-        mask: Uint8Array.from([0, 1, 0]), count: 1,
+        mask: Uint8Array.from([0, 1, 0]),
+        count: 1,
       });
       await flush();
 
@@ -2052,15 +3031,15 @@ describe('NapariVisualizerService', () => {
     it('gives a stack that declares mppX/Y/Z its true physical proportions', async () => {
       // 40 x 40 x 200 µm voxels: the box has to come out 11 x 11 x 15.2 mm, or the
       // anatomy renders as a cube-aspect brick.
-      const layer = await mountVolume(imageInfo({
-        // `tiled: false` is the shape a published volume image has: complete
-        // per-slice images, no server pyramid to describe.
-        tiled: false,
-        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
-        imageMeta: [
-          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
-        ],
-      }));
+      const layer = await mountVolume(
+        imageInfo({
+          // `tiled: false` is the shape a published volume image has: complete
+          // per-slice images, no server pyramid to describe.
+          tiled: false,
+          urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 }],
+        }),
+      );
 
       // voxelSize maps the SAMPLED grid onto the world box, so the box itself is
       // voxelSize x sampled dims — the assertion that survives any decimate factor.
@@ -2077,17 +3056,21 @@ describe('NapariVisualizerService', () => {
       // multiplied by mpp. Once the box is physical (µm) that scaled it twice —
       // 11 mm of mouse brain came out as "44.0 cm" — and Z, never physical at all,
       // read "76 px" for a volume that knows it is 15.2 mm deep.
-      await mountVolume(imageInfo({
-        tiled: false,
-        urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
-        imageMeta: [
-          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 },
-        ],
-      }));
+      await mountVolume(
+        imageInfo({
+          tiled: false,
+          urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76, mppX: 40, mppY: 40, mppZ: 200 }],
+        }),
+      );
 
-      const labels = (service as unknown as {
-        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
-      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+      const labels = (
+        service as unknown as {
+          scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+        }
+      ).scene
+        .axesLabels({ width: 1, height: 1, depth: 1 })
+        .map((l) => l.text);
 
       // 275 x 40 µm = 11 000 µm and 76 x 200 µm = 15 200 µm, formatted in cm at
       // this scale — a mouse brain, not the 44.0 cm the double-scaled label gave.
@@ -2097,17 +3080,21 @@ describe('NapariVisualizerService', () => {
     });
 
     it('labels Z in slices when the stack declares no slice spacing', async () => {
-      await mountVolume(imageInfo({
-        tiled: false,
-        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
-        imageMeta: [
-          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
-        ],
-      }));
+      await mountVolume(
+        imageInfo({
+          tiled: false,
+          urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 }],
+        }),
+      );
 
-      const labels = (service as unknown as {
-        buildAxesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[];
-      }).buildAxesLabels({ width: 1, height: 1, depth: 1 }).map((l) => l.text);
+      const labels = (
+        service as unknown as {
+          scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+        }
+      ).scene
+        .axesLabels({ width: 1, height: 1, depth: 1 })
+        .map((l) => l.text);
 
       expect(labels[0]).toBe('X · 1.1 cm');
       expect(labels[2]).toBe('Z · 8 px'); // unknown thickness — say so, don't invent one
@@ -2116,13 +3103,13 @@ describe('NapariVisualizerService', () => {
     it('falls back to the shape-only reference box when no slice spacing is declared', async () => {
       // Most stacks (a WSI z-series) have no mppZ to offer. The box is then chosen
       // to be independent of the decimate factor rather than physically true.
-      const layer = await mountVolume(imageInfo({
-        tiled: false,
-        urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
-        imageMeta: [
-          { channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 },
-        ],
-      }));
+      const layer = await mountVolume(
+        imageInfo({
+          tiled: false,
+          urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 8, mppX: 40, mppY: 40 }],
+        }),
+      );
 
       const [vx, , vz] = layer.voxelSize;
       // Depth spans the slice count, not a physical extent.
@@ -2139,6 +3126,9 @@ describe('NapariVisualizerService', () => {
 
     /** Mount the spatial mode with `dataset` published, and return the layer built. */
     async function mount(dataset: SpatialDataset | null = spatialDataset()) {
+      return mountSpatial(dataset);
+    }
+    async function mountSpatial(dataset: SpatialDataset | null) {
       // Replace any host from an earlier mount, as the 3D helper does: overlays
       // attach to it, and `getElementById` would keep returning the FIRST stale
       // one — so a test would assert against a previous test's overlay.
@@ -2159,8 +3149,8 @@ describe('NapariVisualizerService', () => {
 
     /** Layers currently in the stub viewer's scene. */
     const viewerLayers = () =>
-      ((service as unknown as { viewer: { layers: { items: readonly unknown[] } } })
-        .viewer?.layers.items ?? []) as readonly unknown[];
+      ((service as unknown as { viewer: { layers: { items: readonly unknown[] } } }).viewer?.layers.items ??
+        []) as readonly unknown[];
 
     /** Mount with the stack opened on slice `z`, as a volume-backed dataset does. */
     async function mountAt(dataset: SpatialDataset, z: number) {
@@ -2192,10 +3182,14 @@ describe('NapariVisualizerService', () => {
           viewer: { layers: { items: layers }, requestRender: jest.fn() },
         };
       };
+      /** The spatial scene, unmounted: hiding reads only its session and its own gene map. */
+      let spatialScene: Spatial2dScene;
+      const session = () => (service as unknown as { spatial: SpatialSession }).spatial;
+      beforeEach(() => {
+        spatialScene = new Spatial2dScene({} as SceneContext, session());
+      });
       const hide = (viewer: unknown, hasPixels: boolean) =>
-        (service as unknown as {
-          hideForeignImage(v: unknown, p: boolean): void;
-        }).hideForeignImage(viewer, hasPixels);
+        spatialScene.hideForeignImage(viewer as never, hasPixels);
 
       it('hides every image layer for a dataset that brings none', () => {
         // The host's viewer keeps whatever was last loaded, and for a dataset that
@@ -2205,8 +3199,7 @@ describe('NapariVisualizerService', () => {
         // only when you zoom out.
         const { layers, viewer } = scene();
         hide(viewer, false);
-        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible))
-          .toEqual([false, false]);
+        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible)).toEqual([false, false]);
       });
 
       it('leaves the observations alone', () => {
@@ -2221,11 +3214,22 @@ describe('NapariVisualizerService', () => {
         const { layers, viewer } = scene();
         const density = layers[2];
         const owned = { owns: (l: unknown) => l === density };
-        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = owned;
+        (session() as unknown as { tileLayers: unknown }).tileLayers = owned;
         hide(viewer, false);
         expect(layers[0].visible).toBe(false);
         expect(density.visible).toBe(true);
-        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = null;
+        (session() as unknown as { tileLayers: unknown }).tileLayers = null;
+      });
+
+      it('leaves the gene map alone when the tissue is hidden', () => {
+        // Regression (NAPARI-SVC-6): the gene map is an ImageLayer too, so the Images toggle
+        // took it down with the slide — though, like the density raster, it is data.
+        const { layers, viewer } = scene();
+        const geneMap = layers[2];
+        spatialScene.geneMapLayer = geneMap as never;
+        hide(viewer, false);
+        expect(layers[0].visible).toBe(false);
+        expect(geneMap.visible).toBe(true);
       });
 
       it('shows the image for a dataset that owns one', () => {
@@ -2235,18 +3239,14 @@ describe('NapariVisualizerService', () => {
         const { layers, viewer } = scene();
         hide(viewer, false);
         hide(viewer, true);
-        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible))
-          .toEqual([true, true]);
+        expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible)).toEqual([true, true]);
       });
 
       it('is actually invoked when the observations are drawn', async () => {
         // The tests above exercise the method directly, because this suite's image
         // fixture has no urls and so builds no image layer to assert over. That leaves
         // the WIRING uncovered — deleting the call kept them all green — so pin it.
-        const spy = jest.spyOn(
-          service as unknown as { hideForeignImage(v: unknown, p: boolean): void },
-          'hideForeignImage',
-        );
+        const spy = jest.spyOn(Spatial2dScene.prototype, 'hideForeignImage');
         await mount();
         expect(spy).toHaveBeenCalled();
         // …and told that this dataset brings no pixels of its own.
@@ -2264,8 +3264,8 @@ describe('NapariVisualizerService', () => {
       it('draws the observations with no image loaded at all, never asking for one', async () => {
         // A host's first view can be an image-less dataset (jit-ui opening a Xenium zip): the
         // visualizer then plots with no loaded image, and there is nothing to render under it.
-        const render = jest.spyOn(service as unknown as { renderImage(z: number): Promise<void> }, 'renderImage');
-        const scaleBar = jest.spyOn(service as unknown as { installScaleBar(): void }, 'installScaleBar');
+        const render = jest.spyOn(Image2dScene.prototype, 'render');
+        const scaleBar = jest.spyOn(Image2dScene.prototype, 'installScaleBar');
         document.getElementById('spatial-host')?.remove();
         const div = document.createElement('div');
         div.id = 'spatial-host';
@@ -2299,7 +3299,7 @@ describe('NapariVisualizerService', () => {
         };
       };
 
-      it('draws only the displayed plane\'s observations, in the slice pixel grid', async () => {
+      it("draws only the displayed plane's observations, in the slice pixel grid", async () => {
         const layer = await mountAt(sliced(), 1);
 
         // Just observation 1 — the other two are other sections, and drawing them
@@ -2344,16 +3344,18 @@ describe('NapariVisualizerService', () => {
         // The stitched branch, which is what a volume-backed dataset takes: its
         // slices are blob images, not a server pyramid. (The tiled branch only
         // moves `dims.z` — no render, so nothing clears the markers there.)
-        (service as unknown as { tiled: boolean }).tiled = false;
+        const scene = (service as unknown as { scene: Spatial2dScene }).scene;
+        const image = scene.image;
+        image.tiled = false;
         const order: string[] = [];
+        jest.spyOn(image, 'render').mockImplementation(async () => {
+          order.push('image');
+        });
         jest
-          .spyOn(service as unknown as { renderImage: (z: number, t?: number) => Promise<void> },
-            'renderImage')
-          .mockImplementation(async () => { order.push('image'); });
-        jest
-          .spyOn(service as unknown as { rebuildSpatialPoints: (...a: unknown[]) => Promise<void> },
-            'rebuildSpatialPoints')
-          .mockImplementation(async () => { order.push('markers'); });
+          .spyOn(scene as unknown as { rebuild: (...a: unknown[]) => Promise<void> }, 'rebuild')
+          .mockImplementation(async () => {
+            order.push('markers');
+          });
 
         service.setZIndex(2);
         await flush();
@@ -2367,16 +3369,16 @@ describe('NapariVisualizerService', () => {
         const ds = sliced();
         // 2-unit radius on a 100-unit voxel grid: drawn to scale that is 1/25 of a
         // pixel, and the section would come up empty.
-        const layer = await mountAt(
-          { ...ds, observations: { ...ds.observations, radius: 2 } }, 1,
-        );
+        const layer = await mountAt({ ...ds, observations: { ...ds.observations, radius: 2 } }, 1);
         expect(Array.from(layer.size as Float32Array)).toEqual([1.5 * 100]);
       });
 
       it('gathers per-point colours down to the drawn subset', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['A', 'B', 'C'],
             colors: ['#ff0000', '#00ff00', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 2]),
@@ -2392,11 +3394,17 @@ describe('NapariVisualizerService', () => {
         expect(layer.faceColor[0].slice(0, 3)).toEqual([0, 1, 0]);
       });
 
+      it('keeps one broadcast colour for the drawn plane when nothing colours the cells', async () => {
+        // A single RGBA tuple is an array too: "gathering" it down to the plane's observations
+        // indexed into its four NUMBERS and handed napari a one-number colour.
+        const layer = await mountAt(sliced(), 1);
+        expect(layer.faceColor).toHaveLength(4);
+        expect(typeof layer.faceColor[0]).toBe('number');
+      });
+
       it('leaves a dataset with a real imageRef drawing every observation', async () => {
         const ds = sliced();
-        const layer = await mountAt(
-          { ...ds, imageRef: { imageId: 'tissue', scale: [2, 2] } }, 1,
-        );
+        const layer = await mountAt({ ...ds, imageRef: { imageId: 'tissue', scale: [2, 2] } }, 1);
         // Its coordinates are already the image's pixels and there is one section:
         // nothing to filter, and the dataset's own affine still wins.
         expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
@@ -2407,6 +3415,23 @@ describe('NapariVisualizerService', () => {
     describe('gene map', () => {
       const geneMapLayers = (addImage: jest.SpyInstance) =>
         addImage.mock.calls.filter((c) => /gene map/.test(String((c[1] as { name?: string })?.name)));
+      /** The map is estimated on the displayed image's grid, so its dataset registers onto one. */
+      const registered = (): SpatialDataset => ({
+        ...spatialDataset(),
+        imageRef: { imageId: 'tissue', scale: [1, 1], translate: [0, 0] },
+      });
+      const mount = () => mountSpatial(registered());
+
+      it('draws no map for a dataset that registers onto no image', async () => {
+        // Regression (NAPARI-SVC-6): the raster was sized from imageW/H, which still hold the
+        // LAST image's size for a dataset that brings none — a map over the wrong extent.
+        const addImage = jest.spyOn(Viewer.prototype, 'addImage');
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mountSpatial(spatialDataset());
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        expect(geneMapLayers(addImage)).toHaveLength(0);
+      });
 
       it('draws nothing until the option is on AND a gene is the colour source', async () => {
         const addImage = jest.spyOn(Viewer.prototype, 'addImage');
@@ -2444,6 +3469,39 @@ describe('NapariVisualizerService', () => {
         );
       });
 
+      it('keeps the cells over a map that lands after an overlapping redraw (SPATIAL-19)', async () => {
+        // The field is estimated asynchronously now (a worker past the threshold). A display-only
+        // change while it is pending redraws the cells first; the map landing afterwards must not
+        // end up on top of them.
+        const vector = new Float32Array([1, 5, 9]);
+        let holdOnce = false;
+        let release: () => void = () => undefined;
+        spatialPort.getFeatureVector.mockImplementation(() => {
+          if (!holdOnce) return Promise.resolve(vector);
+          holdOnce = false;
+          return new Promise<Float32Array>((resolve) => {
+            release = () => resolve(vector);
+          });
+        });
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        // The colouring's fetch is already out; hold the next one — the map's own.
+        holdOnce = true;
+        await flush();
+        store.setSpatialView({ pointScale: 2 }); // same map key: this redraw draws the cells
+        await flush();
+        release();
+        await flush();
+        await flush();
+        const names = (
+          service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } }
+        ).viewer.layers.items.map((l) => l.name ?? '');
+        const map = names.findIndex((n) => n.startsWith('gene map'));
+        expect(map).toBeGreaterThanOrEqual(0);
+        expect(names.lastIndexOf('observations')).toBeGreaterThan(map);
+        expect(names.filter((n) => n === 'observations')).toHaveLength(1);
+      });
+
       it('does not re-estimate the field for a recolour, only for a new gene', async () => {
         // Counted on the estimator itself, not on the fetch: the points path fetches
         // the same vector to colour the markers, so a fetch count says nothing about
@@ -2476,7 +3534,8 @@ describe('NapariVisualizerService', () => {
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
         await mount();
         store.setSpatialView({
-          geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' },
+          geneMap: true,
+          colorBy: { kind: 'feature', name: 'Ttr' },
           continuousColormap: 'Reds',
         });
         await flush();
@@ -2490,8 +3549,12 @@ describe('NapariVisualizerService', () => {
         // Reds really is red-dominant and Blues blue-dominant, so this is the
         // colormap reaching the pixels and not merely some byte changing.
         const channelSums = (d: Uint8Array) => {
-          let r = 0; let b = 0;
-          for (let i = 0; i < d.length; i += 4) { r += d[i]; b += d[i + 2]; }
+          let r = 0;
+          let b = 0;
+          for (let i = 0; i < d.length; i += 4) {
+            r += d[i];
+            b += d[i + 2];
+          }
           return { r, b };
         };
         expect(channelSums(reds.data).r).toBeGreaterThan(channelSums(reds.data).b);
@@ -2520,13 +3583,31 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
         await flush();
         const inScene = () =>
-          ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
-            .viewer.layers.items).filter((l) => l.name?.startsWith('gene map')).length;
+          (
+            service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } }
+          ).viewer.layers.items.filter((l) => l.name?.startsWith('gene map')).length;
         expect(inScene()).toBe(1);
 
         store.setSpatialView({ geneMap: false });
         await flush();
         expect(inScene()).toBe(0);
+      });
+
+      it('draws the map again after a re-plot with the same view state', async () => {
+        // Regression (NAPARI-SVC-1): geneMapKey outlived reset(), so the new viewer
+        // never got the layer back.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+
+        await mount();
+        const inScene = (
+          service as unknown as {
+            viewer: { layers: { items: readonly { name?: string }[] } };
+          }
+        ).viewer.layers.items.filter((l) => l.name?.startsWith('gene map'));
+        expect(inScene).toHaveLength(1);
       });
     });
 
@@ -2541,9 +3622,13 @@ describe('NapariVisualizerService', () => {
        * gesture is a MouseEvent typed `pointermove`, which the same listener sees.
        */
       async function hover(clientX: number, clientY: number) {
-        host().dispatchEvent(new MouseEvent('pointermove', {
-          clientX, clientY, bubbles: true,
-        }));
+        host().dispatchEvent(
+          new MouseEvent('pointermove', {
+            clientX,
+            clientY,
+            bubbles: true,
+          }),
+        );
         // The handler defers to requestAnimationFrame; jsdom runs it on a timer.
         await new Promise((r) => setTimeout(r, 20));
       }
@@ -2551,15 +3636,17 @@ describe('NapariVisualizerService', () => {
       beforeEach(() => {
         // jsdom gives every element a zero rect, so the canvas origin is (0,0) and
         // client coordinates are canvas coordinates.
-        jest.spyOn(Viewer.prototype, 'canvasToWorld').mockImplementation(
-          (cx: number, cy: number) => [cx, cy] as [number, number],
-        );
+        jest
+          .spyOn(Viewer.prototype, 'canvasToWorld')
+          .mockImplementation((cx: number, cy: number) => [cx, cy] as [number, number]);
       });
 
       it('names the class under the cursor, over the column it came from', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -2582,7 +3669,9 @@ describe('NapariVisualizerService', () => {
       it('says nothing over empty tissue', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -2620,7 +3709,9 @@ describe('NapariVisualizerService', () => {
       it('hides when the pointer leaves the plot', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -2639,9 +3730,13 @@ describe('NapariVisualizerService', () => {
       function click(clientX: number, clientY: number, moveTo?: [number, number]) {
         host().dispatchEvent(new MouseEvent('pointerdown', { clientX, clientY, bubbles: true }));
         const [ux, uy] = moveTo ?? [clientX, clientY];
-        host().dispatchEvent(new MouseEvent('pointerup', {
-          clientX: ux, clientY: uy, bubbles: true,
-        }));
+        host().dispatchEvent(
+          new MouseEvent('pointerup', {
+            clientX: ux,
+            clientY: uy,
+            bubbles: true,
+          }),
+        );
       }
 
       const selection = () => TestBed.inject(SpatialSelectionStore).current();
@@ -2649,7 +3744,9 @@ describe('NapariVisualizerService', () => {
       async function mountColouredByRegion() {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           // Observation 0 and 2 are Cortex, 1 is Thalamus.
@@ -2670,9 +3767,11 @@ describe('NapariVisualizerService', () => {
         const loaded = await service.load(imageInfo(), 0);
         await service.plot('plain-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
         await flush();
-        const viewer = (service as unknown as {
-          viewer: { options: { clickZoomFactor?: number } };
-        }).viewer;
+        const viewer = (
+          service as unknown as {
+            viewer: { options: { clickZoomFactor?: number } };
+          }
+        ).viewer;
         expect(viewer.options.clickZoomFactor).toBeUndefined();
       });
 
@@ -2682,9 +3781,11 @@ describe('NapariVisualizerService', () => {
         // halve the world radius the NEXT click hit-tests with, so clicking cells
         // would get steadily harder.
         await mountColouredByRegion();
-        const viewer = (service as unknown as {
-          viewer: { options: { clickZoomFactor?: number } };
-        }).viewer;
+        const viewer = (
+          service as unknown as {
+            viewer: { options: { clickZoomFactor?: number } };
+          }
+        ).viewer;
         expect(viewer.options.clickZoomFactor).toBe(0);
       });
 
@@ -2756,15 +3857,23 @@ describe('NapariVisualizerService', () => {
         // to commit its cache key, the key would claim a source that was never
         // stored — and since every later emission carries the same key, the
         // tooltip would stay silent for the rest of the session.
-        const slow = { meta: {
-          kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
-          colors: ['#ff0000', '#0000ff'],
-        }, codes: new Uint16Array([0, 1, 0]) };
+        const slow = {
+          meta: {
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        };
         // Typed through a holder so TypeScript does not narrow it to `never` from
         // the assignment inside the executor.
         const gate: { release: () => void } = { release: () => undefined };
         spatialPort.getColumn.mockImplementationOnce(
-          () => new Promise((resolve) => { gate.release = () => resolve(slow); }),
+          () =>
+            new Promise((resolve) => {
+              gate.release = () => resolve(slow);
+            }),
         );
         spatialPort.getColumn.mockResolvedValue(slow);
 
@@ -2806,7 +3915,9 @@ describe('NapariVisualizerService', () => {
         // resolves rather than inheriting the earlier silence.
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -2820,7 +3931,9 @@ describe('NapariVisualizerService', () => {
       it('follows the colour source when it changes', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
-            kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus'],
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
             colors: ['#ff0000', '#0000ff'],
           },
           codes: new Uint16Array([0, 1, 0]),
@@ -2865,10 +3978,12 @@ describe('NapariVisualizerService', () => {
       expect(typeof layer.faceColor[0]).toBe('number');
     });
 
-    it('colours by a categorical column using the column\'s own palette', async () => {
+    it("colours by a categorical column using the column's own palette", async () => {
       const column: CategoricalColumn = {
         meta: {
-          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          kind: 'categorical',
+          name: 'region',
+          categories: ['A', 'B'],
           colors: ['#ff0000', '#0000ff'],
         },
         codes: new Uint16Array([0, 1, 0]),
@@ -2918,7 +4033,10 @@ describe('NapariVisualizerService', () => {
       // 'slow' resolves AFTER 'fast', but 'fast' was requested second.
       let releaseSlow: (v: Float32Array) => void = () => undefined;
       spatialPort.getFeatureVector.mockImplementationOnce(
-        () => new Promise<Float32Array>((resolve) => { releaseSlow = resolve; }),
+        () =>
+          new Promise<Float32Array>((resolve) => {
+            releaseSlow = resolve;
+          }),
       );
       spatialPort.getFeatureVector.mockResolvedValueOnce(new Float32Array([9, 9, 9]));
 
@@ -2995,7 +4113,7 @@ describe('NapariVisualizerService', () => {
       expect(addPoints.mock.calls.length).toBe(calls + 1);
     });
 
-    it('applies the dataset\'s data->world affine so spots land on the image', async () => {
+    it("applies the dataset's data->world affine so spots land on the image", async () => {
       const layer = await mount({
         ...spatialDataset(),
         imageRef: { scale: [0.5, 0.5], translate: [10, -4], mppX: 1 },
@@ -3011,9 +4129,14 @@ describe('NapariVisualizerService', () => {
     });
 
     it('renders nothing extra for an empty dataset', async () => {
-      const layer = await mount({ ...spatialDataset(0), observations: {
-        count: 0, x: new Float32Array(0), y: new Float32Array(0),
-      } });
+      const layer = await mount({
+        ...spatialDataset(0),
+        observations: {
+          count: 0,
+          x: new Float32Array(0),
+          y: new Float32Array(0),
+        },
+      });
       expect(layer).toBeUndefined();
     });
 
@@ -3022,6 +4145,261 @@ describe('NapariVisualizerService', () => {
       expect(dataset$.observed).toBe(true);
       service.reset();
       expect(dataset$.observed).toBe(false);
+    });
+  });
+
+  // ── Characterization specs for the NapariVisualizerService split (review Appendix B, 0 (a)–(g)) ──
+  // Pinned against the public surface (plus the few internals the cases name), before any code
+  // moves, so every extraction step has to keep them green as-is.
+  describe('characterization (god-class split)', () => {
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+    let hostIds = 0;
+
+    /** Plot `type` into a fresh host; returns the host's remover. */
+    async function plotInto(type: PlotType, info: IImageInfo = imageInfo(), z = 0) {
+      const div = document.createElement('div');
+      div.id = `characterize-${hostIds++}`;
+      document.body.appendChild(div);
+      const loaded = await service.load(info, z);
+      expect(await service.plot(div.id, loaded, info, 600, type)).toBe(true);
+      await flush();
+      return () => {
+        service.unsubscribe();
+        div.remove();
+      };
+    }
+    const viewer = () =>
+      (
+        service as unknown as {
+          viewer: { dims: { z: number }; layers: { items: readonly object[] } };
+        }
+      ).viewer;
+    const fetchedUrls = () => (globalThis.fetch as jest.Mock).mock.calls.map((c) => String(c[0]));
+
+    describe('(b) setZIndex per scene', () => {
+      it("steps the volume's z plane in place", async () => {
+        const done = await plotInto(PlotType.NAPARI_VOLUME);
+        const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+        service.setZIndex(1);
+        await flush();
+        expect(viewer().dims.z).toBe(1);
+        expect(render).not.toHaveBeenCalled();
+        done();
+      });
+
+      it("moves a tiled image's dims plane and refreshes the histogram sample, without a re-render", async () => {
+        const done = await plotInto(PlotType.NAPARI_IMAGE);
+        const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+        (globalThis.fetch as jest.Mock).mockClear();
+        service.setZIndex(1);
+        await flush();
+        expect(viewer().dims.z).toBe(1);
+        expect(render).not.toHaveBeenCalled();
+        // The coarse sample of the NEW slice (budget 1 → one tile at z=1).
+        expect(fetchedUrls().some((u) => u.includes('/tile?') && u.includes('&z=1&'))).toBe(true);
+        done();
+      });
+
+      it('re-renders a stitched image for the new slice', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes('tiles/info')
+              ? { ok: false, status: 404 }
+              : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+          ),
+        );
+        const done = await plotInto(PlotType.NAPARI_IMAGE);
+        const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
+        (globalThis.fetch as jest.Mock).mockClear();
+        service.setZIndex(1);
+        await flush();
+        expect(render).toHaveBeenCalledTimes(1);
+        expect(fetchedUrls().some((u) => u.includes('&z=1&'))).toBe(true);
+        done();
+      });
+    });
+
+    describe('(d) the descriptor poll', () => {
+      type Internals = { tileClient: { ensureDescriptor(info?: unknown): Promise<unknown> } };
+      const ensure = () => (service as unknown as Internals).tileClient.ensureDescriptor();
+      const infoCalls = () => fetchedUrls().filter((u) => u.includes('tiles/info'));
+      const answer = (status: number, body?: unknown) =>
+        Promise.resolve({ ok: status === 200, status, json: () => Promise.resolve(body) });
+      const desc = { width: 8, height: 8, tileSize: 512, levels: [{ res: 0, width: 8, height: 8 }] };
+
+      afterEach(() => jest.useRealTimers());
+
+      it('re-polls a 202 until the 200 arrives', async () => {
+        jest.useFakeTimers();
+        let calls = 0;
+        (globalThis.fetch as jest.Mock).mockImplementation(() =>
+          calls++ === 0 ? answer(202) : answer(200, desc),
+        );
+        const poll = ensure();
+        await jest.advanceTimersByTimeAsync(1300);
+        expect(await poll).toEqual(desc);
+        expect(infoCalls()).toHaveLength(2);
+      });
+
+      it('gives up (null) once a 202 outlasts the deadline', async () => {
+        jest.useFakeTimers();
+        jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+        (globalThis.fetch as jest.Mock).mockImplementation(() => answer(202));
+        const poll = ensure();
+        await jest.advanceTimersByTimeAsync(125_000);
+        expect(await poll).toBeNull();
+      });
+
+      it('serves a described source from its cache', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation(() => answer(200, desc));
+        expect(await ensure()).toEqual(desc);
+        expect(await ensure()).toEqual(desc);
+        expect(infoCalls()).toHaveLength(1);
+      });
+    });
+
+    describe('(e) the >8-bit histogram', () => {
+      it('fetches the native histogram once per (z, channel) — the bin count is not in the key', async () => {
+        (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
+          if (url.includes('tiles/info')) {
+            return answerJson({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 2,
+              channels: 1,
+              realLevels: 1,
+              channelInfo: [{ bitDepth: 16 }],
+              levels: [{ res: 0, width: 64, height: 48 }],
+            });
+          }
+          if (url.includes('histogram?')) {
+            return answerJson({
+              bitDepth: 16,
+              rangeMin: 0,
+              rangeMax: 2,
+              observedMin: 0,
+              observedMax: 2,
+              binWidth: 1,
+              counts: [1, 2, 3],
+            });
+          }
+          return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+        });
+        const done = await plotInto(PlotType.NAPARI_IMAGE);
+        const histogramCalls = () => fetchedUrls().filter((u) => u.includes('histogram?'));
+
+        const first = await firstValueFrom(service.getHistogram$(0, 3));
+        expect(first).toMatchObject({ bitDepth: 16, counts: [1, 2, 3] });
+        expect(histogramCalls()).toHaveLength(1);
+        expect(histogramCalls()[0]).toContain('channel=0&z=0&bins=3');
+        // Same (z, channel), other bin count: the cached answer.
+        expect(await firstValueFrom(service.getHistogram$(0, 64))).toBe(first);
+        expect(histogramCalls()).toHaveLength(1);
+        // Another slice is another key.
+        service.setZIndex(1);
+        await firstValueFrom(service.getHistogram$(0, 3));
+        expect(histogramCalls()).toHaveLength(2);
+        expect(histogramCalls()[1]).toContain('z=1');
+        done();
+      });
+
+      function answerJson(body: unknown) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+      }
+    });
+
+    describe('(f) the TIFF export', () => {
+      const exportCalls = () => fetchedUrls().filter((u) => u.includes('export/tiff'));
+
+      it('asks for the visible channels only when some are hidden', async () => {
+        await service.load({ ...imageInfo(), fileName: 'scan.ndpi' } as IImageInfo, 3);
+        store.setChannelStates([
+          { index: 0, name: 'a', color: '#f00', min: 0, max: 255, gamma: 1, visible: true },
+          { index: 1, name: 'b', color: '#0f0', min: 0, max: 255, gamma: 1, visible: false },
+          { index: 2, name: 'c', color: '#00f', min: 0, max: 255, gamma: 1, visible: true },
+        ] as IChannelState[]);
+        (saveAs as unknown as jest.Mock).mockClear();
+        await service.exportData();
+        expect(exportCalls()).toEqual(['http://srv/export/tiff?info=INFO&z=3&channels=0,2']);
+        expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'scan_16bit.ome.tif');
+
+        store.setChannelStates([
+          { index: 0, name: 'a', color: '#f00', min: 0, max: 255, gamma: 1, visible: true },
+          { index: 1, name: 'b', color: '#0f0', min: 0, max: 255, gamma: 1, visible: true },
+        ] as IChannelState[]);
+        await service.exportData();
+        expect(exportCalls()[1]).toBe('http://srv/export/tiff?info=INFO&z=3');
+      });
+    });
+
+    describe('(g) the layers each plot type mounts', () => {
+      /** Each added layer, tagged with the Viewer method that made it. */
+      function tagLayers(): WeakMap<object, string> {
+        const kinds = new WeakMap<object, string>();
+        const proto = Viewer.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+        for (const method of ['addImage', 'addVolume', 'addAxes', 'addSurface', 'addPoints', 'addPoints3D']) {
+          const original = proto[method];
+          jest.spyOn(proto, method).mockImplementation(function (this: unknown, ...args: unknown[]) {
+            const layer = original.apply(this, args) as object;
+            kinds.set(layer, method);
+            return layer;
+          });
+        }
+        return kinds;
+      }
+      const shape = (kinds: WeakMap<object, string>) =>
+        viewer().layers.items.map((l) => [kinds.get(l), (l as { name?: string }).name ?? null]);
+
+      it.each([
+        [PlotType.NAPARI_IMAGE, [['addImage', null]]],
+        [
+          PlotType.NAPARI_SCATTER,
+          [
+            ['addImage', null],
+            ['addPoints', null],
+          ],
+        ],
+        [
+          PlotType.NAPARI_SURFACE,
+          [
+            ['addSurface', null],
+            ['addAxes', null],
+          ],
+        ],
+        [PlotType.NAPARI_SCATTER3D, [['addPoints3D', null]]],
+        [
+          PlotType.NAPARI_VOLUME,
+          [
+            ['addVolume', null],
+            ['addAxes', null],
+          ],
+        ],
+        [
+          PlotType.NAPARI_ISOSURFACE,
+          [
+            ['addVolume', null],
+            ['addAxes', null],
+          ],
+        ],
+        [
+          PlotType.SPATIAL_OMICS,
+          [
+            ['addImage', null],
+            ['addPoints', 'observations'],
+          ],
+        ],
+        [PlotType.SPATIAL_OMICS_3D, [['addPoints3D', 'observations']]],
+      ])('%s', async (type, expected) => {
+        jest
+          .spyOn(regionStore, 'getRegions')
+          .mockReturnValue([{ bounds: { x: 10, y: 20, width: 4, height: 6 } }] as never);
+        dataset$.next(type === PlotType.SPATIAL_OMICS_3D ? spatialDataset3d() : spatialDataset());
+        const kinds = tagLayers();
+        const done = await plotInto(type);
+        expect(shape(kinds)).toEqual(expected);
+        done();
+      });
     });
   });
 });

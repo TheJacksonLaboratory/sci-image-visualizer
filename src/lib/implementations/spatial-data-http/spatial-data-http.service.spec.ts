@@ -65,8 +65,7 @@ describe('SpatialDataHttpService', () => {
     it('normalises a base URL without a trailing slash', async () => {
       service.configure({ baseUrl: 'http://example.test/api' });
       const promise = service.selectDataset('d');
-      http.expectOne('http://example.test/api/spatial/d/manifest')
-        .flush({ ...MANIFEST, id: 'd' });
+      http.expectOne('http://example.test/api/spatial/d/manifest').flush({ ...MANIFEST, id: 'd' });
       await Promise.resolve();
       http.expectOne('http://example.test/api/spatial/d/coords').flush(f32(1, 2, 3, 4, 5, 6));
       await promise;
@@ -75,8 +74,7 @@ describe('SpatialDataHttpService', () => {
     it('does not double the slash when one is already there', async () => {
       service.configure({ baseUrl: 'http://example.test/api/' });
       const promise = service.selectDataset('d');
-      http.expectOne('http://example.test/api/spatial/d/manifest')
-        .flush({ ...MANIFEST, id: 'd' });
+      http.expectOne('http://example.test/api/spatial/d/manifest').flush({ ...MANIFEST, id: 'd' });
       await Promise.resolve();
       http.expectOne('http://example.test/api/spatial/d/coords').flush(f32(1, 2, 3, 4, 5, 6));
       await promise;
@@ -84,6 +82,24 @@ describe('SpatialDataHttpService', () => {
   });
 
   describe('selectDataset', () => {
+    it('requests coords, ids and radius together rather than one after another', async () => {
+      // Time to first paint is the slowest of the three, not their sum: the ids JSON
+      // alone is tens of MB on a large dataset.
+      const manifest = { ...MANIFEST, hasIds: true, radius: { mode: 'per-observation' as const } };
+      const promise = service.selectDataset(manifest.id);
+      http.expectOne(`${BASE}/spatial/${manifest.id}/manifest`).flush(manifest);
+      await Promise.resolve();
+      const coords = http.expectOne(`${BASE}/spatial/${manifest.id}/coords`);
+      const ids = http.expectOne(`${BASE}/spatial/${manifest.id}/ids`);
+      const radius = http.expectOne(`${BASE}/spatial/${manifest.id}/radius`);
+      radius.flush(f32(9, 9, 9));
+      ids.flush({ ids: ['a', 'b', 'c'] });
+      coords.flush(f32(1, 2, 3, 4, 5, 6));
+      const dataset = await promise;
+      expect(dataset.observations.ids).toEqual(['a', 'b', 'c']);
+      expect(Array.from(dataset.observations.radius as Float32Array)).toEqual([9, 9, 9]);
+    });
+
     it('fetches only the manifest and coords when ids/radius are not per-observation', async () => {
       const dataset = await loadDataset();
       expect(dataset.observations.count).toBe(3);
@@ -96,7 +112,9 @@ describe('SpatialDataHttpService', () => {
 
     it('fetches ids and a radius vector when the manifest declares them', async () => {
       const dataset = await loadDataset({
-        ...MANIFEST, hasIds: true, radius: { mode: 'per-observation' },
+        ...MANIFEST,
+        hasIds: true,
+        radius: { mode: 'per-observation' },
       });
       expect(dataset.observations.ids).toEqual(['a', 'b', 'c']);
       expect(Array.from(dataset.observations.radius as Float32Array)).toEqual([9, 9, 9]);
@@ -128,7 +146,10 @@ describe('SpatialDataHttpService', () => {
       const slow = service.selectDataset(MANIFEST.id);
       // Handled from the moment it exists: it rejects during a flush below, and an
       // unhandled rejection there fails the run before any assertion is reached.
-      const slowSettled = slow.then(() => 'resolved', (e: Error) => e.name);
+      const slowSettled = slow.then(
+        () => 'resolved',
+        (e: Error) => e.name,
+      );
       const slowManifest = http.expectOne(`${BASE}/spatial/${MANIFEST.id}/manifest`);
       const fast = service.selectDataset(other.id);
       const fastManifest = http.expectOne(`${BASE}/spatial/${other.id}/manifest`);
@@ -153,7 +174,10 @@ describe('SpatialDataHttpService', () => {
 
     it('lets a clear supersede a selection still in flight', async () => {
       const pending = service.selectDataset(MANIFEST.id);
-      const settled = pending.then(() => 'resolved', (e: Error) => e.name);
+      const settled = pending.then(
+        () => 'resolved',
+        (e: Error) => e.name,
+      );
       const manifest = http.expectOne(`${BASE}/spatial/${MANIFEST.id}/manifest`);
 
       service.clear();
@@ -163,7 +187,12 @@ describe('SpatialDataHttpService', () => {
       expect(await settled).toBe('SupersededError');
       // Nothing published: a clear is the newest intent, not a slower request.
       let latest: string | null | undefined;
-      service.getDataset$().subscribe((d) => { latest = d?.id ?? null; }).unsubscribe();
+      service
+        .getDataset$()
+        .subscribe((d) => {
+          latest = d?.id ?? null;
+        })
+        .unsubscribe();
       expect(latest).toBeNull();
     });
   });
@@ -205,8 +234,7 @@ describe('SpatialDataHttpService', () => {
 
     it('rejects an unknown column, naming the ones that exist', async () => {
       await loadDataset();
-      await expect(service.getColumn('nope')).rejects
-        .toThrow(/unknown column "nope".*cluster, total_counts/s);
+      await expect(service.getColumn('nope')).rejects.toThrow(/unknown column "nope".*cluster, total_counts/s);
     });
 
     it('throws before a dataset is selected', () => {
@@ -257,6 +285,53 @@ describe('SpatialDataHttpService', () => {
       await service.getFeatureVector('G32');
       http.verify();
     });
+
+    it('bounds the cache by bytes as well, since one vector is 4·N bytes', async () => {
+      // 12 bytes a vector (N = 3), a 30-byte budget: the third evicts the first.
+      service.configure({ baseUrl: BASE, cacheBytes: 30 });
+      const wide = {
+        ...MANIFEST,
+        features: { count: 3, names: ['G0', 'G1', 'G2'] },
+      };
+      await loadDataset(wide);
+      for (let i = 0; i < 3; i++) {
+        const p = service.getFeatureVector(`G${i}`);
+        http.expectOne(`${BASE}/spatial/visium-brain/feature/G${i}`).flush(f32(i, i, i));
+        await p;
+      }
+      await service.getFeatureVector('G2');
+      await service.getFeatureVector('G1');
+      http.verify();
+      const refetch = service.getFeatureVector('G0');
+      http.expectOne(`${BASE}/spatial/visium-brain/feature/G0`).flush(f32(0, 0, 0));
+      await refetch;
+    });
+
+    it('bounds the tile cache by bytes', async () => {
+      service.configure({ baseUrl: BASE, tileCacheBytes: 40 });
+      await loadDataset({
+        ...MANIFEST,
+        polygonTiles: { bounds: [0, 0, 1, 1], sets: [{ name: 'cell' }], levels: [{ tileSize: 1 }] },
+      } as SpatialManifest);
+      // One ring of three vertices: 4 (obs) + 8 (offsets) + 24 (coords) = 36 bytes viewed.
+      const tile = () =>
+        new Uint8Array([
+          ...new Uint8Array(Uint32Array.from([1, 0, 0, 3]).buffer),
+          ...new Uint8Array(new Float32Array(6).buffer),
+        ]).buffer;
+      const url = (gx: number) => `${BASE}/spatial/visium-brain/polygon-tile/cell/0/${gx}/0`;
+      for (const gx of [0, 1]) {
+        const p = service.getPolygonTile('cell', 0, gx, 0);
+        http.expectOne(url(gx)).flush(tile());
+        await p;
+      }
+      // Tile 1 alone fits; tile 0 was evicted to make room for it.
+      void service.getPolygonTile('cell', 0, 1, 0);
+      http.expectNone(url(1));
+      const again = service.getPolygonTile('cell', 0, 0, 0);
+      http.expectOne(url(0)).flush(tile());
+      await again;
+    });
   });
 
   /**
@@ -272,7 +347,7 @@ describe('SpatialDataHttpService', () => {
     /** A second dataset with the same gene names, which is what makes the collision real. */
     const OTHER: SpatialManifest = { ...MANIFEST, id: 'other-brain', name: 'Other' };
 
-    it('does not let the old dataset\'s vector become the new one\'s cache entry', async () => {
+    it("does not let the old dataset's vector become the new one's cache entry", async () => {
       await loadDataset();
       const stale = service.getFeatureVector('Ttr');
       const request = http.expectOne(`${BASE}/spatial/visium-brain/feature/Ttr`);
@@ -316,11 +391,17 @@ describe('SpatialDataHttpService', () => {
       http.verify();
     });
 
+    it('ranks inlined names as the picker does: prefix matches first', async () => {
+      // gene-search.ts: the picker must not rank differently depending on how the data
+      // happens to be served.
+      await loadDataset({ ...MANIFEST, features: { count: 3, names: ['Actb', 'Cd4', 'Cd44'] } });
+      expect(await service.searchFeatures('c')).toEqual(['Cd4', 'Cd44', 'Actb']);
+    });
+
     it('asks the server when the manifest did not inline the names', async () => {
       await loadDataset({ ...MANIFEST, features: { count: 31053 } });
       const promise = service.searchFeatures('Ttr', 5);
-      http.expectOne(`${BASE}/spatial/visium-brain/features?q=Ttr&limit=5`)
-        .flush({ names: ['Ttr', 'Ttry'] });
+      http.expectOne(`${BASE}/spatial/visium-brain/features?q=Ttr&limit=5`).flush({ names: ['Ttr', 'Ttry'] });
       expect(await promise).toEqual(['Ttr', 'Ttry']);
     });
   });
@@ -368,15 +449,21 @@ describe('SpatialDataHttpService', () => {
     it("surfaces the server's error message", async () => {
       await loadDataset();
       const promise = service.importGroups('x', 'cell_id,group\nnope,A\n');
-      http.expectOne(`${BASE}/spatial/visium-brain/groups?name=x`)
+      http
+        .expectOne(`${BASE}/spatial/visium-brain/groups?name=x`)
         .flush({ error: 'no cell ids matched' }, { status: 400, statusText: 'Bad Request' });
       await expect(promise).rejects.toThrow('no cell ids matched');
     });
   });
 
   describe('getTranscriptGeneBins', () => {
+    const withGeneBins = {
+      ...MANIFEST,
+      transcriptGeneBins: { origin: [0, 0] as [number, number], levels: [] },
+    };
+
     it('asks for a tile of the per-gene levels for the given genes', async () => {
-      await loadDataset();
+      await loadDataset(withGeneBins);
       const promise = service.getTranscriptGeneBins(3, 1, 2, ['CD163', 'MRC1']);
       const req = http.expectOne(`${BASE}/spatial/visium-brain/gene-bins/3/1/2?genes=CD163,MRC1`);
       const buf = new ArrayBuffer(8);
@@ -384,10 +471,17 @@ describe('SpatialDataHttpService', () => {
       req.flush(buf);
       expect((await promise).count).toBe(0);
     });
+
+    it('rejects without a request when the dataset advertises no per-gene levels', async () => {
+      // As every other optional route does: a server without it never sees it requested.
+      await loadDataset();
+      await expect(service.getTranscriptGeneBins(3, 1, 2, ['CD163'])).rejects.toThrow(/per-gene/);
+      http.expectNone(`${BASE}/spatial/visium-brain/gene-bins/3/1/2?genes=CD163`);
+    });
   });
 
   describe('getMarkerGenes', () => {
-    it('asks for a column\'s marker genes, n per group', async () => {
+    it("asks for a column's marker genes, n per group", async () => {
       await loadDataset();
       const promise = service.getMarkerGenes('cell type', 4);
       const req = http.expectOne(`${BASE}/spatial/visium-brain/markers/cell%20type?n=4`);
@@ -430,8 +524,7 @@ describe('SpatialDataHttpService', () => {
       await loadDataset(withUmap);
       const promise = service.getEmbedding('X_umap');
       // count=3, dims=2 -> every d0 then every d1.
-      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`)
-        .flush(f32(1, 2, 3, 40, 50, 60));
+      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`).flush(f32(1, 2, 3, 40, 50, 60));
       const e = await promise;
       expect(Array.from(e.x)).toEqual([1, 2, 3]);
       expect(Array.from(e.y)).toEqual([40, 50, 60]);
@@ -456,8 +549,7 @@ describe('SpatialDataHttpService', () => {
       const first = service.getEmbedding('X_umap');
       // Asked again while the first is still in flight: one request, both resolve.
       const second = service.getEmbedding('X_umap');
-      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`)
-        .flush(f32(1, 2, 3, 40, 50, 60));
+      http.expectOne(`${BASE}/spatial/${withUmap.id}/embedding/X_umap`).flush(f32(1, 2, 3, 40, 50, 60));
       await Promise.all([first, second]);
       const third = await service.getEmbedding('X_umap');
       expect(Array.from(third.x)).toEqual([1, 2, 3]);
@@ -469,5 +561,4 @@ describe('SpatialDataHttpService', () => {
       expect(ds?.embeddings).toEqual([{ name: 'X_umap', label: 'UMAP', dims: 2 }]);
     });
   });
-
 });

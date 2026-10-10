@@ -30,3 +30,47 @@ export function histogram256(counts: number[]): IHistogram {
     max: counts.reduce((m, c) => (c > m ? c : m), 0),
   };
 }
+
+/**
+ * Saturation-based auto-window: pick `[min, max]` so about `saturation` (0..0.5) of the
+ * pixels clip at each end of the histogram. A dominant first or last bin (unscanned
+ * padding, clipped background) is dropped first so it does not skew the range.
+ *
+ * Returns values from `h.bins` (native units for a native histogram), or `fallback` when
+ * the histogram is empty or holds no counts — each caller keeps its own: the 8-bit store
+ * falls back to the full byte range, the channel histogram to its slider bounds.
+ */
+export function autoWindowFromHistogram(
+  h: IHistogram,
+  saturation: number,
+  fallback: readonly [number, number],
+): [number, number] {
+  const counts = h.counts.slice();
+  const n = counts.length;
+  if (n === 0) return [fallback[0], fallback[1]];
+  if (n > 2 && counts[0] > counts[1]) counts[0] = 0;
+  if (n > 2 && counts[n - 1] > counts[n - 2]) counts[n - 1] = 0;
+  let total = 0;
+  for (const c of counts) total += c;
+  if (total <= 0) return [fallback[0], fallback[1]];
+  const target = total * Math.max(0, Math.min(0.5, saturation));
+  let acc = 0;
+  let min = h.bins[0];
+  for (let i = 0; i < n; i++) {
+    acc += counts[i];
+    if (acc > target) {
+      min = h.bins[i];
+      break;
+    }
+  }
+  acc = 0;
+  let max = h.bins[n - 1];
+  for (let i = n - 1; i >= 0; i--) {
+    acc += counts[i];
+    if (acc > target) {
+      max = h.bins[i];
+      break;
+    }
+  }
+  return [min, max];
+}

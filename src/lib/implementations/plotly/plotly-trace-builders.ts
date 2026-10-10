@@ -1,5 +1,6 @@
 import { PlotType } from '../../contracts/plot-type';
 import { bt601Luminance } from '../../contracts/intensity';
+import { polygonCentroid } from '../region-centroids';
 
 /**
  * Pluggable Plotly trace builders for the plot types added on top of the
@@ -8,19 +9,19 @@ import { bt601Luminance } from '../../contracts/intensity';
  * DESIGN / EXTRACTION ALIGNMENT
  * -----------------------------
  * Every function here is **pure** — it takes a `TraceBuildInput` and returns
- * Plotly trace dicts. There is no Angular, no RxJS, no host-state coupling
- * (`MainState`, `FilesService`, …). That keeps the module relocatable into the
- * future `@jax-data-science/image-visualization` library core (see the
- * `sketch/jit-plotting-extraction` SOW) without port surgery.
+ * Plotly trace dicts. There is no Angular, no RxJS and no service state, so
+ * the builders are unit-testable on plain fixtures.
  *
- * Layout building stays in `PlotlyService` (it needs live service state such
- * as screen height, scale ratio and the current shapes); only TRACE building
- * is pluggable here. To add a new plot type: write a builder, register it in
- * `PLOTLY_PLOT_TYPE_IMPLS`, and add a descriptor in `contracts/plot-type.ts`.
+ * Layouts are built in `plotly-layouts.ts` (from a context of live service
+ * state); only TRACE building is pluggable here. To add a new plot type: write
+ * a builder, register it in `PLOTLY_PLOT_TYPE_IMPLS`, and add a descriptor in
+ * `contracts/plot-type.ts`.
  *
- * The original HEATMAP/SURFACE/RGB types intentionally keep their dedicated
- * renderers in `PlotlyService` (they are also reused by the high-def zoom
- * re-fetch path), so they are NOT registered here.
+ * The original HEATMAP/SURFACE/RGB types have their own builders at the end of
+ * this file ({@link buildHeatmapTraces}, {@link buildSurfaceTraces},
+ * {@link buildRgbImageTraces}) — used by the initial render and the high-def
+ * zoom re-render alike — but are NOT registered: they take the raw frames and
+ * the active colormap, not a {@link TraceBuildInput}.
  */
 
 /** Normalised input for a trace builder. Frames are per-z-plane matrices:
@@ -94,7 +95,10 @@ function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][
   const out: number[][] = [];
   for (let r = 0; r < matrix.length; r += sy) {
     const row = matrix[r];
-    if (sx <= 1) { out.push(row); continue; }
+    if (sx <= 1) {
+      out.push(row);
+      continue;
+    }
     const sampled: number[] = [];
     for (let c = 0; c < row.length; c += sx) sampled.push(row[c]);
     out.push(sampled);
@@ -138,24 +142,24 @@ function buildScatterTraces(input: TraceBuildInput): any[] {
   const ys: number[] = [];
   const text: string[] = [];
   input.regions.forEach((poly, i) => {
-    const n = poly.xpoints.length;
-    if (n === 0) return;
-    const cx = poly.xpoints.reduce((a, b) => a + b, 0) / n;
-    const cy = poly.ypoints.reduce((a, b) => a + b, 0) / n;
-    xs.push(cx);
-    ys.push(cy);
+    const c = polygonCentroid(poly.xpoints, poly.ypoints);
+    if (!c) return;
+    xs.push(c[0]);
+    ys.push(c[1]);
     text.push(`R${i + 1}`);
   });
-  return [{
-    x: xs,
-    y: ys,
-    text,
-    type: 'scatter',
-    mode: 'markers+text',
-    textposition: 'top center',
-    marker: { size: 10, color: input.shapeColor, line: { color: '#000', width: 1 } },
-    name: 'Region centroids',
-  }];
+  return [
+    {
+      x: xs,
+      y: ys,
+      text,
+      type: 'scatter',
+      mode: 'markers+text',
+      textposition: 'top center',
+      marker: { size: 10, color: input.shapeColor, line: { color: '#000', width: 1 } },
+      name: 'Region centroids',
+    },
+  ];
 }
 
 /**
@@ -164,7 +168,7 @@ function buildScatterTraces(input: TraceBuildInput): any[] {
  * A single-frame image is thickened to two z-planes so 3D traces render.
  */
 function sampleVolume(input: TraceBuildInput, maxXY: number, maxZ: number) {
-  let frames = input.frames.map(f => toScalarFrame(f, input.isGrayscale));
+  let frames = input.frames.map((f) => toScalarFrame(f, input.isGrayscale));
   if (frames.length < 2) frames = [frames[0] || [], frames[0] || []];
 
   const height = frames[0].length;
@@ -194,19 +198,23 @@ function sampleVolume(input: TraceBuildInput, maxXY: number, maxZ: number) {
 /** SCATTER3D — downsampled voxels as intensity-coloured 3D markers. */
 function buildScatter3dTraces(input: TraceBuildInput): any[] {
   const { x, y, z, value } = sampleVolume(input, 48, 40);
-  return [{
-    type: 'scatter3d',
-    mode: 'markers',
-    x, y, z,
-    marker: {
-      size: 2,
-      color: value,
-      colorscale: input.colorscale,
-      reversescale: input.reversescale,
-      opacity: 0.8,
+  return [
+    {
+      type: 'scatter3d',
+      mode: 'markers',
+      x,
+      y,
+      z,
+      marker: {
+        size: 2,
+        color: value,
+        colorscale: input.colorscale,
+        reversescale: input.reversescale,
+        opacity: 0.8,
+      },
+      name: 'Voxels',
     },
-    name: 'Voxels',
-  }];
+  ];
 }
 
 /** ISOSURFACE — iso-intensity surfaces over the downsampled volume grid.
@@ -218,31 +226,89 @@ function buildIsosurfaceTraces(input: TraceBuildInput): any[] {
   // We only guard ordering here.
   const isoMin = Math.min(input.isoMin, input.isoMax);
   const isoMax = Math.max(input.isoMin, input.isoMax);
-  return [{
-    type: 'isosurface',
-    x, y, z, value,
-    isomin: isoMin,
-    isomax: isoMax,
-    // A few nested levels (not just the two band extremes): even if an extreme
-    // grazes the data edge and draws nothing, an interior level still renders,
-    // so the volume is never silently empty.
-    surface: { count: 3 },
-    colorscale: input.colorscale,
-    reversescale: input.reversescale,
-    opacity: 0.6,
-    caps: { x: { show: false }, y: { show: false }, z: { show: false } },
-    name: 'Isosurface',
-  }];
+  return [
+    {
+      type: 'isosurface',
+      x,
+      y,
+      z,
+      value,
+      isomin: isoMin,
+      isomax: isoMax,
+      // A few nested levels (not just the two band extremes): even if an extreme
+      // grazes the data edge and draws nothing, an interior level still renders,
+      // so the volume is never silently empty.
+      surface: { count: 3 },
+      colorscale: input.colorscale,
+      reversescale: input.reversescale,
+      opacity: 0.6,
+      caps: { x: { show: false }, y: { show: false }, z: { show: false } },
+      name: 'Isosurface',
+    },
+  ];
 }
 
 /** Registry of the pluggable (non-original) plot types. */
 export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl>> = {
-  [PlotType.CONTOUR]:    { buildTraces: buildContourTraces,    layoutKind: '2d-image',   threeD: false },
-  [PlotType.SCATTER]:    { buildTraces: buildScatterTraces,    layoutKind: '2d-overlay', threeD: false },
-  [PlotType.SCATTER3D]:  { buildTraces: buildScatter3dTraces,  layoutKind: '3d-volume',  threeD: true },
-  [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume',  threeD: true },
+  [PlotType.CONTOUR]: { buildTraces: buildContourTraces, layoutKind: '2d-image', threeD: false },
+  [PlotType.SCATTER]: { buildTraces: buildScatterTraces, layoutKind: '2d-overlay', threeD: false },
+  [PlotType.SCATTER3D]: { buildTraces: buildScatter3dTraces, layoutKind: '3d-volume', threeD: true },
+  [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume', threeD: true },
 };
 
-export function getPlotTypeImpl(type: PlotType): PlotlyPlotTypeImpl | undefined {
-  return PLOTLY_PLOT_TYPE_IMPLS[type];
+// ── HEATMAP / SURFACE / RGB image (the original renderers) ─────────────────
+
+/**
+ * One grayscale heatmap trace per z-plane, only the first visible (the layout's
+ * slider switches them). `trueImgSize` is [x0, x1, y0, y1]; `ratios` the data
+ * units per pixel. No per-cell hover text: building it for every pixel is too slow.
+ */
+export function buildHeatmapTraces(
+  frames: any[],
+  trueImgSize: number[],
+  ratios: number[],
+  colorscale: unknown,
+  reversescale: boolean,
+): any[] {
+  return frames.map((z, index) => ({
+    x0: trueImgSize[0],
+    dx: ratios[0],
+    y0: trueImgSize[2],
+    dy: ratios[0],
+    z,
+    type: 'heatmap',
+    hoverinfo: 'none',
+    colorscale,
+    reversescale,
+    name: `Slice ${index + 1}`,
+    visible: index === 0,
+  }));
+}
+
+/** One grayscale surface trace per frame, coloured by the active colormap. */
+export function buildSurfaceTraces(frames: any[], colorscale: unknown, reversescale: boolean): any[] {
+  return frames.map((z) => ({ z, type: 'surface', colorscale, reversescale }));
+}
+
+/** One RGB `image` trace per z-plane (width × height pixels), only the first visible. */
+export function buildRgbImageTraces(
+  frames: any[],
+  trueImgSize: number[],
+  ratios: number[],
+  width: number,
+  height: number,
+): any[] {
+  return frames.map((z, index) => ({
+    x0: trueImgSize[0],
+    dx: ratios[0],
+    y0: trueImgSize[2],
+    dy: ratios[0],
+    x: Array.from(Array(width).keys()),
+    y: Array.from(Array(height).keys()),
+    z,
+    hoverinfo: 'none', // no per-cell hover text: too slow for every pixel
+    type: 'image',
+    name: `Slice ${index + 1}`,
+    visible: index === 0,
+  }));
 }

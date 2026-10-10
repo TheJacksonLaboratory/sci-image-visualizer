@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { firstValueFrom, of } from 'rxjs';
+import { Subject, firstValueFrom, of } from 'rxjs';
 
 import { RoutingVisualizerService } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
@@ -15,6 +15,7 @@ import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { Rectangle, Region } from './models/region';
 import { BehaviorSubject } from 'rxjs';
+import { IntensityProfileService } from './intensity/intensity-profile.service';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -40,6 +41,7 @@ function mockBackend(): any {
     relayout: jest.fn(),
     resetAxes: jest.fn(),
     autoscale: jest.fn(),
+    fitToView: jest.fn(),
     zoomIn: jest.fn(),
     zoomOut: jest.fn(),
     setDragMode: jest.fn(),
@@ -64,6 +66,7 @@ function mockBackend(): any {
     getRegionOverlay: jest.fn().mockReturnValue({ kind: 'overlay' }),
     getSurface3dControls: jest.fn().mockReturnValue({ kind: '3d' }),
     unsubscribe: jest.fn(),
+    detach: jest.fn(),
     // ── remaining IVisualizer surface (for delegation coverage) ──
     getTrueImageSize: jest.fn().mockReturnValue({ width: 0, height: 0 }),
     getCurrentImage: jest.fn().mockResolvedValue(null),
@@ -77,7 +80,7 @@ function mockBackend(): any {
     setStackLoading: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
-    getAutoscaleEvent: jest.fn().mockReturnValue(of(null)),
+    getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
     getIntensityProfile$: jest.fn().mockReturnValue(of([])),
     renderIntensityInset: jest.fn(),
     getRegionUpdateEvent: jest.fn().mockReturnValue(of([])),
@@ -88,12 +91,10 @@ function mockBackend(): any {
     getFillColor: jest.fn().mockReturnValue('#000000'),
     getClassificationColors: jest.fn().mockReturnValue(new Map()),
     setClassificationColor: jest.fn(),
-    plotPreviousShapes: jest.fn(),
-    setPreviousShapes: jest.fn(),
-    getPreviousShapes: jest.fn().mockReturnValue([]),
     importRegions: jest.fn().mockReturnValue([]),
     exportRegions: jest.fn(),
     getGeoJsonString: jest.fn().mockReturnValue('{}'),
+    setActiveTool: jest.fn(),
     setWandMode: jest.fn(),
     setWandOptions: jest.fn(),
     clearActiveWandRegion: jest.fn(),
@@ -112,9 +113,10 @@ function mockBackend(): any {
     getIntensityControls: jest.fn().mockReturnValue(null),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
     refreshIntensitySamplingForRoi: jest.fn(),
-    getViewportChange$: jest.fn().mockReturnValue(of({ x: 0, y: 0, width: 0, height: 0 })),
-    setNavigatorVisible: jest.fn(),
-    setImageSmoothingEnabled: jest.fn(),
+    // capability-gated getters (IVisualizer split (e)): none by default
+    getOsdViewOptions: jest.fn().mockReturnValue(null),
+    getVolumeResolution: jest.fn().mockReturnValue(null),
+    getIntensitySampling: jest.fn().mockReturnValue(null),
   };
 }
 
@@ -126,8 +128,17 @@ describe('RoutingVisualizerService (characterization)', () => {
   let osd: any;
   let napari: any;
   let store: VisualizerStore;
+  let regionStore: RegionStore;
+  let intensity: Record<string, jest.Mock>;
 
   function setup(): void {
+    intensity = {
+      getIntensityProfile$: jest.fn().mockReturnValue(of([])),
+      setSamplingElement: jest.fn(),
+      ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
+      refreshIntensitySamplingForRoi: jest.fn(),
+      addProfileLine: jest.fn().mockReturnValue(null),
+    };
     plotly = mockBackend();
     osd = mockBackend();
     napari = mockBackend();
@@ -140,10 +151,12 @@ describe('RoutingVisualizerService (characterization)', () => {
         { provide: OpenSeadragonVisualizerService, useValue: osd },
         { provide: NapariVisualizerService, useValue: napari },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        { provide: IntensityProfileService, useValue: intensity },
       ],
     });
     router = TestBed.inject(RoutingVisualizerService);
     store = TestBed.inject(VisualizerStore);
+    regionStore = TestBed.inject(RegionStore);
   }
 
   beforeEach(() => setup());
@@ -220,6 +233,24 @@ describe('RoutingVisualizerService (characterization)', () => {
     warn.mockRestore();
   });
 
+  it('passes the abort signal through to the backend load (CORE-11)', async () => {
+    router.setPlotType(PlotType.IMAGE);
+    const signal = new AbortController().signal;
+    await router.load(IMAGE_INFO, 0, signal);
+    expect(osd.load).toHaveBeenCalledWith(IMAGE_INFO, 0, signal);
+  });
+
+  it('does not fall back to another backend for a load that was aborted', async () => {
+    router.setPlotType(PlotType.IMAGE);
+    const ctl = new AbortController();
+    osd.load.mockImplementation(() => {
+      ctl.abort();
+      return Promise.reject(new Error('aborted'));
+    });
+    await expect(router.load(IMAGE_INFO, 0, ctl.signal)).rejects.toThrow('aborted');
+    expect(plotly.load).not.toHaveBeenCalled();
+  });
+
   it('loads through OSD when it succeeds (no Plotly load)', async () => {
     await router.load(IMAGE_INFO, 0);
     expect(osd.load).toHaveBeenCalled();
@@ -277,9 +308,10 @@ describe('RoutingVisualizerService (characterization)', () => {
     await expect(firstValueFrom(router.getColormap())).resolves.toBe('Greens');
     expect(plotly.getColormap).not.toHaveBeenCalled();
 
-    router.setColormap('Reds');
+    const reds = { label: 'Reds', data: { value: 'Reds' } };
+    router.setColormap(reds);
     router.setReverseScale(true);
-    expect(plotly.setColormap).toHaveBeenCalledWith('Reds');
+    expect(plotly.setColormap).toHaveBeenCalledWith(reds);
     expect(plotly.setReverseScale).toHaveBeenCalledWith(true);
   });
 
@@ -301,22 +333,29 @@ describe('RoutingVisualizerService (characterization)', () => {
   it('getAnnotationRegions excludes intensity-profile lines', () => {
     const profile = { id: 1, kind: 'profile' };
     const annotation = { id: 2 };
-    plotly.getRegions.mockReturnValue([profile, annotation]);
+    jest.spyOn(regionStore, 'getRegions').mockReturnValue([profile, annotation] as unknown as Region[]);
     expect(router.getAnnotationRegions()).toEqual([annotation]);
   });
 
   it('setAnnotationRegions preserves existing profile lines and never appends', () => {
     const profile = { id: 1, kind: 'profile' };
-    plotly.getRegions.mockReturnValue([profile, { id: 2 }]);
+    jest.spyOn(regionStore, 'getRegions').mockReturnValue([profile, { id: 2 }] as unknown as Region[]);
+    const write = jest.spyOn(regionStore, 'setRegions').mockImplementation(() => undefined);
     const next: any = [{ id: 3 }];
     router.setAnnotationRegions(next, true, false, '#fff');
-    expect(plotly.setRegions).toHaveBeenCalledWith([{ id: 3 }, profile], true, false, '#fff', false);
+    expect(write).toHaveBeenCalledWith([{ id: 3 }, profile], true, false, '#fff', false);
   });
 
   // ── auto-contrast windowing math ──────────────────────────────────────
   function seedChannel(): void {
     const ch: IChannelState = {
-      index: 0, name: 'Intensity', color: '#ffffff', min: 0, max: 255, gamma: 1, visible: true,
+      index: 0,
+      name: 'Intensity',
+      color: '#ffffff',
+      min: 0,
+      max: 255,
+      gamma: 1,
+      visible: true,
     };
     store.setChannelStates([ch]);
   }
@@ -372,7 +411,7 @@ describe('RoutingVisualizerService (characterization)', () => {
   it.each<[string, any[]]>([
     ['relayout', [[10, 20]]],
     ['resetAxes', []],
-    ['autoscale', []],
+    ['fitToView', []],
     ['zoomIn', []],
     ['zoomOut', []],
     ['setDragMode', ['pan']],
@@ -385,24 +424,8 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['downloadImage', []],
     ['exportComposite', []],
     ['exportData', []],
-    ['getRegions', []],
-    ['getRegionPolygons', []],
-    ['getRegionUpdateEvent', []],
-    ['setSelectedShapeIndices', [[0, 1]]],
-    ['selectRegion', [{ id: 1 }]],
-    ['getSelectedShapeIndices$', []],
-    ['deleteActiveShape', []],
-    ['getShowShapeLabel', []],
-    ['getShapeColor', []],
-    ['getFillColor', []],
-    ['getClassificationColors', []],
-    ['setClassificationColor', ['tumour', '#fff']],
-    ['plotPreviousShapes', []],
-    ['setPreviousShapes', [[]]],
-    ['getPreviousShapes', []],
-    ['importRegions', ['{}']],
-    ['exportRegions', [[]]],
-    ['getGeoJsonString', [[]]],
+    ['setActiveTool', ['wand', { sensitivity: 2 }]],
+    ['setActiveTool', [null, undefined]],
     ['setWandMode', [true, { sensitivity: 2 }]],
     ['setWandOptions', [{ sensitivity: 2 }]],
     ['clearActiveWandRegion', []],
@@ -419,11 +442,60 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['setZoomToBoxMode', [true]],
     ['getHistogram', [0, 256]],
     ['getHistogram$', [0, 256]],
-    ['setRegions', [[], true, false, '#fff', false]],
   ])('routes %s to the active renderer (Plotly before any plot)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
     expect(osd[method]).not.toHaveBeenCalled();
+  });
+
+  // ── region reads and plain writes come straight from the shared stores (IVisualizer split (d)) ──
+  it.each<[string, unknown[], 'region' | 'display']>([
+    ['getRegions', [], 'region'],
+    ['getRegionPolygons', [], 'region'],
+    ['getRegionUpdateEvent', [], 'region'],
+    ['getSelectedShapeIndices$', [], 'region'],
+    ['getShowShapeLabel', [], 'region'],
+    ['getShapeColor', [], 'region'],
+    ['getFillColor', [], 'region'],
+    ['canUndo', [], 'region'],
+    ['canRedo', [], 'region'],
+    ['getCanUndo$', [], 'region'],
+    ['getCanRedo$', [], 'region'],
+    ['resetUndoHistory', [], 'region'],
+    ['importRegions', ['{"type":"FeatureCollection","features":[]}'], 'region'],
+    ['getGeoJsonString', [[]], 'region'],
+    ['isStackMode', [], 'region'],
+    ['exitStackMode', [], 'region'],
+    ['getStackSaveLayout', [], 'region'],
+    ['getSliceRegions', [], 'region'],
+    ['getStackSaveSlices', [], 'region'],
+    // the writes too (step (d)): every backend redraws from the store's events
+    ['setRegions', [[], true, false, '#fff', false], 'region'],
+    ['setSelectedShapeIndices', [[0, 1]], 'region'],
+    ['selectRegion', [{ id: 1 }], 'region'],
+    ['deleteActiveShape', [], 'region'],
+    ['undo', [], 'region'],
+    ['redo', [], 'region'],
+    ['setDisplaySlice', [2], 'region'],
+    ['getClassificationColors', [], 'display'],
+    ['setClassificationColor', ['tumour', '#ffffff'], 'display'],
+  ])('serves %s from the shared store, not a backend', async (method, args, owner) => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE); // OSD on screen
+    const target = (owner === 'region' ? regionStore : store) as unknown as Record<string, () => unknown>;
+    const spy = jest.spyOn(target, method);
+    (router as unknown as Record<string, (...a: unknown[]) => unknown>)[method](...args);
+    expect(spy).toHaveBeenCalledWith(...args);
+    for (const backend of [plotly, osd, napari]) {
+      if (backend[method]) expect(backend[method]).not.toHaveBeenCalled();
+    }
+  });
+
+  it('exports regions through the store, named after the image last plotted', async () => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    const spy = jest.spyOn(regionStore, 'exportRegions').mockImplementation(() => undefined);
+    router.exportRegions([]);
+    expect(spy).toHaveBeenCalledWith([], 'test.tif');
+    for (const backend of [plotly, osd, napari]) expect(backend.exportRegions).not.toHaveBeenCalled();
   });
 
   it('switches delegation to OSD once an IMAGE plot makes it the active renderer', async () => {
@@ -431,32 +503,61 @@ describe('RoutingVisualizerService (characterization)', () => {
     router.zoomIn();
     router.setDragMode('pan');
     router.setZIndex(2);
+    router.setActiveTool('brush', { size: 8 });
     expect(osd.zoomIn).toHaveBeenCalled();
+    expect(osd.setActiveTool).toHaveBeenCalledWith('brush', { size: 8 });
+    expect(plotly.setActiveTool).not.toHaveBeenCalled();
     expect(osd.setDragMode).toHaveBeenCalledWith('pan');
     expect(osd.setZIndex).toHaveBeenCalledWith(2);
   });
 
   // ── methods pinned to a specific backend, regardless of the renderer ──
   it.each<[string, any[]]>([
-    ['setSurfaceDragMode', ['orbit']],
-    ['resetSurfaceCamera', []],
     ['getPlotTypeDescriptors', []],
     ['setStackLoading', [true]],
     ['isStackLoading', []],
     ['getStackLoadingProgress', []],
     ['getAutoscaleEvent', []],
-    ['getIntensityProfile$', []],
     ['renderIntensityInset', ['div', []]],
     ['setColormap', ['Reds']],
     ['setReverseScale', [true]],
     ['getIsosurfaceControls', []],
     ['getSurface3dControls', []],
-    ['getIntensityControls', []],
-    ['ensureIntensitySampling', [IMAGE_INFO, 0]],
-    ['refreshIntensitySamplingForRoi', [0, 0, 10, 10, 0]],
   ])('routes %s to Plotly (the full-featured backend)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('the deprecated autoscale is fitToView; the 3D camera members go through getSurface3dControls()', () => {
+    router.autoscale();
+    expect(plotly.fitToView).toHaveBeenCalledTimes(1);
+    const controls = { setSurfaceDragMode: jest.fn(), resetSurfaceCamera: jest.fn() };
+    plotly.getSurface3dControls.mockReturnValue(controls);
+    router.setSurfaceDragMode('orbit');
+    router.resetSurfaceCamera();
+    expect(controls.setSurfaceDragMode).toHaveBeenCalledWith('orbit');
+    expect(controls.resetSurfaceCamera).toHaveBeenCalled();
+    plotly.getSurface3dControls.mockReturnValue(null); // a 2D-only backend: a no-op, not a throw
+    expect(() => router.resetSurfaceCamera()).not.toThrow();
+  });
+
+  it('surfaces the autoscale event of every backend, not only Plotly (CORE-5)', () => {
+    const osdAutoscale = new Subject<void>();
+    const napariAutoscale = new Subject<void>();
+    osd.getAutoscaleEvent.mockReturnValue(osdAutoscale);
+    napari.getAutoscaleEvent.mockReturnValue(napariAutoscale);
+    const seen = jest.fn();
+    const sub = router.getAutoscaleEvent().subscribe(seen);
+    osdAutoscale.next();
+    napariAutoscale.next();
+    expect(seen).toHaveBeenCalledTimes(2);
+    sub.unsubscribe();
+  });
+
+  it('forwards the image key with the image meta to the store (CORE-8)', () => {
+    const spy = jest.spyOn(store, 'setImageMeta');
+    router.setImageMeta([], 'a.tif');
+    expect(spy).toHaveBeenCalledWith([], 'a.tif');
   });
 
   it('setPlotType records the type and delegates to Plotly', () => {
@@ -464,37 +565,126 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(plotly.setPlotType).toHaveBeenCalledWith(PlotType.HEATMAP);
   });
 
-  it('getViewportChange$ comes from OpenSeadragon (the only backend that emits it)', () => {
-    router.getViewportChange$();
-    expect(osd.getViewportChange$).toHaveBeenCalled();
-    expect(plotly.getViewportChange$).not.toHaveBeenCalled();
+  // ── capability-gated extras (IVisualizer split (e)) ─────────────────────
+  function viewOptions() {
+    return { setNavigatorVisible: jest.fn(), setImageSmoothingEnabled: jest.fn() };
+  }
+
+  it('applies the view options to every backend that has them, before any render', () => {
+    const osdOpts = viewOptions();
+    const napariOpts = viewOptions();
+    osd.getOsdViewOptions.mockReturnValue(osdOpts);
+    napari.getOsdViewOptions.mockReturnValue(napariOpts); // Plotly has none (null)
+    router.getOsdViewOptions().setNavigatorVisible(false);
+    router.getOsdViewOptions().setImageSmoothingEnabled(true);
+    for (const o of [osdOpts, napariOpts]) {
+      expect(o.setNavigatorVisible).toHaveBeenCalledWith(false);
+      expect(o.setImageSmoothingEnabled).toHaveBeenCalledWith(true);
+    }
+    // The deprecated always-on members are the same fan-out.
+    router.setNavigatorVisible(true);
+    router.setImageSmoothingEnabled(false);
+    for (const o of [osdOpts, napariOpts]) {
+      expect(o.setNavigatorVisible).toHaveBeenLastCalledWith(true);
+      expect(o.setImageSmoothingEnabled).toHaveBeenLastCalledWith(false);
+    }
   });
 
-  it.each<[string, any[]]>([
-    ['setNavigatorVisible', [false]],
-    ['setImageSmoothingEnabled', [false]],
-  ])('%s is applied to BOTH backends (set before the first render)', (method, args) => {
-    (router as any)[method](...args);
-    expect(osd[method]).toHaveBeenCalledWith(...args);
-    expect(plotly[method]).toHaveBeenCalledWith(...args);
+  it('serves the volume resolution of the backend on screen; the old members go through it', async () => {
+    expect(router.getVolumeResolution()).toBeNull(); // Plotly before any plot
+    expect(router.getResolutionScale()).toBe(1);
+    expect(() => router.setResolutionScale(4)).not.toThrow();
+
+    const resolution = { get: jest.fn().mockReturnValue(2), set: jest.fn() };
+    napari.getVolumeResolution.mockReturnValue(resolution);
+    router.setPlotType(PlotType.NAPARI_VOLUME);
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
+    expect(router.getVolumeResolution()).toBe(resolution);
+    expect(router.getResolutionScale()).toBe(2);
+    router.setResolutionScale(8);
+    expect(resolution.set).toHaveBeenCalledWith(8);
   });
 
-  it('setNavigatorVisible also reaches napari-js, which now has a navigator too', () => {
-    router.setNavigatorVisible(false);
-    expect(napari.setNavigatorVisible).toHaveBeenCalledWith(false);
+  it('merges the viewport changes of every backend that reports them (OSD, napari-js)', () => {
+    const osd$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+    const napari$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+    osd.getIntensitySampling.mockReturnValue({ getViewportChange$: () => osd$ });
+    napari.getIntensitySampling.mockReturnValue({ getViewportChange$: () => napari$ });
+    const seen: number[] = [];
+    router
+      .getIntensitySampling()
+      .getViewportChange$()
+      .subscribe((r) => seen.push(r.x));
+    router.getViewportChange$().subscribe((r) => seen.push(r.x * 10)); // deprecated alias
+    osd$.next({ x: 1, y: 0, width: 1, height: 1 });
+    napari$.next({ x: 2, y: 0, width: 1, height: 1 });
+    expect(seen).toEqual([1, 10, 2, 20]);
   });
 
-  it('unsubscribe tears down both backends', () => {
+  it('the deprecated sampling members go through getIntensitySampling()', async () => {
+    await router.plot('viz-plot-2', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    const sampling = router.getIntensitySampling();
+    await sampling.ensureIntensitySampling(IMAGE_INFO, 1);
+    sampling.refreshIntensitySamplingForRoi(0, 0, 5, 5, 1);
+    expect(intensity['ensureIntensitySampling']).toHaveBeenCalledWith(IMAGE_INFO, 1);
+    expect(intensity['refreshIntensitySamplingForRoi']).toHaveBeenCalledWith(0, 0, 5, 5, 1);
+    expect(intensity['setSamplingElement']).toHaveBeenCalledWith('viz-plot-2');
+  });
+
+  it('detach detaches every backend; unsubscribe is its deprecated alias (CORE-1)', () => {
+    router.detach();
+    for (const b of [plotly, osd, napari]) expect(b.detach).toHaveBeenCalledTimes(1);
     router.unsubscribe();
-    expect(plotly.unsubscribe).toHaveBeenCalled();
-    expect(osd.unsubscribe).toHaveBeenCalled();
+    for (const b of [plotly, osd, napari]) expect(b.detach).toHaveBeenCalledTimes(2);
   });
 
-  it('getIsosurfaceControls / getIntensityControls are Plotly-owned', () => {
+  it('detach also disposes the napari-js viewer and forgets the backend on screen (CORE-7)', async () => {
+    await router.load(IMAGE_INFO, 0);
+    router.setPlotType(PlotType.NAPARI_VOLUME);
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
+    expect(napari.plot).toHaveBeenCalled();
+    router.detach();
+    expect(napari.detach).toHaveBeenCalled();
+    // Nothing is on screen any more: delegation falls back to the Plotly default.
+    router.zoomIn();
+    expect(plotly.zoomIn).toHaveBeenCalled();
+    expect(napari.zoomIn).not.toHaveBeenCalled();
+  });
+
+  it('getIsosurfaceControls is Plotly-owned before any plot', () => {
     router.getIsosurfaceControls();
-    router.getIntensityControls();
     expect(plotly.getIsosurfaceControls).toHaveBeenCalled();
-    expect(plotly.getIntensityControls).toHaveBeenCalled();
+  });
+
+  // ── intensity profiles: the backend-neutral IntensityProfileService, not Plotly ──
+  it('serves the profiles and the line controls from the IntensityProfileService on any backend', async () => {
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE); // OSD on screen
+    router.getIntensityProfile$();
+    expect(intensity['getIntensityProfile$']).toHaveBeenCalled();
+    expect(router.getIntensityControls()).toBe(intensity);
+    for (const b of [plotly, osd, napari]) {
+      expect(b.getIntensityProfile$).not.toHaveBeenCalled();
+      expect(b.getIntensityControls).not.toHaveBeenCalled();
+    }
+  });
+
+  it('samples through the IntensityProfileService, sizing crops from the plotted div', async () => {
+    await router.plot('viz-plot-1', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    await router.ensureIntensitySampling(IMAGE_INFO, 2);
+    router.refreshIntensitySamplingForRoi(1, 2, 3, 4, 2);
+    expect(intensity['ensureIntensitySampling']).toHaveBeenCalledWith(IMAGE_INFO, 2);
+    expect(intensity['refreshIntensitySamplingForRoi']).toHaveBeenCalledWith(1, 2, 3, 4, 2);
+    // Each call points the service at the plot div first.
+    expect(intensity['setSamplingElement'].mock.calls).toEqual([['viz-plot-1'], ['viz-plot-1']]);
+    expect(intensity['setSamplingElement'].mock.invocationCallOrder[1]).toBeLessThan(
+      intensity['refreshIntensitySamplingForRoi'].mock.invocationCallOrder[0],
+    );
+    for (const b of [plotly, osd, napari]) expect(b.refreshIntensitySamplingForRoi).not.toHaveBeenCalled();
+  });
+
+  it('keeps rendering the inset through Plotly', () => {
+    router.renderIntensityInset('inset', []);
+    expect(plotly.renderIntensityInset).toHaveBeenCalledWith('inset', []);
   });
 
   // ── display + channel state read/write the shared store ───────────────
@@ -540,7 +730,8 @@ describe('RoutingVisualizerService (characterization)', () => {
  */
 describe('RoutingVisualizerService — spatial controls', () => {
   const dataset: SpatialDataset = {
-    id: 'demo', name: 'Demo',
+    id: 'demo',
+    name: 'Demo',
     observations: { count: 2, x: new Float32Array(2), y: new Float32Array(2) },
     columns: [
       { kind: 'categorical', name: 'region', categories: ['A', 'B'], colors: ['#ff0000', '#0000ff'] },
@@ -559,6 +750,7 @@ describe('RoutingVisualizerService — spatial controls', () => {
         { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
         { provide: NapariVisualizerService, useValue: mockBackend() },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        { provide: IntensityProfileService, useValue: {} },
         ...(port ? [{ provide: SPATIAL_DATA_PORT, useValue: port }] : []),
       ],
     });
@@ -581,7 +773,10 @@ describe('RoutingVisualizerService — spatial controls', () => {
   function roi(x: number, y: number, w: number, h: number): Region {
     const r = new Region();
     const b = new Rectangle();
-    b.x = x; b.y = y; b.width = w; b.height = h;
+    b.x = x;
+    b.y = y;
+    b.width = w;
+    b.height = h;
     r.bounds = b;
     return r;
   }
@@ -596,9 +791,11 @@ describe('RoutingVisualizerService — spatial controls', () => {
         columns: [{ kind: 'continuous', name: 'total_counts', logScaleHint: true }],
         features: { count: 1, names: ['Ttr'], logScaleHint: true },
       };
-      const { router, store } = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
-      }));
+      const { router, store } = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(hinted),
+        }),
+      );
       const controls = router.getSpatialControls()!;
 
       controls.colorByColumn('total_counts');
@@ -636,7 +833,8 @@ describe('RoutingVisualizerService — spatial controls', () => {
       // A different dataset with no `region`: keeping the source would leave the
       // map flat while the panel and the charts kept naming it.
       dataset$.next({
-        ...dataset, id: 'other',
+        ...dataset,
+        id: 'other',
         columns: [{ kind: 'categorical', name: 'zone', categories: ['Z'] }],
       });
 
@@ -680,10 +878,12 @@ describe('RoutingVisualizerService — spatial controls', () => {
     };
 
     function withDataset(over: Record<string, unknown> = {}) {
-      const built = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
-        ...over,
-      }));
+      const built = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(spatial),
+          ...over,
+        }),
+      );
       return {
         ...built,
         regions: TestBed.inject(RegionStore),
@@ -723,11 +923,11 @@ describe('RoutingVisualizerService — spatial controls', () => {
     it('rejects a category selection on a continuous column', async () => {
       const { router } = withDataset({
         getColumn: jest.fn().mockResolvedValue({
-          meta: { kind: 'continuous', name: 'counts' }, values: new Float32Array(3),
+          meta: { kind: 'continuous', name: 'counts' },
+          values: new Float32Array(3),
         }),
       });
-      await expect(router.getSpatialControls()!.selectCategory('counts', 0))
-        .rejects.toThrow(/continuous/);
+      await expect(router.getSpatialControls()!.selectCategory('counts', 0)).rejects.toThrow(/continuous/);
     });
 
     it('clears the selection', () => {
@@ -752,11 +952,23 @@ describe('RoutingVisualizerService — spatial controls', () => {
     });
 
     it('selects nothing when no dataset is loaded', () => {
-      const { router } = build(mockPort({
-        getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
-      }));
+      const { router } = build(
+        mockPort({
+          getDataset$: () => new BehaviorSubject<SpatialDataset | null>(null),
+        }),
+      );
       expect(router.getSpatialControls()!.selectFromRegions()).toBe(0);
     });
+  });
+
+  it('drops its dataset subscription when its injector is destroyed (CORE-30)', () => {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    build(mockPort({ getDataset$: () => dataset$ })).router.getSpatialControls();
+    expect(dataset$.observed).toBe(true);
+    // A component-scoped chain (provideVisualization) is destroyed with its host
+    // component; the root port must not keep the whole isolated chain reachable.
+    TestBed.resetTestingModule();
+    expect(dataset$.observed).toBe(false);
   });
 
   it('returns null when the host binds no SPATIAL_DATA_PORT', () => {
@@ -787,9 +999,7 @@ describe('RoutingVisualizerService — spatial controls', () => {
     expect(store.currentSpatialView().colorBy).toBeNull();
 
     controls.setViewState({ pointScale: 3, opacity: 0.5 });
-    expect(store.currentSpatialView()).toEqual(
-      expect.objectContaining({ pointScale: 3, opacity: 0.5 }),
-    );
+    expect(store.currentSpatialView()).toEqual(expect.objectContaining({ pointScale: 3, opacity: 0.5 }));
   });
 
   it('exposes the dataset stream for pickers and legends', async () => {
@@ -825,14 +1035,15 @@ describe('RoutingVisualizerService — spatial controls', () => {
     it('resolves legend swatches with the same function the renderer uses', async () => {
       const column: CategoricalColumn = {
         meta: {
-          kind: 'categorical', name: 'region', categories: ['A', 'B'],
+          kind: 'categorical',
+          name: 'region',
+          categories: ['A', 'B'],
           colors: ['#ff0000', '#0000ff'],
         },
         codes: new Uint16Array([0, 1]),
       };
       const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
-      expect(await router.getSpatialControls()!.categoryColors('region'))
-        .toEqual(['#ff0000', '#0000ff']);
+      expect(await router.getSpatialControls()!.categoryColors('region')).toEqual(['#ff0000', '#0000ff']);
     });
 
     it('rejects for a continuous column instead of returning an empty legend', async () => {
@@ -841,8 +1052,9 @@ describe('RoutingVisualizerService — spatial controls', () => {
         values: new Float32Array(2),
       };
       const { router } = build(mockPort({ getColumn: jest.fn().mockResolvedValue(column) }));
-      await expect(router.getSpatialControls()!.categoryColors('counts'))
-        .rejects.toThrow(/continuous .* no categories/);
+      await expect(router.getSpatialControls()!.categoryColors('counts')).rejects.toThrow(
+        /continuous .* no categories/,
+      );
     });
   });
 });

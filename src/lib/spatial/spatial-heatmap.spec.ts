@@ -1,6 +1,4 @@
-import {
-  HEATMAP_MIN_CELLS, HeatmapGroups, cellsAsGroups, heatmapMatrix,
-} from './spatial-heatmap';
+import { HEATMAP_MIN_CELLS, HeatmapGroups, cellsAsGroups, heatmapMatrix } from './spatial-heatmap';
 import { NO_CATEGORY } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -19,11 +17,7 @@ describe('heatmapMatrix', () => {
     m.values[r * m.cols.length + c];
 
   it('averages each gene within each group', () => {
-    const m = heatmapMatrix(
-      [gene('g1', [1, 2, 3, 10, 20, 30])],
-      groups,
-      { zScore: false },
-    )!;
+    const m = heatmapMatrix([gene('g1', [1, 2, 3, 10, 20, 30])], groups, { zScore: false })!;
     expect(m.rows).toEqual(['g1']);
     expect(m.cols).toEqual(['A', 'B']);
     expect(at(m, 0, 0)).toBeCloseTo(2, 5); // (1+2+3)/3
@@ -34,11 +28,7 @@ describe('heatmapMatrix', () => {
   it('skips a cell with no measurement rather than reading it as zero', () => {
     // Counting the NaN as 0 would give A a mean of 1, implying the gene is
     // nearly absent there for a reason that is not about the biology.
-    const m = heatmapMatrix(
-      [gene('g1', [3, NaN, 3, 5, 5, 5])],
-      groups,
-      { zScore: false },
-    )!;
+    const m = heatmapMatrix([gene('g1', [3, NaN, 3, 5, 5, 5])], groups, { zScore: false })!;
     expect(at(m, 0, 0)).toBeCloseTo(3, 5);
     // The COLUMN count still reports the cells in the group, not the measured
     // ones — the group really does hold three cells.
@@ -46,11 +36,7 @@ describe('heatmapMatrix', () => {
   });
 
   it('leaves a group with nothing measured as a gap, not a zero', () => {
-    const m = heatmapMatrix(
-      [gene('g1', [1, 2, 3, NaN, NaN, NaN])],
-      groups,
-      { zScore: false },
-    )!;
+    const m = heatmapMatrix([gene('g1', [1, 2, 3, NaN, NaN, NaN])], groups, { zScore: false })!;
     expect(at(m, 0, 0)).toBeCloseTo(2, 5);
     expect(Number.isNaN(at(m, 0, 1))).toBe(true);
   });
@@ -81,21 +67,17 @@ describe('heatmapMatrix', () => {
       codes: Uint16Array.from([0, 0, 0, 1, 1, NO_CATEGORY]),
       categories: ['A', 'B'],
     };
-    const m = heatmapMatrix(
-      [gene('g1', [1, 1, 1, 4, 4, 999])],
-      withUnassigned,
-      { zScore: false, minCells: 2 },
-    )!;
+    const m = heatmapMatrix([gene('g1', [1, 1, 1, 4, 4, 999])], withUnassigned, { zScore: false, minCells: 2 })!;
     expect(at(m, 0, 1)).toBeCloseTo(4, 5); // the 999 is not in any group
     expect(Array.from(m.counts)).toEqual([3, 2]);
   });
 
   it('restricts to the given indices — an ROI selection', () => {
-    const m = heatmapMatrix(
-      [gene('g1', [1, 2, 3, 10, 20, 30])],
-      groups,
-      { zScore: false, minCells: 1, indices: Uint32Array.from([0, 3]) },
-    )!;
+    const m = heatmapMatrix([gene('g1', [1, 2, 3, 10, 20, 30])], groups, {
+      zScore: false,
+      minCells: 1,
+      indices: Uint32Array.from([0, 3]),
+    })!;
     expect(at(m, 0, 0)).toBeCloseTo(1, 5);
     expect(at(m, 0, 1)).toBeCloseTo(10, 5);
     expect(Array.from(m.counts)).toEqual([1, 1]);
@@ -112,7 +94,8 @@ describe('heatmapMatrix', () => {
     expect(HEATMAP_MIN_CELLS).toBe(3);
     // …and a caller who wants them can lower the floor.
     const all = heatmapMatrix([gene('g1', [1, 1, 1, 1, 1, 99])], lopsided, {
-      zScore: false, minCells: 1,
+      zScore: false,
+      minCells: 1,
     })!;
     expect(all.cols).toEqual(['big', 'tiny']);
   });
@@ -125,15 +108,14 @@ describe('heatmapMatrix', () => {
     };
     /** Group `g` gets value `level[g]`, the same for all three of its cells. */
     const byGroup = (name: string, level: number[]) =>
-      gene(name, Array.from({ length: 30 }, (_, i) => level[Math.floor(i / 3)]));
+      gene(
+        name,
+        Array.from({ length: 30 }, (_, i) => level[Math.floor(i / 3)]),
+      );
 
     it('keeps the columns where a gene actually stands out', () => {
       // g0 and g9 are the peaks; the middle eight sit flat at 1.
-      const m = heatmapMatrix(
-        [byGroup('g1', [9, 1, 1, 1, 1, 1, 1, 1, 1, 9])],
-        wide,
-        { maxCols: 3 },
-      )!;
+      const m = heatmapMatrix([byGroup('g1', [9, 1, 1, 1, 1, 1, 1, 1, 1, 9])], wide, { maxCols: 3 })!;
       expect(m.cols).toHaveLength(3);
       expect(m.cols).toContain('g0');
       expect(m.cols).toContain('g9');
@@ -156,22 +138,14 @@ describe('heatmapMatrix', () => {
     it('keeps a strong NEGATIVE column — absence is a marker too', () => {
       // g5 is the only group where the gene is missing. On a z-scored panel that
       // is a large negative, and it is exactly what a marker panel is read for.
-      const m = heatmapMatrix(
-        [byGroup('g1', [5, 5, 5, 5, 5, 0, 5, 5, 5, 5])],
-        wide,
-        { maxCols: 1 },
-      )!;
+      const m = heatmapMatrix([byGroup('g1', [5, 5, 5, 5, 5, 0, 5, 5, 5, 5])], wide, { maxCols: 1 })!;
       expect(m.cols).toEqual(['g5']);
       expect(at(m, 0, 0)).toBeLessThan(0);
     });
 
-    it('keeps the surviving columns in the column\'s own order, not by rank', () => {
+    it("keeps the surviving columns in the column's own order, not by rank", () => {
       // Ranked order would read g9, g0, g4 — jumbling the categories.
-      const m = heatmapMatrix(
-        [byGroup('g1', [7, 1, 1, 1, 5, 1, 1, 1, 1, 9])],
-        wide,
-        { maxCols: 3 },
-      )!;
+      const m = heatmapMatrix([byGroup('g1', [7, 1, 1, 1, 5, 1, 1, 1, 1, 9])], wide, { maxCols: 3 })!;
       expect(m.cols).toEqual(['g0', 'g4', 'g9']);
     });
 
@@ -179,8 +153,7 @@ describe('heatmapMatrix', () => {
       // The subset is rebuilt into a narrower matrix; a stride bug here would
       // put a column's colour under a different label.
       const m = heatmapMatrix(
-        [byGroup('a', [10, 1, 1, 1, 1, 1, 1, 1, 1, 20]),
-          byGroup('b', [30, 2, 2, 2, 2, 2, 2, 2, 2, 40])],
+        [byGroup('a', [10, 1, 1, 1, 1, 1, 1, 1, 1, 20]), byGroup('b', [30, 2, 2, 2, 2, 2, 2, 2, 2, 40])],
         wide,
         { maxCols: 2, zScore: false },
       )!;
@@ -195,18 +168,16 @@ describe('heatmapMatrix', () => {
     it('reports the range over the KEPT columns only', () => {
       // A dropped column's extreme must not stretch the colour scale, or the
       // panel is scaled to something it is not showing.
-      const m = heatmapMatrix(
-        [byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 99])],
-        wide,
-        { maxCols: 1, zScore: false },
-      )!;
+      const m = heatmapMatrix([byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 99])], wide, {
+        maxCols: 1,
+        zScore: false,
+      })!;
       expect(m.cols).toEqual(['g9']);
       expect(m.range).toEqual([99, 100]);
     });
 
     it('leaves a column narrower than the cap untouched', () => {
-      const m = heatmapMatrix([byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])], wide,
-        { maxCols: 50 })!;
+      const m = heatmapMatrix([byGroup('g1', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])], wide, { maxCols: 50 })!;
       expect(m.cols).toHaveLength(10);
       expect(m.hiddenCols).toBe(0);
     });
@@ -224,15 +195,16 @@ describe('heatmapMatrix', () => {
 
   it('returns null when there is nothing to draw', () => {
     expect(heatmapMatrix([], groups)).toBeNull();
-    expect(heatmapMatrix([gene('g1', [1])], { codes: new Uint16Array(1), categories: [] }))
-      .toBeNull();
+    expect(heatmapMatrix([gene('g1', [1])], { codes: new Uint16Array(1), categories: [] })).toBeNull();
     // Every group under the floor.
-    expect(heatmapMatrix([gene('g1', [1, 2])], {
-      codes: Uint16Array.from([0, 1]), categories: ['A', 'B'],
-    })).toBeNull();
+    expect(
+      heatmapMatrix([gene('g1', [1, 2])], {
+        codes: Uint16Array.from([0, 1]),
+        categories: ['A', 'B'],
+      }),
+    ).toBeNull();
     // Nothing measured anywhere.
-    expect(heatmapMatrix([gene('g1', [NaN, NaN, NaN, NaN, NaN, NaN])], groups, { zScore: false }))
-      .toBeNull();
+    expect(heatmapMatrix([gene('g1', [NaN, NaN, NaN, NaN, NaN, NaN])], groups, { zScore: false })).toBeNull();
   });
 });
 
@@ -263,7 +235,9 @@ describe('cellsAsGroups', () => {
     const genes = [{ name: 'g1', values: Float32Array.from([1, 5, 9]) }];
     expect(heatmapMatrix(genes, cells.groups, { indices: cells.indices })).toBeNull();
     const m = heatmapMatrix(genes, cells.groups, {
-      indices: cells.indices, minCells: 1, zScore: false,
+      indices: cells.indices,
+      minCells: 1,
+      zScore: false,
     })!;
     expect(m.cols).toEqual(['#0', '#1', '#2']);
     expect(Array.from(m.values)).toEqual([1, 5, 9]);

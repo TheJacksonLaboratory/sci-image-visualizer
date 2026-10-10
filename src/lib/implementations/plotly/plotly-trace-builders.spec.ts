@@ -15,7 +15,7 @@ describe('plotly-trace-builders', () => {
       [80, 90, 100, 110],
     ];
     return {
-      frames: [frame, frame.map(r => r.map(v => v + 1))],
+      frames: [frame, frame.map((r) => r.map((v) => v + 1))],
       width: 4,
       height: 3,
       ratios: [2, 2],
@@ -33,9 +33,7 @@ describe('plotly-trace-builders', () => {
 
   it('registry covers contour, scatter, scatter3d, isosurface only', () => {
     const keys = Object.keys(PLOTLY_PLOT_TYPE_IMPLS).sort();
-    expect(keys).toEqual(
-      [PlotType.CONTOUR, PlotType.ISOSURFACE, PlotType.SCATTER, PlotType.SCATTER3D].sort(),
-    );
+    expect(keys).toEqual([PlotType.CONTOUR, PlotType.ISOSURFACE, PlotType.SCATTER, PlotType.SCATTER3D].sort());
     // The original renderers stay in the service, not the registry.
     expect(PLOTLY_PLOT_TYPE_IMPLS[PlotType.HEATMAP]).toBeUndefined();
     expect(PLOTLY_PLOT_TYPE_IMPLS[PlotType.SURFACE]).toBeUndefined();
@@ -53,7 +51,7 @@ describe('plotly-trace-builders', () => {
   it('SCATTER plots region centroids', () => {
     const regions = [
       { xpoints: [0, 10, 10, 0], ypoints: [0, 0, 10, 10] }, // centroid (5,5)
-      { xpoints: [20, 30], ypoints: [20, 40] },             // centroid (25,30)
+      { xpoints: [20, 30], ypoints: [20, 40] }, // centroid (25,30)
     ];
     const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.SCATTER]!.buildTraces(grayInput({ regions }));
     expect(traces[0].x).toEqual([5, 25]);
@@ -73,7 +71,8 @@ describe('plotly-trace-builders', () => {
 
   it('ISOSURFACE uses the supplied isoMin/isoMax bounds', () => {
     const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.ISOSURFACE]!.buildTraces(
-      grayInput({ isoMin: 80, isoMax: 180 }));
+      grayInput({ isoMin: 80, isoMax: 180 }),
+    );
     const t = traces[0];
     expect(t.type).toBe('isosurface');
     expect(t.isomin).toBe(80);
@@ -83,24 +82,34 @@ describe('plotly-trace-builders', () => {
 
   it('converts RGB frames to luminance for scalar plots', () => {
     const rgbFrame = [
-      [[255, 0, 0], [0, 255, 0]],
-      [[0, 0, 255], [255, 255, 255]],
+      [
+        [255, 0, 0],
+        [0, 255, 0],
+      ],
+      [
+        [0, 0, 255],
+        [255, 255, 255],
+      ],
     ];
-    const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.CONTOUR]!.buildTraces(grayInput({
-      frames: [rgbFrame],
-      isGrayscale: false,
-      width: 2,
-      height: 2,
-    }));
+    const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.CONTOUR]!.buildTraces(
+      grayInput({
+        frames: [rgbFrame],
+        isGrayscale: false,
+        width: 2,
+        height: 2,
+      }),
+    );
     // Row index 1 → [blue, white] → luminance [~29.07, 255].
     expect(traces[0].z[1][0]).toBeCloseTo(0.114 * 255, 2);
     expect(traces[0].z[1][1]).toBeCloseTo(255, 2);
   });
 
   it('thickens a single frame so 3D traces still render', () => {
-    const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.SCATTER3D]!.buildTraces(grayInput({
-      frames: [grayInput().frames[0]],
-    }));
+    const traces = PLOTLY_PLOT_TYPE_IMPLS[PlotType.SCATTER3D]!.buildTraces(
+      grayInput({
+        frames: [grayInput().frames[0]],
+      }),
+    );
     // z spans two planes (0 and 1) even though only one frame was supplied.
     const zMax = Math.max(...traces[0].z);
     expect(zMax).toBe(1);

@@ -24,33 +24,118 @@ source; contributions welcome.
 npm install @jax-data-science/sci-image-visualizer
 ```
 
-Install the Angular / rendering **peer dependencies** your app doesn't already
-have:
+Then install the **peer dependencies** your app doesn't already have:
 
 ```bash
-npm install @angular/animations @angular/router primeng \
-  openseadragon plotly.js-dist-min image-js file-saver buffer onnxruntime-web
+npm install @angular/animations @angular/router primeng primeicons primeflex \
+  image-js file-saver buffer onnxruntime-web
 ```
 
 ### Peer dependencies
 
-| Package | Range | Notes |
-|---|---|---|
-| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0` | Angular 17 (animations + router are needed by the PrimeNG components) |
-| `rxjs` | `^7.8.0` | |
-| `primeng` | `^17.18.0` | toolbar / dialogs / table / dropdown UI |
-| `image-js` | `^0.35.6` | client-side image processing |
-| `file-saver` | `^2.0.5` | GeoJSON / mask export |
-| `buffer` | `^5.7.1` | |
-| `onnxruntime-web` | `~1.26.0` | browser SAM / cellpose inference (WebGPU/WASM) |
+| Package                                                        | Range               | Notes                                                                                                                    |
+| -------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0`           | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
+| `rxjs`                                                         | `^7.8.0`            |                                                                                                                          |
+| `primeng`                                                      | `^17.18.0`          | toolbar / dialogs / table / dropdown UI                                                                                  |
+| `primeicons` · `primeflex`                                     | `^7.0.0` · `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup))     |
+| `image-js`                                                     | `^0.35.6`           | client-side image processing                                                                                             |
+| `file-saver`                                                   | `^2.0.5`            | GeoJSON / mask export                                                                                                    |
+| `buffer`                                                       | `^5.7.1`            | Node `Buffer` polyfill for the Plotly backend                                                                            |
+| `onnxruntime-web`                                              | `~1.26.0`           | browser SAM / cellpose inference (WebGPU/WASM)                                                                           |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
 `napari-js`, `cellpose-js`, `fast-png`, and `tslib` — are declared as regular
 **dependencies** and installed automatically; you don't add them yourself.
-`cellpose-js` is still lazy-imported at runtime, so apps that never open the
+`cellpose-js` is lazy-imported at runtime, so apps that never open the
 Cellpose tool don't pay for it in the bundle — but it does need
-`onnxruntime-web` (its own peer, listed above) present. See
-[Quick start](#usage-host-integration-brief) below for wiring.
+`onnxruntime-web` (its own peer, listed above) present.
+
+## Host setup
+
+Besides the ports, the library expects these from the host app. The
+[host integration guide](docs/guides/host-integration.md) has the details and
+[`examples/browser-image/main.ts`](examples/browser-image/main.ts) shows all of
+it working.
+
+1. **Providers:** `provideHttpClient()`, `provideAnimations()`, and PrimeNG's
+   `MessageService` and `ConfirmationService`.
+2. **CSS:** `primeicons/primeicons.css`, `primeng/resources/primeng.min.css`,
+   `primeflex/primeflex.css` and a PrimeNG theme.
+3. **Assets:** serve the package's `src/lib/assets` at `assets/plotting/`
+   (icons, colormap previews, `colormap-luts.json`). In `angular.json`:
+   ```json
+   {
+     "glob": "**/*",
+     "input": "node_modules/@jax-data-science/sci-image-visualizer/src/lib/assets",
+     "output": "assets/plotting"
+   }
+   ```
+4. **onnxruntime-web sidecars** at `/assets/ort/` (copy
+   `node_modules/onnxruntime-web/dist/*.{wasm,mjs}`), or call `setOrtWasmBase(url)`
+   once at startup.
+5. **Icon stylesheet (optional):** the toolbar and context-menu icon classes
+   (`.wand-icon`, `.brush-icon`, … and the active context-menu entry) are global,
+   because those menus are appended to `<body>`. The visualizer defines them when
+   it first loads; to have them defined up front and independent of stylesheet
+   order (say, for a host menu that reuses the icons), add the shipped stylesheet
+   to `angular.json`:
+   ```json
+   "styles": ["node_modules/@jax-data-science/sci-image-visualizer/src/lib/styles/viz-icons.scss"]
+   ```
+
+## Quick start
+
+```ts
+import { Component } from '@angular/core';
+import {
+  VisualizerComponent,
+  RegionEditorComponent,
+  provideVisualization,
+  IMAGE_STATE_PORT,
+  TILE_ACCESS_PORT,
+  REGION_IO_PORT,
+  VIZ_CONFIG,
+  setSamModelUrls,
+} from '@jax-data-science/sci-image-visualizer';
+
+// Once at startup: where the SAM model files are hosted.
+setSamModelUrls(
+  'microsam-vit-t-lm',
+  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
+  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx',
+);
+
+@Component({
+  selector: 'app-viewer',
+  standalone: true,
+  imports: [VisualizerComponent, RegionEditorComponent],
+  template: `<visualizer></visualizer> <region-editor></region-editor>`,
+  providers: [
+    // The viewer chain. In `bootstrapApplication` providers it is the one app-wide
+    // viewer; in a component's providers it is an isolated viewer for that subtree.
+    ...provideVisualization(),
+    // Your adapters: the library reaches the host only through these ports.
+    { provide: IMAGE_STATE_PORT, useClass: MyImageStateAdapter },
+    { provide: TILE_ACCESS_PORT, useClass: MyTileAccessAdapter },
+    { provide: REGION_IO_PORT, useClass: MyRegionIoAdapter },
+    { provide: VIZ_CONFIG, useValue: { slideCropServer: 'https://tiles.example.org' } },
+  ],
+})
+export class ViewerComponent {}
+```
+
+`CELL_SEGMENTER` is optional: override it only to replace the default
+`CellposeSegmenterService`. `SPATIAL_DATA_PORT` and `PREFERENCES_PORT` are
+optional too.
+
+All components are standalone. `VisualizationModule` still works for NgModule hosts but is
+deprecated: import the components and add `provideVisualization()` instead.
+
+The embeddable components use plain, unprefixed selectors: `visualizer`,
+`region-editor`, `channel-histogram`, `hex-color-picker`, `spatial-controls` and
+`spatial-charts`. Their inputs and outputs are listed in the
+[host integration guide](docs/guides/host-integration.md#6-components).
 
 ## Live demo & running the example
 
@@ -107,6 +192,7 @@ Open an image and it renders through whichever backend best fits it; the
 state (regions, channels, zoom) consistent across them.
 
 ### OpenSeadragon — tiled image view
+
 The default **Image** view is a natively tiled, deeply zoomable raster powered by
 [OpenSeadragon](https://openseadragon.github.io/). It streams pyramid tiles (the
 host supplies them through the `TILE_ACCESS_PORT`, e.g. a `/tiles/info` + `/tile`
@@ -130,6 +216,7 @@ resolution there is no finer level to switch to, and the setting only moves the
 jump to full-resolution tiles to a lower zoom.
 
 ### Plotly — plots & 3D
+
 Non-image plot types render with [Plotly](https://plotly.com/javascript/) and
 support "real zooming" — a downscaled overview that re-fetches higher-resolution
 data as you zoom in:
@@ -141,6 +228,7 @@ data as you zoom in:
 - scalar/3D types expect a grayscale image (the volume types also need a z-stack).
 
 ### napari-js — WebGPU
+
 GPU-accelerated renderings via [napari-js](https://www.npmjs.com/package/napari-js)
 (WebGPU), selectable from the plot-type menu as the "napari · WebGPU" variants of
 Image, Scatter 2D, Surface, Scatter 3D, **Volume**, **Isosurface**, and the two
@@ -168,191 +256,30 @@ false`) — the latter (e.g. a host-assembled folder of numbered files) fetches
 matching ROI GeoJSON per slice (`IImageInfo.roiJsonStrs`), which the viewer
 shows for the displayed slice and swaps as you scrub.
 
-### Intensity profiles *(work in progress)*
+### Intensity profiles _(work in progress)_
+
 A line-ROI tool draws coloured lines and plots intensity along each one in a live
 floating inset chart that re-samples at the current zoom. It works today but the
 API/UX are still stabilizing (see [In progress / roadmap](#in-progress--roadmap)).
 
 ## Spatial omics
 
-Contracts for **spatial-omics datasets**: N observations (Visium spots,
-segmented cells) positioned in a tissue image's pixel space, each carrying
-categorical and continuous annotations plus a lazily-fetched feature (gene)
-matrix.
+Two napari-js plot modes for **spatial-omics datasets** — N observations (Visium
+spots, segmented cells) positioned in a tissue image's pixel space, each with
+categorical and continuous annotations plus a lazily-fetched gene matrix:
 
-```ts
-import {
-  SPATIAL_DATA_PORT, SpatialDataHttpService, SpatialDataset,
-} from '@jax-data-science/sci-image-visualizer';
+- **Spatial omics** — one marker per observation over the tissue image, with
+  10x Xenium cell outlines, transcripts and a density map read in place;
+- **Spatial omics 3D** — the observations as a point cloud under an orbit camera,
+  inside the dataset's reference volume, with per-cluster density volumes.
 
-providers: [
-  SpatialDataHttpService,
-  { provide: SPATIAL_DATA_PORT, useExisting: SpatialDataHttpService },
-]
-```
+The data arrive through an optional `SPATIAL_DATA_PORT`; `SpatialDataHttpService`
+is a reference adapter for the bundled example server. A controls panel
+(`<spatial-controls>`) colours by column or gene, selects from ROIs or legend
+rows, and shows linked distributions. The modes appear only when a dataset is
+published.
 
-Like `TILE_ACCESS_PORT`, this is a **port**: the library consumes typed arrays
-and never learns how the data is stored. `SpatialDataHttpService` is an optional
-reference adapter for the format the bundled example server speaks; a host with
-its own backend implements `SpatialDataPort` instead and imports neither.
-
-Two properties the design turns on:
-
-- **Metadata is eager, values are lazy.** A `SpatialDataset` holds coordinates
-  plus column and feature *descriptors*; vectors arrive one at a time, for the
-  one column or gene being displayed. A Visium table is ~31k genes wide — the
-  dense matrix is ~800 MB — so loading a dataset can never mean loading its
-  matrix.
-- **Struct-of-arrays, not object-per-cell.** Datasets run 10³ (Visium) to 10⁶
-  (Xenium/CosMx) observations; two `Float32Array`s beat 500k `{x, y}` objects
-  and upload to the GPU without a copy.
-
-Once a dataset is published, the spatial plot types appear in the selector (and
-disappear when it is cleared — the same gating that hides Volume without a
-z-stack):
-
-- **Spatial omics** — one marker per observation over the tissue image the
-  coordinates live in, positioned through `imageRef`'s affine.
-- **Spatial omics 3D** — gated additionally on the observations carrying a `z`
-  (`requiresSpatial3d`): the same observations as a point cloud under an orbit
-  camera, inside the dataset's reference volume if it has one.
-
-**A dataset whose 3D data is one file gets an image made from it.** A registered
-volume (`SpatialDataset.volume` + `SpatialDataPort.getVolume()`) is published *as*
-a grayscale z-stack image — one plane per slice, opened mid-volume — so the whole
-image surface applies to it: the toolbar slice slider, the contrast window,
-colormaps, the region tools, the physical scale bar, and Volume / Isosurface
-through the ordinary stack path. In the 2D mode the displayed plane then draws
-**that plane's** observations over that plane's anatomy, in the volume's own pixel
-grid, and a region drawn there selects that plane's cells rather than the whole
-depth behind them.
-
-**Cluster density volumes** *(3D mode, optional)* — a checkbox that raymarches
-each cluster as a smooth density field beside the cloud, tinted with its legend
-colour and blended additively. Serial sections hundreds of microns apart cannot be
-read as an anatomical distribution from points alone: the eye will not integrate a
-stack of discs into a shape, and every gap between sections reads as absence.
-Individual cells are never interpolated — consecutive sections sample different
-cells, so there is nothing to interpolate along — but a density *field* is an
-estimate legitimately defined between the imaged planes, and it renders as a
-translucent cloud so it cannot be mistaken for measurement. The kernel is
-anisotropic (σ along z clears one section gap) and the field is coverage-normalised
-along z, so unimaged planes do not read as empty tissue.
-
-In **3D** the same `Gene map` checkbox draws one field per imaged section, at its
-own depth, with the gaps between sections empty — the measured slides, stacked.
-`One map section at a time` isolates a single sheet (its own control, separate from
-the cloud's, so every combination stays reachable), and `Volume rendering
-(interpolate along z)` smooths the sheets into a continuous volume. The last is a
-different object and the panel labels it as one: the planes between sections then
-carry an estimate smoothed from their neighbours' mean, nothing is drawn past the
-outermost section, and the section restriction is ignored because a volume built
-from one slide would smear it through the whole specimen. It is estimated on the
-reference volume's lattice — coarsened in-plane but never along z, so one plane is
-one section — and shares the 2D map's bandwidth, window and colormap.
-
-**Show** *(3D mode)* — the reference volume, the observation cloud and the cluster
-density volumes share one space, so any two of them hide each other; 374k points
-drawn as a stack of discs hide the density volumes almost entirely. Each is
-toggled independently, so every combination is reachable — the estimated fields
-alone, the fields with the anatomy behind them, the anatomy on its own. These are
-visibility only: the layers stay built, so a toggle never re-fetches the template
-or re-rasterises a field, and none of them re-frames the orbit camera. (The
-density checkbox is the exception and still gates construction, since building six
-volumes is not free.) **Volume opacity** is the backdrop's own slider, separate
-from the markers': reading the cloud or a density field *through* the anatomy
-means turning the anatomy down, not the data over it. **One section at a time** restricts the cloud to a single
-imaged section, which is how you check whether the estimated field follows the
-cells that were actually measured. Sections are the distinct z of the
-observations — every cell on a slide shares that slide's registered z, so no
-section-label column is needed — and a dataset whose z is continuous rather than
-sectioned is offered no section control instead of having one invented for it.
-
-**Hover and click** — hovering an observation names it in a cursor tooltip: the
-class for a categorical column, the value with its unit for a gene or numeric one,
-and nothing at all when no colour source is set (there is no cluster to name).
-Clicking a marker selects that whole class, the same selection the legend's rows
-produce, and clicking it again clears. Because a click means "select" here,
-napari's click-to-zoom is off in the spatial modes — the wheel, the zoom buttons
-and the zoom-box tool still zoom. A gene cannot be clicked to select: no set of
-cells "is" a value.
-
-**Colormap** *(continuous colouring)* — the low→high gradient for a gene or a
-numeric column, chosen from the library's own `COLORMAP_OPTIONS` with the same
-swatch previews the image's colormap picker uses. It defaults to following the
-image's colormap (with a Viridis fallback, since a grey measurement over grey
-anatomy cannot be told apart from it), and clearing the picker returns to that.
-One setting drives the markers, both gene maps and the panel's colour bar, so none
-of them can disagree about what a colour means.
-
-**Gene map** *(2D mode, optional, with a gene selected)* — a checkbox that draws
-the selected gene's expression as a smooth field *beneath* the cells. Coloured
-markers answer "which cells express this gene"; they do not answer "where is it
-expressed", because the eye cannot integrate thousands of small dots into a
-territory. The field is the kernel-weighted **mean per cell, not a sum** — a sum
-would make a crowded region glow whatever its cells were doing — and smoothing the
-numerator and denominator together spreads *where*, not *how much*. That
-denominator is also what lets the layer say nothing: where no cell was measured the
-mean is undefined rather than zero, so those pixels stay fully transparent instead
-of taking the colormap's low end, and alpha ramps with local support so a thinly
-sampled pixel reads as tentative. `Smoothing` sets the kernel σ; `Map opacity` is
-the field's own opacity, separate from the markers' — turn the markers down to read
-the field under them. On a volume-backed dataset the field is re-estimated per
-plane from that plane's cells.
-
-Colour it through `getSpatialControls()`:
-
-```ts
-const controls = viz.getSpatialControls();   // null unless a port is bound
-controls?.colorByColumn('region');           // categorical -> the column's palette
-controls?.colorByFeature('Ttr');             // gene -> colormap, log, percentile-clipped
-controls?.setViewState({ pointScale: 2 });
-```
-
-The view state lives in the shared store, so the controls work before any
-backend has mounted and survive a plot-type switch.
-
-The [example server](examples/tile-server/README.md#spatial-omics-endpoints)
-implements the endpoints, and `npm run make-spatial-demo` generates a synthetic
-Visium-geometry dataset **and a matching tissue image** so the
-[browser example](examples/browser-image/README.md#spatial-omics-demo) runs the
-whole path with no download. A converter for real SpatialData Zarr stores ships
-alongside it.
-
-A **Spatial omics** controls panel (`<spatial-controls>`, opened from the
-toolbar) drives all of this from the UI: a column dropdown, a gene search over
-the feature panel, a legend for categorical colourings and a colour bar for
-continuous ones, plus point-size, opacity, log-scale and outlier-clip controls.
-Its legend swatches and colour bar are built with the same functions the
-renderer uses, so the key cannot drift from the canvas.
-
-**Selection** reuses the region tools you already have: draw a rectangle,
-polygon, freehand shape, wand or brush region, then *Select from ROIs* selects
-every observation inside their union and mutes the rest. Legend rows select
-their category on click.
-
-**Linked distributions** sit in the same panel, below the colour controls, over
-whatever the map is coloured by: histogram, violin or box for a continuous column
-or a gene, and per-category **counts** for a categorical one — a histogram of a
-category code would be meaningless, but "how many cells per class" is the question
-the legend implies and never answers. Violin and box are splittable by a
-categorical column. One dialog on purpose — changing the gene
-and watching the distribution move is a single action. They follow the selection: the histogram
-overlays *Selected* on the full distribution, violin and box narrow to it. The
-chart's subject is the map's colour source rather than an independent picker, so
-the two cannot disagree about what is being shown.
-
-Categorical colouring has one renderer-specific limit worth knowing: the 3D
-points layer maps a per-point scalar through a 256-entry LUT, which keeps 96
-blocks apart exactly — one of them reserved for a missing value, so **95
-categories** fit — and above that the cloud draws flat and the panel says so.
-The 2D markers (per-point RGBA) and the density volumes (a scalar field per
-cluster) have no such limit — which is why the example server serves `subclass`
-(338) even though the cloud cannot colour by it.
-
-Still to build: hover tooltips, chart → map brushing, and a GPU layer for cell
-boundary polygons (they are served, not yet drawn) — see
-[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
+Full guide: [docs/guides/spatial-omics.md](docs/guides/spatial-omics.md).
 
 ## Regions & annotation
 
@@ -396,115 +323,82 @@ canvas (and vice-versa), so it pairs with the on-canvas tools above.
 
 ## Segmentation tools (SAM & cellpose)
 
-All segmentation runs **client-side** — models are fetched once (a progress
-toast is shown), cached, then executed with `onnxruntime-web` (WebGPU where
-supported, WASM otherwise). Generated regions inherit the color of the rectangle
-they came from.
+All segmentation runs **client-side** with `onnxruntime-web` (WebGPU where
+supported, WASM otherwise); models are fetched once and cached.
 
-### Box-prompt SAM — "Segment"
-Draw one or more **rectangles** around objects, then click **Segment**. Each
-rectangle is sent to SAM as a box prompt and replaced by the segmented mask.
+- **Segment** — draw rectangles, then each box becomes a SAM box prompt.
+- **Point prompts** — click an object to segment it as a new region;
+  `Shift`/`Alt`-click excludes, `Enter` commits, `Esc` undoes.
+- **Model picker** — micro-sam ViT-T (default) / ViT-B for light microscopy,
+  patho-sam ViT-B (fp16 or int8) for H&E.
+- **Cellpose** — automatic cellpose-SAM: one region per detected cell inside each
+  rectangle.
 
-### Interactive point prompts
-Click directly on an object to segment it as a **new** region (each click is an
-independent object — clicking another object won't grow the previous one).
-`Shift`/`Alt`-click adds an *exclude* point that refines the current object;
-`Enter` commits, `Esc` undoes.
+Models, hosting and the host configuration:
+[docs/guides/segmentation.md](docs/guides/segmentation.md).
 
-### Model picker
-A dropdown on the Segment button chooses the SAM model; the choice applies to
-**both** the box and point tools. An info button summarizes the trade-offs.
+## Extending the viewer
 
-### Cellpose — automatic
-Draw rectangles, then click **Cellpose** to auto-segment every cell inside each
-rectangle (client-side cellpose-SAM via [`cellpose-js`](https://www.npmjs.com/package/cellpose-js)) —
-one region per detected cell, no per-object clicking. (Cellpose-SAM is *not*
-promptable, so it's the automatic tool rather than a model in the SAM picker.)
+Other packages can add to the viewer through Angular DI, with plain objects and
+no Angular compiler required:
 
-## Models
-
-Promptable SAM models are SAM-v1 encoder/decoder ONNX pairs (the encoder runs
-once per image; the decoder runs per prompt). The registry lives in
-`src/lib/toolbar/sam-model-registry.ts`; the host supplies hosted URLs via
-`setSamModelUrls(...)`. Export/quantization tooling lives in the sibling
-`browser-onnx-tools` project.
-
-| Picker id | Domain | Encoder | Runs on | HF model |
-|---|---|---|---|---|
-| `microsam-vit-t-lm` *(default)* | light microscopy | TinyViT, ~14 MB fp16 | WASM¹ | [jax-image-tools/microsam-vit-t-lm-onnx](https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx) |
-| `microsam-vit-b-lm` | light microscopy | ViT-B, ~172 MB fp16 | WebGPU | [jax-image-tools/microsam-vit-b-lm-onnx](https://huggingface.co/jax-image-tools/microsam-vit-b-lm-onnx) |
-| `patho-sam-vit-b` | histopathology (H&E) | ViT-B, ~172 MB fp16 | WebGPU | [jax-image-tools/patho-sam-vit-b-onnx](https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx) |
-| `patho-sam-vit-b-int8` | histopathology (H&E) | ViT-B, ~100 MB int8 | WASM | [jax-image-tools/patho-sam-vit-b-onnx](https://huggingface.co/jax-image-tools/patho-sam-vit-b-onnx) (`encoder.int8.onnx`) |
-| cellpose-SAM *(automatic)* | cells (generalist) | SAM ViT + flow head | WebGPU/WASM | [jax-image-tools/cellpose-sam-onnx](https://huggingface.co/jax-image-tools/cellpose-sam-onnx) |
-
-¹ TinyViT's fp16 attention overflows on the onnxruntime-web WebGPU EP (returns an
-empty mask); it is numerically correct and fast on WASM, so its encoder is pinned
-to WASM. int8 models also run on WASM (no WebGPU int8 matmul).
-
-micro-sam and patho-sam are distributed through micro-sam's model registry
-(`vit_*_lm`, `vit_*_histopathology`); SAM 3 is a planned addition (it needs a
-`variant: 'sam3'` decoder path, since SAM 2/3 differ in mask I/O). See
-`docs/sam-segmentation-design.md` for the design.
+- **Plot modes** on `PLOT_TYPE_CONTRIBUTIONS` — a new entry in the plot-type
+  selector that rides on a built-in view and gets the viewport, the visualizer
+  and an optional side panel. See
+  [docs/guides/plot-type-contributions.md](docs/guides/plot-type-contributions.md).
+- **Toolbar tools** on `TOOLBAR_TOOLS` — a parameter dialog that runs once, or an
+  interactive **dialog tool** (`kind: 'dialog'`) with its own session. See
+  [docs/guides/dialog-tools.md](docs/guides/dialog-tools.md).
 
 ## In progress / roadmap
 
-Work that is landed-but-unstable or planned (not yet available):
-
-- **Intensity profile tool** *(work in progress — not yet stable)* — coloured line
+- **Intensity profile tool** _(work in progress — not yet stable)_ — coloured line
   ROIs with a floating inset chart that plots intensity along each line and updates
   live as the line is dragged. Usable today but the API/UX and multi-line/stack
   behaviour are still settling.
-- **Example / test server + demos** *(planned)* — a small example server, bundled
-  with the library, that powers a set of runnable **demos** showcasing the
-  image-visualization use cases (tiled OSD viewing, Plotly plots, region tools,
-  and browser-side SAM/cellpose segmentation) against sample images — so the
-  library can be evaluated and developed standalone, outside jit-ui. Tracked in
-  the library-extraction SOW ([docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)).
-- **Spatial-omics follow-ons** *(planned — the modes themselves shipped in
-  0.4.0, see [Spatial omics](#spatial-omics))* — hover tooltips over
-  observations, brushing a chart selection back onto the map, and a GPU shapes
-  layer for cell-boundary polygons (the example server serves them; nothing draws
-  them yet, since a DOM overlay will not hold 10⁴–10⁵ outlines). The GPU layer is
-  measured as feasible — generating the geometry in a compute pass is bit-exact
-  and ~16× faster than JS, and 10⁵–10⁶ outlines draw in single-digit
-  milliseconds; the constraint is napari-js's closed renderer, not WebGPU. See
-  [.planning/research/cell-boundary-polygons-webgpu.md](.planning/research/cell-boundary-polygons-webgpu.md)
-  and [docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md).
-- **SAM 3 model** *(planned)* — a `variant: 'sam3'` decoder path + export tooling
+- **Chart → map brushing** _(planned)_ — brushing a selection in a spatial-omics
+  distribution chart back onto the map. See
+  [docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md).
+- **SAM 3 model** _(planned)_ — a `variant: 'sam3'` decoder path + export tooling
   (SAM 2/3 use a different mask I/O than the current SAM-v1 path). See
-  [docs/sam-segmentation-design.md](docs/sam-segmentation-design.md).
+  [docs/design/sam-segmentation-design.md](docs/design/sam-segmentation-design.md).
 - **int8 patho-sam validation** — the `patho-sam-vit-b-int8` option is sanity-checked
   (IoU ~0.99 vs fp16 on a synthetic prompt) but not yet validated on real H&E
   slides, where int8 ViT attention can degrade on subtle boundaries.
 
 ## Documentation
 
-Design, architecture, and planning docs for the library:
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how `src/lib` is laid out:
+  layers, backends, contracts, stores, regions, tools, workers and the test stub.
+- **Guides** — [host integration](docs/guides/host-integration.md) ·
+  [spatial omics](docs/guides/spatial-omics.md) ·
+  [segmentation](docs/guides/segmentation.md) ·
+  [plot-type contributions](docs/guides/plot-type-contributions.md) ·
+  [dialog tools](docs/guides/dialog-tools.md).
+- **Design records** ([docs/design/](docs/design/)) — each with a Status line:
+  [SAM segmentation](docs/design/sam-segmentation-design.md) ·
+  [spatial-omics plot mode](docs/design/spatial-omics-plot-mode-design.md) ·
+  [region holes](docs/design/region-holes-design.md) ·
+  [region boolean ops](docs/design/region-boolean-ops-design.md) ·
+  [MCP control bridge](docs/design/mcp-control-design.md) ·
+  [omics preprocessing in JIT](docs/design/omics-preprocessing-jit.md).
+- **Architecture diagrams** (Mermaid sources, ELK layout) in [docs/diagrams/](docs/diagrams/):
+  - [siv-architecture.mmd](docs/diagrams/siv-architecture.mmd) — host ⇄ contracts ⇄
+    router ⇄ OSD / Plotly / napari-js backends, the stores, spatial omics, the
+    workers, and the servers the library talks to.
+  - [siv-regions.mmd](docs/diagrams/siv-regions.mmd) — the region interfaces, the
+    three region overlays, the on-canvas tools with their tool kit and geometry,
+    and the `RegionStore`.
 
-- **[docs/sam-segmentation-design.md](docs/sam-segmentation-design.md)** — design of
-  the browser SAM segmentation: model choice, ONNX export/quantization recipe,
-  encoder/decoder I/O, the engine/session architecture, and the rollout phases.
-- **[docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)** —
-  design and phased plan for the spatial-omics plot mode: current-state audit,
-  what the CosMx / Spatial-Live / SpatialData references contribute, the data
-  plane, MoSCoW requirements, and the open questions still to settle.
-- **Architecture diagrams**
-  - [docs/jit-ui-visualization-architecture.mmd](docs/jit-ui-visualization-architecture.mmd)
-    ([PNG](docs/img/jit-ui-visualization-architecture.png) ·
-    [SVG](docs/img/jit-ui-visualization-architecture.svg)) — host ⇄ library ⇄
-    rendering backends, ports, and the jit-service request flow (tiles, preview,
-    region/zoom, Plotly data).
-  - [docs/jit-ui-region-architecture.mmd](docs/jit-ui-region-architecture.mmd)
-    ([PNG](docs/img/jit-ui-region-architecture.png) ·
-    [SVG](docs/img/jit-ui-region-architecture.svg)) — the region interfaces +
-    region tools and how OSD and Plotly each implement the overlay.
-  - Diagram/SOW generators: [docs/gen_architecture_diagram.py](docs/gen_architecture_diagram.py),
-    [docs/gen_jit_ui_visualization_sow.py](docs/gen_jit_ui_visualization_sow.py).
+  The PNG/SVG renders in `docs/img/` are of the earlier, pre-napari diagrams that
+  the SOW documents embed.
+
 - **[docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)** —
-  statement of work for extracting/publishing this library (incl. test-coverage
-  results and the example-server task).
-- **[REFACTORING-PLAN.md](docs/REFACTORING-PLAN.md)** — the plan that shaped the
-  current module/contract/implementation boundaries.
+  statement of work for extracting/publishing this library.
+- **History** ([docs/history/](docs/history/)) — the 2026-06 refactoring plan, the
+  shared-backend refactor, the OpenSeadragon backend investigation, past bug
+  write-ups and review records. Kept for
+  context; not current.
 
 Related (host side, in jit-ui):
 
@@ -518,27 +412,33 @@ Related (host side, in jit-ui):
 ## Scientific references
 
 **Segment Anything (SAM)** — the promptable segmentation foundation model.
-> Kirillov, A. et al. *Segment Anything.* ICCV 2023. arXiv:[2304.02643](https://arxiv.org/abs/2304.02643).
+
+> Kirillov, A. et al. _Segment Anything._ ICCV 2023. arXiv:[2304.02643](https://arxiv.org/abs/2304.02643).
 > Code: [facebookresearch/segment-anything](https://github.com/facebookresearch/segment-anything).
 
 **micro-sam** — SAM finetuned for microscopy (the `*_lm` models; default tool).
-> Archit, A. et al. *Segment Anything for Microscopy.* Nature Methods (2025); bioRxiv:[2023.08.21.554208](https://doi.org/10.1101/2023.08.21.554208).
+
+> Archit, A. et al. _Segment Anything for Microscopy._ Nature Methods (2025); bioRxiv:[2023.08.21.554208](https://doi.org/10.1101/2023.08.21.554208).
 > Code: [computational-cell-analytics/micro-sam](https://github.com/computational-cell-analytics/micro-sam).
 
 **patho-sam** — SAM finetuned for histopathology (the `*_histopathology` models).
-> *Segment Anything for Histopathology.* arXiv:[2502.00408](https://arxiv.org/abs/2502.00408) (computational-cell-analytics).
+
+> _Segment Anything for Histopathology._ arXiv:[2502.00408](https://arxiv.org/abs/2502.00408) (computational-cell-analytics).
 > Code: [computational-cell-analytics/patho-sam](https://github.com/computational-cell-analytics/patho-sam).
 
 **Cellpose** — generalist cellular segmentation (flow-field algorithm).
-> Stringer, C. et al. *Cellpose: a generalist algorithm for cellular segmentation.* Nature Methods 18, 100–106 (2021). doi:[10.1038/s41592-020-01018-x](https://doi.org/10.1038/s41592-020-01018-x).
+
+> Stringer, C. et al. _Cellpose: a generalist algorithm for cellular segmentation._ Nature Methods 18, 100–106 (2021). doi:[10.1038/s41592-020-01018-x](https://doi.org/10.1038/s41592-020-01018-x).
 > Code: [MouseLand/cellpose](https://github.com/MouseLand/cellpose).
 
 **Cellpose-SAM** — Cellpose built on a SAM ViT backbone (the automatic tool).
-> Stringer, C. & Pachitariu, M. *Cellpose-SAM: superhuman generalization for cellular segmentation.* bioRxiv:[2025.04.28.651001](https://doi.org/10.1101/2025.04.28.651001).
+
+> Stringer, C. & Pachitariu, M. _Cellpose-SAM: superhuman generalization for cellular segmentation._ bioRxiv:[2025.04.28.651001](https://doi.org/10.1101/2025.04.28.651001).
 > Model: [mouseland/cellpose-sam](https://huggingface.co/mouseland/cellpose-sam).
 
 **MobileSAM** — the TinyViT encoder behind micro-sam ViT-T.
-> Zhang, C. et al. *Faster Segment Anything: Towards Lightweight SAM for Mobile Applications.* arXiv:[2306.14289](https://arxiv.org/abs/2306.14289) (2023).
+
+> Zhang, C. et al. _Faster Segment Anything: Towards Lightweight SAM for Mobile Applications._ arXiv:[2306.14289](https://arxiv.org/abs/2306.14289) (2023).
 > Code: [ChaoningZhang/MobileSAM](https://github.com/ChaoningZhang/MobileSAM).
 
 **Rendering & runtime libraries**
@@ -559,173 +459,11 @@ Related (host side, in jit-ui):
 Please cite the relevant model papers when publishing results produced with these
 tools.
 
-## Usage (host integration, brief)
-
-Import `VisualizationModule`, render `<visualizer>` (and `<region-editor>` for
-the Regions panel), and provide the DI ports (`TILE_ACCESS_PORT`,
-`IMAGE_STATE_PORT`, `REGION_IO_PORT`, `VIZ_CONFIG`, and `CELL_SEGMENTER` for the
-cellpose adapter). Configure hosted SAM model URLs once at startup:
-
-```ts
-import { setSamModelUrls } from '@jax-data-science/sci-image-visualizer';
-
-setSamModelUrls('microsam-vit-t-lm',
-  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/encoder.fp16.onnx',
-  'https://huggingface.co/jax-image-tools/microsam-vit-t-lm-onnx/resolve/main/decoder.onnx');
-```
-
-`onnxruntime-web` WASM/JSEP sidecars must be served from `/assets/ort/`. See
-jit-ui's `app.module.ts` for a full wiring example.
-
-Each embeddable component uses a plain, unprefixed selector: `visualizer`,
-`region-editor`, `plotting-toolbar`, `channel-histogram`, `hex-color-picker`.
-
-## Contributed plot types
-
-Another package can add a mode to the plot-type selector at runtime, through
-Angular DI — the same way `TOOLBAR_TOOLS` contributes toolbar tools. Nothing
-registers at import time: a mode appears only when the host provides it on the
-`PLOT_TYPE_CONTRIBUTIONS` multi-provider token, and with no provider the
-library behaves exactly as before. A contribution is a plain object, so the
-contributing package needs no Angular compiler and no decorators.
-
-```ts
-import {
-  PLOT_TYPE_CONTRIBUTIONS, PlotType, PlotTypeContribution,
-} from '@jax-data-science/sci-image-visualizer';
-
-const myMode: PlotTypeContribution = {
-  descriptor: {
-    type: 'my-mode',                  // namespaced; must not clash with a PlotType
-    label: 'Image + my overlay',      // test-mode label
-    productionLabel: 'My overlay',    // omit to make the mode test-only
-    icon: 'pi pi-pencil',
-    dimensions: '2d',
-    baseType: PlotType.IMAGE,         // v1: only the OpenSeadragon Image view
-  },
-  activate(ctx) {
-    // ctx.visualizer — the public IVisualizer (regions, region overlay, undo…)
-    // ctx.viewport  — overlay container, dataToClient / clientToData, frame$ / settled$
-    // ctx.imageInfo$ — the current image
-    // ctx.tools     — arm the toolbar brush for a class (0.6.0+):
-    //                 ctx.tools?.armBrush({ label: 'tumour', color: '#1E88E5' })
-    const sub = ctx.viewport.frame$.subscribe((visible) => redraw(visible));
-    return { deactivate: () => sub.unsubscribe() };
-  },
-  // Optional side panel, in the right-hand panel area while the mode is active.
-  // Either an Angular component (it can inject PLOT_MODE_CONTEXT / PLOT_MODE_SESSION)…
-  //   panel: { title: 'My overlay', component: MyPanelComponent },
-  // …or plain DOM, for a package built without the Angular compiler:
-  panel: {
-    title: 'My overlay',
-    mount(host, ctx, session) {
-      host.textContent = 'Hello';
-      return () => { host.textContent = ''; };   // teardown
-    },
-  },
-};
-
-// Host composition root:
-providers: [{ provide: PLOT_TYPE_CONTRIBUTIONS, useValue: myMode, multi: true }]
-```
-
-Selecting the mode plots exactly as its `baseType` would (same backend, toolbar,
-region tools and wheel handling), then calls `activate(ctx)` once the viewport
-is ready. `session.deactivate()` runs exactly once when the user leaves the
-mode, when the image changes (a fresh session starts for the new image), or
-when the visualizer is destroyed. Anything a contribution throws or rejects is
-caught and logged. Failing to start falls back to `baseType`, and so does failing
-to clean up when the same mode is about to be re-activated (re-render, image
-switch). Contributed descriptors take the same `requiresGrayscale`,
-`requiresStack`, `requiresSpatialData` and `requiresSpatial3d` gates as the
-built-ins. The full contract
-and its guarantees are documented in
-[`plot-type-contribution.contract.ts`](./src/lib/contracts/plot-type-contribution.contract.ts).
-
-## Contributed dialog tools
-
-An interactive tool that is not "set parameters, run once" can be a **dialog
-tool** (0.6.0+). It is provided on `TOOLBAR_TOOLS`, like the run tools, with
-`kind: 'dialog'`:
-
-- **Button:** it sits with the host's own projected buttons at the start of the
-  toolbar, and shows in the Image view only.
-- **Dialog:** clicking the button opens a floating, non-modal dialog and starts
-  a session. The tool fills the dialog body with plain DOM.
-- **Context:** the same one a plot mode gets (the public visualizer, the Image
-  view's viewport, the current image), with `ctx.tools` always present.
-
-```ts
-import { TOOLBAR_TOOLS, ToolbarDialogToolContribution } from '@jax-data-science/sci-image-visualizer';
-
-const myTool: ToolbarDialogToolContribution = {
-  kind: 'dialog',
-  id: 'my-tool',
-  label: 'My tool',
-  icon: { pi: 'pi-pencil' },
-  tooltip: 'Open my tool',
-  dialog: { title: 'My tool', width: '22rem' },
-  activate(ctx) {
-    const sub = ctx.viewport.frame$.subscribe((visible) => redraw(visible));
-    return { deactivate: () => sub.unsubscribe() };
-  },
-  // After activate(), once the dialog has rendered: `host` is in the document here,
-  // so the body can measure itself.
-  mount(host, ctx, session) {
-    host.textContent = 'Hello';
-    return () => { host.textContent = ''; };   // teardown, before deactivate()
-  },
-};
-
-providers: [{ provide: TOOLBAR_TOOLS, useValue: myTool, multi: true }]
-```
-
-**Lifecycle:**
-- Clicking the button again, or closing the dialog, tears the body down and then
-  calls `session.deactivate()`, exactly once.
-- Re-rendering the Image view (another image or slice) ends the session. The
-  dialog stays open, and a fresh session starts on the new view.
-- Leaving the Image view closes the dialog.
-- A failed start closes the dialog with a warning. As with plot modes, nothing
-  the tool throws or rejects escapes.
-
-## Development
-
-```bash
-npm install
-npm run build       # ng-packagr → ./dist  (the publishable package)
-npm test            # jest (jest-preset-angular)
-npm run typecheck   # tsc --noEmit
-npm run lint        # eslint
-npm run format      # prettier --write
-```
-
-`npm run build` emits a complete, publishable Angular package into `dist/`
-(FESM2022 + ESM2022 bundles, type declarations, assets, README, LICENSE).
-
-## Releasing
-
-Publishing is automated by CI (`.github/workflows/ci-cd.yaml`): pushing a
-`v*.*.*` tag whose version matches `package.json` and is reachable from `main`
-(or a `release/x.y.z` branch) builds, tests, and runs
-`npm publish --access public --provenance` from `dist/`. It requires an
-`NPM_TOKEN` repository secret with publish rights to the `@jax-data-science`
-npm scope.
-
-```bash
-# bump package.json to x.y.z first, commit, then:
-git tag vx.y.z && git push origin vx.y.z
-```
-
-Released versions and what changed in each are recorded in
-[`CHANGELOG.md`](./CHANGELOG.md); add an entry there as part of the change, not
-at tag time.
-
 ## Contributing
 
-Issues and pull requests are welcome. Please run `npm run lint`, `npm test`, and
-`npm run build` before opening a PR. Design and architecture notes live in
-[`docs/`](docs/).
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+the dev loop (`npm run typecheck`, `npm run lint`, `npm test`, `npm run build`),
+the branch and pull-request rules, and how releases are published.
 
 ## License
 

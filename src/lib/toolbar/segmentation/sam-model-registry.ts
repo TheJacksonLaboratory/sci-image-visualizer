@@ -14,7 +14,12 @@ import { SamModelDef } from '../../contracts/sam.contract';
  * cellpose default). A host can repoint them at its own hosting (e.g. a GCS
  * bucket) at runtime via {@link setSamModelUrls}; an empty URL disables a model
  * (the session throws a clear "not configured" error). Export/quantization
- * tooling: the sibling `browser-onnx-tools` project; see docs/sam-segmentation-design.md.
+ * tooling: the sibling `browser-onnx-tools` project; see
+ * docs/design/sam-segmentation-design.md.
+ *
+ * Downloads are cached in the browser by URL and `revision`: when a model's files are
+ * re-exported under the same URLs, set (or bump) its `revision` so browsers fetch the
+ * new files instead of serving the old ones from cache.
  */
 export const SAM_MODELS: SamModelDef[] = [
   {
@@ -100,13 +105,15 @@ export function isSamModelReady(model: SamModelDef): boolean {
 /**
  * Point a registered model at its hosted ONNX pair (HF / GCS). Called by the
  * host's composition root once hosting is decided, keeping deployment URLs out
- * of the library.
+ * of the library. Pass `revision` when the files at those URLs can be replaced in
+ * place, and change it whenever they are (see {@link SamModelDef.revision}).
  */
-export function setSamModelUrls(id: string, encoderUrl: string, decoderUrl: string): void {
+export function setSamModelUrls(id: string, encoderUrl: string, decoderUrl: string, revision?: string): void {
   const m = SAM_MODELS.find((x) => x.id === id);
   if (m) {
     m.encoderUrl = encoderUrl;
     m.decoderUrl = decoderUrl;
+    if (revision !== undefined) m.revision = revision;
     // The configured (hosted) model becomes the active default, so the tools
     // use it rather than the first registry entry (which may be unhosted).
     if (encoderUrl && decoderUrl) activeDefaultId = id;

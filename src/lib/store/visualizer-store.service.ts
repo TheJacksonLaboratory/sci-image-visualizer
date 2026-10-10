@@ -1,6 +1,6 @@
 import { Injectable, Optional, Inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, firstValueFrom } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset';
@@ -12,24 +12,30 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 
 /**
+ * The colormap LUT asset is fetched once per HttpClient — in an app, once per page,
+ * since `provideVisualization()` chains share the root HttpClient — however many
+ * stores exist, and resolved INTO the shared `COLORMAP_OPTIONS` tree. In place on
+ * purpose: components read the options once at init and the default colormap is one
+ * of those nodes, so a resolved copy would leave them holding the unresolved keys.
+ * Dropped on failure so a later store can retry.
+ */
+const colormapLutsLoads = new WeakMap<HttpClient, Promise<void>>();
+
+/**
  * Backend-neutral store for the **visualization session** — the state that
  * describes *how* the current image is being viewed, independent of which
- * rendering backend (Plotly or OpenSeadragon) is on screen:
+ * rendering backend (Plotly, OpenSeadragon or napari-js) is on screen:
  *
  *  - the active colormap / LUT and its reverse-scale toggle,
- *  - the current image's physical metadata (µm/pixel etc.),
- *  - the classification label → colour map,
+ *  - the current image's physical metadata (µm/pixel etc.) and its per-channel
+ *    display state (window, gamma, tint, visibility; grayscale / invert),
+ *  - the annotation-class presets (the classification label → colour map),
+ *  - the spatial-omics view state,
  *  - which on-canvas tool is currently active.
  *
- * Both backends read and write this single instance, so they stay in lock-step
- * regardless of which one is rendering. Previously this state lived inside
- * `PlotlyService`, which forced the OpenSeadragon backend to depend on the
- * Plotly service purely to read the shared colormap; this store removes that
- * coupling — neither backend owns the session state.
- *
- * NOTE: region *geometry* (the drawn shapes / per-image region cache) still
- * lives in `PlotlyService` for now; extracting it into a sibling region store
- * is a separate follow-up.
+ * Every backend reads and writes this single instance (one per visualizer chain),
+ * so they stay in lock-step regardless of which one is rendering; none of them
+ * owns the session state. Region geometry lives in the sibling `RegionStore`.
  */
 @Injectable({ providedIn: 'root' })
 export class VisualizerStore {
@@ -55,6 +61,8 @@ export class VisualizerStore {
   // The derived defaults (full window, gamma 1, default tint) for the current
   // image, kept so "Reset" can restore a channel's window/gamma/colour.
   private defaultChannelStates: IChannelState[] = [];
+  /** The image the current channel states were derived for (see setImageMeta). */
+  private channelImageKey: string | undefined;
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -102,25 +110,38 @@ export class VisualizerStore {
    * "Greys" scale) needs no JSON, so the first render works before this resolves.
    */
   private loadColormapLuts(): void {
-    if (!this.http) return;
-    this.http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json').subscribe({
-      next: (luts) => {
-        for (const group of COLORMAP_OPTIONS as any[]) {
-          for (const child of group.children ?? []) {
-            const key = child?.data?.value;
-            if (typeof key === 'string' && luts[key]) child.data.value = luts[key];
+    const http = this.http;
+    if (!http || colormapLutsLoads.has(http)) return;
+    colormapLutsLoads.set(
+      http,
+      firstValueFrom(http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json')).then(
+        (luts) => {
+          for (const group of COLORMAP_OPTIONS) {
+            for (const child of group.children ?? []) {
+              const data = child.data as { value: unknown } | null;
+              const key = data?.value;
+              if (data && typeof key === 'string' && luts[key]) data.value = luts[key];
+            }
           }
-        }
-      },
-      error: () => { /* leave keys unresolved; named scales still work */ },
-    });
+        },
+        (err: unknown) => {
+          // Named Plotly scales still work with the keys unresolved; let a later store retry.
+          console.warn('[visualizer] colormap LUTs unavailable', err);
+          colormapLutsLoads.delete(http);
+        },
+      ),
+    );
   }
 
   // ── Preset persistence (jit-ui#70) ───────────────────────────────────
   private initPresetPersistence(): void {
     // Debounced write-back so a burst of edits collapses into one PUT.
     this.savePresets$.pipe(debounceTime(800)).subscribe(() => {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     });
     // Load the user's saved set (if any); otherwise keep the seeded defaults.
     this.prefsPort?.loadPresetSet().subscribe({
@@ -131,7 +152,9 @@ export class VisualizerStore {
         }
         this.presetsLoaded = true;
       },
-      error: () => { this.presetsLoaded = true; },
+      error: () => {
+        this.presetsLoaded = true;
+      },
     });
   }
 
@@ -159,7 +182,11 @@ export class VisualizerStore {
    *  debounce. Used for explicit bulk actions (Apply / Import / Reset). */
   private savePresetsNow(): void {
     if (this.presetsLoaded) {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     }
   }
 
@@ -203,7 +230,8 @@ export class VisualizerStore {
    * Editor) show µm²/mm² instead of px². No-op when neither axis is positive.
    */
   setPhysicalPixelSize(mppX?: number, mppY?: number): void {
-    const hasX = (mppX ?? 0) > 0, hasY = (mppY ?? 0) > 0;
+    const hasX = (mppX ?? 0) > 0,
+      hasY = (mppY ?? 0) > 0;
     if (!hasX && !hasY) return;
     const cur = this.imageMeta$.value;
     const meta = (cur && cur.length ? cur : [{} as IImageMetadata]).map((e) => ({ ...e }));
@@ -211,17 +239,26 @@ export class VisualizerStore {
     if (hasY) meta[0].mppY = mppY;
     this.imageMeta$.next(meta);
   }
-  setImageMeta(imageMeta: IImageMetadata[]): void {
+  /**
+   * Publish the current image's metadata and derive its channels.
+   *
+   * `imageKey` identifies the image (its file name). A re-plot of the SAME image
+   * keeps the user's window/gamma/tint edits; a different image gets its own
+   * derived channels even at the same channel count — keying on the count alone
+   * left a DAPI/GFP/RFP stack's names, tints and windows on a following
+   * CD3/CD8/PanCK one. Without a key, only a change of channel count re-derives.
+   */
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
     this.imageMeta$.next(imageMeta);
-    // Re-derive channels only when their structure changes (count), so a re-plot
-    // of the same image doesn't clobber the user's window/gamma edits.
     const next = this.deriveChannels(imageMeta);
     // Always refresh the reset baseline to the current image's derived defaults
     // (names/colours can differ even at the same channel count).
     this.defaultChannelStates = next.map((c) => ({ ...c }));
-    if (next.length !== this.channelStates$.value.length) {
+    const otherImage = imageKey !== undefined && imageKey !== this.channelImageKey;
+    if (imageKey !== undefined) this.channelImageKey = imageKey;
+    if (otherImage || next.length !== this.channelStates$.value.length) {
       this.channelStates$.next(next);
-      this.selectedChannel$.next(0); // new channel structure → reset the selected band
+      this.selectedChannel$.next(0); // new image / channel structure → reset the selected band
     }
   }
 
@@ -263,8 +300,12 @@ export class VisualizerStore {
     return this.channelStates$.value;
   }
   /** The channel selected in the pane (drives a single-scalar 3D Surface). */
-  getSelectedChannel(): Observable<number> { return this.selectedChannel$.asObservable(); }
-  currentSelectedChannel(): number { return this.selectedChannel$.value; }
+  getSelectedChannel(): Observable<number> {
+    return this.selectedChannel$.asObservable();
+  }
+  currentSelectedChannel(): number {
+    return this.selectedChannel$.value;
+  }
   setSelectedChannel(index: number): void {
     if (this.selectedChannel$.value !== index) this.selectedChannel$.next(index);
   }
@@ -362,10 +403,6 @@ export class VisualizerStore {
     this.presetSet$.next(this.presetSet);
     this.savePresetsNow(); // explicit reset → persist immediately
   }
-  /** Force a (debounced) write-back of the current preset set. */
-  persistPresets(): void {
-    this.queuePresetSave();
-  }
 
   // ── spatial-omics view state ──────────────────────────────────────────
   getSpatialView$(): Observable<SpatialViewState> {
@@ -382,17 +419,8 @@ export class VisualizerStore {
     this.spatialView$.next({ ...this.spatialView$.value, ...partial });
   }
 
-  /** Reset to defaults — e.g. when a different dataset is selected, where the
-   *  previous colour column almost certainly does not exist. */
-  resetSpatialView(): void {
-    this.spatialView$.next({ ...DEFAULT_SPATIAL_VIEW });
-  }
-
   getActiveTool$(): Observable<string | null> {
     return this.activeTool$.asObservable();
-  }
-  getActiveTool(): string | null {
-    return this.activeTool$.value;
   }
   setActiveTool(tool: string | null): void {
     this.activeTool$.next(tool);

@@ -1,6 +1,5 @@
 import { InjectionToken } from '@angular/core';
 
-
 /**
  * Port for a **semantic** segmenter — one that assigns every pixel a class from
  * a fixed set, with no notion of separate objects.
@@ -30,6 +29,10 @@ export interface SemanticRegion {
   area: number;
 }
 
+/**
+ * The result of one {@link ISemanticSegmenter} run: the class layers found, in the pixel
+ * frame of the `width × height` image that was segmented.
+ */
 export interface SemanticSegmentation {
   regions: SemanticRegion[];
   /** Total pixels assigned to each class, indexed by class id. */
@@ -49,6 +52,7 @@ export interface SemanticSegmentation {
   unassignedFraction: number;
 }
 
+/** Options for one {@link ISemanticSegmenter} run. */
 export interface SemanticSegmentOptions {
   /** Which registered model to run. Defaults to the registry's default. */
   modelId?: string;
@@ -98,6 +102,7 @@ export interface SemanticSegmentProgress {
   onStatus?: (status: string) => void;
 }
 
+/** A segmenter that assigns every pixel a class and returns the class regions. */
 export interface ISemanticSegmenter {
   /** Assign every pixel a class and return the resulting regions. */
   segmentSemantic(

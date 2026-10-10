@@ -1,14 +1,16 @@
 /**
  * Draggable Z-height handle for the napari-js WebGPU volume (jit-ui#102). A small DOM grip is drawn
- * over the 3D canvas at the projected top-face centre of the volume box (reusing the axes-label
- * {@link projectPoint} projection, so it tracks the box as the volume orbits). Dragging it up makes
+ * over the 3D canvas at the projected top-face centre of the volume box (projected with napari-js's
+ * {@link projectPoint}, like the axes labels, so it tracks the box as the volume orbits). Dragging it up makes
  * the volume taller, down makes it flatter — the host maps the drag to a Z-scale factor and
  * restretches the volume + axes live (only the model matrix changes; the voxel texture is untouched).
  *
  * Direct-manipulation counterpart of {@link NapariAxesLabels}: both are absolute-positioned overlays
  * updated on every `camera3d.changed`, but this one accepts pointer input.
  */
-import { AxesLabelCamera3D, projectPoint } from './napari-axes-labels';
+import { projectPoint } from 'napari-js';
+
+import { AxesLabelCamera3D } from './napari-axes-labels';
 
 export interface VolumeZHandleOptions {
   /** Current top-face-centre world point (the box is centred at the origin, so `[0, 0, +halfZ]`). */
@@ -123,10 +125,7 @@ export class NapariVolumeZHandle {
     // Up (negative dy) → taller. Exponential so each `pixelsPerDouble` px doubles/halves the height.
     const dy = e.clientY - this.startY;
     const factor = Math.pow(2, -dy / this.opts.pixelsPerDouble);
-    const next = Math.min(
-      this.opts.maxScale,
-      Math.max(this.opts.minScale, this.startScale * factor),
-    );
+    const next = Math.min(this.opts.maxScale, Math.max(this.opts.minScale, this.startScale * factor));
     this.opts.setScale(next);
     this.reposition();
   };

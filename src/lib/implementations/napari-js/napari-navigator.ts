@@ -1,3 +1,5 @@
+import { worldViewport } from 'napari-js';
+
 /**
  * Overview navigator (minimap) for the napari-js 2D views, mirroring the OSD backend's
  * built-in navigator: a thumbnail of the whole image in the bottom-right corner with the
@@ -13,6 +15,25 @@ export interface NavigatorCamera {
   center: readonly [number, number];
   readonly zoom: number;
   readonly changed: { connect(listener: () => void): () => void };
+}
+
+/** A world rectangle, as napari-js's `Rect`. */
+export interface NavigatorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The viewer itself (napari-js `Viewer` satisfies it): its camera, plus the world rect it
+ * shows. Preferred over a bare camera, because napari-js sizes that rect from the CANVAS,
+ * which is what is actually on screen; from a bare camera the navigator can only use the
+ * host's size, which is off when the host holds anything besides the canvas.
+ */
+export interface NavigatorView {
+  readonly camera: NavigatorCamera;
+  visibleWorldRect(): NavigatorRect;
 }
 
 /** Where the thumbnail sits inside the navigator box, in CSS px. */
@@ -31,7 +52,10 @@ const NAVIGATOR_MAX_PX = 300;
 
 /** Box size and scale for a `worldW × worldH` image in a host `hostW` wide. */
 export function navigatorLayout(
-  hostW: number, worldW: number, worldH: number, ratio = NAVIGATOR_SIZE_RATIO,
+  hostW: number,
+  worldW: number,
+  worldH: number,
+  ratio = NAVIGATOR_SIZE_RATIO,
 ): NavigatorLayout | null {
   if (!(worldW > 0) || !(worldH > 0) || !(hostW > 0)) return null;
   const longest = Math.min(NAVIGATOR_MAX_PX, Math.max(NAVIGATOR_MIN_PX, hostW * ratio));
@@ -39,18 +63,13 @@ export function navigatorLayout(
   return { width: worldW * scale, height: worldH * scale, scale };
 }
 
-/** The part of the world the camera shows, as `[x0, y0, x1, y1]`. */
-export function viewportWorldRect(
-  center: readonly [number, number], zoom: number, hostW: number, hostH: number,
-): [number, number, number, number] {
-  const hw = hostW / zoom / 2;
-  const hh = hostH / zoom / 2;
-  return [center[0] - hw, center[1] - hh, center[0] + hw, center[1] + hh];
-}
-
 /** A point in the navigator box → world coordinates, clamped to the image. */
 export function navigatorToWorld(
-  px: number, py: number, layout: NavigatorLayout, worldW: number, worldH: number,
+  px: number,
+  py: number,
+  layout: NavigatorLayout,
+  worldW: number,
+  worldH: number,
 ): [number, number] {
   const x = Math.min(worldW, Math.max(0, px / layout.scale));
   const y = Math.min(worldH, Math.max(0, py / layout.scale));
@@ -63,6 +82,9 @@ export class NapariNavigator {
   private readonly region: HTMLDivElement;
   private readonly disconnectCamera: () => void;
   private readonly resizeObserver?: ResizeObserver;
+  private readonly camera: NavigatorCamera;
+  /** The world rect on screen: the viewer's own when given one, else from the host's size. */
+  private readonly visibleRect: () => NavigatorRect;
   /** Aborted by destroy() to remove every DOM listener the box holds. */
   private readonly listeners = new AbortController();
   private layout: NavigatorLayout | null = null;
@@ -72,7 +94,7 @@ export class NapariNavigator {
 
   constructor(
     private readonly host: HTMLElement,
-    private readonly camera: NavigatorCamera,
+    view: NavigatorView | NavigatorCamera,
     private worldW: number,
     private worldH: number,
     /** Called when the pointer enters the navigator — e.g. to hide a hover tooltip that
@@ -80,6 +102,14 @@ export class NapariNavigator {
     private readonly onEnter?: () => void,
   ) {
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    if ('visibleWorldRect' in view) {
+      this.camera = view.camera;
+      this.visibleRect = () => view.visibleWorldRect();
+    } else {
+      this.camera = view;
+      this.visibleRect = () =>
+        worldViewport(view.center[0], view.center[1], view.zoom, host.clientWidth, host.clientHeight);
+    }
 
     this.box = document.createElement('div');
     this.box.className = 'napari-navigator';
@@ -123,7 +153,7 @@ export class NapariNavigator {
       this.box.addEventListener(type, stop, { passive: false, signal });
     }
 
-    this.disconnectCamera = camera.changed.connect(() => this.updateRegion());
+    this.disconnectCamera = this.camera.changed.connect(() => this.updateRegion());
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(() => this.relayout());
       this.resizeObserver.observe(host);
@@ -186,13 +216,11 @@ export class NapariNavigator {
   private updateRegion(): void {
     const l = this.layout;
     if (!l) return;
-    const [x0, y0, x1, y1] = viewportWorldRect(
-      this.camera.center, this.camera.zoom, this.host.clientWidth, this.host.clientHeight,
-    );
-    const left = Math.max(0, x0 * l.scale);
-    const top = Math.max(0, y0 * l.scale);
-    const right = Math.min(l.width, x1 * l.scale);
-    const bottom = Math.min(l.height, y1 * l.scale);
+    const r = this.visibleRect();
+    const left = Math.max(0, r.x * l.scale);
+    const top = Math.max(0, r.y * l.scale);
+    const right = Math.min(l.width, (r.x + r.width) * l.scale);
+    const bottom = Math.min(l.height, (r.y + r.height) * l.scale);
     Object.assign(this.region.style, {
       left: `${left}px`,
       top: `${top}px`,
@@ -208,7 +236,11 @@ export class NapariNavigator {
     if (!l) return;
     const rect = this.box.getBoundingClientRect();
     this.camera.center = navigatorToWorld(
-      e.clientX - rect.left, e.clientY - rect.top, l, this.worldW, this.worldH,
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+      l,
+      this.worldW,
+      this.worldH,
     );
   }
 

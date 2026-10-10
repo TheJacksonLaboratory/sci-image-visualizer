@@ -15,8 +15,7 @@ describe('WandService', () => {
 
   // Helpers ------------------------------------------------------------
 
-  function makeGrayImage(width: number, height: number,
-                        valueAt: (x: number, y: number) => number): WandImage {
+  function makeGrayImage(width: number, height: number, valueAt: (x: number, y: number) => number): WandImage {
     const data: number[][] = [];
     for (let y = 0; y < height; y++) {
       const row: number[] = [];
@@ -26,8 +25,11 @@ describe('WandService', () => {
     return { data, width, height, isGrayscale: true };
   }
 
-  function makeRgbImage(width: number, height: number,
-                       valueAt: (x: number, y: number) => [number, number, number]): WandImage {
+  function makeRgbImage(
+    width: number,
+    height: number,
+    valueAt: (x: number, y: number) => [number, number, number],
+  ): WandImage {
     const data: number[][][] = [];
     for (let y = 0; y < height; y++) {
       const row: number[][] = [];
@@ -129,7 +131,10 @@ describe('WandService', () => {
       return inside ? [220, 30, 30] : [30, 220, 30];
     });
     const poly = service.computeRegion(img, 60, 60, {
-      patchSize: 51, type: 'LAB_DISTANCE', sigma: 1, sensitivity: 4,
+      patchSize: 51,
+      type: 'LAB_DISTANCE',
+      sigma: 1,
+      sensitivity: 4,
     });
     expect(poly).not.toBeNull();
     const b = bbox(poly!);
@@ -146,7 +151,9 @@ describe('WandService', () => {
       return inside ? [200, 100, 50] : [10, 10, 10];
     });
     const poly = service.computeRegion(img, 40, 40, {
-      patchSize: 41, type: 'LAB_DISTANCE', simpleMode: true,
+      patchSize: 41,
+      type: 'LAB_DISTANCE',
+      simpleMode: true,
     });
     expect(poly).not.toBeNull();
     const b = bbox(poly!);
@@ -185,16 +192,22 @@ describe('WandService', () => {
     const half = (W - 1) / 2;
     // Clicks must be close enough that the patches overlap, otherwise the
     // largest connected component is just one of the two patches.
-    const cx1 = 80, cy1 = 80;
-    const cx2 = 100, cy2 = 80;
+    const cx1 = 80,
+      cy1 = 80;
+    const cx2 = 100,
+      cy2 = 80;
     const x0 = Math.min(cx1, cx2) - half;
     const y0 = Math.min(cy1, cy2) - half;
     const x1 = Math.max(cx1, cx2) + half + 1;
     const y1 = Math.max(cy1, cy2) + half + 1;
-    const bw = x1 - x0, bh = y1 - y0;
+    const bw = x1 - x0,
+      bh = y1 - y0;
     const accum = new Uint8Array(bw * bh);
 
-    for (const [cx, cy] of [[cx1, cy1], [cx2, cy2]]) {
+    for (const [cx, cy] of [
+      [cx1, cy1],
+      [cx2, cy2],
+    ]) {
       const patch = service.computePatchMask(img, cx, cy, { simpleMode: true, patchSize: W });
       expect(patch).not.toBeNull();
       const px0 = cx - half;
@@ -202,14 +215,14 @@ describe('WandService', () => {
       for (let py = 0; py < W; py++) {
         for (let px = 0; px < W; px++) {
           if (!patch!.mask[py * W + px]) continue;
-          const mx = (px0 + px) - x0;
-          const my = (py0 + py) - y0;
+          const mx = px0 + px - x0;
+          const my = py0 + py - y0;
           accum[my * bw + mx] = 1;
         }
       }
     }
 
-    const poly = service.maskToPolygon(accum, bw, bh, img.width, img.height, x0, y0);
+    const poly = service.maskToPolygons(accum, bw, bh, x0, y0)[0];
     expect(poly).not.toBeNull();
     const b = bbox(poly!);
     // Boundary should span the union of both patches horizontally.
@@ -313,45 +326,77 @@ describe('WandService', () => {
 
   it('maskToPolygons traces an enclosed hole as an interior ring', () => {
     const mask = donutMask(20, 20, 7, 7, 13, 13);
-    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 4);
+    const polys = service.maskToPolygons(mask, 20, 20, 0, 0, 4, 4);
     expect(polys.length).toBe(1);
     expect(polys[0].holes?.length).toBe(1);
     expect(polys[0].holes![0].length).toBeGreaterThanOrEqual(4);
   });
 
+  it('maskToPolygons keeps hole rings in true coords, like the exterior (RT-4)', () => {
+    // A stroke whose origin lies left of / above the readback window (negative
+    // matrix coords). The exterior is unclamped (jit-ui#102); the hole must be too,
+    // or it collapses onto the window edge.
+    const mask = donutMask(20, 20, 7, 7, 13, 13);
+    const polys = service.maskToPolygons(mask, 20, 20, -50, -50, 4, 4);
+    expect(polys.length).toBe(1);
+    expect(Math.min(...polys[0].xpoints)).toBe(-50);
+    const hole = polys[0].holes![0];
+    expect(Math.min(...hole.map((p) => p[0]))).toBe(-43);
+    expect(Math.max(...hole.map((p) => p[0]))).toBe(-38);
+    expect(Math.min(...hole.map((p) => p[1]))).toBe(-43);
+    expect(new Set(hole.map((p) => p.join(','))).size).toBeGreaterThanOrEqual(4);
+  });
+
   it('maskToPolygons drops a hole smaller than minHoleSize', () => {
     const mask = donutMask(20, 20, 9, 9, 11, 11); // 2×2 = 4px hole
-    const polys = service.maskToPolygons(mask, 20, 20, 20, 20, 0, 0, 4, 50);
+    const polys = service.maskToPolygons(mask, 20, 20, 0, 0, 4, 50);
     expect(polys.length).toBe(1);
     expect(polys[0].holes).toBeUndefined();
   });
 
   it('a background indentation open to the border is NOT a hole', () => {
     // Square with a notch cut from the right edge — open to the outside.
-    const w = 20, h = 20;
+    const w = 20,
+      h = 20;
     const mask = new Uint8Array(w * h);
     mask.fill(1);
     for (let y = 8; y < 12; y++) for (let x = 15; x < 20; x++) mask[y * w + x] = 0;
-    const polys = service.maskToPolygons(mask, w, h, w, h, 0, 0, 4, 4);
+    const polys = service.maskToPolygons(mask, w, h, 0, 0, 4, 4);
     expect(polys[0].holes).toBeUndefined();
   });
 
   it('pointInPolygonWithHoles is false inside a hole, true in the solid ring', () => {
-    const xs = [0, 19, 19, 0], ys = [0, 0, 19, 19];
-    const holes = [[[7, 7], [12, 7], [12, 12], [7, 12]]];
+    const xs = [0, 19, 19, 0],
+      ys = [0, 0, 19, 19];
+    const holes = [
+      [
+        [7, 7],
+        [12, 7],
+        [12, 12],
+        [7, 12],
+      ],
+    ];
     expect(service.pointInPolygonWithHoles(10, 10, xs, ys, holes)).toBe(false); // in hole
-    expect(service.pointInPolygonWithHoles(2, 2, xs, ys, holes)).toBe(true);    // solid ring
+    expect(service.pointInPolygonWithHoles(2, 2, xs, ys, holes)).toBe(true); // solid ring
     expect(service.pointInPolygonWithHoles(50, 50, xs, ys, holes)).toBe(false); // outside
   });
 
   it('rasterizePolygon punches holes back out', () => {
-    const xs = [0, 19, 19, 0], ys = [0, 0, 19, 19];
-    const holes = [[[7, 7], [12, 7], [12, 12], [7, 12]]];
+    const xs = [0, 19, 19, 0],
+      ys = [0, 0, 19, 19];
+    const holes = [
+      [
+        [7, 7],
+        [12, 7],
+        [12, 12],
+        [7, 12],
+      ],
+    ];
     const r = service.rasterizePolygon(xs, ys, 20, 20, holes);
     expect(r).not.toBeNull();
     const at = (x: number, y: number) => r!.mask[(y - r!.by) * r!.bw + (x - r!.bx)];
     expect(at(10, 10)).toBe(0); // inside the hole
-    expect(at(2, 2)).toBe(1);   // solid ring
+    expect(at(2, 2)).toBe(1); // solid ring
   });
 
   it('returns coordinates as a 2-D array matching xpoints/ypoints', () => {

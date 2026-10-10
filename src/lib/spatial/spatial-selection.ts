@@ -1,5 +1,6 @@
 import { Region } from '../models/region';
-import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
+import { RingBounds as Bounds, pointInRing as ringContainsPoint, ringBounds } from '../geometry/ring';
+import { SpatialImageRef, SpatialObservations, SpatialSelectionMask } from '../contracts/spatial-dataset.contract';
 
 /**
  * Which observations fall inside a set of drawn regions.
@@ -21,11 +22,8 @@ import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-datas
  * transformed forward before testing, matching exactly what the renderer draws.
  */
 
-/** A selection over N observations: `mask[i] === 1` when i is selected. */
-export interface SpatialSelectionMask {
-  mask: Uint8Array;
-  count: number;
-}
+/** Moved to the dataset contract (a pure data type); re-exported here for existing importers. */
+export type { SpatialSelectionMask };
 
 /** An empty selection over `count` observations. */
 export function emptySelection(count = 0): SpatialSelectionMask {
@@ -59,34 +57,14 @@ export function mutedFromSelection(selection: SpatialSelectionMask): Uint8Array 
   return muted;
 }
 
-/** Even-odd ray cast: is (px, py) inside the closed ring xs/ys? */
+/**
+ * Even-odd ray cast: is (px, py) inside the closed ring xs/ys?
+ *
+ * Public API kept with its (ring, point) argument order; the test itself is
+ * the shared `geometry/ring` one the region overlays and tools use.
+ */
 export function pointInRing(xs: readonly number[], ys: readonly number[], px: number, py: number): boolean {
-  let inside = false;
-  const n = xs.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const yi = ys[i];
-    const yj = ys[j];
-    // Half-open comparison so a vertex on the ray is counted once, not twice.
-    if ((yi > py) !== (yj > py)) {
-      const t = (py - yi) / (yj - yi);
-      if (px < xs[i] + t * (xs[j] - xs[i])) inside = !inside;
-    }
-  }
-  return inside;
-}
-
-/** Axis-aligned bounds of a ring, for a cheap reject before the ray cast. */
-interface Bounds { minX: number; minY: number; maxX: number; maxY: number }
-
-function ringBounds(xs: readonly number[], ys: readonly number[]): Bounds {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i < xs.length; i++) {
-    if (xs[i] < minX) minX = xs[i];
-    if (xs[i] > maxX) maxX = xs[i];
-    if (ys[i] < minY) minY = ys[i];
-    if (ys[i] > maxY) maxY = ys[i];
-  }
-  return { minX, minY, maxX, maxY };
+  return ringContainsPoint(px, py, xs, ys);
 }
 
 function inBounds(b: Bounds, px: number, py: number): boolean {
@@ -100,22 +78,26 @@ interface Shape {
 }
 
 /** Polygon-with-holes: inside the exterior and outside every hole. */
-function polygonShape(
-  xs: number[], ys: number[], holes?: number[][][],
-): Shape | null {
+function polygonShape(xs: number[], ys: number[], holes?: number[][][]): Shape | null {
   if (xs.length < 3) return null;
   const bounds = ringBounds(xs, ys);
+  // Split and bounded ONCE per shape: the hit test runs for every candidate point
+  // inside the exterior — up to millions of cells per selection.
+  const holeRings = (holes ?? [])
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => {
+      const hx = ring.map((p) => p[0]);
+      const hy = ring.map((p) => p[1]);
+      return { xs: hx, ys: hy, bounds: ringBounds(hx, hy) };
+    });
   return {
     bounds,
     hit: (px, py) => {
       if (!pointInRing(xs, ys, px, py)) return false;
       // The region model is explicit: a point inside the exterior AND inside a
       // hole is OUTSIDE the region.
-      for (const ring of holes ?? []) {
-        if (ring.length >= 3
-          && pointInRing(ring.map((p) => p[0]), ring.map((p) => p[1]), px, py)) {
-          return false;
-        }
+      for (const hole of holeRings) {
+        if (inBounds(hole.bounds, px, py) && pointInRing(hole.xs, hole.ys, px, py)) return false;
       }
       return true;
     },
@@ -130,16 +112,26 @@ function polygonShape(
 export function regionShapes(region: Region): Shape[] {
   // Profile lines belong to the intensity tool, not the annotation set.
   if ((region as unknown as { kind?: string })?.kind === 'profile') return [];
-  const b = region?.bounds as unknown as {
-    x?: number; y?: number; width?: number; height?: number;
-    xpoints?: number[]; ypoints?: number[]; closed?: boolean; holes?: number[][][];
-    polygons?: { xpoints: number[]; ypoints: number[]; closed?: boolean; holes?: number[][][] }[];
-  } | null | undefined;
+  const b = region?.bounds as unknown as
+    | {
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
+        xpoints?: number[];
+        ypoints?: number[];
+        closed?: boolean;
+        holes?: number[][][];
+        polygons?: { xpoints: number[]; ypoints: number[]; closed?: boolean; holes?: number[][][] }[];
+      }
+    | null
+    | undefined;
   if (!b) return [];
 
   if (Array.isArray(b.polygons)) {
     return b.polygons.flatMap((p) =>
-      p.closed === false ? [] : (polygonShape(p.xpoints ?? [], p.ypoints ?? [], p.holes) ?? []));
+      p.closed === false ? [] : (polygonShape(p.xpoints ?? [], p.ypoints ?? [], p.holes) ?? []),
+    );
   }
   if (Array.isArray(b.xpoints)) {
     if (b.closed === false) return []; // open polyline encloses nothing
@@ -162,18 +154,6 @@ export function regionShapes(region: Region): Shape[] {
 }
 
 /**
- * Observations inside ANY of `regions` (union). Coordinates are transformed by
- * `imageRef` first, so the test happens in the same world space the regions were
- * drawn in.
- *
- * `candidates`, when given, restricts the test to those observation indices — how
- * a 2D view of a 3D dataset keeps a drawn region meaning what it looks like it
- * means: the shape was drawn over ONE section, so it selects that section's cells
- * rather than the whole depth of the specimen behind them. The returned mask stays
- * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
- * the same way.
- */
-/**
  * A selection from an explicit list of observation indices.
  *
  * What a lasso in a linked plot produces: the plot knows which points the user drew
@@ -182,9 +162,7 @@ export function regionShapes(region: Region): Shape[] {
  * point twice, and a stale index from a plot drawn before a dataset change must not
  * throw in the middle of a selection gesture.
  */
-export function selectByIndices(
-  indices: Iterable<number>, observationCount: number,
-): SpatialSelectionMask {
+export function selectByIndices(indices: Iterable<number>, observationCount: number): SpatialSelectionMask {
   const mask = new Uint8Array(observationCount);
   let count = 0;
   for (const i of indices) {
@@ -196,6 +174,18 @@ export function selectByIndices(
   return { mask, count };
 }
 
+/**
+ * Observations inside ANY of `regions` (union). Coordinates are transformed by
+ * `imageRef` first, so the test happens in the same world space the regions were
+ * drawn in.
+ *
+ * `candidates`, when given, restricts the test to those observation indices — how
+ * a 2D view of a 3D dataset keeps a drawn region meaning what it looks like it
+ * means: the shape was drawn over ONE section, so it selects that section's cells
+ * rather than the whole depth of the specimen behind them. The returned mask stays
+ * indexed by observation, so every consumer (charts, legend, the 3D cloud) reads it
+ * the same way.
+ */
 export function selectInRegions(
   observations: SpatialObservations,
   imageRef: SpatialImageRef | undefined,
@@ -275,7 +265,6 @@ export function selectInRegionsProjected(
   return { mask, count: hits };
 }
 
-/** Every observation whose categorical code equals `code` — the legend click. */
 /**
  * Whether two selections hold exactly the same observations.
  *
@@ -295,6 +284,7 @@ export function sameSelection(a: SpatialSelectionMask, b: SpatialSelectionMask):
   return true;
 }
 
+/** Every observation whose categorical code equals `code` — the legend click. */
 export function selectByCategory(codes: Uint16Array, code: number): SpatialSelectionMask {
   const mask = new Uint8Array(codes.length);
   let count = 0;

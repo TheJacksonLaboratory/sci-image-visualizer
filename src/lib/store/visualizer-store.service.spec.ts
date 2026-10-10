@@ -1,3 +1,6 @@
+import { of } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { IImageMetadata } from '../contracts/image.contract';
 import { VisualizerStore } from './visualizer-store.service';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
 
@@ -45,7 +48,13 @@ describe('VisualizerStore.resetChannelState', () => {
   it('falls back to neutral defaults when no image baseline was captured', () => {
     const store = new VisualizerStore();
     const seed: IChannelState = {
-      index: 0, name: 'X', color: '#abcabc', min: 5, max: 9, gamma: 3, visible: true,
+      index: 0,
+      name: 'X',
+      color: '#abcabc',
+      min: 5,
+      max: 9,
+      gamma: 3,
+      visible: true,
     };
     store.setChannelStates([seed]);
 
@@ -153,5 +162,63 @@ describe('VisualizerStore.selectedChannel', () => {
     store.setSelectedChannel(3); // deduped
     sub.unsubscribe();
     expect(seen).toEqual([0, 3]); // initial + one change
+  });
+});
+
+describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
+  const fluo = (names: string[]): IImageMetadata[] => [
+    {
+      channelCount: names.length,
+      rgbChannels: 1,
+      x: 10,
+      y: 10,
+      z: 1,
+      channelInfo: names.map((name) => ({ name })),
+    } as IImageMetadata,
+  ];
+
+  it("keeps the user's window edits on a re-plot of the SAME image", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    store.setChannelState(1, { min: 20, max: 180 });
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    expect(store.currentChannelStates()[1]).toMatchObject({ name: 'GFP', min: 20, max: 180 });
+  });
+
+  it('re-derives names, tints and windows for a DIFFERENT image with the same channel count', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'a.tif');
+    store.setChannelState(1, { min: 20, max: 180 });
+    store.setSelectedChannel(2);
+    store.setImageMeta(fluo(['CD3', 'CD8', 'PanCK']), 'b.tif');
+    expect(store.currentChannelStates().map((c) => c.name)).toEqual(['CD3', 'CD8', 'PanCK']);
+    expect(store.currentChannelStates()[1]).toMatchObject({ min: 0, max: 255 });
+    expect(store.currentSelectedChannel()).toBe(0);
+  });
+
+  it('an RGB image followed by a 3-channel fluorescence image drops Red/Green/Blue', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata], 'rgb.png');
+    store.setImageMeta(fluo(['DAPI', 'GFP', 'RFP']), 'fluo.tif');
+    expect(store.currentChannelStates()[0].name).toBe('DAPI');
+  });
+});
+
+describe('VisualizerStore colormap LUT loading (CORE-18)', () => {
+  it('fetches the LUT asset once per page, however many isolated chains create a store', async () => {
+    const lut: [number, string][] = [
+      [0, '#000000'],
+      [1, '#ffffff'],
+    ];
+    const http = { get: jest.fn(() => of({ GIST_NCAR_LUT: lut })) };
+    const first = new VisualizerStore(http as unknown as HttpClient);
+    new VisualizerStore(http as unknown as HttpClient); // e.g. the pipeline preview's provideVisualization() chain
+    await Promise.resolve();
+    expect(http.get).toHaveBeenCalledTimes(1);
+    const resolved = first
+      .getColormapOptions()
+      .flatMap((g: { children?: { label: string; data: { value: unknown } }[] }) => g.children ?? [])
+      .find((c: { label: string }) => c.label === 'gist_ncar');
+    expect(resolved.data.value).toEqual(lut);
   });
 });

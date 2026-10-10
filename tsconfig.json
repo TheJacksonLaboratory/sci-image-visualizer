@@ -2,6 +2,9 @@
   "compileOnSave": false,
   "compilerOptions": {
     "baseUrl": ".",
+    "paths": {
+      "plotly.js-dist-min": ["src/lib/implementations/plotly/plotly.d.ts"]
+    },
     "rootDir": ".",
     "outDir": "./dist/out-tsc",
     "sourceMap": true,

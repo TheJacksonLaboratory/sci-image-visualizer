@@ -1,4 +1,6 @@
 import { SliceCache, SliceCacheHost } from './slice-cache';
+import { OsdAddTiledImageOptions, OsdTiledImageLike } from './osd-viewer-like';
+import { fakeOsdTiledImage, fakeOsdViewer } from '../../testing/fake-osd-viewer';
 
 /**
  * Unit tests for the slice cache (refactoring plan, Step 3) — the logic that
@@ -7,19 +9,14 @@ import { SliceCache, SliceCacheHost } from './slice-cache';
  * channel-group reveal.
  */
 
-interface FakeItem {
+interface FakeItem extends OsdTiledImageLike {
   z: number;
   fullyLoaded: boolean;
   setOpacity: jest.Mock;
-  getFullyLoaded: () => boolean;
 }
 
 function makeItem(z: number, fullyLoaded = true): FakeItem {
-  const it: any = {
-    z,
-    fullyLoaded,
-    setOpacity: jest.fn(),
-  };
+  const it: FakeItem = Object.assign(fakeOsdTiledImage(), { z, fullyLoaded, setOpacity: jest.fn() });
   it.getFullyLoaded = () => it.fullyLoaded;
   return it;
 }
@@ -27,28 +24,35 @@ function makeItem(z: number, fullyLoaded = true): FakeItem {
 /** Fake viewer: records addTiledImage calls; success is fired manually so the
  *  tests control async ordering exactly like OSD's real callback timing. */
 function makeViewer() {
-  const items: any[] = [];
-  const pending: Array<{ opts: any }> = [];
-  return {
-    items,
-    pending,
+  const items: OsdTiledImageLike[] = [];
+  const pending: OsdAddTiledImageOptions[] = [];
+  const addTiledImage = jest.fn((opts: OsdAddTiledImageOptions) => {
+    pending.push(opts);
+  });
+  const viewer = fakeOsdViewer({
     world: {
-      getIndexOfItem: (it: any) => items.indexOf(it),
-      removeItem: jest.fn((it: any) => {
+      getIndexOfItem: (it) => items.indexOf(it),
+      removeItem: jest.fn((it: OsdTiledImageLike) => {
         const i = items.indexOf(it);
         if (i >= 0) items.splice(i, 1);
       }),
     },
-    addTiledImage: jest.fn((opts: any) => pending.push({ opts })),
+    addTiledImage,
+  });
+  return Object.assign(viewer, {
+    items,
+    pending,
+    addTiledImage,
     /** Resolve the oldest pending add with a fake item. */
     succeedNext(z: number, fullyLoaded = true): FakeItem {
-      const p = pending.shift()!;
+      const opts = pending.shift()!;
       const item = makeItem(z, fullyLoaded);
       items.push(item);
-      p.opts.success({ item });
+      // OSD raises an event object carrying the added item.
+      opts.success?.(Object.assign(new Event('add-item'), { item }));
       return item;
     },
-  };
+  });
 }
 
 describe('SliceCache', () => {
@@ -176,7 +180,7 @@ describe('SliceCache', () => {
     jest.advanceTimersByTime(250);
     expect(viewer.addTiledImage).toHaveBeenCalledTimes(1);
     // Nearest-first: distance 1 below the current slice is tried first.
-    expect(viewer.addTiledImage.mock.calls[0][0].tileSource.z).toBe(1);
+    expect(viewer.addTiledImage.mock.calls[0][0].tileSource).toMatchObject({ z: 1 });
   });
 
   it('prefetch yields while the visible slice is still streaming tiles', () => {
@@ -205,7 +209,7 @@ describe('SliceCache', () => {
     bgItem.fullyLoaded = true; // tiles land
     jest.advanceTimersByTime(250); // poll: advance to the next slice
     expect(viewer.addTiledImage).toHaveBeenCalledTimes(2);
-    expect(viewer.addTiledImage.mock.calls[1][0].tileSource.z).toBe(3);
+    expect(viewer.addTiledImage.mock.calls[1][0].tileSource).toMatchObject({ z: 3 });
   });
 
   it('skips prefetch entirely for stacks over the fit-tile budget', () => {
@@ -236,8 +240,8 @@ describe('SliceCache', () => {
     cache.showSlice(0);
     const a0 = viewer.succeedNext(0);
     const a1 = viewer.succeedNext(0);
-    (a0 as any).requestInvalidate = jest.fn();
-    (a1 as any).requestInvalidate = jest.fn();
+    const invalidate0 = (a0.requestInvalidate = jest.fn());
+    const invalidate1 = (a1.requestInvalidate = jest.fn());
     host.state.currentZ = 1;
     cache.showSlice(1);
     viewer.succeedNext(1);
@@ -247,8 +251,8 @@ describe('SliceCache', () => {
 
     host.state.currentZ = 0;
     cache.showSlice(0); // revisit → stale tint re-applied
-    expect((a0 as any).requestInvalidate).toHaveBeenCalled();
-    expect((a1 as any).requestInvalidate).toHaveBeenCalled();
+    expect(invalidate0).toHaveBeenCalled();
+    expect(invalidate1).toHaveBeenCalled();
   });
 
   // ── reset / teardown ──────────────────────────────────────────────────

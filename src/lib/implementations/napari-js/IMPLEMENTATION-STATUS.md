@@ -1,116 +1,91 @@
-# napari-js WebGPU backend — implementation status (jit-ui#102)
+# napari-js backend: architecture and known gaps
 
-Session handoff / progress tracker. Branch: `feat/102-napari-js-backend` (local, **not pushed**;
-commits held pending review). The napari-js library lives at `~/git/napari-js` (published to npm as
-`napari-js`; repo `github.com/belkassaby/napari-js`).
+The WebGPU backend of `sci-image-visualizer`, built on
+[`napari-js`](https://github.com/TheJacksonLaboratory/napari-js) (`^0.14.0`, a runtime
+dependency). It is one `IViewerBackend` next to OSD and Plotly, chosen by the router
+(`RoutingVisualizerService`) for the `napari-*` plot types (`NAPARI_IMAGE`, `NAPARI_SCATTER`,
+`NAPARI_SURFACE`, `NAPARI_SCATTER3D`, `NAPARI_VOLUME`, `NAPARI_ISOSURFACE`), for the spatial-omics
+2D/3D views, and for `IMAGE` when `VizConfig.useNapariRenderer` opts in. A failed load falls back
+to OSD (2D) or Plotly (3D) for that image.
 
-## Goal
-Add a WebGPU `napari-js` backend as a new `IVisualizer` implementation in `jax-image-visualization`,
-offered alongside OSD (image) and Plotly (3D), behind opt-in napari plot types
-(`NAPARI_IMAGE` / `NAPARI_VOLUME` / `NAPARI_ISOSURFACE`). Reach feature parity with OSD for the
-image view; reuse the shared backend-agnostic services (RegionStore, tool services) and the same
-host wiring (`RoutingVisualizerService`, toolbar `toggleDragMode`).
+## Shape
 
-## Key files
-- `implementations/napari-js/napari-visualizer.service.ts` — the IVisualizer backend.
-- `implementations/napari-js/napari-region-overlay.ts` — SVG region overlay (draw/select/edit).
-- `implementations/napari-js/napari-scale-bar.ts` — physical scale bar overlay.
-- `testing/napari-js-stub.ts` — Jest stub for the napari-js ESM package.
-- `routing-visualizer.service.ts` — routes plot types to backends; `getRegionOverlay()` returns
-  the napari overlay when napari is active.
-- napari-js library: `src/viewer.ts`, `src/camera/controls.ts`, `src/engine/readback.ts`,
-  `src/io/texture-source.ts` (TiledSource), `src/io/pyramid.ts`, `src/layers/*`.
+`NapariVisualizerService` is a coordinator: it owns the viewer's lifetime and the routing contract,
+and hands everything else to collaborators. Region and display *state* is not here: it lives in
+the shared `RegionStore` / `VisualizerStore`, which the router serves to hosts directly; this
+backend draws from their events like the others.
 
-## napari-js library versions
-- **0.4.0** (published): `Viewer.setControlsEnabled()` runtime control toggle (region drawing).
-- **0.4.1** (published): readback renders into the canvas format + swizzles BGRA→RGBA (fixed the
-  per-scrub WebGPU validation error on Metal).
-- **0.4.2** (published): gentler, device-normalized + clamped wheel zoom.
-- **0.5.0** (published): `TiledSource.levelScales` — arbitrary (non-power-of-two) pyramid level
-  scales, so the dynamic tiling renders the server's Bio-Formats levels correctly.
-- jit-ui dep is at **^0.5.0** (reconciled + committed).
+```
+NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
+ ├─ NapariTileClient       server descriptors, tiles, volume assembly, native histograms, TIFF export
+ ├─ NapariDisplayState     channel window / gamma / invert / colormap → layer colours
+ ├─ NapariToolBridge       canvas tools + region overlay over the viewer (2D and 3D screen space)
+ ├─ LoadingBadgeState      what is loading, for the "… reloading" badge
+ └─ NapariScene            one per plot(), owns every layer/subscription it creates
+     ├─ Image2dScene / ScatterRegionsScene
+     ├─ VolumeScene / Scatter3dScene
+     ├─ SurfaceScene
+     └─ Spatial2dScene / Spatial3dScene  (via SpatialSession)
+          └─ NapariSpatialTileLayers (2D tile LOD layers: spatial-tiles/)
+```
 
-## DONE (committed on the branch — see git log)
-- Opt-in backend + napari plot types in the dropdown (kept Plotly iso/surface alongside).
-- Full-image render via real `/tiles/info` pyramid grid (stitch tiles of the finest level that
-  fits a tile budget + the 8192px GPU texture limit; single-tile fallback; safety downscale).
-- Live slice scrubbing (re-render per slice, out-of-order guard, branch on volume presence).
-- Native channels: per-channel additive composite (tint LUT), grayscale colormap, RGB composite;
-  per-channel native histograms via `layerHistogram`; invert; reactive to `VisualizerStore`.
-- Physical scale bar (`mppX` from `/tiles/info`).
-- Region overlay: draw rect/polygon/freehand; select; move/resize; vertex move/add/delete; bezier
-  display + handles + drag; pan/zoom gating via `setControlsEnabled`; donut (hole) RENDERING
-  (even-odd) + hole-vertex editing; classification labels.
-- Pixel tools (reuse shared services + a napari host w/ readback from `lastPixels`): wand, brush,
-  vertex-eraser, zoom-to-box. SAM box/point + cellpose wired through the same host.
-- Parity gap-fills: image smoothing→interpolation, `getViewportChange$` clamp, TIFF `exportData`,
-  native >8-bit `getHistogram$`.
-- ndpi/large-image FIX: layers scaled into FULL-RESOLUTION world coords so pre-saved regions align.
-- Volume/isosurface: color LUT (store colormap, reactive) + intensity histogram.
-- OSD-parity gap-fills: interpolation/smoothing, getViewportChange$ clamp, native >8-bit
-  getHistogram$, TIFF exportData, region labels, donut hole-vertex editing.
-- **Bézier holes (full model support)** — DONE. Polygon `holeHandlesIn/Out`; store seeds/edits
-  (`moveHoleBezierHandle`) + clone; both overlays render holes as cubic bezier (shared ring path);
-  napari draws+drag-edits hole control handles; GeoJSON round-trips hole anchors+handles and
-  exports flattened hole curves. Fixes OSD's donut→bezier bug too. (Minor follow-up: OSD hole
-  bezier-handle DRAG editing — OSD renders the curve; napari has full edit.)
-- **Wand/brush off-screen FIX** — the stroke mask + rasterization no longer clamp to the viewport
-  (with a 4096² memory guard), so extending a region that was panned/zoomed partly off-screen keeps
-  its off-screen part. Shared services → OSD + napari + Plotly.
+## Files
 
-## DONE (cont.)
-- **Dynamic pyramidal tiling on zoom** (task 6) — DONE. napari-js 0.5.0 `TiledSource.levelScales`
-  (arbitrary levels) + adapter `buildTiledSource` feeding `/tile` per (level,col,row,z). The 2D
-  image refines to higher resolution on zoom; tiled layers sit in full-res coords (regions align);
-  slice scrub just moves `dims.z`; histogram uses a coarse per-channel luminance sample. Stitch
-  remains as a no-descriptor fallback.
+| File | Role |
+|---|---|
+| `napari-visualizer.service.ts` | The backend: viewer lifecycle, `load`/`plot`, the scene per plot type, readback, export, and the capability-gated getters (`getOsdViewOptions`, `getVolumeResolution`, `getIntensitySampling`). |
+| `napari-scene.ts` | The `NapariScene` interface, `SceneContext` (what a scene may use) and `NapariSettings`. |
+| `napari-image-2d-scene.ts` | The 2D image, alone or under the region-centroid scatter (`NAPARI_IMAGE`, `NAPARI_SCATTER`). |
+| `napari-volume-scene.ts` | Volume / isosurface (MIP or iso) and the 3D scatter. |
+| `napari-surface-scene.ts` | The slice as a height field (`NAPARI_SURFACE`). |
+| `napari-spatial-scene.ts` | `SpatialSession`: the dataset / view-state / selection subscription shared by both spatial scenes. |
+| `napari-spatial-2d-scene.ts`, `napari-spatial-3d-scene.ts` | Spatial omics: markers over the tissue image; the 3D point cloud. |
+| `napari-spatial-encoding.ts` | Pure colour and grouping math of the spatial scenes. |
+| `napari-spatial-hover.ts`, `napari-spatial-tooltip.ts` | Spatial hover / click picking and the cursor tooltip. |
+| `napari-spatial-tiles.ts` | Coordinator of the 2D spatial view's camera-driven level-of-detail layers (see `spatial-tiles/`). |
+| `napari-tile-client.ts` | Talks to the tile server: descriptors, 2D tiles, volume assembly (decimated by the Resolution control), native >8-bit histograms, TIFF export. |
+| `napari-tool-bridge.ts` | The canvas tools' host and the region overlay's viewer adapter, in 2D world space and the 3D view's screen space. |
+| `napari-display-state.ts` | Channel display settings → napari layer colours (window → invert → gamma per channel, then an additive merge; gamma converted by `toNapariGamma`). |
+| `napari-helpers.ts` | Pure helpers and constants (no viewer, store or network). |
+| `napari-loading-state.ts`, `napari-loading-badge.ts` | Loading bookkeeping and the badge. |
+| `napari-region-overlay.ts` | SVG region overlay over the canvas: draw, select, marquee, move / resize, vertex and bezier-handle editing, holes, multi-part regions. Writes to the shared `RegionStore` and redraws from its update event. |
+| `region-overlay/` | The overlay's pieces: `overlay-projection.ts` (client / svg-local / world coordinates), `region-edit.ts` (a live drag), `region-svg-renderer.ts` (handles and paths). |
+| `spatial-tiles/` | The tile layers: `cell-layers.ts` (outlines / fills, with a cached contrast window), `transcript-layers.ts` + `transcript-jobs.ts` (points and their fetch planning), `density-layer.ts`, `transcript-hover.ts`, `categorical-lookup.ts`, `layer-groups.ts`, `plan-context.ts`. |
+| `napari-navigator.ts`, `napari-scale-bar.ts`, `napari-axes-gizmo.ts`, `napari-axes-labels.ts` | Overlay chrome: minimap, physical scale bar, 3D axes gizmo and labels. |
+| `napari-volume-z-handle.ts` | Drag handle that restretches a volume's Z. |
+| `napari-zoom.ts` | Wheel-zoom speed derived from OSD's step, so both backends zoom alike. |
 
-## DONE (cont.)
-- **Pixel-tool readback currency (SAM/wand/brush)** — SAM runs client-side and embeds the
-  *displayed* pixels (`getCachedImageData` → `lastPixels`). With tiling, tiles load async after the
-  post-plot readback and the readback wasn't refreshed on pan/zoom, so `lastPixels` was blank/stale
-  → SAM point prompts over-segmented, box prompts found "no cells" (wand/brush silently affected
-  too). Fix: `runReadback()` + debounced `armReadback()` re-armed on `camera.changed`; tools arm a
-  readback on activation; SAM-box awaits a fresh readback before encoding.
+## Contract
 
-## KNOWN LIMITATIONS / NOTES
-- **SAM segments the VISIBLE viewport at screen resolution** (same as OSD) — the client-side encoder
-  embeds the displayed composite, so small features must be zoomed in to segment well; segmenting
-  tiny features while zoomed all the way out won't resolve them.
+- Regions: the router writes the `RegionStore`; the overlay redraws on `getRegionUpdateEvent()`,
+  and the canvas tools reset on `getRegionSetReplaced$()` (undo, redo, a slice switch) through
+  `BaseStoreVisualizer`.
+- Navigator and image smoothing: `getOsdViewOptions()` (the router applies a setting to every
+  backend that has these options).
+- Resolution control: `getVolumeResolution()` (`{ get, set }`, the 3D decimate factor; takes
+  effect on the next load).
+- Intensity inset: `getIntensitySampling()` reports where the camera settled; the sampling itself
+  is the router's `IntensityProfileService`.
 
-## DONE (cont.)
-- **Click-to-zoom + gentler wheel** (task 7) — napari-js 0.5.1: OSD-style click-to-zoom (left-click
-  in, right/modifier-click out, drag still pans), and a gentler/clamped/device-normalized wheel zoom
-  (`ViewerOptions.wheelZoomSpeed`/`clickZoomFactor`). Fixes the over-sensitive scroll.
-- **Rubber-band region selection** — select mode draws a marquee in empty space and selects every
-  region whose bbox it overlaps (rect/polygon/multipolygon); click on empty clears. Mirrors OSD.
+## Testing
 
-## TODO / BACKLOG
-- **Full-resolution SAM embedding (optional, task 8)** — instead of embedding the screen readback,
-  fetch the prompt region's native-res tiles and embed those, so SAM segments at full detail
-  regardless of zoom. Larger change (SAM-specific image fetch + coordinate mapping).
-- **Shared-code refactor (held)** — extract the identical OSD+napari IRegionStore/IDisplayOptions
-  delegations into an abstract base.
+Jest cannot load napari-js (ESM-only, needs WebGPU), so `jest.config.ts` maps `napari-js` to
+`src/lib/testing/napari-js-stub.ts`. Specs type-check against the real `.d.ts` and run against
+the stub; `napari-js-stub.conformance.spec.ts` checks the stub's shapes against the real types
+and lists the remaining deviations. Replace the stub when napari-js ships a headless
+`./testing` entry. `osd/display-pipeline.cross-backend.spec.ts` checks OSD's display pipeline
+against napari-js's own colour functions.
 
-## DONE (cont.)
-- **OSD donut hole-bézier full edit** — OSD now draws + hit-tests + drags hole bézier control
-  handles (ring-aware → store.moveHoleBezierHandle), matching napari. Both backends fully edit
-  bézier donuts.
-- **Wand/brush zoom-scale fix** — the persisted stroke is invalidated when the view ratio/origin
-  changes, so editing no longer rescales a region by the zoom-change factor; plus `fitsForEdit`
-  skips adopt/merge of a region too large to rasterize at the current zoom. Shared (all 3 backends).
-- **Shared-code refactor** (HELD by user): extract the ~40 identical `IRegionStore`/`IDisplayOptions`
-  delegations from OSD + napari into a shared abstract base class they extend.
-- Known parity gaps (lower priority): `setNavigatorVisible` (napari-js has no minimap — library
-  limitation), stack slice-cache/preload + grayscale auto-window seeding (UX polish).
+## Known gaps
 
-## VERIFIED IN BROWSER (by user)
-Large single image (whole image, not corner); large grayscale stack scrubbing (after BGRA fix);
-channels/invert; scale bar; region rect/polygon/freehand draw + bezier display + select + handles;
-wand; vertex-eraser; zoom-to-box. NOT yet confirmed live: brush, SAM/cellpose (need a model +
-server), volume/iso LUT+histogram, the latest parity gap-fills, ndpi alignment, donut rendering.
+Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 
-## GATES
-`npx nx build jax-image-visualization` · `npx nx test jax-image-visualization` (717 tests) ·
-`npx nx lint jax-image-visualization` (0 errors) · `npx nx build jit-ui` (AOT). All green at last
-commit (`f490e6c`). Commit convention: NO `Co-Authored-By` trailer.
+- **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
+- **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
+  min.
+- **Needs napari-js APIs:** `LayerList.move` (layer reorders re-upload GPU buffers,
+  NAPARI-BOUNDARY-11), flat `Float32Array` point colours (NAPARI-BOUNDARY-12), per-point
+  symbols (NAPARI-BOUNDARY-25), per-shape colours (NAPARI-BOUNDARY-27), GPU density windowing
+  (NAPARI-BOUNDARY-28).
+- **SAM** embeds the displayed viewport at screen resolution, as on OSD: zoom in to segment
+  small features.

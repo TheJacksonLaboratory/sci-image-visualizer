@@ -1,5 +1,6 @@
 import { SpatialImageRef, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { blurVolumeAxis, DensityGrid } from './spatial-density';
+import { percentileWindow, quantile } from './stats';
 
 /**
  * Turning per-cell expression into a **gene map** — a continuous field over the
@@ -43,6 +44,10 @@ export interface ExpressionFieldOptions {
   indices?: Uint32Array;
 }
 
+/**
+ * A 2D field of kernel-weighted mean expression on a `width × height` grid, with the
+ * support that says where it was actually measured.
+ */
 export interface ExpressionField {
   width: number;
   height: number;
@@ -57,49 +62,13 @@ export interface ExpressionField {
   range: [number, number];
 }
 
-/** In-place separable Gaussian along one axis of a `w × h` field. */
-function blurAxis(field: Float32Array, w: number, h: number, axis: 0 | 1, sigma: number): void {
-  if (!(sigma > 0.01)) return;
-  const radius = Math.max(1, Math.ceil(sigma * 3));
-  const kernel = new Float32Array(radius * 2 + 1);
-  let sum = 0;
-  for (let i = -radius; i <= radius; i++) {
-    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
-    kernel[i + radius] = v;
-    sum += v;
-  }
-  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
-
-  const len = axis === 0 ? w : h;
-  const stride = axis === 0 ? 1 : w;
-  const lines = axis === 0 ? h : w;
-  const line = new Float32Array(len);
-  for (let l = 0; l < lines; l++) {
-    const base = axis === 0 ? l * w : l;
-    for (let i = 0; i < len; i++) line[i] = field[base + i * stride];
-    for (let i = 0; i < len; i++) {
-      let acc = 0;
-      for (let k = -radius; k <= radius; k++) {
-        // Clamped edges: zero-padding would darken the specimen's own boundary,
-        // and the support channel already says where there is no data at all.
-        const j = Math.min(len - 1, Math.max(0, i + k));
-        acc += line[j] * kernel[k + radius];
-      }
-      field[base + i * stride] = acc;
-    }
-  }
-}
-
 /**
  * Estimate a gene's expression field over the image the observations sit in.
  *
  * Null when nothing lands on the raster — the caller then draws no layer, rather
  * than an empty one the reader has to interpret.
  */
-export function expressionField(
-  obs: SpatialObservations,
-  opts: ExpressionFieldOptions,
-): ExpressionField | null {
+export function expressionField(obs: SpatialObservations, opts: ExpressionFieldOptions): ExpressionField | null {
   const { width: w, height: h, step, sigma, values, indices } = opts;
   if (w <= 0 || h <= 0) return null;
   const [sx, sy] = opts.ref?.scale ?? [1, 1];
@@ -125,28 +94,27 @@ export function expressionField(
   }
   if (!placed) return null;
 
+  // A plane is the one-deep volume: the same blur, so the 2-D and 3-D gene maps
+  // cannot smooth differently.
   for (const axis of [0, 1] as const) {
-    blurAxis(num, w, h, axis, sigma);
-    blurAxis(den, w, h, axis, sigma);
+    blurVolumeAxis(num, w, h, 1, axis, sigma);
+    blurVolumeAxis(den, w, h, 1, axis, sigma);
   }
 
   const mean = new Float32Array(w * h);
   let lo = Infinity;
   let hi = -Infinity;
-  const positives: number[] = [];
   for (let i = 0; i < mean.length; i++) {
     const d = den[i];
     if (d <= 0) continue;
     const m = num[i] / d;
     mean[i] = m;
-    positives.push(d);
     if (m < lo) lo = m;
     if (m > hi) hi = m;
   }
   if (!Number.isFinite(lo)) return null;
 
-  positives.sort((a, b) => a - b);
-  const supportScale = positives[positives.length >> 1] || 0;
+  const supportScale = quantile(den, 0.5, { filter: 'positive' }) || 0;
   return {
     width: w,
     height: h,
@@ -155,6 +123,22 @@ export function expressionField(
     supportScale,
     range: hi > lo ? [lo, hi] : [lo, lo + 1],
   };
+}
+
+/**
+ * Contrast window of a gene map (2-D or 3-D), from percentiles of the MEASURED pixels.
+ *
+ * `mean` is 0 wherever `support` is 0, and those zeros are not data: windowing the whole
+ * array pins the low percentile at 0 and slides the high one upward on any section the
+ * tissue does not fill, so the colours stop describing what was measured. `lo`/`hi` are
+ * fractions, as for `contrastWindow`; `[0, 1]` when nothing was measured.
+ */
+export function fieldContrastWindow(
+  field: Pick<ExpressionField | ExpressionVolumeField, 'mean' | 'support'>,
+  lo = 0.01,
+  hi = 0.99,
+): [number, number] {
+  return percentileWindow(field.mean, lo, hi, { where: field.support });
 }
 
 /**
@@ -198,6 +182,36 @@ export function colorExpressionField(
   return rgba;
 }
 
+/** Options for {@link expressionVolume}. */
+export interface ExpressionVolumeOptions {
+  /** Kernel σ per axis, in the observations' own units. The z term is used only
+   *  when {@link interpolate} is set. */
+  sigma: [number, number, number];
+  /** One expression value per observation. */
+  values: Float32Array;
+  /** Observations to include; every one when absent — one section, or a selection. */
+  indices?: Uint32Array;
+  /** Smooth along z into a continuous estimate rather than leaving the measured
+   *  sheets isolated at their own planes. */
+  interpolate?: boolean;
+}
+
+/**
+ * The 3D counterpart of {@link ExpressionField}: kernel-weighted mean expression on a
+ * `width × height × depth` voxel grid, with its support.
+ */
+export interface ExpressionVolumeField {
+  width: number;
+  height: number;
+  depth: number;
+  /** Kernel-weighted mean expression, valid only where `support > 0`. */
+  mean: Float32Array;
+  /** Kernel-weighted cell count per voxel — 0 where nothing was measured. */
+  support: Float32Array;
+  /** Finite range of `mean` over the supported voxels, for a contrast window. */
+  range: [number, number];
+}
+
 /**
  * The same estimator in 3D: a gene's expression over a serially sectioned
  * specimen, on a {@link DensityGrid} lattice.
@@ -220,31 +234,6 @@ export function colorExpressionField(
  * different cells, so there is nothing to interpolate along. What is interpolated
  * is a field, which is legitimately defined between the planes.
  */
-export interface ExpressionVolumeOptions {
-  /** Kernel σ per axis, in the observations' own units. The z term is used only
-   *  when {@link interpolate} is set. */
-  sigma: [number, number, number];
-  /** One expression value per observation. */
-  values: Float32Array;
-  /** Observations to include; every one when absent — one section, or a selection. */
-  indices?: Uint32Array;
-  /** Smooth along z into a continuous estimate rather than leaving the measured
-   *  sheets isolated at their own planes. */
-  interpolate?: boolean;
-}
-
-export interface ExpressionVolumeField {
-  width: number;
-  height: number;
-  depth: number;
-  /** Kernel-weighted mean expression, valid only where `support > 0`. */
-  mean: Float32Array;
-  /** Kernel-weighted cell count per voxel — 0 where nothing was measured. */
-  support: Float32Array;
-  /** Finite range of `mean` over the supported voxels, for a contrast window. */
-  range: [number, number];
-}
-
 export function expressionVolume(
   obs: SpatialObservations,
   grid: DensityGrid,
@@ -282,7 +271,9 @@ export function expressionVolume(
   if (!placed) return null;
 
   const sigmaVox: [number, number, number] = [
-    opts.sigma[0] / voxelSize[0], opts.sigma[1] / voxelSize[1], opts.sigma[2] / voxelSize[2],
+    opts.sigma[0] / voxelSize[0],
+    opts.sigma[1] / voxelSize[1],
+    opts.sigma[2] / voxelSize[2],
   ];
   // In-plane always: a section's own gene map is a 2D field, whichever mode this is.
   for (const axis of [0, 1] as const) {

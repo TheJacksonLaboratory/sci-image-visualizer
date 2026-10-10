@@ -6,8 +6,13 @@
  * see `class-color.util.ts` for the deterministic colour-resolution engine.
  */
 
+/** Where a preset class came from: added by the user, one of the built-in
+ *  defaults, or auto-promoted from an unknown region label. */
 export type PresetSource = 'user' | 'default' | 'auto';
 
+/** One annotation class and its colour: regions whose `label` matches
+ *  `name` (per the set's {@link MatchMode}) draw in `color` unless their colour
+ *  was overridden by hand. */
 export interface ClassPreset {
   /** The class name — matched against `Region.label`. */
   name: string;
@@ -19,8 +24,15 @@ export interface ClassPreset {
   source?: PresetSource;
 }
 
+/** How a region label is matched to a preset name: `'exact'` compares the
+ *  strings as is; `'normalized'` trims and lower-cases both first. */
 export type MatchMode = 'exact' | 'normalized';
 
+/**
+ * The per-user class-colour configuration (server-persisted through the
+ * preferences port): the preset classes, the palette for labels outside them,
+ * and the matching rules. Resolved into region colours by `class-color.util.ts`.
+ */
 export interface PresetSet {
   /** Ordered list of preset classes. */
   classes: ClassPreset[];
@@ -38,8 +50,16 @@ export interface PresetSet {
  * gets the same colour with no stored state.
  */
 export const DEFAULT_FALLBACK_PALETTE: string[] = [
-  '#6C8EBF', '#82B366', '#B85450', '#9673A6', '#D79B00',
-  '#3C948B', '#A64CA6', '#CC6677', '#4477AA', '#228833',
+  '#6C8EBF',
+  '#82B366',
+  '#B85450',
+  '#9673A6',
+  '#D79B00',
+  '#3C948B',
+  '#A64CA6',
+  '#CC6677',
+  '#4477AA',
+  '#228833',
 ];
 
 /** Seed classes — mirrors the historical hard-coded `classificationColors` map. */
@@ -72,4 +92,31 @@ export function defaultPresetSet(): PresetSet {
 /** True when the set has no usable classes (e.g. the server returned an empty/blank record). */
 export function isEmptyPresetSet(set: PresetSet | null | undefined): boolean {
   return !set || !Array.isArray(set.classes) || set.classes.length === 0;
+}
+
+/**
+ * Validate an untrusted value (e.g. an imported JSON file) as a preset set.
+ * Returns a clean copy — only well-formed `{ name, color }` classes, defaults
+ * for missing optional fields — or null when it has no usable classes.
+ */
+export function parsePresetSet(value: unknown): PresetSet | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Record<keyof PresetSet, unknown>>;
+  if (!Array.isArray(raw.classes)) return null;
+  const classes: ClassPreset[] = [];
+  for (const c of raw.classes as unknown[]) {
+    const entry = c as Partial<ClassPreset> | null;
+    if (!entry || typeof entry.name !== 'string' || typeof entry.color !== 'string') continue;
+    classes.push({ ...entry, name: entry.name, color: entry.color });
+  }
+  if (classes.length === 0) return null;
+  const palette = Array.isArray(raw.fallbackPalette)
+    ? (raw.fallbackPalette as unknown[]).filter((c): c is string => typeof c === 'string')
+    : [];
+  return {
+    classes,
+    fallbackPalette: palette.length ? palette : [...DEFAULT_FALLBACK_PALETTE],
+    autoPromote: raw.autoPromote === true,
+    matchMode: raw.matchMode === 'normalized' ? 'normalized' : 'exact',
+  };
 }

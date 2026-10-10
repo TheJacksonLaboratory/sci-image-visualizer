@@ -1,0 +1,76 @@
+<p-dialog
+  header="Save Mask"
+  [visible]="visible"
+  (visibleChange)="visibleChange.emit($event)"
+  [modal]="true"
+  appendTo="body"
+  [style]="{ width: '30rem' }"
+  [draggable]="false"
+  [resizable]="false"
+  [closable]="!busy"
+  [closeOnEscape]="!busy"
+>
+  <!-- Idle: filename + mask-type form. -->
+  <div *ngIf="!busy" class="flex flex-column gap-3 pt-2">
+    <label for="mask-filename" class="font-medium">Mask filename</label>
+    <input
+      id="mask-filename"
+      type="text"
+      pInputText
+      [ngModel]="filename"
+      (ngModelChange)="filenameChange.emit($event)"
+      class="w-full"
+    />
+    <span class="font-medium">Mask type</span>
+    <div class="flex align-items-center gap-2">
+      <p-radioButton
+        inputId="mask-binary"
+        name="maskMode"
+        value="binary"
+        [ngModel]="mode"
+        (ngModelChange)="modeChange.emit($event)"
+      ></p-radioButton>
+      <label for="mask-binary">Binary <span class="text-color-secondary">(regions 1, background 0)</span></label>
+    </div>
+    <div class="flex align-items-center gap-2">
+      <p-radioButton
+        inputId="mask-multiclass"
+        name="maskMode"
+        value="multiclass"
+        [ngModel]="mode"
+        (ngModelChange)="modeChange.emit($event)"
+      ></p-radioButton>
+      <label for="mask-multiclass"
+        >Multi-class <span class="text-color-secondary">(unique id per region, background 0)</span></label
+      >
+    </div>
+  </div>
+
+  <!-- Busy: progress while the worker rasterizes + encodes the PNG. -->
+  <div *ngIf="busy" class="flex flex-column gap-3 pt-2">
+    <span>{{ encoding ? 'Encoding PNG…' : 'Rasterizing regions…' }}</span>
+    <p-progressBar
+      [mode]="encoding ? 'indeterminate' : 'determinate'"
+      [value]="progress"
+      [style]="{ height: '0.75rem' }"
+    ></p-progressBar>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <p-button *ngIf="!busy" label="Cancel" icon="pi pi-times" [text]="true" (onClick)="close()"></p-button>
+    <p-button
+      *ngIf="!busy"
+      label="Download"
+      icon="pi pi-download"
+      [disabled]="!filename || !filename.trim()"
+      (onClick)="confirm.emit()"
+    ></p-button>
+    <p-button
+      *ngIf="busy"
+      label="Cancel"
+      icon="pi pi-times"
+      [text]="true"
+      (onClick)="cancelExport.emit()"
+    ></p-button>
+  </ng-template>
+</p-dialog>

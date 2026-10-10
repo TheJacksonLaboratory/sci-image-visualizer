@@ -1,4 +1,7 @@
 import { elementToImage, imageToElement, imageRectToViewport, viewportRectToImage } from './osd-coords';
+import { OSD } from './osd-lib';
+import { OsdRectLike, OsdViewerLike } from './osd-viewer-like';
+import { fakeOsdTiledImage, fakeOsdViewer } from '../../testing/fake-osd-viewer';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -10,33 +13,34 @@ import { elementToImage, imageToElement, imageRectToViewport, viewportRectToImag
  * factors per leg so the path taken is provable from the output value.
  */
 
-/** element↔viewport scale 100, viewport↔image scale 1000, fallback scale 7. */
-function fakeViewer(withItem: boolean): any {
-  const item = {
-    viewportToImageCoordinates: (p: any) => ({ x: p.x * 1000, y: p.y * 1000 }),
-    imageToViewportCoordinates: (p: any) => ({ x: p.x / 1000, y: p.y / 1000 }),
-    imageToViewportRectangle: (r: any) => ({
-      x: r.x / 1000, y: r.y / 1000, width: r.width / 1000, height: r.height / 1000, via: 'item',
-    }),
-    viewportToImageRectangle: (r: any) => ({
-      x: r.x * 1000, y: r.y * 1000, width: r.width * 1000, height: r.height * 1000, via: 'item',
-    }),
-  };
-  return {
+/** element↔viewport scale 100, viewport↔image scale 1000, fallback scale 7.
+ *  Rect results are tagged with the path that produced them (`via`). */
+function fakeViewer(withItem: boolean): OsdViewerLike {
+  const tagged = (r: OsdRectLike, via: string) =>
+    Object.assign(new OSD.Rect(r.x, r.y, r.width, r.height), { via });
+  const item = fakeOsdTiledImage({
+    viewportToImageCoordinates: (p) => ({ x: p.x * 1000, y: p.y * 1000 }),
+    imageToViewportCoordinates: (p) => ({ x: p.x / 1000, y: p.y / 1000 }),
+    imageToViewportRectangle: (r) =>
+      tagged({ x: r.x / 1000, y: r.y / 1000, width: r.width / 1000, height: r.height / 1000 }, 'item'),
+    viewportToImageRectangle: (r) =>
+      tagged({ x: r.x * 1000, y: r.y * 1000, width: r.width * 1000, height: r.height * 1000 }, 'item'),
+  });
+  return fakeOsdViewer({
     world: {
       getItemCount: () => (withItem ? 1 : 0),
-      getItemAt: () => (withItem ? item : null),
+      getItemAt: () => (withItem ? item : undefined),
     },
     viewport: {
-      viewerElementToViewportCoordinates: (p: any) => ({ x: p.x / 100, y: p.y / 100 }),
-      viewportToViewerElementCoordinates: (p: any) => ({ x: p.x * 100, y: p.y * 100 }),
+      viewerElementToViewportCoordinates: (p) => ({ x: p.x / 100, y: p.y / 100 }),
+      viewportToViewerElementCoordinates: (p) => ({ x: p.x * 100, y: p.y * 100 }),
       // Fallback-only methods (deliberately different scale so use is detectable).
-      viewerElementToImageCoordinates: (p: any) => ({ x: p.x * 7, y: p.y * 7 }),
-      imageToViewerElementCoordinates: (p: any) => ({ x: p.x / 7, y: p.y / 7 }),
-      imageToViewportRectangle: (r: any) => ({ ...r, via: 'viewport' }),
-      viewportToImageRectangle: (r: any) => ({ ...r, via: 'viewport' }),
+      viewerElementToImageCoordinates: (p) => ({ x: p.x * 7, y: p.y * 7 }),
+      imageToViewerElementCoordinates: (p) => ({ x: p.x / 7, y: p.y / 7 }),
+      imageToViewportRectangle: (r) => tagged(r, 'viewport'),
+      viewportToImageRectangle: (r) => tagged(r, 'viewport'),
     },
-  };
+  });
 }
 
 describe('osd-coords (characterization)', () => {

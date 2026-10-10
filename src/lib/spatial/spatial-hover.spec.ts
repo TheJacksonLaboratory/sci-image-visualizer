@@ -1,4 +1,4 @@
-import { HoverSource, hoverText, nearestObservation } from './spatial-hover';
+import { HoverSource, PointGridIndex, hoverText, nearestObservation } from './spatial-hover';
 import { NO_CATEGORY } from '../contracts/spatial-dataset.contract';
 
 describe('nearestObservation', () => {
@@ -80,7 +80,9 @@ describe('hoverText', () => {
 
   it('keeps a value readable at either extreme, and needs no unit', () => {
     const big: HoverSource = {
-      kind: 'continuous', name: 'counts', values: Float32Array.from([12345, 0.0001, 3.14159]),
+      kind: 'continuous',
+      name: 'counts',
+      values: Float32Array.from([12345, 0.0001, 3.14159]),
     };
     expect(hoverText(big, 0)).toEqual(['1.23e+4', 'counts']);
     expect(hoverText(big, 1)).toEqual(['1.00e-4', 'counts']);
@@ -91,5 +93,53 @@ describe('hoverText', () => {
     // Nothing is being shown about the cells, so there is no cluster to name.
     expect(hoverText(null, 0)).toBeNull();
     expect(hoverText(categorical, -1)).toBeNull();
+  });
+});
+
+describe('PointGridIndex', () => {
+  /** A deterministic pseudo-random cloud, with some points not drawn. */
+  function cloud(n: number, seed = 7): Float32Array {
+    let s = seed;
+    const rand = () => {
+      s = (s * 1103515245 + 12345) % 2147483648;
+      return s / 2147483648;
+    };
+    const out = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const hidden = rand() < 0.05;
+      out[i * 2] = hidden ? NaN : rand() * 1000;
+      out[i * 2 + 1] = hidden ? NaN : rand() * 600;
+    }
+    return out;
+  }
+
+  it('answers exactly what the linear scan answers', () => {
+    const positions = cloud(5000);
+    const index = PointGridIndex.build(positions)!;
+    for (let q = 0; q < 500; q++) {
+      const x = ((q * 37) % 1100) - 50;
+      const y = ((q * 53) % 700) - 50;
+      for (const r of [0.5, 5, 40, 2000]) {
+        expect(index.nearest(x, y, r)).toBe(nearestObservation(positions, x, y, r));
+      }
+    }
+  });
+
+  it('gives a tie to the later observation, as the scan does', () => {
+    const positions = Float32Array.from([10, 10, 10, 10, 0, 0, 10, 10]);
+    expect(PointGridIndex.build(positions)!.nearest(10, 10, 1)).toBe(3);
+  });
+
+  it('skips undrawn points and is null when nothing is drawn', () => {
+    const positions = Float32Array.from([NaN, NaN, 5, 5]);
+    expect(PointGridIndex.build(positions)!.nearest(5, 5, 1)).toBe(1);
+    expect(PointGridIndex.build(Float32Array.from([NaN, NaN]))).toBeNull();
+  });
+
+  it('handles every point on one spot', () => {
+    const positions = Float32Array.from([3, 3, 3, 3, 3, 3]);
+    const index = PointGridIndex.build(positions)!;
+    expect(index.nearest(3, 3, 0)).toBe(2);
+    expect(index.nearest(4, 3, 0.5)).toBe(-1);
   });
 });

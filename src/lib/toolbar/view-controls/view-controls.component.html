@@ -1,0 +1,167 @@
+<!-- Zoom tools. Plotly rubber-band drag-zoom: on OpenSeadragon the box-zoom
+     covers this and a bare drag pans natively, so it's hidden in image view. -->
+<ng-container *ngIf="isHeatmap && zoomTools">
+  <span class="toolbar-separator"></span>
+  <p-button
+    *ngIf="!isImageView"
+    icon="pi pi-search"
+    size="small"
+    [text]="activeDragMode !== 'zoom'"
+    ariaLabel="Zoom drag"
+    pTooltip="Zoom drag"
+    tooltipPosition="bottom"
+    (onClick)="toggleDragMode.emit('zoom')"
+  >
+  </p-button>
+  <p-button
+    size="small"
+    [text]="activeDragMode !== 'zoomToBox'"
+    ariaLabel="Zoom box"
+    pTooltip="Zoom box (<kbd>b</kbd>)"
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="toggleDragMode.emit('zoomToBox')"
+  >
+    <img
+      src="assets/plotting/zoom-box.svg"
+      [class]="activeDragMode === 'zoomToBox' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+      style="width: 1rem"
+    />
+  </p-button>
+  <p-button
+    icon="pi pi-arrows-alt"
+    size="small"
+    [text]="activeDragMode !== 'pan'"
+    ariaLabel="Pan the image"
+    pTooltip="Pan the image (<kbd>p</kbd>)"
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="toggleDragMode.emit('pan')"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-search-plus"
+    size="small"
+    [text]="true"
+    ariaLabel="Zoom in"
+    pTooltip="Zoom in (<kbd>+</kbd>)"
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="zoomIn.emit()"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-search-minus"
+    size="small"
+    [text]="true"
+    ariaLabel="Zoom out"
+    pTooltip="Zoom out (<kbd>-</kbd>)"
+    [escape]="false"
+    tooltipPosition="bottom"
+    (onClick)="zoomOut.emit()"
+  >
+  </p-button>
+</ng-container>
+
+<!-- Surface 3D controls -->
+<ng-container *ngIf="!isHeatmap">
+  <span class="toolbar-separator"></span>
+  <p-button
+    icon="pi pi-search"
+    size="small"
+    [text]="activeSurface3dMode !== 'zoom'"
+    ariaLabel="Zoom"
+    pTooltip="Zoom"
+    tooltipPosition="bottom"
+    (onClick)="toggleSurface3dMode.emit('zoom')"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-arrows-alt"
+    size="small"
+    [text]="activeSurface3dMode !== 'pan'"
+    ariaLabel="Pan"
+    pTooltip="Pan"
+    tooltipPosition="bottom"
+    (onClick)="toggleSurface3dMode.emit('pan')"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-globe"
+    size="small"
+    [text]="activeSurface3dMode !== 'orbit'"
+    ariaLabel="Orbital rotation"
+    pTooltip="Orbital rotation"
+    tooltipPosition="bottom"
+    (onClick)="toggleSurface3dMode.emit('orbit')"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-sync"
+    size="small"
+    [text]="activeSurface3dMode !== 'turntable'"
+    ariaLabel="Turntable rotation"
+    pTooltip="Turntable rotation"
+    tooltipPosition="bottom"
+    (onClick)="toggleSurface3dMode.emit('turntable')"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-home"
+    size="small"
+    [text]="true"
+    ariaLabel="Reset camera"
+    pTooltip="Reset camera to default"
+    tooltipPosition="bottom"
+    (onClick)="resetSurfaceCamera.emit()"
+  >
+  </p-button>
+  <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only).
+       `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
+       (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
+  <p-button
+    size="small"
+    *ngIf="isNapariMode"
+    styleClass="p-button-icon-only"
+    [text]="!axesVisible"
+    ariaLabel="Toggle 3D axes"
+    pTooltip="Toggle 3D axes / scale"
+    tooltipPosition="bottom"
+    (onClick)="toggleAxes.emit()"
+  >
+    <img
+      src="assets/plotting/3d-coordinates.svg"
+      [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+      style="width: 1rem"
+    />
+  </p-button>
+  <!-- Surface wireframe toggle (napari-js WebGPU surface only). -->
+  <p-button
+    icon="pi pi-share-alt"
+    size="small"
+    *ngIf="isNapariSurfaceMode"
+    [text]="!wireframeActive"
+    ariaLabel="Toggle wireframe"
+    pTooltip="Toggle wireframe"
+    tooltipPosition="bottom"
+    (onClick)="toggleWireframe.emit()"
+  >
+  </p-button>
+  <!-- Resolution (decimate factor) for the napari 3D types — reloads at coarser/finer sampling. -->
+  <ng-container *ngIf="isNapari3dMode">
+    <span class="flex align-items-center mx-1 toolbar-text">Res</span>
+    <p-dropdown
+      [options]="decimateOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="resolutionScale"
+      appendTo="body"
+      ariaLabel="Resolution"
+      pTooltip="Resolution (decimate factor)"
+      tooltipPosition="bottom"
+      [style]="{ 'min-width': '6rem' }"
+      (onChange)="selectResolution.emit($event.value)"
+    >
+    </p-dropdown>
+  </ng-container>
+</ng-container>

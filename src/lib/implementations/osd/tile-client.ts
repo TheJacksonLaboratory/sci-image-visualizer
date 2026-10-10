@@ -6,7 +6,8 @@ import { timeout } from 'rxjs/operators';
  * Single source of truth for jit-service `/tile` access from the OSD backend
  * (refactoring plan, Step 2). Before this module the tile URL was string-built
  * in four places and the fetch→decode pipeline copy-pasted in three — every
- * query-param change had to be repeated per site.
+ * query-param change had to be repeated per site. The URL itself now lives in
+ * the shared `tile-server/` client.
  *
  * Error handling is deliberately left to the CALL SITES: these helpers
  * propagate failures so each caller keeps its own tagged catch
@@ -14,23 +15,11 @@ import { timeout } from 'rxjs/operators';
  * skip/fallback semantics.
  */
 
-/** Tile coordinates for one `/tile` request. `channel == null` (or omitted)
- *  requests the server-composited tile; an index (including 0) requests that
- *  single channel as grayscale. */
-export interface TileCoords {
-  res: number;
-  col: number;
-  row: number;
-  z: number;
-  tileSize: number;
-  channel?: number | null;
-}
-
-/** Build the `/tile` request URL — the one place its query shape lives. */
-export function buildTileUrl(api: string, infoB64: string, c: TileCoords): string {
-  const ch = c.channel == null ? '' : `&channel=${c.channel}`;
-  return `${api}tile?info=${infoB64}&res=${c.res}&col=${c.col}&row=${c.row}&z=${c.z}&tileSize=${c.tileSize}${ch}`;
-}
+/** The `/tile` URL shape moved to the backend-neutral jit-service client
+ *  (`implementations/tile-server/`), shared with napari-js; re-exported so the OSD
+ *  modules keep importing it from here. */
+export { buildTileUrl } from '../tile-server/tile-protocol';
+export type { TileCoords } from '../tile-server/tile-protocol';
 
 /** Fetch a tile PNG and decode it to an ImageBitmap. The caller owns the
  *  bitmap (call `close()` when done). Throws on network/decode failure. */
@@ -42,16 +31,24 @@ export async function fetchTileBitmap(http: HttpClient, url: string, timeoutMs: 
 /** Fetch a tile and read its pixels back as RGBA ImageData (via an offscreen
  *  canvas). Returns null only when a 2d context can't be created; throws on
  *  network/decode failure (the caller's tagged catch handles it). */
-export async function fetchTileRgba(
-  http: HttpClient, url: string, timeoutMs: number,
-): Promise<ImageData | null> {
+export async function fetchTileRgba(http: HttpClient, url: string, timeoutMs: number): Promise<ImageData | null> {
   const bmp = await fetchTileBitmap(http, url, timeoutMs);
+  try {
+    return readRgba(bmp, bmp.width, bmp.height);
+  } finally {
+    bmp.close?.();
+  }
+}
+
+/** Draw a decoded image (bitmap, `<img>`, canvas) onto a scratch canvas and
+ *  read its pixels back as RGBA ImageData. Null when a 2d context can't be
+ *  created. */
+export function readRgba(src: CanvasImageSource, width: number, height: number): ImageData | null {
   const cv = document.createElement('canvas');
-  cv.width = bmp.width;
-  cv.height = bmp.height;
+  cv.width = width;
+  cv.height = height;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
-  ctx.drawImage(bmp, 0, 0);
-  bmp.close?.();
-  return ctx.getImageData(0, 0, cv.width, cv.height);
+  ctx.drawImage(src, 0, 0);
+  return ctx.getImageData(0, 0, width, height);
 }

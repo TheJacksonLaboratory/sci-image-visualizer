@@ -1,6 +1,5 @@
 <p-toolbar>
   <div class="p-toolbar-group-start flex-wrap align-items-center gap-1">
-
     <!-- Host-provided custom toolbar buttons, shown first (e.g. app-specific
          actions the visualization view itself doesn't own). -->
     <ng-content></ng-content>
@@ -9,825 +8,213 @@
          like the host's own buttons above, so they sit right beside them. Image view
          only, the view their dialog draws over. Highlighted while the dialog is open. -->
     <ng-container *ngIf="isImageView">
-      <p-button *ngFor="let tool of dialogTools; trackBy: trackToolById"
-                size="small" [text]="openDialogToolId !== tool.id"
-                [pTooltip]="tool.tooltip" tooltipPosition="bottom"
-                [ariaLabel]="tool.label"
-                [attr.aria-pressed]="openDialogToolId === tool.id"
-                (onClick)="toggleDialogTool.emit(tool.id)">
-        <img *ngIf="tool.icon.src" [src]="tool.icon.src" style="width: 1rem" [alt]="tool.label"
-             [class]="openDialogToolId === tool.id ? 'toolbar-icon-active' : 'toolbar-icon-dark'" />
+      <p-button
+        *ngFor="let tool of dialogTools; trackBy: trackToolById"
+        size="small"
+        [text]="openDialogToolId !== tool.id"
+        [pTooltip]="tool.tooltip"
+        tooltipPosition="bottom"
+        [ariaLabel]="tool.label"
+        [attr.aria-pressed]="openDialogToolId === tool.id"
+        (onClick)="toggleDialogTool.emit(tool.id)"
+      >
+        <img
+          *ngIf="tool.icon.src"
+          [src]="tool.icon.src"
+          style="width: 1rem"
+          [alt]="tool.label"
+          [class]="openDialogToolId === tool.id ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        />
         <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
       </p-button>
     </ng-container>
 
     <!-- Plot type: available for any image (grayscale or RGB), and for a spatial dataset
          that brings none (its spatial modes are still a choice). -->
-    <ng-container *ngIf="showPlotTypes">
-      <span class="toolbar-separator"></span>
-      <p-dropdown [options]="plotTypeOptions" optionLabel="label" optionValue="type"
-                  [(ngModel)]="selectedPlotType" appendTo="body"
-                  pTooltip="Select plot type" tooltipPosition="bottom"
-                  [style]="{'min-width': '11rem'}"
-                  styleClass="plotmode-dropdown" panelStyleClass="plotmode-panel"
-                  (onChange)="selectPlotType.emit($event.value)">
-        <ng-template let-opt pTemplate="selectedItem">
-          <span class="plotmode-item" *ngIf="opt">
-            <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
-            <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
-            <span>{{ opt.label }}</span>
-          </span>
-        </ng-template>
-        <ng-template let-opt pTemplate="item">
-          <span class="plotmode-item">
-            <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
-            <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
-            <span>{{ opt.label }}</span>
-          </span>
-        </ng-template>
-      </p-dropdown>
-      <ng-container *ngIf="isIsosurfaceMode">
-        <span class="flex align-items-center mx-1 toolbar-text">Iso</span>
-        <p-slider [(ngModel)]="isoRange" [range]="true"
-                  [min]="isoValueMin" [max]="isoValueMax" [step]="isoValueStep"
-                  (onChange)="isoRangeChange.emit($event.values)"
-                  pTooltip="Isosurface band (0–255), mapped onto the volume's
-                  actual intensity range. Surfaces are drawn for voxels whose
-                  intensity falls in the selected band — narrow it to isolate
-                  features, widen it to see the whole structure."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ isoRange[0] }}–{{ isoRange[1] }}</span>
-      </ng-container>
-      <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
-           Each added line gets the next bright palette colour and its own inset
-           trace; select a line on the image and use the trash tool to remove it
-           (and its trace). The lines are Region-based but excluded from the
-           Region Editor and exports. -->
-      <ng-container *ngIf="isIntensityCapable">
-        <span class="toolbar-separator"></span>
-        <p-button size="small" [text]="true"
-                  pTooltip="Add an intensity line (new colour). Click a line to select it,
-                  then use the trash tool to remove it."
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="addProfileLine.emit()">
-          <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-        </p-button>
-      </ng-container>
-    </ng-container>
+    <toolbar-plot-type-selector
+      *ngIf="showPlotTypes"
+      [options]="plotTypeOptions"
+      [selected]="selectedPlotType"
+      [isosurface]="isIsosurfaceMode"
+      [isoRange]="isoRange"
+      [intensityLines]="isIntensityCapable"
+      (selectPlotType)="selectPlotType.emit($event)"
+      (isoRangeChange)="isoRangeChange.emit($event)"
+      (addProfileLine)="addProfileLine.emit()"
+    >
+    </toolbar-plot-type-selector>
     <!-- Channels & Histogram: brightness/contrast, gamma, per-channel display,
          colormap/reverse/invert — opens the floating dialog. -->
-    <p-button *ngIf="tools.specialTools" pRipple size="small" [text]="true"
-              pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
-              tooltipPosition="bottom"
-              (onClick)="openChannelHistogram.emit()">
-      <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    <p-button
+      *ngIf="tools.specialTools"
+      pRipple
+      size="small"
+      [text]="true"
+      ariaLabel="Channels &amp; Histogram"
+      pTooltip="Channels &amp; Histogram (brightness/contrast, colormap)"
+      tooltipPosition="bottom"
+      (onClick)="openChannelHistogram.emit()"
+    >
+      <img src="assets/plotting/invert.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
 
     <!-- Spatial-omics controls. Only meaningful in the spatial mode, which is
          itself only offered while a dataset is loaded — so this button appears
          exactly when there is something for it to control. -->
-    <p-button *ngIf="tools.specialTools && isSpatialMode" pRipple size="small" [text]="true"
-              pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
-              tooltipPosition="bottom"
-              (onClick)="openSpatialControls.emit()">
-      <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem"/>
+    <p-button
+      *ngIf="tools.specialTools && isSpatialMode"
+      pRipple
+      size="small"
+      [text]="true"
+      ariaLabel="Spatial omics controls"
+      pTooltip="Spatial omics (colour by column or gene, legend, selection, distributions)"
+      tooltipPosition="bottom"
+      (onClick)="openSpatialControls.emit()"
+    >
+      <img src="assets/plotting/spatial-omics.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
 
     <!-- Smoothen toggle: bilinear smoothing vs nearest-neighbour raw pixels (Image
          view only — it's an OpenSeadragon drawer setting). Highlighted when smoothing on. -->
-    <p-button *ngIf="tools.specialTools && isImageView" size="small"
-              [text]="!imageSmoothingEnabled"
-              pTooltip="Smoothen (turn on image smoothing)" tooltipPosition="bottom"
-              (onClick)="toggleImageSmoothing.emit()">
-      <img src="assets/plotting/smooth.svg" style="width: 1rem"
-           [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"/>
+    <p-button
+      *ngIf="tools.specialTools && isImageView"
+      size="small"
+      [text]="!imageSmoothingEnabled"
+      ariaLabel="Smoothen"
+      pTooltip="Smoothen (turn on image smoothing)"
+      tooltipPosition="bottom"
+      (onClick)="toggleImageSmoothing.emit()"
+    >
+      <img
+        src="assets/plotting/smooth.svg"
+        style="width: 1rem"
+        [class]="imageSmoothingEnabled ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+      />
     </p-button>
 
     <!-- Stack controls -->
-    <ng-container *ngIf="imageInfo?.isStack">
-      <span class="toolbar-separator"></span>
-      <!-- Image view: scrub z-slices live (the renderer swaps slices in place). -->
-      <ng-container *ngIf="showsLiveSliceScrubber">
-        <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
-        <p-slider [(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
-                  (onChange)="zScrub.emit($event.value)" (onSlideEnd)="zSlide.emit($event.value)"
-                  pTooltip="Slice through the stack (← / → keys)" tooltipPosition="bottom"
-                  [style]="{'width':'16rem'}" styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text">{{zIndex}} of {{maxIndex}}</span>
-      </ng-container>
-      <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
-           hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
-           spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
-           image, and these modes draw observations, not one of its slices. -->
-      <ng-container *ngIf="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode">
-      <p-button icon="pi pi-image" size="small"
-                [text]="imageInfo?.showStack"
-                pTooltip="Single image mode: enables high-def zoom" tooltipPosition="bottom"
-                (onClick)="selectStackOption.emit(stackOptions[0])">
-      </p-button>
-      <p-button icon="pi pi-images" size="small"
-                [text]="!imageInfo?.showStack"
-                pTooltip="Stack mode, enables slicing through image frames" tooltipPosition="bottom"
-                (onClick)="selectStackOption.emit(stackOptions[1])">
-      </p-button>
-      <ng-container *ngIf="!imageInfo?.showStack">
-        <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
-        <div class="p-inputgroup" style="width: auto">
-          <p-inputNumber styleClass="w-3rem toolbar-input"
-					pTooltip="View image in stack (&#x23CE;)"
-					[(ngModel)]="zIndex" [min]="0" [max]="maxIndex"
-           (onInput)="zIndexInput.emit(zIndex)" (keydown.enter)="reloadAndPlot.emit()"/>
-          <p-button icon="pi pi-refresh" size="small" [text]="true" (onClick)="reloadAndPlot.emit()"
-                    pTooltip="Plot this slice" tooltipPosition="bottom">
-          </p-button>
-        </div>
-        <span class="flex align-items-center mx-1 toolbar-text">of {{maxIndex}}</span>
-        </ng-container>
-      </ng-container>
-    </ng-container>
+    <toolbar-stack-controls
+      *ngIf="imageInfo?.isStack"
+      [liveScrubber]="showsLiveSliceScrubber"
+      [stackToggle]="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode"
+      [showStack]="!!imageInfo?.showStack"
+      [stackOptions]="stackOptions"
+      [zIndex]="zIndex"
+      [maxIndex]="maxIndex"
+      (zScrub)="zScrub.emit($event)"
+      (zSlide)="zSlide.emit($event)"
+      (selectStackOption)="selectStackOption.emit($event)"
+      (zIndexInput)="zIndexInput.emit($event)"
+      (reloadAndPlot)="reloadAndPlot.emit()"
+    >
+    </toolbar-stack-controls>
 
     <!-- Image actions (special tools) -->
     <ng-container *ngIf="tools.specialTools">
       <span class="toolbar-separator"></span>
-      <p-button icon="pi pi-download" size="small" [text]="true"
-                pTooltip="Download image as PNG" tooltipPosition="bottom"
-                (onClick)="downloadImage.emit()">
+      <p-button
+        icon="pi pi-download"
+        size="small"
+        [text]="true"
+        ariaLabel="Download image as PNG"
+        pTooltip="Download image as PNG"
+        tooltipPosition="bottom"
+        (onClick)="downloadImage.emit()"
+      >
       </p-button>
-      <p-button *ngIf="isHeatmap" icon="pi pi-window-maximize" size="small" [text]="true"
-                pTooltip="Fit to view" tooltipPosition="bottom"
-                (onClick)="autoscaleImage.emit()">
-      </p-button>
-    </ng-container>
-
-    <!-- Zoom tools. Plotly rubber-band drag-zoom: on OpenSeadragon the box-zoom
-         covers this and a bare drag pans natively, so it's hidden in image view. -->
-    <ng-container *ngIf="isHeatmap && tools.zoomTools">
-      <span class="toolbar-separator"></span>
-      <p-button *ngIf="!isImageView" icon="pi pi-search" size="small"
-                [text]="activeDragMode !== 'zoom'"
-                pTooltip="Zoom drag" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('zoom')">
-      </p-button>
-      <p-button size="small"
-                [text]="activeDragMode !== 'zoomToBox'"
-                pTooltip="Zoom box (<kbd>b</kbd>)" [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('zoomToBox')">
-        <img src="assets/plotting/zoom-box.svg"
-             [class]="activeDragMode === 'zoomToBox' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <p-button icon="pi pi-arrows-alt" size="small"
-                [text]="activeDragMode !== 'pan'"
-                pTooltip="Pan the image (<kbd>p</kbd>)" [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('pan')">
-      </p-button>
-      <p-button icon="pi pi-search-plus" size="small" [text]="true"
-                pTooltip="Zoom in (<kbd>+</kbd>)" [escape]="false" tooltipPosition="bottom"
-                (onClick)="zoomIn.emit()">
-      </p-button>
-      <p-button icon="pi pi-search-minus" size="small" [text]="true"
-                pTooltip="Zoom out (<kbd>-</kbd>)" [escape]="false" tooltipPosition="bottom"
-                (onClick)="zoomOut.emit()">
+      <p-button
+        *ngIf="isHeatmap"
+        icon="pi pi-window-maximize"
+        size="small"
+        [text]="true"
+        ariaLabel="Fit to view"
+        pTooltip="Fit to view"
+        tooltipPosition="bottom"
+        (onClick)="autoscaleImage.emit()"
+      >
       </p-button>
     </ng-container>
 
-    <!-- Surface 3D controls -->
-    <ng-container *ngIf="!isHeatmap">
-      <span class="toolbar-separator"></span>
-      <p-button icon="pi pi-search" size="small"
-                [text]="activeSurface3dMode !== 'zoom'"
-                pTooltip="Zoom" tooltipPosition="bottom"
-                (onClick)="toggleSurface3dMode.emit('zoom')">
-      </p-button>
-      <p-button icon="pi pi-arrows-alt" size="small"
-                [text]="activeSurface3dMode !== 'pan'"
-                pTooltip="Pan" tooltipPosition="bottom"
-                (onClick)="toggleSurface3dMode.emit('pan')">
-      </p-button>
-      <p-button icon="pi pi-globe" size="small"
-                [text]="activeSurface3dMode !== 'orbit'"
-                pTooltip="Orbital rotation" tooltipPosition="bottom"
-                (onClick)="toggleSurface3dMode.emit('orbit')">
-      </p-button>
-      <p-button icon="pi pi-sync" size="small"
-                [text]="activeSurface3dMode !== 'turntable'"
-                pTooltip="Turntable rotation" tooltipPosition="bottom"
-                (onClick)="toggleSurface3dMode.emit('turntable')">
-      </p-button>
-      <p-button icon="pi pi-home" size="small" [text]="true"
-                pTooltip="Reset camera to default" tooltipPosition="bottom"
-                (onClick)="resetSurfaceCamera.emit()">
-      </p-button>
-      <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only).
-           `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
-           (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
-      <p-button size="small" *ngIf="isNapariMode" styleClass="p-button-icon-only"
-                [text]="!axesVisible"
-                pTooltip="Toggle 3D axes / scale" tooltipPosition="bottom"
-                (onClick)="toggleAxes.emit()">
-        <img src="assets/plotting/3d-coordinates.svg"
-             [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <!-- Surface wireframe toggle (napari-js WebGPU surface only). -->
-      <p-button icon="pi pi-share-alt" size="small" *ngIf="isNapariSurfaceMode"
-                [text]="!wireframeActive"
-                pTooltip="Toggle wireframe" tooltipPosition="bottom"
-                (onClick)="toggleWireframe.emit()">
-      </p-button>
-      <!-- Resolution (decimate factor) for the napari 3D types — reloads at coarser/finer sampling. -->
-      <ng-container *ngIf="isNapari3dMode">
-        <span class="flex align-items-center mx-1 toolbar-text">Res</span>
-        <p-dropdown [options]="decimateOptions" optionLabel="label" optionValue="value"
-                    [ngModel]="resolutionScale" appendTo="body"
-                    pTooltip="Resolution (decimate factor)" tooltipPosition="bottom"
-                    [style]="{'min-width': '6rem'}"
-                    (onChange)="selectResolution.emit($event.value)">
-        </p-dropdown>
-      </ng-container>
-    </ng-container>
+    <toolbar-view-controls
+      [isHeatmap]="isHeatmap"
+      [zoomTools]="tools.zoomTools"
+      [isImageView]="isImageView"
+      [activeDragMode]="activeDragMode"
+      [activeSurface3dMode]="activeSurface3dMode"
+      [isNapariMode]="isNapariMode"
+      [isNapariSurfaceMode]="isNapariSurfaceMode"
+      [isNapari3dMode]="isNapari3dMode"
+      [axesVisible]="axesVisible"
+      [wireframeActive]="wireframeActive"
+      [resolutionScale]="resolutionScale"
+      (toggleDragMode)="toggleDragMode.emit($event)"
+      (zoomIn)="zoomIn.emit()"
+      (zoomOut)="zoomOut.emit()"
+      (toggleSurface3dMode)="toggleSurface3dMode.emit($event)"
+      (resetSurfaceCamera)="resetSurfaceCamera.emit()"
+      (toggleAxes)="toggleAxes.emit()"
+      (toggleWireframe)="toggleWireframe.emit()"
+      (selectResolution)="selectResolution.emit($event)"
+    >
+    </toolbar-view-controls>
 
     <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
-      <span class="toolbar-separator"></span>
-      <!-- Region Editor: opens the editor as a floating dialog (formerly the
-           right-panel Regions tab). Sits with the region drawing tools. -->
-      <p-button size="small" [text]="true"
-                pTooltip="Open the Region Editor" tooltipPosition="bottom"
-                (onClick)="openRegionEditor.emit()">
-        <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <!-- Region drawing tools -->
-      <p-button icon="pi pi-arrow-up-right" size="small"
-                [text]="activeDragMode !== 'select'"
-                pTooltip="Selection mode (<kbd>s</kbd>)"
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('select')">
-      </p-button>
-      <p-button icon="pi pi-stop" size="small"
-                [text]="activeDragMode !== 'drawrect'"
-                pTooltip="Draw a rectangular region (<kbd>r</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawrect')">
-      </p-button>
-      <p-button *ngIf="!is3dRegions" size="small"
-                [text]="activeDragMode !== 'drawopenpath'"
-                pTooltip="Draw a polyline (<kbd>l</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawopenpath')">
-        <img src="assets/plotting/polyline.svg"
-             [class]="activeDragMode === 'drawopenpath' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <p-button icon="pi pi-pencil" size="small"
-                [text]="activeDragMode !== 'drawclosedpath'"
-                pTooltip="Draw a freeform region (<kbd>f</kbd>)" [escape]="false"
-                tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('drawclosedpath')">
-      </p-button>
-      <!-- Brush: paint a region by dragging a disc of the given size; the Size
-           slider appears while it's active. Hold Shift to erase (subtract). -->
-      <!-- Brush and polyline are absent from a 3D cloud: the brush paints in IMAGE
-                 pixels and there is no raster to sample, and an open polyline is a
-                 profile tool, not a closed region a selection can test against. -->
-            <p-button *ngIf="!is3dRegions" size="small"
-                [text]="activeDragMode !== 'brush'"
-                pTooltip="Brush: click and drag to paint a region.
-                <br>Hold <kbd>Shift</kbd> while painting to erase from a region."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('brush')">
-        <img src="assets/plotting/paintbrush.svg"
-             [class]="activeDragMode === 'brush' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'brush'">
-        <span class="flex align-items-center mx-1 toolbar-text">Size</span>
-        <p-slider [(ngModel)]="brushSize"
-                  [min]="brushSizeMin" [max]="brushSizeMax" [step]="brushSizeStep"
-                  (onChange)="brushSizeChange.emit($event.value)"
-                  pTooltip="Brush diameter in image pixels."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ brushSize }}</span>
-      </ng-container>
-
-      <!-- Vertex editing — backends with a vertex-editing overlay (OSD + napari-js image). -->
-      <ng-container *ngIf="supportsRegionVertexTools">
-        <p-button size="small"
-                  [text]="activeDragMode !== 'drawpolygon'"
-                  pTooltip="Polygon: click to place each vertex; click the first point to close"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('drawpolygon')">
-          <img src="assets/plotting/polygon-vertices.svg"
-               [class]="activeDragMode === 'drawpolygon' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'addpoint'"
-                  pTooltip="Add a vertex: click an edge of the selected polygon"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('addpoint')">
-          <img src="assets/plotting/vertex-add.svg"
-               [class]="activeDragMode === 'addpoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'deletepoint'"
-                  pTooltip="Delete a vertex: click a vertex of the selected polygon"
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('deletepoint')">
-          <img src="assets/plotting/vertex-delete.svg"
-               [class]="activeDragMode === 'deletepoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-      </ng-container>
-
-      <p-button size="small"
-                [text]="activeDragMode !== 'wand'"
-                pTooltip="Wand: click and drag to grow a region by similar pixel values (<kbd>w</kbd>).
-                <br>Hold <kbd>Shift</kbd> while clicking or dragging on a region to erase pixels from it."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('wand')">
-        <img src="assets/plotting/wand.svg"
-             [class]="activeDragMode === 'wand' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-             style="width: 1rem"/>
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'wand'">
-        <span class="flex align-items-center mx-1 toolbar-text">Sens.</span>
-        <p-slider [(ngModel)]="wandSensitivity"
-                  [min]="wandSensitivityMin" [max]="wandSensitivityMax" [step]="wandSensitivityStep"
-                  (onChange)="wandSensitivityChange.emit($event.value)"
-                  pTooltip="Higher = stricter (smaller selection); lower = looser.
-                  Takes effect from the next click/drag tick."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ wandSensitivity.toFixed(1) }}</span>
-      </ng-container>
-      <p-button icon="pi pi-eraser" size="small"
-                [text]="activeDragMode !== 'eraseVertex'"
-                pTooltip="Vertex eraser (<kbd>e</kbd>): click or drag to remove polygon vertices inside
-                the cursor circle from any region."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="toggleDragMode.emit('eraseVertex')">
-      </p-button>
-      <ng-container *ngIf="activeDragMode === 'eraseVertex'">
-        <span class="flex align-items-center mx-1 toolbar-text">Radius</span>
-        <p-slider [(ngModel)]="vertexEraserRadius"
-                  [min]="vertexEraserRadiusMin" [max]="vertexEraserRadiusMax" [step]="vertexEraserRadiusStep"
-                  (onChange)="vertexEraserRadiusChange.emit($event.value)"
-                  pTooltip="Eraser radius in image pixels.
-                  Vertices within this distance of the cursor are removed."
-                  [escape]="false" tooltipPosition="bottom"
-                  styleClass="wand-sensitivity-slider"></p-slider>
-        <span class="flex align-items-center mx-1 toolbar-text wand-sensitivity-value">
-          {{ vertexEraserRadius }}</span>
-      </ng-container>
-      <p-button size="small" [text]="true"
-                [disabled]="!canUndo"
-                pTooltip="Undo the last region action (<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
-                Up to 10 actions can be undone."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="undoRegion.emit()">
-        <img src="assets/plotting/undo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <p-button size="small" [text]="true"
-                [disabled]="!canRedo"
-                pTooltip="Redo the last undone region action
-                (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd>)."
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="redoRegion.emit()">
-        <img src="assets/plotting/redo.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-      <p-button icon="pi pi-trash" size="small" [text]="true"
-                pTooltip="Delete selected region (<kbd>Del</kbd>)"
-                [escape]="false" tooltipPosition="bottom"
-                (onClick)="deleteRegion.emit()">
-      </p-button>
-      <!-- SAM (jit-ui#90): box-prompt segment, interactive point prompts, and a
-           model picker. -->
-      <span class="toolbar-separator"></span>
-      <!-- SAM controls grouped: box-prompt Segment, then the point-prompt tool,
-           then the model-picker dropdown (the chevron) which governs BOTH tools.
-           Falls back to Segment + point with no model picker when none are set. -->
-      <span *ngIf="samModels.length; else segmentPlain" class="p-buttonset segment-split">
-        <p-button size="small" [text]="true"
-                  pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-                  tooltipPosition="bottom"
-                  (onClick)="segmentRegions.emit()">
-          <img src="assets/plotting/sam-box-prompt.svg"
-               class="toolbar-icon-dark" style="width: 1rem"/>
-        </p-button>
-        <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-        <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                  pTooltip="Pick the SAM model (used by both segment tools)"
-                  tooltipPosition="bottom"
-                  (onClick)="samModelMenu.toggle($event)">
-        </p-button>
-      </span>
-      <ng-template #segmentPlain>
-        <span class="p-buttonset segment-split">
-          <p-button size="small" [text]="true"
-                    pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-                    tooltipPosition="bottom"
-                    (onClick)="segmentRegions.emit()">
-            <img src="assets/plotting/sam-box-prompt.svg"
-                 class="toolbar-icon-dark" style="width: 1rem"/>
-          </p-button>
-          <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-        </span>
-      </ng-template>
-      <!-- Point-prompt tool — shared between the models / no-models layouts so it
-           always sits just left of the model dropdown. -->
-      <ng-template #samPointBtn>
-        <p-button size="small"
-                  [text]="activeDragMode !== 'samPoint'"
-                  pTooltip="SAM point prompts: click a fiber to segment it as a new region;
-                  Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."
-                  [escape]="false" tooltipPosition="bottom"
-                  (onClick)="toggleDragMode.emit('samPoint')">
-          <img src="assets/plotting/sam-point-prompt.svg"
-               [class]="activeDragMode === 'samPoint' ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-               style="width: 1rem"/>
-        </p-button>
-      </ng-template>
-      <p-menu #samModelMenu styleClass="model-menu" [model]="samMenuItems" [popup]="true" appendTo="body">
-        <ng-template pTemplate="item" let-item>
-          <ng-container [ngTemplateOutlet]="modelMenuItem"
-                        [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-        </ng-template>
-      </p-menu>
-
-      <!-- Shared item body for all three model pickers (SAM / YOLO / retinal):
-           the standard check-or-blank icon and label, plus an info icon carrying
-           the model's description as a hover tooltip. This replaced a single
-           "About the SAM models" overlay panel — per-model text sits next to the
-           model it describes, and YOLO/retinal get the same affordance.
-
-           p-menu puts its click handler on the wrapping `.p-menuitem-content`,
-           outside this template, so `command` still fires and the whole row stays
-           clickable — which is also why the info icon has to stop propagation, or
-           reading about a model would switch to it. -->
-      <ng-template #modelMenuItem let-item>
-        <a class="p-menuitem-link model-menu-item">
-          <span class="p-menuitem-icon" [ngClass]="item.icon"></span>
-          <span class="p-menuitem-text">{{ item.label }}</span>
-          <!-- `bottom` like every other tooltip in this toolbar, and for room:
-               these menus open under buttons that can sit near the right edge,
-               where a `right` tooltip has a few hundred px and squeezes its text
-               into a narrow column instead of using its max-width. -->
-          <!-- A focusable <button>, not a bare <i>. As an <i> the description
-               was reachable only by hovering a mouse: not tabbable, no
-               accessible name, nothing for a screen reader to announce — so
-               keyboard and AT users could pick a checkpoint but never read what
-               it was. PrimeNG's tooltip shows on focus as well as hover, so
-               making it a button restores it for free.
-
-               `aria-describedby` is deliberately not used: the tooltip is
-               rendered into `body` on demand and has no stable id to point at.
-               The description is carried on `aria-label` instead, which is
-               announced whether or not the tooltip is showing. It is stripped of
-               markup first, since the copy contains `<b>`/`<br>` for the visual
-               tooltip and those would otherwise be read out literally. -->
-          <button *ngIf="item.tooltip" type="button"
-                  class="pi pi-info-circle model-info-icon"
-                  [attr.aria-label]="'About ' + item.label + ': ' + plainText(item.tooltip)"
-                  [pTooltip]="item.tooltip" [escape]="false" tooltipPosition="bottom"
-                  appendTo="body" tooltipStyleClass="model-info-tooltip"
-                  (click)="$event.stopPropagation()"
-                  (keydown.enter)="$event.stopPropagation()"
-                  (keydown.space)="$event.stopPropagation()"></button>
-        </a>
-      </ng-template>
-      <p-button size="small" [text]="true"
-                pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM)"
-                tooltipPosition="bottom"
-                (onClick)="segmentCellpose.emit()">
-        <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem"/>
-      </p-button>
-
-      <!-- Contributed no-prompt tools (TOOLBAR_TOOLS). Unlike the SAM and
-           cellpose tools these take no prompt — they sweep the whole current
-           view rather than being pointed at something — so there is nothing to
-           draw first. Each renders the same split button: run, pick checkpoint,
-           open parameters.
-
-           Nothing here names a specific tool. The library ships none; a host
-           registers them, which is what lets this package be published without
-           the closed model dependencies. -->
-      <ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
-        <span class="p-buttonset segment-split">
-          <p-button size="small" [text]="true"
-                    [pTooltip]="tool.runTooltip"
-                    tooltipPosition="bottom"
-                    (onClick)="runTool.emit(tool.id)">
-            <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
-                 toggle tools: these fire a run and have no active state. -->
-            <img *ngIf="tool.icon.src" [src]="tool.icon.src" class="toolbar-icon-dark"
-                 style="width: 1rem" [alt]="tool.label" />
-            <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
-          </p-button>
-          <p-button icon="pi pi-chevron-down" size="small" [text]="true"
-                    [pTooltip]="tool.modelTooltip || 'Pick the model'"
-                    tooltipPosition="bottom"
-                    (onClick)="toolMenu.toggle($event)">
-          </p-button>
-          <p-button *ngIf="tool.params.length"
-                    icon="pi pi-sliders-h" size="small" [text]="true"
-                    [pTooltip]="tool.paramsTooltip || 'Parameters'"
-                    tooltipPosition="bottom"
-                    (onClick)="openToolParams.emit(tool.id)">
-          </p-button>
-        </span>
-        <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []"
-                [popup]="true" appendTo="body">
-          <ng-template pTemplate="item" let-item>
-            <ng-container [ngTemplateOutlet]="modelMenuItem"
-                          [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-          </ng-template>
-        </p-menu>
-      </ng-container>
+      <toolbar-region-tools
+        [activeDragMode]="activeDragMode"
+        [is3dRegions]="is3dRegions"
+        [vertexTools]="supportsRegionVertexTools"
+        [wandSensitivity]="wandSensitivity"
+        [brushSize]="brushSize"
+        [vertexEraserRadius]="vertexEraserRadius"
+        [canUndo]="canUndo"
+        [canRedo]="canRedo"
+        (openRegionEditor)="openRegionEditor.emit()"
+        (toggleDragMode)="toggleDragMode.emit($event)"
+        (undoRegion)="undoRegion.emit()"
+        (redoRegion)="redoRegion.emit()"
+        (deleteRegion)="deleteRegion.emit()"
+        (wandSensitivityChange)="wandSensitivityChange.emit($event)"
+        (brushSizeChange)="brushSizeChange.emit($event)"
+        (vertexEraserRadiusChange)="vertexEraserRadiusChange.emit($event)"
+      >
+      </toolbar-region-tools>
+      <toolbar-segmentation-tools
+        [activeDragMode]="activeDragMode"
+        [samModels]="samModels"
+        [samModelId]="samModelId"
+        [contributedTools]="contributedTools"
+        [toolModelIds]="toolModelIds"
+        (segmentRegions)="segmentRegions.emit()"
+        (segmentCellpose)="segmentCellpose.emit()"
+        (toggleDragMode)="toggleDragMode.emit($event)"
+        (samModelChange)="samModelChange.emit($event)"
+        (runTool)="runTool.emit($event)"
+        (toolModelChange)="toolModelChange.emit($event)"
+        (openToolParams)="openToolParams.emit($event)"
+      >
+      </toolbar-segmentation-tools>
     </ng-container>
 
     <ng-container *ngIf="tools.help">
       <span class="toolbar-separator"></span>
 
       <!-- Help -->
-      <p-button icon="pi pi-question-circle" size="small" [text]="true"
-                pTooltip="Help" tooltipPosition="bottom"
-                (onClick)="showHelp()">
+      <p-button
+        icon="pi pi-question-circle"
+        size="small"
+        [text]="true"
+        ariaLabel="Help"
+        pTooltip="Help"
+        tooltipPosition="bottom"
+        (onClick)="showHelp()"
+      >
       </p-button>
     </ng-container>
-
   </div>
 </p-toolbar>
-<p-dialog header="Plotting help" [(visible)]="displayHelpDialog" [modal]="true" [style]="{width: '50vw'}"
-          [maximizable]="true" [draggable]="false" [resizable]="false">
-  <p>Click a file in the left-hand tree to display it. By default it opens in the
-    <b>Image</b> view — a natively tiled, deeply zoomable raster (OpenSeadragon) with a
-    navigator minimap and a physical-units scale bar. <b>Click the image to zoom</b> toward
-    the clicked point; scroll to zoom and drag to pan. When a stack is open, a slice slider
-    (Image view) or image-mode toggle (other views) appears. Regions can also be edited in the
-    <b>Region Editor</b>, opened with the
-    <img src="assets/plotting/region-editor.svg" width="14" height="14" alt="Region Editor"/>
-    toolbar button as a floating dialog. Drag the <i class="pi pi-bars"></i> handle to detach
-    this toolbar into a floating window.
-  </p>
-
-  <h3>Plot-type dropdown</h3>
-  <p>
-    The <b>plot-type dropdown</b> switches how the file is visualized:
-    <b>Image</b>, <b>Heatmap</b>, <b>Contour</b>, <b>Surface</b>, <b>Volume</b>,
-    <b>Isosurface</b>, and — when a spatial-omics dataset is open —
-    <b>Spatial omics</b> and <b>Spatial omics 3D</b>.
-  </p>
-  <p>
-    <b>Only the modes the data can actually support are offered</b>, so the list changes
-    with what is loaded rather than showing entries that would come up blank:
-  </p>
-  <ul>
-    <li><b>Contour</b>, <b>Volume</b> and <b>Isosurface</b> need a grayscale image; the
-      two 3D ones also need a z-stack.</li>
-    <li><b>Spatial omics</b> needs a published dataset, and <b>Spatial omics 3D</b> needs
-      one whose coordinates carry a z.</li>
-    <li>The pixel modes (<b>Image</b>, <b>Heatmap</b>, <b>Surface</b>) are withheld for a
-      dataset that brings no tissue image — seqFISH records coordinates and no section, so
-      there is nothing for them to draw.</li>
-  </ul>
-  <ul>
-    <li>"<b>Isosurface band</b>" slider (Isosurface): sets the intensity band the surfaces are
-      drawn for, mapped onto the volume's real intensity range.</li>
-    <li>"<b>3D camera</b>" (Surface / Scatter 3D / Isosurface): zoom <i class="pi pi-search"></i>,
-      pan <i class="pi pi-arrows-alt"></i>, orbit <i class="pi pi-globe"></i>,
-      turntable <i class="pi pi-sync"></i>, and reset camera <i class="pi pi-home"></i>;
-      scroll to zoom the 3D scene.</li>
-  </ul>
-
-  <h3>Image manipulation tools</h3>
-  <ul>
-    <li>"<b>Region Editor</b>" <img src="assets/plotting/region-editor.svg" width="15" height="15">:
-      opens the Region Editor as a floating, draggable dialog — a per-image table of every region
-      (class, colour, area) with bulk select/label/colour/delete and GeoJSON import/export. It stays
-      in sync with the image, so you can keep it open while drawing.</li>
-    <li>"<b>Intensity profile lines</b>" <img src="assets/plotting/spline-chart.svg" width="15" height="15">
-      (<i>work in progress — not yet stable</i>): adds a coloured line ROI; a floating inset
-      chart plots intensity along each line, updates live as you drag it, and re-samples at the
-      current zoom resolution. Each added line gets its own colour; select a line and use the
-      trash tool <i class="pi pi-trash"></i> to remove it (and its trace).</li>
-    <li>"<b>Channels &amp; Histogram</b>" <img src="assets/plotting/invert.svg" width="15" height="15">:
-      opens a floating dialog for brightness/contrast, gamma, and per-channel display, plus the
-      <b>colormap / LUT</b> controls (grayscale only) — a <b>reverse</b> toggle and a colormap
-      dropdown (default: inverted greys).</li>
-    <li>"<b>Smoothen</b>" <img src="assets/plotting/smooth.svg" width="15" height="15">
-      (Image view only): the image opens showing <b>raw pixels</b> (nearest-neighbour), so
-      zooming in renders crisp blocks for pixel inspection. Toggle this on for bilinear
-      smoothing; the icon turns white while smoothing is active.</li>
-  </ul>
-
-  <h3>Download &amp; view tools</h3>
-  <ul>
-    <li>"<b>Download</b>" <i class="pi pi-download"></i>: download the current image as a PNG.</li>
-    <li>"<b>Fit to view</b>" / autoscale <i class="pi pi-window-maximize"></i>: resets the image
-      to its original dimensions. In stack mode it also resets to single-image mode.</li>
-  </ul>
-
-  <h3>Zoom tools</h3>
-  <ul>
-    <li>"<b>Zoom box</b>" <img src="assets/plotting/zoom-box.svg" width="15" height="15">
-      (<kbd>b</kbd>): drag a box to select an area to zoom into.</li>
-    <li>"<b>Pan</b>" <i class="pi pi-arrows-alt"></i> (<kbd>p</kbd>): drag to pan the image.</li>
-    <li>"<b>Zoom in</b>" <i class="pi pi-search-plus"></i> (<kbd>+</kbd>): zoom in one step.</li>
-    <li>"<b>Zoom out</b>" <i class="pi pi-search-minus"></i> (<kbd>-</kbd>): zoom out one step,
-      stopping at the original image dimensions.</li>
-  </ul>
-
-  <h3>Region tools</h3>
-  <p>By default no tool is selected (all greyed-out); selecting a tool highlights it. The
-    vertex-editing tools (polygon, add/delete vertex, move, Bézier conversions) are available
-    in the <b>Image</b> view only. On a <b>donut</b> (a region with a hole), the inner-ring
-    vertices are editable too — drag, add, and delete them just like the outer ring.</p>
-  <ul>
-    <li>"<b>Selection</b>" <i class="pi pi-arrow-up-right"></i> (<kbd>s</kbd>): a neutral mode
-      that turns off whatever drawing tool was active (wand, vertex eraser, rectangle, etc.).
-      Use it to step out of editing without picking another tool.</li>
-    <li>"<b>Rectangular region</b>" <i class="pi pi-stop"></i> (<kbd>r</kbd>): click and drag to
-      create a rectangular region.</li>
-    <li>"<b>Polyline</b>" <img src="assets/plotting/polyline.svg" width="14" height="14">
-      (<kbd>l</kbd>): draw an open (non-closed) polyline by clicking and dragging. Polylines can
-      be edited and exported to GeoJSON as a <code>LineString</code> feature.</li>
-    <li>"<b>Freeform region</b>" <i class="pi pi-pencil"></i> (<kbd>f</kbd>): click and drag to
-      draw a closed freeform polygon.</li>
-    <li>"<b>Brush</b>" <img src="assets/plotting/paintbrush.svg" width="15" height="15">: click
-      and drag to paint a region with a circular brush — the painted stroke is the region.
-      A <b>Size</b> slider (brush diameter, in image pixels) appears in the toolbar while the
-      brush is active. Hold <kbd>Shift</kbd> while painting to <b>erase</b> (subtract) from a
-      region instead. Painting over an existing region extends it; brushing across two regions
-      merges them. Painting a closed ring (or shift-erasing an interior pocket) leaves the
-      enclosed area empty — a <b>donut</b> (Image view).</li>
-    <li>"<b>Polygon</b>" <img src="assets/plotting/polygon-vertices.svg" width="15" height="15">:
-      click to place each vertex; click the first point to close the polygon.</li>
-    <li>"<b>Add vertex</b>" <img src="assets/plotting/vertex-add.svg" width="15" height="15">:
-      click an edge of the selected polygon to insert a new vertex.</li>
-    <li>"<b>Delete vertex</b>" <img src="assets/plotting/vertex-delete.svg" width="15" height="15">:
-      click a vertex of the selected polygon to remove it.</li>
-    <li>"<b>Move region</b>" <img src="assets/plotting/region-move.svg" width="15" height="15">:
-      drag to move the selected region.</li>
-    <li>"<b>To Bézier</b>" <img src="assets/plotting/to-bezier.svg" width="15" height="15"> /
-      "<b>To polygon</b>" <img src="assets/plotting/to-polygon.svg" width="15" height="15">:
-      convert the selected region to a smooth Bézier curve, or back to a straight-edged polygon.</li>
-    <li>"<b>Wand</b>" <img src="assets/plotting/wand.svg" width="15" height="15"> (<kbd>w</kbd>):
-      click to grow a region from pixels with similar values around the click point. Hold
-      <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> for an exact-match flood fill; drag to keep extending the
-      selection while moving; hold <kbd>Shift</kbd> while clicking or dragging on an existing
-      region to <b>erase</b> pixels from it. Use the <b>Sens.</b> slider that appears to make the
-      wand stricter (higher = smaller selection) or looser. Subsequent clicks keep extending the
-      same region; clicking inside an existing region adopts it, and growing into another region
-      merges them.</li>
-    <li>"<b>Vertex eraser</b>" <i class="pi pi-eraser"></i> (<kbd>e</kbd>): click or click-and-drag
-      to remove polygon vertices that fall inside the cursor circle from any region, including a
-      region's inner rings (donut holes). Use the <b>Radius</b> slider to set the eraser size in
-      image pixels. Polygons reduced below 3 vertices (or polylines below 2) are deleted entirely;
-      a hole reduced below 3 vertices is removed.</li>
-    <li>"<b>Undo</b>" <img src="assets/plotting/undo.svg" width="15" height="15">
-      (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd>): reverts the
-      last region action (draw, delete, edit, wand/brush stroke, segmentation, …). Up to the last
-      <b>10</b> actions can be undone; the button greys out when there's nothing left to undo.</li>
-    <li>"<b>Redo</b>" <img src="assets/plotting/redo.svg" width="15" height="15">
-      (<kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Y</kbd>):
-      re-applies the most recently undone action. Performing a new region action clears what can be redone.</li>
-    <li>"<b>Delete region</b>" <i class="pi pi-trash"></i> (<kbd>Del</kbd>): deletes the selected
-      region. This can also be done from the Region Editor.</li>
-  </ul>
-
-  <h3>Region actions (right-click the image)</h3>
-  <p>Right-click a region — or the current multi-selection — to open the
-    "<b>Selected region(s)</b>" group at the top of the context menu. These act immediately on
-    the selection (they're not drawing modes) and are fully undo/redo-able:</p>
-  <ul>
-    <li>"<b>Select all regions</b>" <i class="pi pi-check-square"></i>: select every region on
-      the image (also in the Region Editor toolbar).</li>
-    <li>"<b>Merge / group</b>": combine 2+ selected regions into one. If the pieces don't touch,
-      the result is a single multi-part region (sparse "bits").</li>
-    <li>"<b>Ungroup</b>": split a multi-part region back into one region per piece.</li>
-    <li>"<b>Inverse</b>": replace the selection with everything <i>outside</i> it — the image
-      rectangle with the selected regions punched out as holes. Works at any image size.</li>
-    <li>"<b>Simplify</b>": reduce a region's vertex count (Douglas–Peucker) by an altitude
-      threshold in pixels — pick <b>Light</b> (1&nbsp;px), <b>Medium</b> (3&nbsp;px),
-      <b>Strong</b> (8&nbsp;px), or <b>Custom…</b> for a slider. Applies to the exterior and any
-      holes (and every part of a multi-part region).</li>
-    <li>The Bézier conversions and Delete also live in this group (the right-click equivalents of
-      the toolbar / vertex tools above).</li>
-  </ul>
-
-  <h3>Segmentation &amp; detection tools</h3>
-  <p>AI-assisted segmentation and detection that run entirely in the browser. The first run
-    of any model downloads it (a progress toast is shown); it's then cached.</p>
-  <p>Two shapes of tool: the <b>prompted</b> ones (Segment, Point prompts, Cellpose) act on
-    rectangles you draw, and generated regions inherit the color of the rectangle they came
-    from<span *ngIf="contributedTools.length">; the <b>no-prompt</b> ones ({{ contributedToolNames }})
-    sweep the whole current view, so there is nothing to draw first</span>.</p>
-  <p>Each model dropdown <i class="pi pi-chevron-down"></i> lists the available checkpoints with
-    a <i class="pi pi-info-circle"></i> beside each one — hover it for that model's size, speed,
-    training domain and accuracy, so you can pick without leaving the toolbar.</p>
-  <ul>
-    <li>"<b>Segment</b>" <img src="assets/plotting/sam-box-prompt.svg" width="15" height="15">
-      (box prompt): draw one or more <b>Rectangular regions</b> around the objects of interest,
-      then click Segment. Each rectangle is replaced by the SAM mask of the object inside it.</li>
-    <li>"<b>Point prompts</b>" <img src="assets/plotting/sam-point-prompt.svg" width="15" height="15">: click directly on an object to
-      segment it as a <b>new</b> region. Each click starts a fresh object — clicking another
-      object won't grow the previous one. <kbd>Shift</kbd>/<kbd>Alt</kbd>-click adds an
-      <i>exclude</i> point that refines the current object; <kbd>Esc</kbd> undoes it,
-      <kbd>Enter</kbd> commits it.</li>
-    <li>"<b>Model picker</b>" <i class="pi pi-chevron-down"></i>: the dropdown attached to the
-      Segment button chooses the SAM model — <b>micro-sam ViT-T</b> (default; small, fast) or
-      <b>micro-sam ViT-B</b> (larger, highest accuracy) for light microscopy, or
-      <b>patho-sam ViT-B</b> for histopathology (H&amp;E / stained tissue). All are promptable
-      Segment Anything models finetuned for biomedical images; they differ in the <i>image
-      encoder</i> (the heavy once-per-image step) and the training domain — box and point
-      prompting behave the same. The choice applies to <i>both</i> the box and point tools, and
-      each tool loads its own encoder, so the first click after switching re-encodes once.</li>
-    <li>"<b>Cellpose</b>" <img src="assets/plotting/cells.svg" width="15" height="15">: draw rectangles, then click Cellpose to
-      automatically segment every cell inside each rectangle (client-side cellpose-SAM) — one
-      region per detected cell. No clicking on individual cells needed.</li>
-    <!-- Contributed tools describe themselves. This library ships none, so an
-         open build's help lists only the prompted tools above — the text no
-         longer promises buttons that are not there. -->
-    <ng-container *ngFor="let tool of contributedTools">
-      <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
-    </ng-container>
-    <ng-container *ngFor="let tool of dialogTools">
-      <li *ngIf="tool.help" [innerHTML]="tool.help.body"></li>
-    </ng-container>
-  </ul>
-
-  <h3>Spatial omics</h3>
-  <p>
-    In <b>Spatial omics</b> mode each observation — a cell or a Visium spot — is drawn at
-    its own coordinates, over the tissue image where the dataset registers onto one. The
-    <img src="assets/plotting/spatial-omics.svg" width="14" height="14" alt="Spatial omics"/>
-    panel colours them by a <b>column</b> (a cell type, a cluster) or by a <b>gene</b>, and
-    the two are exclusive so what drives the colours is never ambiguous.
-  </p>
-  <ul>
-    <li>"<b>Select from ROIs</b>": turns the regions you have drawn into a selection of
-      observations. Everything else then follows that selection.</li>
-    <li>"<b>Point size</b>" / "<b>Opacity</b>": how the markers are drawn, not what is
-      selected.</li>
-  </ul>
-
-  <h3>Distribution charts</h3>
-  <p>
-    The <b>Distribution</b> section of the spatial-omics panel charts whatever the map is
-    coloured by, so the two can never disagree. Each tab answers a different question, and
-    the <i class="pi pi-question-circle"></i> beside them explains the one on screen —
-    including what it must <em>not</em> be read for.
-  </p>
-  <ul>
-    <li>"<b>Counts</b>": how many observations per category. A category is a label, not a
-      magnitude, so a frequency is the only distribution it has.</li>
-    <li>"<b>Histogram</b>" / "<b>Violin</b>" / "<b>Box</b>": how a continuous value is
-      distributed — over everything, or split by a grouping column.</li>
-    <li>"<b>Heatmap</b>": mean expression of the genes you pick within each group.
-      Z-scored per gene by default, so a colour means "above or below this gene's own
-      average" rather than "highly expressed".</li>
-    <li>"<b>Embedding</b>": a UMAP, PCA or t-SNE over the same cells. <b>Lasso it to
-      select on the map</b> — both views read the same selection. Only PCA labels its axes
-      with a percentage, because only its axes explain a measurable share of the variance;
-      UMAP and t-SNE coordinates are arbitrary, so distance between distant clusters
-      should not be read.</li>
-    <li>"<b>Detach</b>": moves the charts into their own window so they can sit beside the
-      map instead of inside the panel. Switching tabs keeps the window where it is.</li>
-  </ul>
-
-  <h3>Help</h3>
-  <p>"<b>Help</b>" <i class="pi pi-question-circle"></i>: opens this dialog.</p>
-
-  <h3>Keyboard shortcuts</h3>
-  <table class="shortcuts-table">
-    <tr><td><kbd>+</kbd> / <kbd>=</kbd></td><td>Zoom in</td></tr>
-    <tr><td><kbd>-</kbd></td><td>Zoom out</td></tr>
-    <tr><td><kbd>b</kbd></td><td>Toggle zoom box mode</td></tr>
-    <tr><td><kbd>p</kbd></td><td>Toggle pan mode</td></tr>
-    <tr><td><kbd>f</kbd></td><td>Toggle freeform region drawing</td></tr>
-    <tr><td><kbd>l</kbd></td><td>Toggle polyline drawing</td></tr>
-    <tr><td><kbd>r</kbd></td><td>Toggle rectangular region drawing</td></tr>
-    <tr><td><kbd>w</kbd></td><td>Toggle wand tool</td></tr>
-    <tr><td>Wand + <kbd>Shift</kbd></td><td>Erase pixels from the active region</td></tr>
-    <tr><td>Wand + <kbd>Ctrl</kbd>/<kbd>Cmd</kbd></td><td>Exact-match flood fill (no smoothing)</td></tr>
-    <tr><td><kbd>e</kbd></td><td>Toggle vertex eraser</td></tr>
-    <tr><td><kbd>s</kbd></td><td>Selection mode (deactivates drawing tools)</td></tr>
-    <tr><td>Point prompt + <kbd>Shift</kbd>/<kbd>Alt</kbd></td><td>Add an exclude point (refine the current object)</td></tr>
-    <tr><td><kbd>Enter</kbd></td><td>Commit the current SAM point object</td></tr>
-    <tr><td><kbd>Esc</kbd></td><td>Undo the current SAM point object</td></tr>
-    <tr><td><kbd>Del</kbd> / <kbd>⌫</kbd></td><td>Delete selected region</td></tr>
-    <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Z</kbd></td><td>Undo the last region action (up to 10)</td></tr>
-    <tr><td><kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Redo the last undone region action</td></tr>
-  </table>
-
-  <ng-template pTemplate="footer">
-    <p-button icon="pi pi-check" (click)="displayHelpDialog=false" label="Ok" styleClass="p-button-text">
-    </p-button>
-  </ng-template>
-</p-dialog>
+<toolbar-help-dialog
+  [(visible)]="displayHelpDialog"
+  [contributedTools]="contributedTools"
+  [dialogTools]="dialogTools"
+>
+</toolbar-help-dialog>

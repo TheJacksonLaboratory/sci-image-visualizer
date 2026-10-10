@@ -1,14 +1,16 @@
 import { Injectable } from '@angular/core';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from './models/region';
-import { BBoxMask, unionMasks, simplifyRing } from './models/geometry';
-import { WandService } from './toolbar/wand/wand.service';
+import { BBoxMask, rasterizePolygon, unionMasks } from './geometry/raster';
+import { maskToPolygons } from './geometry/contour';
+import { simplifyRing } from './geometry/ring';
+import { clonePolygon, makePolygon, rectToRing } from './models/polygon-factory';
 
 /**
  * Pure (DOM-free) region set-operations — merge / inverse / ungroup (jit-ui#85).
  *
  * Raster-based, reusing the wand/brush mask pipeline
- * ({@link WandService.rasterizePolygon} → {@link WandService.maskToPolygons}),
+ * ({@link rasterizePolygon} → {@link maskToPolygons}, the pure `geometry/` modules),
  * so "select + merge" yields the same geometry as brushing regions together:
  * one engine, one set of behaviours, holes + multi-part results for free.
  *
@@ -29,8 +31,6 @@ export class RegionOpsService {
    */
   private static readonly MAX_OP_PIXELS = 16_000_000;
 
-  constructor(private wand: WandService) {}
-
   /**
    * Geometric union of `regions` into a single region: a {@link Polygon} when
    * the union is one connected piece, a {@link MultiPolygon} when it stays
@@ -45,9 +45,7 @@ export class RegionOpsService {
     const scale = this.opRasterScale(regions, imageWidth, imageHeight);
     const mask = this.unionMask(regions, imageWidth, imageHeight, scale);
     if (!mask) return null;
-    const sw = Math.max(1, Math.round(imageWidth * scale));
-    const sh = Math.max(1, Math.round(imageHeight * scale));
-    let polys = this.wand.maskToPolygons(mask.mask, mask.bw, mask.bh, sw, sh, mask.bx, mask.by, 1, 1);
+    let polys = maskToPolygons(mask.mask, mask.bw, mask.bh, mask.bx, mask.by, 1, 1);
     if (scale !== 1) polys = polys.map((p) => this.scalePolygon(p, 1 / scale));
     return this.regionFromParts(polys, regions[0]);
   }
@@ -55,10 +53,19 @@ export class RegionOpsService {
   /** Downscale factor (≤ 1) keeping the selection's clipped bbox within
    *  {@link MAX_OP_PIXELS}; 1 when it already fits. */
   private opRasterScale(regions: Region[], W: number, H: number): number {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     const scan = (xs: number[], ys: number[]) => {
-      for (const x of xs) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
-      for (const y of ys) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
+      for (const x of xs) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+      for (const y of ys) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
     };
     for (const r of regions || []) {
       const b = r?.bounds;
@@ -76,14 +83,14 @@ export class RegionOpsService {
 
   /** A copy of `p` with every coordinate (and hole coordinate) multiplied by `s`. */
   private scalePolygon(p: Polygon, s: number): Polygon {
-    const poly = new Polygon();
-    poly.xpoints = p.xpoints.map((x) => x * s);
-    poly.ypoints = p.ypoints.map((y) => y * s);
-    poly.npoints = poly.xpoints.length;
-    poly.closed = p.closed;
-    poly.coordinates = poly.xpoints.map((x, i) => [x, poly.ypoints[i]]);
-    if (p.holes) poly.holes = p.holes.map((ring) => ring.map(([x, y]) => [x * s, y * s]));
-    return poly;
+    return makePolygon(
+      p.xpoints.map((x) => x * s),
+      p.ypoints.map((y) => y * s),
+      {
+        closed: p.closed,
+        holes: p.holes?.map((ring) => ring.map(([x, y]) => [x * s, y * s])),
+      },
+    );
   }
 
   /**
@@ -102,14 +109,16 @@ export class RegionOpsService {
     if (imageWidth <= 0 || imageHeight <= 0) return null;
     const merged = this.merge(regions, imageWidth, imageHeight);
     if (!merged) return null;
-    const comps: Polygon[] = merged.bounds instanceof MultiPolygon
-      ? merged.bounds.polygons
-      : merged.bounds instanceof Polygon ? [merged.bounds] : [];
+    const comps: Polygon[] =
+      merged.bounds instanceof MultiPolygon
+        ? merged.bounds.polygons
+        : merged.bounds instanceof Polygon
+          ? [merged.bounds]
+          : [];
     if (comps.length === 0) return null;
 
     // Image rectangle exterior with every component outline as a hole.
-    const rect = this.ringPolygon(
-      [0, imageWidth, imageWidth, 0], [0, 0, imageHeight, imageHeight]);
+    const rect = makePolygon([0, imageWidth, imageWidth, 0], [0, 0, imageHeight, imageHeight]);
     rect.holes = comps.map((c) => c.xpoints.map((x, i) => [x, c.ypoints[i]]));
 
     // Each component's own hole (donut interior) is *outside* the region, so it
@@ -118,23 +127,17 @@ export class RegionOpsService {
     for (const c of comps) {
       if (c.holes) {
         for (const ring of c.holes) {
-          parts.push(this.ringPolygon(ring.map((p) => p[0]), ring.map((p) => p[1])));
+          parts.push(
+            makePolygon(
+              ring.map((p) => p[0]),
+              ring.map((p) => p[1]),
+            ),
+          );
         }
       }
     }
     const bounds = parts.length === 1 ? parts[0] : Object.assign(new MultiPolygon(), { polygons: parts });
     return this.makeRegion(bounds, regions[0]);
-  }
-
-  /** A closed straight-edged Polygon from parallel coord arrays. */
-  private ringPolygon(xs: number[], ys: number[]): Polygon {
-    const p = new Polygon();
-    p.xpoints = xs.slice();
-    p.ypoints = ys.slice();
-    p.npoints = xs.length;
-    p.coordinates = xs.map((x, i) => [x, ys[i]]);
-    p.closed = true;
-    return p;
   }
 
   /**
@@ -145,9 +148,7 @@ export class RegionOpsService {
   ungroup(region: Region): Region[] {
     const b = region.bounds;
     if (b instanceof MultiPolygon) {
-      return b.polygons
-        .filter((p) => p.xpoints.length >= 3)
-        .map((p) => this.makeRegion(this.clonePolygon(p), region));
+      return b.polygons.filter((p) => p.xpoints.length >= 3).map((p) => this.makeRegion(clonePolygon(p), region));
     }
     return [region];
   }
@@ -188,20 +189,14 @@ export class RegionOpsService {
       return s.xs.length >= 3 ? s : { xs: xs.slice(), ys: ys.slice() };
     };
     const ext = keepOrSrc(p.xpoints, p.ypoints);
-    const poly = new Polygon();
-    poly.npoints = ext.xs.length;
-    poly.xpoints = ext.xs;
-    poly.ypoints = ext.ys;
-    poly.coordinates = ext.xs.map((x, i) => [x, ext.ys[i]]);
-    poly.closed = true;
-    if (p.holes) {
-      const holes = p.holes.map((ring) => {
-        const s = keepOrSrc(ring.map((q) => q[0]), ring.map((q) => q[1]));
-        return s.xs.map((x, i) => [x, s.ys[i]]);
-      });
-      if (holes.length) poly.holes = holes;
-    }
-    return poly;
+    const holes = p.holes?.map((ring) => {
+      const s = keepOrSrc(
+        ring.map((q) => q[0]),
+        ring.map((q) => q[1]),
+      );
+      return s.xs.map((x, i) => [x, s.ys[i]]);
+    });
+    return makePolygon(ext.xs, ext.ys, { holes });
   }
 
   // ── internals ──────────────────────────────────────────────────────────
@@ -230,19 +225,18 @@ export class RegionOpsService {
       !holes || scale === 1 ? holes : holes.map((ring) => ring.map(([x, y]) => [x * scale, y * scale]));
     const b = region?.bounds;
     if (b instanceof Rectangle) {
-      const xs = [b.x, b.x + b.width, b.x + b.width, b.x];
-      const ys = [b.y, b.y, b.y + b.height, b.y + b.height];
-      return this.wand.rasterizePolygon(sc(xs), sc(ys), sw, sh);
+      const ring = rectToRing(b);
+      return rasterizePolygon(sc(ring.xs), sc(ring.ys), sw, sh);
     }
     if (b instanceof Polygon) {
       if (b.closed === false || b.xpoints.length < 3) return null;
-      return this.wand.rasterizePolygon(sc(b.xpoints), sc(b.ypoints), sw, sh, scHoles(b.holes));
+      return rasterizePolygon(sc(b.xpoints), sc(b.ypoints), sw, sh, scHoles(b.holes));
     }
     if (b instanceof MultiPolygon) {
       let acc: BBoxMask | null = null;
       for (const part of b.polygons) {
         if (part.xpoints.length < 3) continue;
-        const m = this.wand.rasterizePolygon(sc(part.xpoints), sc(part.ypoints), sw, sh, scHoles(part.holes));
+        const m = rasterizePolygon(sc(part.xpoints), sc(part.ypoints), sw, sh, scHoles(part.holes));
         if (m) acc = acc ? unionMasks(acc, m) : m;
       }
       return acc;
@@ -266,17 +260,5 @@ export class RegionOpsService {
     r.color = proto?.color;
     r.label = proto?.label ?? 'Region';
     return r;
-  }
-
-  private clonePolygon(p: Polygon): Polygon {
-    const poly = new Polygon();
-    poly.npoints = p.npoints;
-    poly.xpoints = p.xpoints.slice();
-    poly.ypoints = p.ypoints.slice();
-    poly.coordinates = p.coordinates.map((c) => c.slice());
-    poly.closed = p.closed;
-    poly.bezier = p.bezier;
-    if (p.holes) poly.holes = p.holes.map((ring) => ring.map((pt) => pt.slice()));
-    return poly;
   }
 }

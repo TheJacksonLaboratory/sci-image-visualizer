@@ -37,6 +37,9 @@ jobs:
       - name: Lint (eslint)
         run: npm run lint
 
+      - name: Format (prettier --check)
+        run: npm run format:check
+
       - name: Test (jest)
         run: npm test
 

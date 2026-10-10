@@ -6,13 +6,54 @@ import type { SamPrompt } from '../../contracts/sam.contract';
  * Shared, DOM-free SAM inference primitives used by BOTH inference backends:
  * the in-process session (`OnnxSamSession`, main thread) and the dedicated
  * Web Worker (`onnx-sam.worker`). Keeping these here avoids duplicating the
- * preprocessing / decoder-prompt math and keeps the worker DOM-free (it can't
- * import sam-prompt.ts, which pulls in DOM types).
+ * preprocessing / decoder-prompt math; nothing here may import Angular or the
+ * DOM, since the worker bundles it.
  */
 
+/** SAM's per-channel (RGB) pixel mean, subtracted before the encoder. */
 export const PIXEL_MEAN = [123.675, 116.28, 103.53];
+/** SAM's per-channel (RGB) pixel standard deviation, divided out before the encoder. */
 export const PIXEL_STD = [58.395, 57.12, 57.375];
-const MODEL_CACHE = 'sam-onnx';
+/** Cache API store for downloaded model files. Bump the version only when the cache
+ *  LAYOUT changes — opening the cache deletes every older `sam-onnx*` store. A model
+ *  re-exported under the same URLs bumps its own `SamModelDef.revision` instead,
+ *  which re-downloads that model alone (see {@link modelCacheKey}). */
+const MODEL_CACHE_PREFIX = 'sam-onnx';
+const MODEL_CACHE = `${MODEL_CACHE_PREFIX}-v2`;
+
+let staleCachesPurged: Promise<void> | null = null;
+
+/** Delete model caches from earlier versions (once per page/worker). */
+function purgeStaleModelCaches(): Promise<void> {
+  staleCachesPurged ??= caches
+    .keys()
+    .then((names) =>
+      Promise.all(
+        names.filter((n) => n.startsWith(MODEL_CACHE_PREFIX) && n !== MODEL_CACHE).map((n) => caches.delete(n)),
+      ),
+    )
+    .then(() => undefined)
+    .catch(() => undefined); // best effort: a stale cache only wastes space
+  return staleCachesPurged;
+}
+
+/** Open the current model cache, or null where the Cache API is unavailable. */
+async function openModelCache(): Promise<Cache | null> {
+  if (typeof caches === 'undefined') return null;
+  await purgeStaleModelCaches();
+  return caches.open(MODEL_CACHE).catch(() => null);
+}
+
+/**
+ * Delete every downloaded SAM model (several hundred MB per origin). Resolves
+ * to true when something was removed; false where the Cache API is unavailable.
+ */
+export async function clearSamModelCache(): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
+  const names = (await caches.keys()).filter((n) => n.startsWith(MODEL_CACHE_PREFIX));
+  const removed = await Promise.all(names.map((n) => caches.delete(n)));
+  return removed.some(Boolean);
+}
 
 /** Encoder output for one image, reused across prompts. */
 export interface CoreEmbedding {
@@ -31,13 +72,39 @@ export interface CoreMask {
   iou: number;
 }
 
+/**
+ * The Cache API key a model file is stored under: its URL, plus the model's
+ * `SamModelDef.revision` as a query parameter when it has one, so a bumped revision
+ * misses the cache and downloads the re-exported file.
+ */
+export function modelCacheKey(url: string, revision?: string): string {
+  if (!revision) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}siv-model-rev=${encodeURIComponent(revision)}`;
+}
+
+/** Store a downloaded file under `key`, first dropping every other copy of the same file
+ *  (other revisions, or the same path under another query): a model is several hundred
+ *  MB, and a superseded copy would otherwise stay on disk for good. */
+async function cacheModel(cache: Cache, url: string, key: string, body: Response): Promise<void> {
+  await cache.delete(url, { ignoreSearch: true }).catch(() => undefined);
+  await cache.put(key, body).catch(() => undefined);
+}
+
 /** Fetch a model as an ArrayBuffer, streaming progress and caching in the Cache
- *  API (so it isn't re-downloaded). Cache hit → progress jumps to 1. Works on
- *  the main thread and in a worker (both have `fetch` + `caches`). */
-export async function fetchModel(url: string, onProgress?: (f: number) => void): Promise<ArrayBuffer> {
-  const cache = typeof caches !== 'undefined' ? await caches.open(MODEL_CACHE).catch(() => null) : null;
-  const hit = cache ? await cache.match(url) : null;
-  if (hit) { onProgress?.(1); return await hit.arrayBuffer(); }
+ *  API (so it isn't re-downloaded) under {@link modelCacheKey}. Cache hit → progress
+ *  jumps to 1. Works on the main thread and in a worker (both have `fetch` + `caches`). */
+export async function fetchModel(
+  url: string,
+  onProgress?: (f: number) => void,
+  revision?: string,
+): Promise<ArrayBuffer> {
+  const key = modelCacheKey(url, revision);
+  const cache = await openModelCache();
+  const hit = cache ? await cache.match(key) : null;
+  if (hit) {
+    onProgress?.(1);
+    return await hit.arrayBuffer();
+  }
 
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`fetch ${url} failed: HTTP ${resp.status}`);
@@ -45,7 +112,7 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
   if (!resp.body || !total) {
     const buf = await resp.arrayBuffer();
     onProgress?.(1);
-    if (cache) await cache.put(url, new Response(buf)).catch(() => undefined);
+    if (cache) await cacheModel(cache, url, key, new Response(buf));
     return buf;
   }
   const reader = resp.body.getReader();
@@ -60,10 +127,13 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
   }
   const out = new Uint8Array(received);
   let off = 0;
-  for (const c of chunks) { out.set(c, off); off += c.length; }
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
   if (cache) {
-    await cache.put(url, new Response(out.slice(), { headers: { 'content-length': String(received) } }))
-      .catch(() => undefined);
+    // The Response copies its body, so no extra full-size copy of the model here.
+    await cacheModel(cache, url, key, new Response(out, { headers: { 'content-length': String(received) } }));
   }
   onProgress?.(1);
   return out.buffer;
@@ -71,7 +141,11 @@ export async function fetchModel(url: string, onProgress?: (f: number) => void):
 
 /** Resize (long side → size, bilinear), pad to size×size, SAM-normalize → CHW float32. */
 export function preprocess(
-  data: Uint8ClampedArray, width: number, height: number, size: number, scale: number,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  size: number,
+  scale: number,
 ): Float32Array {
   const newW = Math.round(width * scale);
   const newH = Math.round(height * scale);
@@ -105,17 +179,24 @@ export function preprocess(
  *  (resized) space. Box = two points labelled 2/3; points use 1/0; a points-only
  *  prompt pads the absent box slot with `[0,0]` labelled -1. */
 export function buildDecoderPrompt(
-  prompt: SamPrompt, scale: number,
+  prompt: SamPrompt,
+  scale: number,
 ): { pointCoords: Float32Array; pointLabels: Float32Array; numPoints: number } {
   const coords: number[] = [];
   const labels: number[] = [];
-  for (const p of prompt.points ?? []) { coords.push(p.x * scale, p.y * scale); labels.push(p.label); }
+  for (const p of prompt.points ?? []) {
+    coords.push(p.x * scale, p.y * scale);
+    labels.push(p.label);
+  }
   if (prompt.box) {
     const b = prompt.box;
-    coords.push(b.x0 * scale, b.y0 * scale); labels.push(2);
-    coords.push(b.x1 * scale, b.y1 * scale); labels.push(3);
+    coords.push(b.x0 * scale, b.y0 * scale);
+    labels.push(2);
+    coords.push(b.x1 * scale, b.y1 * scale);
+    labels.push(3);
   } else if (labels.length > 0) {
-    coords.push(0, 0); labels.push(-1);
+    coords.push(0, 0);
+    labels.push(-1);
   }
   return {
     pointCoords: Float32Array.from(coords),
@@ -140,7 +221,11 @@ export function bestMaskIndex(iou: Float32Array | number[]): number {
 
 /** Run the encoder on an RGBA image → a reusable embedding. */
 export async function runEncoder(
-  encoder: ort.InferenceSession, data: Uint8ClampedArray, width: number, height: number, inputSize: number,
+  encoder: ort.InferenceSession,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  inputSize: number,
 ): Promise<CoreEmbedding> {
   const scale = inputSize / Math.max(width, height);
   const input = preprocess(data, width, height, inputSize, scale);
@@ -149,14 +234,19 @@ export async function runEncoder(
   });
   const emb = out[encoder.outputNames[0]];
   return {
-    data: emb.data as Float32Array, dims: emb.dims as number[],
-    scale, imageWidth: width, imageHeight: height,
+    data: emb.data as Float32Array,
+    dims: emb.dims as number[],
+    scale,
+    imageWidth: width,
+    imageHeight: height,
   };
 }
 
 /** Run the decoder for one prompt against a cached embedding → a binary mask. */
 export async function runDecoder(
-  decoder: ort.InferenceSession, e: CoreEmbedding, prompt: SamPrompt,
+  decoder: ort.InferenceSession,
+  e: CoreEmbedding,
+  prompt: SamPrompt,
 ): Promise<CoreMask> {
   const { pointCoords, pointLabels, numPoints } = buildDecoderPrompt(prompt, e.scale);
   const out = await decoder.run({

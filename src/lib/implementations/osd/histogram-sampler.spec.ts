@@ -1,4 +1,4 @@
-import { of, throwError, firstValueFrom } from 'rxjs';
+import { from, of, throwError, firstValueFrom } from 'rxjs';
 
 import { HistogramSampler, HistogramSamplerHost } from './histogram-sampler';
 
@@ -15,7 +15,10 @@ const tileClient = require('./tile-client');
 function tile(n: number, [r, g, b]: [number, number, number]) {
   const data = new Uint8ClampedArray(n * 4);
   for (let i = 0; i < n; i++) {
-    data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255;
+    data[i * 4] = r;
+    data[i * 4 + 1] = g;
+    data[i * 4 + 2] = b;
+    data[i * 4 + 3] = 255;
   }
   return { data, width: n, height: 1 };
 }
@@ -68,7 +71,7 @@ describe('HistogramSampler', () => {
       .mockResolvedValue(tile(2, [40, 40, 40]));
     const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] }; // 2-tile grid
     await sampler.computeImageWindow(twoTiles, 'B64', 0);
-    expect(onWindow).toHaveBeenCalledWith(5, 40);
+    expect(onWindow).toHaveBeenCalledWith(5, 40, 0);
   });
 
   it('samples R/G/B histograms (no window) for RGB images', async () => {
@@ -93,7 +96,8 @@ describe('HistogramSampler', () => {
   // ── computeMultiChannelHistograms ─────────────────────────────────────
   it('bins one histogram per channel from per-channel tiles and nudges the pane', async () => {
     (tileClient.fetchTileRgba as jest.Mock).mockImplementation((_http: any, url: string) =>
-      Promise.resolve(tile(2, url.includes('channel=0') ? [15, 15, 15] : [240, 240, 240])));
+      Promise.resolve(tile(2, url.includes('channel=0') ? [15, 15, 15] : [240, 240, 240])),
+    );
     await sampler.computeMultiChannelHistograms(DESC, 'B64', 3);
 
     expect(sampler.get(3, 0)!.counts[15]).toBe(2);
@@ -113,7 +117,7 @@ describe('HistogramSampler', () => {
     sampler.computeSimpleHistogram(2, tile(5, [42, 42, 42]).data, /*gray*/ true);
     const h = sampler.get(2, 0)!;
     expect(h.counts[42]).toBe(5);
-    expect(sampler.get(2, 1)).toBeNull();            // grayscale → one channel only
+    expect(sampler.get(2, 1)).toBeNull(); // grayscale → one channel only
     expect(onSampled).toHaveBeenCalled();
     expect(tileClient.fetchTileRgba).not.toHaveBeenCalled(); // never hits the server
   });
@@ -127,8 +131,14 @@ describe('HistogramSampler', () => {
 
   it('skips fully-transparent pixels', () => {
     const data = new Uint8ClampedArray(2 * 4);
-    data[0] = 7; data[1] = 7; data[2] = 7; data[3] = 255; // opaque gray 7
-    data[4] = 99; data[5] = 99; data[6] = 99; data[7] = 0; // transparent → ignored
+    data[0] = 7;
+    data[1] = 7;
+    data[2] = 7;
+    data[3] = 255; // opaque gray 7
+    data[4] = 99;
+    data[5] = 99;
+    data[6] = 99;
+    data[7] = 0; // transparent → ignored
     sampler.computeSimpleHistogram(0, data, true);
     expect(sampler.get(0, 0)!.counts[7]).toBe(1);
     expect(sampler.get(0, 0)!.counts[99]).toBe(0);
@@ -147,18 +157,27 @@ describe('HistogramSampler', () => {
 
   // ── native histogram fetch ────────────────────────────────────────────
   const NATIVE = {
-    bitDepth: 16, rangeMin: 96, rangeMax: 150, observedMin: 96, observedMax: 150,
-    binWidth: 0.215, counts: [4, 0, 8],
+    bitDepth: 16,
+    rangeMin: 96,
+    rangeMax: 150,
+    observedMin: 96,
+    observedMax: 150,
+    binWidth: 0.215,
+    counts: [4, 0, 8],
   };
+  /** What `http.get(url, { observe: 'response' })` emits for it. */
+  const NATIVE_RESP = { status: 200, body: NATIVE };
 
   it('maps the server HistogramInfo to native bins and caches per slice+channel', async () => {
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     const h = (await firstValueFrom(sampler.native$('B64', 0, 1, 256)))!;
     expect(h.bitDepth).toBe(16);
     expect(h.bins[0]).toBe(96);
     expect(h.bins[2]).toBeCloseTo(96 + 2 * 0.215);
     expect(h.max).toBe(8);
     expect(http.get.mock.calls[0][0]).toContain('histogram?info=B64&channel=1&z=0&bins=256');
+    // The per-app-load cache-buster that defeats the server's 24 h cache.
+    expect(http.get.mock.calls[0][0]).toMatch(/&_=\d+$/);
 
     // Cached: a second subscription must not refetch.
     await firstValueFrom(sampler.native$('B64', 0, 1, 256));
@@ -172,8 +191,90 @@ describe('HistogramSampler', () => {
     warn.mockRestore();
   });
 
+  // ── supersession (review OSD-PLOTLY-4) ───────────────────────────────
+  // A run started for image A that finishes after clear() (image switch) must
+  // not write A's histogram, auto-window or native histogram into image B.
+
+  /** A fetchTileRgba mock whose results are all held until released by hand. */
+  function deferredTile(px: [number, number, number]) {
+    const pending: Array<() => void> = [];
+    (tileClient.fetchTileRgba as jest.Mock).mockImplementation(
+      () => new Promise((resolve) => pending.push(() => resolve(tile(2, px)))),
+    );
+    return () => pending.forEach((release) => release());
+  }
+
+  it('drops a computeImageWindow result that lands after clear()', async () => {
+    const release = deferredTile([40, 40, 40]);
+    (tileClient.fetchTileRgba as jest.Mock).mockResolvedValueOnce(tile(2, [5, 5, 5]));
+    const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] };
+    const run = sampler.computeImageWindow(twoTiles, 'B64', 0);
+    sampler.clear(); // image switch while A's tiles are still in flight
+    release();
+    await run;
+    expect(sampler.get(0, 0)).toBeNull();
+    expect(onWindow).not.toHaveBeenCalled();
+  });
+
+  it('drops a computeMultiChannelHistograms result that lands after clear()', async () => {
+    const release = deferredTile([15, 15, 15]);
+    const run = sampler.computeMultiChannelHistograms(DESC, 'B64', 0);
+    sampler.clear();
+    release();
+    await run;
+    expect(sampler.get(0, 0)).toBeNull();
+    expect(onSampled).not.toHaveBeenCalled();
+  });
+
+  it('does not cache a native histogram that lands after clear()', async () => {
+    let respond!: (v: unknown) => void;
+    http.get.mockReturnValueOnce(
+      from(
+        new Promise((r) => {
+          respond = r;
+        }),
+      ),
+    );
+    const first = firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    sampler.clear();
+    respond(NATIVE_RESP);
+    await first;
+    http.get.mockReturnValue(of(NATIVE_RESP));
+    await firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    expect(http.get).toHaveBeenCalledTimes(2); // not served from a stale cache entry
+  });
+
+  it('keys native histograms by image and bin count', async () => {
+    http.get.mockReturnValue(of(NATIVE_RESP));
+    await firstValueFrom(sampler.native$('A64', 0, 0, 256));
+    await firstValueFrom(sampler.native$('B64', 0, 0, 256)); // other image, same z/channel
+    await firstValueFrom(sampler.native$('B64', 0, 0, 64)); // other bin count
+    expect(http.get).toHaveBeenCalledTimes(3);
+    expect(http.get.mock.calls[2][0]).toContain('bins=64');
+  });
+
+  // ── no re-sampling of a sampled / in-flight slice (OSD-PLOTLY-13) ─────
+  it('does not re-fetch tiles for a slice already sampled or in flight', async () => {
+    (tileClient.fetchTileRgba as jest.Mock).mockResolvedValue(tile(2, [15, 15, 15]));
+    const a = sampler.computeMultiChannelHistograms(DESC, 'B64', 1);
+    const b = sampler.computeMultiChannelHistograms(DESC, 'B64', 1); // scrub back mid-flight
+    await Promise.all([a, b]);
+    await sampler.computeMultiChannelHistograms(DESC, 'B64', 1); // and once cached
+    await sampler.computeImageWindow(DESC, 'B64', 1);
+    expect(tileClient.fetchTileRgba).toHaveBeenCalledTimes(2); // one run × 2 channels
+  });
+
+  it('reports the slice an auto-window was measured on', async () => {
+    (tileClient.fetchTileRgba as jest.Mock)
+      .mockResolvedValueOnce(tile(2, [5, 5, 5]))
+      .mockResolvedValue(tile(2, [40, 40, 40]));
+    const twoTiles = { ...DESC, width: 128, levels: [{ width: 128, height: 64 }] };
+    await sampler.computeImageWindow(twoTiles, 'B64', 3);
+    expect(onWindow).toHaveBeenCalledWith(5, 40, 3);
+  });
+
   it('clear() drops both caches', async () => {
-    http.get.mockReturnValue(of(NATIVE));
+    http.get.mockReturnValue(of(NATIVE_RESP));
     await firstValueFrom(sampler.native$('B64', 0, 0, 256));
     (tileClient.fetchTileRgba as jest.Mock).mockResolvedValue(tile(1, [9, 9, 9]));
     await sampler.computeImageWindow(DESC, 'B64', 0);

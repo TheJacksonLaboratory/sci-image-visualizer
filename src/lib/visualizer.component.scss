@@ -1,3 +1,5 @@
+@use './styles/viz-icons-rules';
+
 :host {
   display: flex;
   flex-direction: column;
@@ -83,27 +85,6 @@ kbd {
   font-size: 0.85em;
 }
 
-::ng-deep .context-menu-active > .p-menuitem-content {
-  background-color: var(--primary-color) !important;
-}
-
-::ng-deep .context-menu-active > .p-menuitem-content .p-menuitem-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .p-menuitem-text {
-  color: #ffffff !important;
-}
-
-::ng-deep .context-menu-active > .p-menuitem-content .zoom-box-off-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .wand-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .polyline-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .polygon-vertices-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .vertex-add-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .vertex-delete-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .region-move-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .to-bezier-icon,
-::ng-deep .context-menu-active > .p-menuitem-content .to-polygon-icon {
-  filter: brightness(0) invert(1);
-}
-
 .toolbar-separator {
   border-left: 1px solid var(--surface-border);
   height: 1.5rem;
@@ -143,36 +124,37 @@ kbd {
   position: absolute;
   left: 45%;
   top: 45%;
-  height:100px;
-  width:100px;
-  margin:0 auto;
-  -webkit-animation: rotation .6s infinite linear;
-  -moz-animation: rotation .6s infinite linear;
-  -o-animation: rotation .6s infinite linear;
-  animation: rotation .6s infinite linear;
-  border-left:6px solid rgba(0,174,239,.15);
-  border-right:6px solid rgba(0,174,239,.15);
-  border-bottom:6px solid rgba(0,174,239,.15);
-  border-top:6px solid rgb(82, 107, 178);
-  border-radius:100%;
+  height: 100px;
+  width: 100px;
+  margin: 0 auto;
+  -webkit-animation: rotation 0.6s infinite linear;
+  -moz-animation: rotation 0.6s infinite linear;
+  -o-animation: rotation 0.6s infinite linear;
+  animation: rotation 0.6s infinite linear;
+  border-left: 6px solid rgba(0, 174, 239, 0.15);
+  border-right: 6px solid rgba(0, 174, 239, 0.15);
+  border-bottom: 6px solid rgba(0, 174, 239, 0.15);
+  border-top: 6px solid rgb(82, 107, 178);
+  border-radius: 100%;
 }
-#overlay {
+// Styled by class, not id: two live viewers would otherwise share the id.
+.loading-overlay {
   position: absolute;
-  top:0;
-  left:0;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(255, 255, 255, .5);
+  background-color: rgba(255, 255, 255, 0.5);
   // Sit above the OpenSeadragon canvas/navigator (appended into #plot after
   // this node), so the spinner / "Caching image..." progress shows on top of
   // the currently displayed OSD image instead of behind it.
   z-index: 1000;
 }
 // Translucent overlay used during the small→large tier sharpening phase.
-// More transparent than the main #overlay so the user can clearly see the
+// More transparent than the main .loading-overlay so the user can clearly see the
 // blurry small-tier preview underneath, but still has a spinner + label to
 // communicate that loading isn't actually done yet.
-#sharpening-overlay {
+.sharpening-overlay {
   position: absolute;
   top: 0;
   left: 0;
@@ -180,7 +162,7 @@ kbd {
   height: 100%;
   background-color: rgba(255, 255, 255, 0.18);
   pointer-events: none;
-  z-index: 1000; // above the OSD canvas/navigator (see #overlay)
+  z-index: 1000; // above the OSD canvas/navigator (see .loading-overlay)
   // Inherit the spinner positioning, but make it smaller so it doesn't
   // dominate the visible image underneath.
   .spinner {
@@ -206,154 +188,45 @@ kbd {
 }
 
 @-webkit-keyframes rotation {
-  from {-webkit-transform: rotate(0deg);}
-  to {-webkit-transform: rotate(359deg);}
+  from {
+    -webkit-transform: rotate(0deg);
+  }
+  to {
+    -webkit-transform: rotate(359deg);
+  }
 }
 @-moz-keyframes rotation {
-  from {-moz-transform: rotate(0deg);}
-  to {-moz-transform: rotate(359deg);}
+  from {
+    -moz-transform: rotate(0deg);
+  }
+  to {
+    -moz-transform: rotate(359deg);
+  }
 }
 @-o-keyframes rotation {
-  from {-o-transform: rotate(0deg);}
-  to {-o-transform: rotate(359deg);}
+  from {
+    -o-transform: rotate(0deg);
+  }
+  to {
+    -o-transform: rotate(359deg);
+  }
 }
 @keyframes rotation {
-  from {transform: rotate(0deg);}
-  to {transform: rotate(359deg);}
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(359deg);
+  }
 }
 
-::ng-deep .zoom-box-off-icon {
-  background: url('./assets/zoom-box.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .wand-icon {
-  background: url('./assets/wand.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .brush-icon {
-  background: url('./assets/paintbrush.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-
-::ng-deep .polyline-icon {
-  background: url('./assets/polyline.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .polygon-vertices-icon {
-  background: url('./assets/polygon-vertices.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .vertex-add-icon {
-  background: url('./assets/vertex-add.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .vertex-delete-icon {
-  background: url('./assets/vertex-delete.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .region-move-icon {
-  background: url('./assets/region-move.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .to-bezier-icon {
-  background: url('./assets/to-bezier.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-::ng-deep .to-polygon-icon {
-  background: url('./assets/to-polygon.svg') no-repeat center center;
-  background-size: contain;
-  width: 1.25rem;
-  height: 1.25rem;
-  display: inline-block;
-  filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
-}
-
-
-
-
-/* Floating, draggable intensity-profile inset (LINE plot type). Fixed to the
-   viewport so it floats over the whole page (above the toolbar, z-index 1000),
-   not clipped to the #plot/canvas area. */
-.intensity-panel {
-  position: fixed;
-  z-index: 1100;
-  width: 280px;
-  height: 180px;
-  background: rgba(25, 25, 25, 0.9);
-  border: 1px solid var(--primary-color, #3399ff);
-  border-radius: 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.intensity-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.25rem 0.5rem;
-  cursor: move;
-  user-select: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #eee;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.intensity-panel-header i {
-  opacity: 0.6;
-  font-size: 0.7rem;
-}
-
-.intensity-panel-plot {
-  flex: 1 1 auto;
-  width: 100%;
+// Toolbar / context-menu icons, and the active context-menu entry. Deliberately unscoped
+// (::ng-deep with no :host): the context menu and the toolbar overlays are appended to
+// <body>, outside this component's view. The same rules ship to hosts as
+// styles/viz-icons.scss; emitting them here too keeps a host that does not include that
+// stylesheet working.
+::ng-deep {
+  @include viz-icons-rules.rules('./assets');
 }
 
 /* SAM/cellpose model-download bar: kill PrimeNG's default `width 1s ease`

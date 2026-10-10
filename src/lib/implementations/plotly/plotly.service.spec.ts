@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 
 import { PlotlyService, PlotType } from './plotly.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -10,6 +10,14 @@ import { Region, Rectangle } from '../../models/region';
 import { Image } from 'image-js';
 import * as Plotly from 'plotly.js-dist-min';
 import * as path from 'path';
+import { VisualizerStore } from '../../store/visualizer-store.service';
+import { RegionStore } from '../../store/region-store.service';
+import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
+import { Subject } from 'rxjs';
+import { IntensityProfileService } from '../../intensity/intensity-profile.service';
+import { PlotUtilities } from '../../plot.utilities';
+import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -17,13 +25,10 @@ describe('PlotlyService', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS,
-        MessageService
-      ]
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
   });
-
 
   it('should be created', () => {
     expect(service).toBeTruthy();
@@ -39,7 +44,6 @@ describe('PlotlyService', () => {
     expect(loading).toHaveBeenCalledWith(false);
     expect(info).not.toHaveBeenCalled();
   });
-
 });
 
 describe('PlotlyService load and plot image', () => {
@@ -48,44 +52,46 @@ describe('PlotlyService load and plot image', () => {
   let imageInfo: IImageInfo;
   let screenHeight: number;
 
-  beforeAll(async() => {
+  beforeAll(async () => {
     urls = [path.join(__dirname, 'test_grayscale.png')];
-    imageInfo = ({} as IImageInfo);
+    imageInfo = {} as IImageInfo;
     imageInfo.urls = urls;
-    imageInfo.trueImageSize = [ 1344, 1024 ];
+    imageInfo.trueImageSize = [1344, 1024];
     imageInfo.scaleRatio = true;
     imageInfo.isGrayscale = true;
     imageInfo.showStack = false;
 
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS,
-        MessageService
-      ]
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
     // Bypass HttpClient for local file paths in tests — auth headers not needed here
-    jest.spyOn(service as any, 'loadImage').mockImplementation((url: unknown) => Image.load(url as string));
+    jest
+      .spyOn((service as any).loader, 'loadImage')
+      .mockImplementation((url: unknown) => Image.load(url as string));
     // canvas size
     screenHeight = 811;
     // create DOM element
     document.body.innerHTML = '<div id="plot"></div>';
   });
 
-  it('Should load and plot grayscale image',  async() => {
-    let imgLoaded!: {data: any[], ratios: number[], sizes: any[]};
+  it('Should load and plot grayscale image', async () => {
+    let imgLoaded!: { data: any[]; ratios: number[]; sizes: any[] };
 
     // load
-    await service.load(imageInfo, 0).then(imageLoaded => {
+    await service.load(imageInfo, 0).then((imageLoaded) => {
       console.log('image loaded:');
       imgLoaded = imageLoaded;
       const imgData = JSON.stringify(imgLoaded.data);
-      expect(imgData).toContain('[[[99,105,102,104,102,104,105,102,101,106,104,102,97,105,103,103,106,103,104,106,101,100,109,107,106,106,103,103,105,100,103,104,107,105,108,105,104,105,104,107,103,103,103,105,100,106,106,102,104,105,104,104,107,105,108,103,104,102,102,105,102,102,100,103,102,103,100,101,104,102,105,106,101,100,104,105,109,103,104,100,108,105,103,102,104,109,106,108,107,106,109,107,105,102,104,99,105,106,103,103,105,108,107,109,107,105,106,107,109,103,102,101,105,105,105,105,109,104,100,103,100,99,104,110,107,103,103,101,103,105,102,102,101,103,104,106,106,108,104,105,101,109,106,105,107,106,107,111,109,108,108,107,107,102,102,100,101,104,103,105,106,106,107,110,103,105,104,104');
-      expect(imgLoaded.ratios).toStrictEqual([1.3125,1.3128205128205128]);
-      expect(imgLoaded.sizes).toStrictEqual([1024,780]);
+      expect(imgData).toContain(
+        '[[[99,105,102,104,102,104,105,102,101,106,104,102,97,105,103,103,106,103,104,106,101,100,109,107,106,106,103,103,105,100,103,104,107,105,108,105,104,105,104,107,103,103,103,105,100,106,106,102,104,105,104,104,107,105,108,103,104,102,102,105,102,102,100,103,102,103,100,101,104,102,105,106,101,100,104,105,109,103,104,100,108,105,103,102,104,109,106,108,107,106,109,107,105,102,104,99,105,106,103,103,105,108,107,109,107,105,106,107,109,103,102,101,105,105,105,105,109,104,100,103,100,99,104,110,107,103,103,101,103,105,102,102,101,103,104,106,106,108,104,105,101,109,106,105,107,106,107,111,109,108,108,107,107,102,102,100,101,104,103,105,106,106,107,110,103,105,104,104',
+      );
+      expect(imgLoaded.ratios).toStrictEqual([1.3125, 1.3128205128205128]);
+      expect(imgLoaded.sizes).toStrictEqual([1024, 780]);
     });
     // plot
-    await service.plot('plot', imgLoaded, imageInfo, screenHeight, PlotType.HEATMAP).then(result => {
+    await service.plot('plot', imgLoaded, imageInfo, screenHeight, PlotType.HEATMAP).then((result) => {
       console.log(result);
       expect(result).toBe(true);
     });
@@ -100,27 +106,43 @@ describe('PlotlyService relayout handler', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS,
-        MessageService
-      ]
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
 
     // Set up internal state needed by the relayout handler
-    (service as any).plotDiv = 'plot';
-    (service as any).shapes = [];
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+    (service as any).shapeProjection.shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).trueImgSize = [0, 1344, 0, 1024];
-    (service as any).isRealZoom = true;
+    (service as any).zoom.isRealZoom = true;
 
     document.body.innerHTML = '<div id="plot"></div>';
 
     relayoutSpy = jest.spyOn(Plotly, 'relayout').mockResolvedValue({} as any);
-    triggerZoomSpy = jest.spyOn(service as any, 'triggerZoom').mockImplementation(() => undefined);
+    triggerZoomSpy = jest.spyOn((service as any).zoom, 'triggerZoom').mockImplementation(() => undefined);
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  it('re-binding the relayout handler on an in-place render does not stack it (OSD-PLOTLY-7)', () => {
+    // Plotly's gd.on() registers on its own EventEmitter (removeListener), not
+    // the DOM — removeEventListener never unbound the previous handler.
+    const listeners: Record<string, Array<(e: unknown) => void>> = {};
+    const plot = document.getElementById('plot') as any;
+    plot.on = (name: string, fn: (e: unknown) => void) => {
+      (listeners[name] ??= []).push(fn);
+    };
+    plot.removeListener = (name: string, fn: (e: unknown) => void) => {
+      listeners[name] = (listeners[name] ?? []).filter((f) => f !== fn);
+    };
+    const handler = jest.spyOn(service as any, 'relayoutEventHandler').mockImplementation(() => undefined);
+    (service as any).setEvents('plot', true, 600);
+    (service as any).setEvents('plot', true, 600); // the in-place (large) pass
+    listeners['plotly_relayout'].forEach((fn) => fn({ 'xaxis.range[0]': 1 }));
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
   it('should not process zoom-to-box shapes in relayout handler', () => {
@@ -130,9 +152,7 @@ describe('PlotlyService relayout handler', () => {
     // Simulate a shape event while in zoom-to-box mode — should be treated
     // as a regular shape, not a zoom action (zoom is handled by the canvas overlay)
     const event = { shapes: [{ x0: 100, x1: 500, y0: 200, y1: 800, type: 'rect' }] };
-    (service as any).relayoutEventHandler(
-      event, {} as any, service, {} as any
-    );
+    (service as any).relayoutEventHandler(event, {} as any, service, {} as any);
 
     // Should NOT call triggerZoom — zoom-to-box is handled by the overlay, not relayout
     expect(triggerZoomSpy).not.toHaveBeenCalled();
@@ -146,35 +166,33 @@ describe('PlotlyService relayout handler', () => {
     relayoutSpy.mockClear();
 
     // Existing shape plus a new one — simulates drawing a region
-    (service as any).shapes = [{ x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' }];
+    (service as any).shapeProjection.shapes = [{ x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' }];
     const event = {
       shapes: [
         { x0: 0, x1: 50, y0: 0, y1: 50, name: 'shape0', type: 'rect' },
-        { x0: 100, x1: 500, y0: 200, y1: 800, type: 'rect' }
-      ]
+        { x0: 100, x1: 500, y0: 200, y1: 800, type: 'rect' },
+      ],
     };
-    (service as any).relayoutEventHandler(
-      event, {} as any, service, {} as any
-    );
+    (service as any).relayoutEventHandler(event, {} as any, service, {} as any);
 
     // Should NOT call triggerZoom — shape is treated as a region, not a zoom box
     expect(triggerZoomSpy).not.toHaveBeenCalled();
     // Shapes should be updated with the new shape
-    expect((service as any).shapes.length).toBe(2);
+    expect((service as any).shapeProjection.shapes.length).toBe(2);
   });
 
   it('should update zoomCoordinates on drag zoom in stack mode without triggering real zoom', () => {
     (service as any).imageInfo.showStack = true;
 
     const event = {
-      'xaxis.range[0]': 100, 'xaxis.range[1]': 500,
-      'yaxis.range[0]': 800, 'yaxis.range[1]': 200
+      'xaxis.range[0]': 100,
+      'xaxis.range[1]': 500,
+      'yaxis.range[0]': 800,
+      'yaxis.range[1]': 200,
     };
-    (service as any).relayoutEventHandler(
-      event, {} as any, service, {} as any
-    );
+    (service as any).relayoutEventHandler(event, {} as any, service, {} as any);
 
-    expect((service as any).zoomCoordinates).toEqual([100, 500, 800, 200]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([100, 500, 800, 200]);
     expect(triggerZoomSpy).not.toHaveBeenCalled();
   });
 
@@ -182,14 +200,14 @@ describe('PlotlyService relayout handler', () => {
     (service as any).imageInfo.showStack = false;
 
     const event = {
-      'xaxis.range[0]': 100, 'xaxis.range[1]': 500,
-      'yaxis.range[0]': 800, 'yaxis.range[1]': 200
+      'xaxis.range[0]': 100,
+      'xaxis.range[1]': 500,
+      'yaxis.range[0]': 800,
+      'yaxis.range[1]': 200,
     };
-    (service as any).relayoutEventHandler(
-      event, {} as any, service, {} as any
-    );
+    (service as any).relayoutEventHandler(event, {} as any, service, {} as any);
 
-    expect((service as any).zoomCoordinates).toEqual([100, 500, 800, 200]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([100, 500, 800, 200]);
     expect(triggerZoomSpy).toHaveBeenCalledWith([100, 500, 800, 200]);
   });
 
@@ -197,13 +215,13 @@ describe('PlotlyService relayout handler', () => {
     const gd = document.getElementById('plot') as any;
     gd._fullLayout = {
       xaxis: { range: [0, 1000] },
-      yaxis: { range: [0, 800] }
+      yaxis: { range: [0, 800] },
     };
     relayoutSpy.mockClear();
 
     service.zoomIn();
 
-    const coords = (service as any).zoomCoordinates;
+    const coords = (service as any).zoom.zoomCoordinates;
     expect(coords.length).toBe(4);
     // Zoomed range should be smaller than original
     expect(coords[1] - coords[0]).toBeLessThan(1000);
@@ -214,13 +232,13 @@ describe('PlotlyService relayout handler', () => {
     const gd = document.getElementById('plot') as any;
     gd._fullLayout = {
       xaxis: { range: [200, 800] },
-      yaxis: { range: [200, 600] }
+      yaxis: { range: [200, 600] },
     };
     relayoutSpy.mockClear();
 
     service.zoomOut();
 
-    const coords = (service as any).zoomCoordinates;
+    const coords = (service as any).zoom.zoomCoordinates;
     expect(coords.length).toBe(4);
     // Zoomed-out range should be larger than original
     expect(coords[1] - coords[0]).toBeGreaterThan(600);
@@ -247,7 +265,6 @@ describe('PlotlyService relayout handler', () => {
   });
 });
 
-
 /**
  * Plotly-specific region glue. The region *state* (per-image cache, selection,
  * CRUD, vertex edits, key derivation) is the shared RegionStore's job and is
@@ -261,14 +278,12 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS,
-        MessageService
-      ]
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
 
-    (service as any).plotDiv = 'plot';
-    (service as any).shapes = [];
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+    (service as any).shapeProjection.shapes = [];
     (service as any).imageInfo = { showStack: false, isGrayscale: true } as IImageInfo;
     (service as any).fileName = '';
 
@@ -281,7 +296,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
   });
 
   function makeImageInfo(url: string, basename: string): IImageInfo {
-    const info = ({} as IImageInfo);
+    const info = {} as IImageInfo;
     info.urls = [url];
     info.fileName = basename;
     info.trueImageSize = [100, 100];
@@ -296,7 +311,10 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     const r = new Region();
     r.name = name;
     const rect = new Rectangle();
-    rect.x = 0; rect.y = 0; rect.width = 10; rect.height = 10;
+    rect.x = 0;
+    rect.y = 0;
+    rect.width = 10;
+    rect.height = 10;
     r.bounds = rect;
     return r;
   }
@@ -308,31 +326,141 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
 
     // Plotly emits the new shape via plotly_relayout (single `shapes` key).
     const newShape = { x0: 0, x1: 50, y0: 0, y1: 50, type: 'rect' };
-    (service as any).relayoutEventHandler(
-      { shapes: [newShape] }, {} as any, service, {} as any
-    );
+    (service as any).relayoutEventHandler({ shapes: [newShape] }, {} as any, service, {} as any);
 
     // The drawn shape is now a region in the shared store (and projected to
     // Plotly's working-set), with a minted id.
     expect(service.getRegions().length).toBe(1);
-    expect(service.getShapes().length).toBe(1);
-    expect(service.getShapes()[0].id).toBeDefined();
+    expect(service.getRegions()[0].id).toBeDefined();
   });
 
-  it('deleteActiveShape falls back to Plotly\'s _activeShapeIndex when nothing is selected', () => {
+  // ── Plotly follows the store (IVisualizer split (d)): it is not on the write path ──
+
+  /** Make `#plot` look like a live Plotly graph (what liveGd() checks). */
+  type LiveGd = HTMLElement & { _fullLayout: { _activeShapeIndex: number } };
+  type ShapeDict = { name?: string; x0?: number; y0?: number };
+  /** The private members these specs drive. */
+  const internals = () =>
+    service as unknown as {
+      shapeProjection: { shapes: ShapeDict[]; syncSelectionFromPlot(): void };
+      relayoutEventHandler(event: Record<string, unknown>): void;
+    };
+  function liveGraph(activeShapeIndex = -1): LiveGd {
+    const gd = document.getElementById('plot') as LiveGd;
+    gd._fullLayout = { _activeShapeIndex: activeShapeIndex };
+    return gd;
+  }
+  const lastRelayout = (): { shapes: ShapeDict[] } =>
+    (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)?.[1];
+  const drawnNames = (): Array<string | undefined> => lastRelayout().shapes.map((d) => d.name);
+
+  it('a shape clicked on the plot is selected in the store, so a store delete removes it and redraws', () => {
     const a = makeImageInfo('s3://bkt/img.tif', 'img.tif');
     service.setActiveImage(a);
-    service.setRegions([makeRect('s0'), makeRect('s1')]);
+    const regionStore = TestBed.inject(RegionStore);
+    regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
+    liveGraph(1); // Plotly made shape 1 active on a click
+    internals().shapeProjection.syncSelectionFromPlot(); // the mousedown handler's sample
+    expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
 
-    // Clear the selection first (this also resets Plotly's active index), then
-    // simulate Plotly tracking a clicked shape — deleteActiveShape should fall
-    // back to it.
-    service.setSelectedShapeIndices([]);
-    const gd: any = document.getElementById('plot');
-    gd._fullLayout = { _activeShapeIndex: 1 };
-    service.deleteActiveShape();
+    regionStore.deleteActiveShape();
 
-    expect(service.getShapes().map((s: any) => s.name)).toEqual(['s0']);
+    expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
+    expect(drawnNames()).toEqual(['s0']);
+    expect(document.getElementById('plot')).toHaveProperty('_fullLayout._activeShapeIndex', -1);
+  });
+
+  it('redraws the shapes on a store undo/redo (heatmap undo)', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    regionStore.beginGesture(); // its own undo step (not folded into the first write)
+    regionStore.setRegions([...regionStore.getRegions(), makeRect('s1')]);
+    regionStore.endGesture();
+    expect(drawnNames()).toEqual(['s0', 's1']);
+
+    regionStore.undo();
+    expect(drawnNames()).toEqual(['s0']);
+    regionStore.redo();
+    expect(drawnNames()).toEqual(['s0', 's1']);
+  });
+
+  it('redraws a Region Editor edit made straight on the store', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    regionStore.moveRegion(regionStore.getRegions()[0].id, 5, 7);
+    expect(lastRelayout().shapes[0]).toMatchObject({ x0: 5, y0: 7 });
+  });
+
+  it('moves the edit handles to the store selection, and leaves a plot that already shows it alone', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
+    const gd = liveGraph();
+    const redraw = jest.spyOn(Plotly, 'redraw').mockResolvedValue(gd as unknown as Plotly.PlotlyHTMLElement);
+
+    regionStore.selectRegion(regionStore.getRegions()[0]);
+    expect(gd._fullLayout._activeShapeIndex).toBe(0);
+    expect(redraw).toHaveBeenCalledTimes(1);
+
+    gd._fullLayout._activeShapeIndex = 1; // a click on the plot…
+    internals().shapeProjection.syncSelectionFromPlot(); // …synced into the store
+    expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
+    expect(redraw).toHaveBeenCalledTimes(1); // no redraw for a change the plot made
+  });
+
+  it('commits a shape edited on the canvas without relayouting it back', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    (Plotly.relayout as unknown as jest.Mock).mockClear();
+
+    internals().relayoutEventHandler({ 'shapes[0].x0': 3.4 });
+
+    expect((regionStore.getRegions()[0].bounds as Rectangle).x).toBe(3);
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+  });
+
+  it('draws a transient region set without touching the stored one', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+
+    regionStore.setRegions([makeRect('t0'), makeRect('t1')], false, false);
+
+    expect(drawnNames()).toEqual(['t0', 't1']);
+    expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
+    expect(internals().shapeProjection.shapes.map((d) => d.name)).toEqual(['s0']);
+  });
+
+  it('does not redraw an image switch onto the outgoing plot, nor anything without a live graph', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/a.tif', 'a.tif'));
+    regionStore.setRegions([makeRect('s0')]); // no live graph: nothing to relayout
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+
+    liveGraph();
+    service.setActiveImage(makeImageInfo('s3://bkt/b.tif', 'b.tif'));
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+    expect(internals().shapeProjection.shapes).toEqual([]); // b's (empty) set, for the next plot
+  });
+
+  it('draws a new profile line from the store event (no direct relayout in addProfileLine)', () => {
+    const intensity = TestBed.inject(IntensityProfileService);
+    const line = makeRect('line');
+    jest.spyOn(intensity, 'addProfileLine').mockImplementation(() => {
+      TestBed.inject(RegionStore).setRegions([line]);
+      return line;
+    });
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    expect(service.addProfileLine()).toBe(line);
+    expect(drawnNames()).toEqual(['line']);
   });
 });
 
@@ -348,7 +476,7 @@ describe('PlotlyService viewport + stack-state methods', () => {
       providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
-    (service as any).plotDiv = 'plot';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
     (service as any).imageInfo = { showStack: true, isGrayscale: true } as IImageInfo;
     document.body.innerHTML = '<div id="plot"></div>';
     relayout = jest.spyOn(Plotly, 'relayout').mockResolvedValue({} as any);
@@ -367,9 +495,9 @@ describe('PlotlyService viewport + stack-state methods', () => {
   });
 
   it('autoscale relayouts to autorange and clears the zoom box', () => {
-    (service as any).zoomCoordinates = [1, 2, 3, 4];
+    (service as any).zoom.zoomCoordinates = [1, 2, 3, 4];
     service.autoscale();
-    expect((service as any).zoomCoordinates).toEqual([]);
+    expect((service as any).zoom.zoomCoordinates).toEqual([]);
     expect(relayout).toHaveBeenCalledWith('plot', expect.objectContaining({ 'xaxis.autorange': true }));
   });
 
@@ -378,14 +506,26 @@ describe('PlotlyService viewport + stack-state methods', () => {
     expect(purge).toHaveBeenCalledWith('plot');
   });
 
-  it('setColormap restyles the colorscale and writes the store', () => {
+  it('setColormap restyles the colorscale of a live Plotly graph and writes the store', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = {};
     service.setColormap({ data: { value: 'Viridis' } } as any);
-    expect(restyle).toHaveBeenCalledWith('plot', { colorscale: ['Viridis'] });
+    expect(restyle).toHaveBeenCalledWith(gd, { colorscale: ['Viridis'] });
   });
 
-  it('setReverseScale restyles reversescale', () => {
+  it('setReverseScale restyles reversescale of a live Plotly graph', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = {};
     service.setReverseScale(true);
-    expect(restyle).toHaveBeenCalledWith('plot', { reversescale: true });
+    expect(restyle).toHaveBeenCalledWith(gd, { reversescale: true });
+  });
+
+  it('display/shape restyles skip a div another backend owns (OSD-PLOTLY-26)', () => {
+    // No _fullLayout: the div was purged and handed to OSD/napari.
+    service.setColormap({ data: { value: 'Viridis' } } as any);
+    service.setReverseScale(true);
+    expect(relayout).not.toHaveBeenCalled();
+    expect(restyle).not.toHaveBeenCalled();
   });
 
   it('setShowStack(false) resets the slice index and relayouts', () => {
@@ -406,18 +546,429 @@ describe('PlotlyService viewport + stack-state methods', () => {
     expect(service.getAutoscaleEvent()).toBeDefined();
   });
 
-  it('navigator + smoothing toggles are safe no-ops on the Plotly backend', () => {
-    expect(() => {
-      service.setNavigatorVisible(false);
-      service.setImageSmoothingEnabled(false);
-    }).not.toThrow();
+  it('has no OSD view options, volume resolution or viewport signal (capability-gated)', () => {
+    expect(service.getOsdViewOptions()).toBeNull();
+    expect(service.getVolumeResolution()).toBeNull();
+    expect(service.getIntensitySampling()).toBeNull();
+  });
+});
+
+describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
+  let service: PlotlyService;
+  let imageInfo: IImageInfo;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    jest
+      .spyOn((service as unknown as { loader: { loadImage(u: string): Promise<Image> } }).loader, 'loadImage')
+      .mockImplementation((url: string) => Image.load(url));
+    imageInfo = {
+      urls: [path.join(__dirname, 'test_grayscale.png')],
+      trueImageSize: [1344, 1024],
+      scaleRatio: true,
+      isGrayscale: true,
+      showStack: false,
+    } as IImageInfo;
+    document.body.innerHTML = '<div id="plot"></div>';
   });
 
-  it('getViewportChange$ is an empty stream (OSD-only signal)', () => {
-    let completed = false;
-    let emitted = false;
-    service.getViewportChange$().subscribe({ next: () => (emitted = true), complete: () => (completed = true) });
-    expect(emitted).toBe(false);
-    expect(completed).toBe(true);
+  afterEach(() => jest.restoreAllMocks());
+
+  const channel = (min: number, max: number): IChannelState => ({
+    index: 0,
+    name: 'Intensity',
+    color: '#ffffff',
+    min,
+    max,
+    gamma: 1,
+    visible: true,
+  });
+
+  it('re-arms the channel and region subscriptions on the next plot after unsubscribe()', async () => {
+    const store = TestBed.inject(VisualizerStore);
+    const regionStore = TestBed.inject(RegionStore);
+    // A destroyed VisualizerComponent tears the root singleton's subscriptions down...
+    service.unsubscribe();
+    // ...and a recreated one loads and plots the next image.
+    const loaded = await service.load(imageInfo, 0);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+
+    const restyle = jest.spyOn(Plotly, 'restyle').mockResolvedValue(document.createElement('div') as never);
+    const emitProfiles = jest.spyOn(TestBed.inject(IntensityProfileService), 'emitProfiles');
+    store.setChannelStates([channel(10, 20)]);
+    expect(restyle).toHaveBeenCalledWith(
+      document.getElementById('plot'),
+      expect.objectContaining({ zmin: 10, zmax: 20 }),
+    );
+
+    const r = new Region();
+    r.bounds = Object.assign(new Rectangle(), { x: 1, y: 1, width: 5, height: 5 });
+    regionStore.setRegions([r]);
+    expect(emitProfiles).toHaveBeenCalled();
+  });
+
+  it('does not double-subscribe when plot runs without a prior unsubscribe()', async () => {
+    const store = TestBed.inject(VisualizerStore);
+    const loaded = await service.load(imageInfo, 0);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+    await service.plot('plot', loaded, imageInfo, 811, PlotType.HEATMAP);
+
+    const apply = jest
+      .spyOn(service as unknown as { applyChannelDisplay(): void }, 'applyChannelDisplay')
+      .mockImplementation(() => undefined);
+    store.setChannelStates([channel(1, 2)]);
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Async results must not land after the user moved on (review OSD-PLOTLY-8):
+ * an intensity-sampling fetch for the previous image, or a high-def zoom crop
+ * that arrives after the div was handed to another backend.
+ */
+describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
+  let service: PlotlyService;
+  let zoom$: Subject<ArrayBuffer>;
+
+  beforeEach(() => {
+    zoom$ = new Subject<ArrayBuffer>();
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    TestBed.overrideProvider(TILE_ACCESS_PORT, {
+      useValue: {
+        getSelectedInfoB64: () => null,
+        getAuthHeaders: () => Promise.resolve({}),
+        zoomOnRegion: () => zoom$,
+        selectDiagramDisplay: () => undefined,
+      },
+    });
+    service = TestBed.inject(PlotlyService);
+    document.body.innerHTML = '<div id="plot"></div>';
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('drops an intensity-sampling load that a newer one superseded', async () => {
+    const intensity = TestBed.inject(IntensityProfileService);
+    const releases: Array<() => void> = [];
+    type Loader = { loadSlice(info: IImageInfo): Promise<{ frame: unknown[]; ratios: number[] }> };
+    jest
+      .spyOn(intensity as unknown as Loader, 'loadSlice')
+      .mockImplementation(
+        (info: IImageInfo) =>
+          new Promise((resolve) => releases.push(() => resolve({ frame: [[info.fileName!]], ratios: [1, 1] }))),
+      );
+    const info = (name: string) =>
+      ({ fileName: name, urls: [name], trueImageSize: [1, 1] }) as unknown as IImageInfo;
+    // The router samples through the IntensityProfileService (IVisualizer split, intensity routing).
+    const a = intensity.ensureIntensitySampling(info('A'), 0);
+    const b = intensity.ensureIntensitySampling(info('B'), 0);
+    releases[1](); // B first
+    await b;
+    releases[0](); // then the slow A
+    await a;
+    expect((intensity as unknown as { frames: { frames: unknown } }).frames.frames).toEqual([[['B']]]);
+    // ...and the Plotly pixel tools' frames are not the profiles' (OSD-PLOTLY-2).
+    expect((service as any).cachedImageFrames).toBeUndefined();
+  });
+
+  it('drops a high-def zoom crop that arrives after the plot was purged for another backend', async () => {
+    const s = service as any;
+    s.plotDiv = 'plot';
+    s.trueImgSize = [0, 1000, 0, 800];
+    s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
+    s.fileName = 'f.tif';
+    jest.spyOn(Plotly, 'purge').mockImplementation(() => undefined as never);
+    const image = { width: 2, height: 2, grey: () => ({ data: [1, 2, 3, 4] }) };
+    jest.spyOn(Image, 'load').mockResolvedValue(image as never);
+    const heatmap = jest.spyOn(s, 'plotHeatmap').mockResolvedValue(undefined);
+    const registry = jest.spyOn(s, 'plotViaRegistry').mockResolvedValue(undefined);
+    s.zoom.triggerZoom([100, 200, 300, 400]);
+    service.purgePlot(); // same file, user switched to the OSD image view
+    zoom$.next(new ArrayBuffer(4));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(heatmap).not.toHaveBeenCalled();
+    expect(registry).not.toHaveBeenCalled();
+  });
+
+  it('sizes the zoom crop request from its own plot div, not a host element id (CORE-24)', () => {
+    const s = service as any;
+    s.plotDiv = 'plot';
+    s.trueImgSize = [0, 1000, 0, 800];
+    s.imageInfo = { isGrayscale: true, fileName: 'f.tif' } as IImageInfo;
+    const measure = jest.spyOn(PlotUtilities.prototype, 'getDomRectangle');
+    s.zoom.triggerZoom([100, 200, 300, 400]);
+    // (The profiles' crop is sized from the same div: the router points the
+    // IntensityProfileService at it — routing-visualizer.service.spec.ts.)
+    expect(measure.mock.calls).toEqual([['plot']]);
+  });
+
+  it("loads a stack's slices in parallel, keeping slice order (OSD-PLOTLY-31)", async () => {
+    const s = (service as any).loader;
+    s.stackLoading$.next(true);
+    const pending: Array<{ url: string; resolve: (img: unknown) => void }> = [];
+    const img = (v: number) => ({ width: 1, height: 1, grey: () => ({ data: [v] }) });
+    const loadImage = jest
+      .spyOn(s, 'loadImage')
+      .mockImplementation(
+        (url: unknown) => new Promise((resolve) => pending.push({ url: url as string, resolve })),
+      );
+    loadImage.mockImplementationOnce(() => Promise.resolve(img(-1))); // the displayed-slice probe
+    const info = {
+      fileName: 'stack',
+      isStack: true,
+      showStack: true,
+      isGrayscale: true,
+      urls: ['s0', 's1', 's2', 's3', 's4'],
+      trueImageSize: [1, 1],
+    } as unknown as IImageInfo;
+    const run = service.load(info, 0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pending.map((p) => p.url)).toEqual(['s0', 's1', 's2', 's3']); // 4 in flight
+    // Resolve out of order.
+    while (pending.length) {
+      const p = pending.pop()!;
+      p.resolve(img(Number(p.url.slice(1))));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    const loaded = await run;
+    expect(loaded.data.map((m: number[][]) => m[0][0])).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  // ── IDataRenderer.load(info, z, signal) (review CORE-11) ──────────────
+  it('cancels the image request and rejects with an AbortError when the load is aborted', async () => {
+    const http = TestBed.inject(HttpTestingController);
+    const ctl = new AbortController();
+    const info = { fileName: 'a.png', urls: ['a.png'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    const run = service.load(info, 0, ctl.signal);
+    const req = http.expectOne('a.png');
+    ctl.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    expect(req.cancelled).toBe(true);
+  });
+
+  it('rejects an already-aborted load without requesting anything', async () => {
+    const http = TestBed.inject(HttpTestingController);
+    const ctl = new AbortController();
+    ctl.abort();
+    const info = { fileName: 'a.png', urls: ['a.png'], trueImageSize: [1, 1] } as unknown as IImageInfo;
+    await expect(service.load(info, 0, ctl.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    http.expectNone('a.png');
+  });
+
+  it('stops a stack load when aborted: no further slices are requested', async () => {
+    const s = (
+      service as unknown as {
+        loader: {
+          stackLoading$: Subject<boolean>;
+          stackLoadingProgress$: { value: number };
+          loadImage(url: string, signal?: AbortSignal): Promise<unknown>;
+        };
+      }
+    ).loader;
+    s.stackLoading$.next(true);
+    const img = { width: 1, height: 1, grey: () => ({ data: [0] }) };
+    const requested: string[] = [];
+    jest.spyOn(s, 'loadImage').mockImplementation((url: unknown, signal: unknown) => {
+      requested.push(url as string);
+      if (url === 's0' && requested.length === 1) return Promise.resolve(img); // the displayed-slice probe
+      return new Promise((resolve, reject) => {
+        (signal as AbortSignal).addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    });
+    const ctl = new AbortController();
+    const info = {
+      fileName: 'stack',
+      isStack: true,
+      showStack: true,
+      isGrayscale: true,
+      urls: ['s0', 's1', 's2', 's3', 's4', 's5'],
+      trueImageSize: [1, 1],
+    } as unknown as IImageInfo;
+    const run = service.load(info, 0, ctl.signal);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(requested).toEqual(['s0', 's0', 's1', 's2', 's3']); // probe + 4 in flight
+    ctl.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(requested).toHaveLength(5); // s4, s5 never requested
+    expect(s.stackLoadingProgress$.value).toBe(0);
+  });
+});
+
+describe('PlotlyService canvas tools (setActiveTool)', () => {
+  let service: PlotlyService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    document.body.innerHTML = '<div id="plot"></div>';
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+  });
+
+  afterEach(() => service.setActiveTool(null));
+
+  const overlays = () => document.querySelectorAll('#plot > canvas').length;
+
+  it('arms one tool at a time over the plot div', () => {
+    service.setActiveTool('wand', { sensitivity: 2 });
+    expect(overlays()).toBe(1);
+    service.setActiveTool('brush', { size: 8 });
+    expect(overlays()).toBe(1);
+    service.setActiveTool('drawrect'); // a region mode arms no canvas tool
+    expect(overlays()).toBe(0);
+  });
+
+  it('a deprecated setter disarms only its own tool', () => {
+    service.setBrushMode(true, { size: 8 });
+    service.setWandMode(false);
+    expect(overlays()).toBe(1);
+    service.setBrushMode(false);
+    expect(overlays()).toBe(0);
+  });
+});
+
+/**
+ * Characterization ahead of the PlotlyService split (review §6, proposal B):
+ * the layouts the renderers hand Plotly, and the isosurface band mapping.
+ */
+describe('PlotlyService layouts and isosurface band (characterization)', () => {
+  let service: PlotlyService;
+  type Internals = {
+    screenHeight: number;
+    scaleratio: boolean;
+    dragMode: string;
+    imageLength: number;
+    plotType: PlotType;
+    getHeatmapLayout(x: number[], y: number[]): Record<string, unknown>;
+    layoutContext(): ImageLayoutContext;
+    buildTraceInput(info: IImageInfo, loaded: unknown, size: number[]): { isoMin: number; isoMax: number };
+  };
+  const internals = () => service as unknown as Internals;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    Object.assign(service, { screenHeight: 600, scaleratio: true, dragMode: 'pan', imageLength: 2 });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('builds the heatmap layout: image-aligned axes, the z-plane slider and the region shapes', () => {
+    const layout = internals().getHeatmapLayout([0, 100], [80, 0]);
+    expect(layout).toEqual({
+      xaxis: { constrain: 'range', constraintoward: 'center', side: 'top', ticks: '', range: [0, 100] },
+      yaxis: {
+        constrain: 'range',
+        constraintoward: 'center',
+        range: [80, 0],
+        ticks: '',
+        ticksuffix: '  ',
+        autorange: false,
+        scaleanchor: 'x',
+      },
+      margin: { t: 30, b: 5, l: 55, r: 5 },
+      height: 600,
+      sliders: [
+        {
+          pad: { t: 50 },
+          currentvalue: { visible: true, prefix: 'Z-plane:', xanchor: 'right' },
+          steps: [
+            { label: 1, method: 'restyle', args: ['visible', [true, false]] },
+            { label: 2, method: 'restyle', args: ['visible', [false, true]] },
+          ],
+        },
+      ],
+      autosize: true,
+      shapes: [],
+      activeshape: { fillcolor: service.getFillColor() },
+      dragmode: 'pan',
+      newshape: { line: { color: service.getShapeColor(), width: 3 } },
+    });
+  });
+
+  it('drops the aspect lock and the drag mode when they are off', () => {
+    Object.assign(service, { scaleratio: false, dragMode: '' });
+    type Layout = { yaxis: { scaleanchor: unknown }; dragmode: unknown };
+    const layout = internals().getHeatmapLayout([0, 1], [1, 0]) as Layout;
+    expect(layout.yaxis.scaleanchor).toBe(false);
+    expect(layout.dragmode).toBe(false);
+  });
+
+  it('builds the overlay, chart, volume and surface layouts', () => {
+    expect(overlayLayout(internals().layoutContext(), [0, 10], [10, 0])).toMatchObject({
+      xaxis: { range: [0, 10], side: 'top' },
+      yaxis: { range: [10, 0], scaleanchor: 'x', autorange: false },
+      height: 600,
+      shapes: [],
+      dragmode: 'pan',
+    });
+    expect(chartLayout(600)).toEqual({
+      margin: { t: 30, b: 45, l: 60, r: 20 },
+      height: 600,
+      autosize: true,
+      xaxis: { title: 'Position (px)' },
+      yaxis: { title: 'Intensity' },
+      dragmode: false,
+    });
+    expect(volumeLayout(600)).toMatchObject({
+      height: 600,
+      scene: { zaxis: { title: 'Z-plane' }, aspectmode: 'cube' },
+    });
+    expect(surfaceLayout(0.4)).toMatchObject({
+      scene: { aspectratio: { x: 1, y: 1, z: 0.4 }, aspectmode: 'manual' },
+    });
+  });
+
+  it('maps the 0–255 iso slider onto the measured volume range, inset 3% from its edges', () => {
+    internals().plotType = PlotType.ISOSURFACE;
+    const info = { isGrayscale: true } as IImageInfo;
+    const loaded = {
+      data: [
+        [
+          [10, 20],
+          [30, 50],
+        ],
+      ],
+      sizes: [2, 2],
+      ratios: [1, 1],
+    };
+    const input = internals().buildTraceInput(info, loaded, [0, 2, 0, 2]);
+    // range [10, 50]: pad 1.2, usable 37.6
+    expect(input.isoMin).toBeCloseTo(11.2);
+    expect(input.isoMax).toBeCloseTo(48.8);
+
+    // A live isosurface is restyled in place, through the same mapping.
+    document.body.innerHTML = '<div id="plot"></div>';
+    const gd = document.getElementById('plot') as unknown as { _fullLayout: object };
+    gd._fullLayout = {};
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+    const restyle = jest
+      .spyOn(Plotly as unknown as { restyle(): Promise<unknown> }, 'restyle')
+      .mockResolvedValue(undefined);
+    service.getIsosurfaceControls()!.setIsoRange(255, 0); // reversed: normalised
+    expect(restyle).toHaveBeenCalledWith(gd, { isomin: [expect.closeTo(11.2)], isomax: [expect.closeTo(48.8)] });
+  });
+
+  it('uses the slider values as-is before a volume has been measured', () => {
+    internals().plotType = PlotType.HEATMAP;
+    const input = internals().buildTraceInput(
+      { isGrayscale: true } as IImageInfo,
+      { data: [[[1]]], sizes: [1, 1], ratios: [1, 1] },
+      [0, 1, 0, 1],
+    );
+    expect([input.isoMin, input.isoMax]).toEqual([0, 255]);
   });
 });

@@ -1,5 +1,6 @@
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { elementToImage, imageToElement } from './osd-coords';
+import { OsdViewerLike } from './osd-viewer-like';
 
 /**
  * OpenSeadragon implementation of {@link ICoordinateTransform}. "Data coords"
@@ -8,8 +9,7 @@ import { elementToImage, imageToElement } from './osd-coords';
  * viewport gives a clean screen<->image mapping that holds across pan/zoom.
  */
 export class OsdCoordinateTransform implements ICoordinateTransform {
-
-  constructor(private viewer: any) {}
+  constructor(private viewer: OsdViewerLike) {}
 
   isReady(): boolean {
     return !!this.viewer?.viewport && this.viewer.world?.getItemCount() > 0;

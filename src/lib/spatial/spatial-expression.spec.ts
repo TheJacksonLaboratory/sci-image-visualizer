@@ -1,7 +1,11 @@
 import {
-  colorExpressionField, encodeExpressionVolume, expressionField,
+  colorExpressionField,
+  encodeExpressionVolume,
+  expressionField,
   expressionVolume,
+  fieldContrastWindow,
 } from './spatial-expression';
+import { contrastWindow } from './spatial-encoding';
 import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -48,10 +52,16 @@ describe('expressionField', () => {
   it('skips a cell with no measurement rather than reading it as zero', () => {
     // NaN is "not measured for this cell"; counting it as 0 would drag the local
     // mean down as if the gene were absent.
-    const f = expressionField(obs([[2, 2], [2, 2]]), {
-      ...grid,
-      values: new Float32Array([4, NaN]),
-    })!;
+    const f = expressionField(
+      obs([
+        [2, 2],
+        [2, 2],
+      ]),
+      {
+        ...grid,
+        values: new Float32Array([4, NaN]),
+      },
+    )!;
     expect(at(f.mean, 2, 2)).toBeCloseTo(4, 5);
     expect(at(f.support, 2, 2)).toBeCloseTo(1, 5);
   });
@@ -84,11 +94,17 @@ describe('expressionField', () => {
   });
 
   it('restricts to the given indices — a plane, or a selection', () => {
-    const f = expressionField(obs([[1, 1], [6, 6]]), {
-      ...grid,
-      values: new Float32Array([9, 9]),
-      indices: new Uint32Array([1]),
-    })!;
+    const f = expressionField(
+      obs([
+        [1, 1],
+        [6, 6],
+      ]),
+      {
+        ...grid,
+        values: new Float32Array([9, 9]),
+        indices: new Uint32Array([1]),
+      },
+    )!;
     expect(at(f.support, 1, 1)).toBe(0);
     expect(at(f.support, 6, 6)).toBeGreaterThan(0);
   });
@@ -99,9 +115,7 @@ describe('expressionField', () => {
   });
 
   it('returns null when nothing lands on the raster', () => {
-    expect(
-      expressionField(obs([[500, 500]]), { ...grid, values: new Float32Array([1]) }),
-    ).toBeNull();
+    expect(expressionField(obs([[500, 500]]), { ...grid, values: new Float32Array([1]) })).toBeNull();
     expect(expressionField(obs([]), { ...grid, values: new Float32Array(0) })).toBeNull();
   });
 });
@@ -136,7 +150,13 @@ describe('colorExpressionField', () => {
 
   it('ramps alpha with support, so a thinly sampled pixel reads as tentative', () => {
     // Two pixels: one with four cells, one with a single cell.
-    const pts: [number, number][] = [[2, 2], [2, 2], [2, 2], [2, 2], [6, 6]];
+    const pts: [number, number][] = [
+      [2, 2],
+      [2, 2],
+      [2, 2],
+      [2, 2],
+      [6, 6],
+    ];
     const f = expressionField(obs(pts), {
       width: 8,
       height: 8,
@@ -177,8 +197,7 @@ describe('colorExpressionField', () => {
       sigma: 0.01,
       values: new Float32Array([5]),
     })!;
-    const alpha = (o?: number) =>
-      colorExpressionField(f, LUT, [0, 10], { opacity: o })[(1 * 4 + 1) * 4 + 3];
+    const alpha = (o?: number) => colorExpressionField(f, LUT, [0, 10], { opacity: o })[(1 * 4 + 1) * 4 + 3];
     expect(alpha(0.5)).toBeLessThan(alpha(1));
   });
 });
@@ -216,10 +235,17 @@ describe('expressionVolume', () => {
 
   it('leaves the gaps between sections empty in sheets mode', () => {
     // Sections at z = 1 and z = 3; nobody imaged z = 2.
-    const f = expressionVolume(obs([[1, 1, 1], [1, 1, 3]]), grid, {
-      sigma: tight,
-      values: new Float32Array([4, 8]),
-    })!;
+    const f = expressionVolume(
+      obs([
+        [1, 1, 1],
+        [1, 1, 3],
+      ]),
+      grid,
+      {
+        sigma: tight,
+        values: new Float32Array([4, 8]),
+      },
+    )!;
     expect(at(f.support, 1, 1, 1)).toBeGreaterThan(0);
     expect(at(f.support, 1, 1, 3)).toBeGreaterThan(0);
     // The measured sheets, and nothing between them.
@@ -229,11 +255,18 @@ describe('expressionVolume', () => {
   });
 
   it('bridges the gap in volume mode, with the neighbours’ mean not their sum', () => {
-    const f = expressionVolume(obs([[1, 1, 1], [1, 1, 3]]), grid, {
-      sigma: [0.01, 0.01, 1.2],
-      values: new Float32Array([4, 8]),
-      interpolate: true,
-    })!;
+    const f = expressionVolume(
+      obs([
+        [1, 1, 1],
+        [1, 1, 3],
+      ]),
+      grid,
+      {
+        sigma: [0.01, 0.01, 1.2],
+        values: new Float32Array([4, 8]),
+        interpolate: true,
+      },
+    )!;
     // The unimaged plane now carries an estimate…
     expect(at(f.support, 1, 1, 2)).toBeGreaterThan(0);
     // …and it is BETWEEN its neighbours, not their total (12) thinned out.
@@ -246,11 +279,18 @@ describe('expressionVolume', () => {
   it('does not reach past the outermost imaged section', () => {
     // Sections at z = 1 and 2 only. A z blur leaves a tail at 0, 3 and 4; keeping
     // it would draw expression where the specimen was never sectioned.
-    const f = expressionVolume(obs([[1, 1, 1], [1, 1, 2]]), grid, {
-      sigma: [0.01, 0.01, 1.5],
-      values: new Float32Array([5, 5]),
-      interpolate: true,
-    })!;
+    const f = expressionVolume(
+      obs([
+        [1, 1, 1],
+        [1, 1, 2],
+      ]),
+      grid,
+      {
+        sigma: [0.01, 0.01, 1.5],
+        values: new Float32Array([5, 5]),
+        interpolate: true,
+      },
+    )!;
     expect(at(f.support, 1, 1, 0)).toBe(0);
     expect(at(f.support, 1, 1, 3)).toBe(0);
     expect(at(f.support, 1, 1, 4)).toBe(0);
@@ -258,20 +298,34 @@ describe('expressionVolume', () => {
   });
 
   it('restricts to the given indices — one section, or a selection', () => {
-    const f = expressionVolume(obs([[1, 1, 1], [2, 2, 3]]), grid, {
-      sigma: tight,
-      values: new Float32Array([9, 9]),
-      indices: new Uint32Array([1]),
-    })!;
+    const f = expressionVolume(
+      obs([
+        [1, 1, 1],
+        [2, 2, 3],
+      ]),
+      grid,
+      {
+        sigma: tight,
+        values: new Float32Array([9, 9]),
+        indices: new Uint32Array([1]),
+      },
+    )!;
     expect(at(f.support, 1, 1, 1)).toBe(0);
     expect(at(f.support, 2, 2, 3)).toBeGreaterThan(0);
   });
 
   it('skips a cell with no measurement rather than reading it as zero', () => {
-    const f = expressionVolume(obs([[1, 1, 1], [1, 1, 1]]), grid, {
-      sigma: tight,
-      values: new Float32Array([4, NaN]),
-    })!;
+    const f = expressionVolume(
+      obs([
+        [1, 1, 1],
+        [1, 1, 1],
+      ]),
+      grid,
+      {
+        sigma: tight,
+        values: new Float32Array([4, NaN]),
+      },
+    )!;
     expect(at(f.mean, 1, 1, 1)).toBeCloseTo(4, 5);
     expect(at(f.support, 1, 1, 1)).toBeCloseTo(1, 5);
   });
@@ -329,5 +383,35 @@ describe('encodeExpressionVolume', () => {
     // Opt in and a measured-but-empty voxel becomes faintly visible again.
     const flat = field([0], [[1, 1, 1]]);
     expect(at(encodeExpressionVolume(flat, [0, 10], { floor: 0.2 }), 1, 1, 1)).toBe(51);
+  });
+});
+
+/**
+ * The contrast window of a field: `mean` is 0 wherever nothing was measured, and those
+ * zeros are not data. Counting them pinned the low end at 0 whenever tissue covered less
+ * than the raster.
+ */
+describe('fieldContrastWindow', () => {
+  // Measured values 10..19 over a tenth of the raster; the rest unmeasured.
+  const size = 100;
+  const mean = new Float32Array(size);
+  const support = new Float32Array(size);
+  for (let i = 0; i < 10; i++) {
+    mean[i] = 10 + i;
+    support[i] = 1;
+  }
+  const field = { mean, support };
+
+  it('windows the measured pixels only', () => {
+    // What counting every pixel gives: the unmeasured zeros set the floor.
+    expect(contrastWindow(mean, 0.01, 0.99)[0]).toBe(0);
+    expect(fieldContrastWindow(field, 0, 1)).toEqual([10, 19]);
+    const [lo, hi] = fieldContrastWindow(field, 0.01, 0.99);
+    expect(lo).toBeGreaterThanOrEqual(10);
+    expect(hi).toBeLessThanOrEqual(19);
+  });
+
+  it('falls back to a usable window for an unmeasured field', () => {
+    expect(fieldContrastWindow({ mean, support: new Float32Array(size) }, 0.01, 0.99)).toEqual([0, 1]);
   });
 });

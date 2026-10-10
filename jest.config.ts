@@ -3,15 +3,21 @@ export default {
   displayName: 'sci-image-visualizer',
   preset: 'jest-preset-angular',
   setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
-  globals: {
-    'ts-jest': {
-      tsconfig: '<rootDir>/tsconfig.spec.json',
-      stringifyContentPathRegex: '\\.(html|svg)$',
-    },
-  },
   coverageDirectory: '<rootDir>/coverage',
+  // The napari-js stub is test infrastructure, not library code.
+  coveragePathIgnorePatterns: ['/node_modules/', '<rootDir>/src/lib/testing/'],
+  // The current floor: `npm run test:coverage` fails if a change drops below it.
+  coverageThreshold: {
+    global: { lines: 80, branches: 65 },
+  },
   transform: {
-    '^.+\\.(ts|mjs|js|html)$': 'jest-preset-angular',
+    '^.+\\.(ts|mjs|js|html)$': [
+      'jest-preset-angular',
+      {
+        tsconfig: '<rootDir>/tsconfig.spec.json',
+        stringifyContentPathRegex: '\\.(html|svg)$',
+      },
+    ],
   },
   // image-js and its ESM dependency tree ship untranspiled ESM in node_modules;
   // transform those (plus any .mjs) so jest can load them.
