@@ -4,6 +4,7 @@ import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialDataset, SpatialPolygonTile, SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
+import { densityAutoRange } from '../../spatial/density-raster';
 import { emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 
@@ -853,6 +854,149 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
     expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).not.toBeNull();
     items.length = 0;
     expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
+    tiles.detach();
+  });
+});
+
+/** The transcript density layer: one image per (genes, bin, window, colormap), and its window. */
+describe('NapariSpatialTileLayers: the transcript density', () => {
+  function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    // 2 × 2 grid cells of 2 × 2 units: per unit area 0, 1, 2 and 10.
+    const getDensity = jest.fn(async () => ({
+      meta: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 }, genes: ['A'],
+      values: Float32Array.of(0, 4, 8, 40),
+    }));
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
+      density: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
+    } as unknown as SpatialDataset;
+    let view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'density' as const, transcriptGenes: ['A'], ...patch };
+    const items: unknown[] = [];
+    const viewer = {
+      camera: { center: [2, 2], zoom: 40, changed: { connect: () => () => undefined } },
+      layers: {
+        items, add: (l: unknown) => items.push(l), remove: (l: unknown) => items.splice(items.indexOf(l), 1),
+      },
+      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})),
+      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const densityChanged = jest.fn();
+    const tiles = new NapariSpatialTileLayers({ getDensity } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      densityChanged,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (p: Partial<typeof view>) => { view = { ...view, ...p }; };
+    return { tiles, plan, setView, getDensity, viewer, densityChanged };
+  }
+
+  it('draws once, and an unchanged plan neither refetches nor redraws', async () => {
+    const { tiles, plan, setView, getDensity, viewer } = setup();
+    await plan();
+    await plan();
+    expect(getDensity).toHaveBeenCalledTimes(1);
+    expect(viewer.addImage).toHaveBeenCalledTimes(1);
+    setView({ densityOpacity: 0.3 }); // part of the key
+    await plan();
+    expect(viewer.addImage).toHaveBeenCalledTimes(2);
+    tiles.detach();
+  });
+
+  it('derives the window from the bins per unit area, and reports it with the densest bin', async () => {
+    const { tiles, plan, densityChanged } = setup();
+    await plan();
+    const [lo, hi] = densityAutoRange(Float32Array.of(0, 1, 2, 10));
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo, hi, max: 10 });
+    expect(tiles.densityStats).toEqual({ lo, hi, max: 10 });
+    tiles.detach();
+  });
+
+  it('keeps a window the user set', async () => {
+    const { tiles, plan, densityChanged } = setup({ densityRange: [0.5, 5] });
+    await plan();
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo: 0.5, hi: 5, max: 10 });
+    tiles.detach();
+  });
+
+  it('drops the layer and its window when the view stops drawing density', async () => {
+    const { tiles, plan, setView, viewer } = setup();
+    await plan();
+    setView({ transcriptMode: 'circles' });
+    await plan();
+    expect(viewer.layers.items).toHaveLength(0);
+    expect(tiles.densityStats).toBeNull();
+    tiles.detach();
+  });
+});
+
+/** Xenium Explorer's "Estimated Transcript Points": each visible gene's total × the share in view. */
+describe('NapariSpatialTileLayers: the transcripts-in-view estimate', () => {
+  function setup(zoom: number, patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const getTranscriptCounts = jest.fn(async () => ({
+      counts: { A: 400, B: 100 }, total: 1000, bounds: [0, 0, 100, 100] as [number, number, number, number],
+    }));
+    const dataset = {
+      id: 'd', name: 'd', columns: [],
+      observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1000, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'density' as const, transcriptGenes: ['A', 'B'],
+      transcriptHiddenGenes: ['B'], ...patch,
+    };
+    const viewer = {
+      camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
+      layers: { items: [], add: () => undefined, remove: () => undefined },
+      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
+      requestRender: () => undefined,
+    } as unknown as Viewer;
+    const estimateChanged = jest.fn();
+    const tiles = new NapariSpatialTileLayers({ getTranscriptCounts } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+      estimateChanged,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    return { tiles, plan, getTranscriptCounts, estimateChanged };
+  }
+  const settled = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+
+  it('scales the visible genes\' totals by the share of the tissue on screen', async () => {
+    const whole = setup(4); // the view is exactly the 100 × 100 tissue
+    await whole.plan();
+    await settled();
+    expect(whole.getTranscriptCounts).toHaveBeenCalledWith(['A']); // B is hidden
+    expect(whole.estimateChanged).toHaveBeenLastCalledWith({ points: 400, max: 100_000 });
+    whole.tiles.detach();
+
+    const quarter = setup(8); // 50 × 50 of it
+    await quarter.plan();
+    await settled();
+    expect(quarter.estimateChanged).toHaveBeenLastCalledWith({ points: 100, max: 100_000 });
+    quarter.tiles.detach();
+  });
+
+  it('counts every gene for "all genes", and asks for the totals once per gene set', async () => {
+    const { tiles, plan, getTranscriptCounts, estimateChanged } = setup(4, { transcriptAllGenes: true });
+    await plan();
+    await settled();
+    await plan();
+    await settled();
+    expect(getTranscriptCounts).toHaveBeenCalledTimes(1);
+    expect(getTranscriptCounts).toHaveBeenCalledWith([]);
+    expect(estimateChanged).toHaveBeenLastCalledWith({ points: 1000, max: 100_000 });
+    tiles.detach();
+  });
+
+  it('reports no estimate while transcripts are off', async () => {
+    const { tiles, plan, estimateChanged } = setup(4, { transcriptMode: 'off' });
+    await plan();
+    expect(estimateChanged).toHaveBeenLastCalledWith(null);
     tiles.detach();
   });
 });
