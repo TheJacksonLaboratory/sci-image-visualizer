@@ -235,14 +235,16 @@ export class PlotUtilities {
   }
 
   /**
-   * given a dom object (found by id), return a Rectangle of the bounding element.
+   * The on-screen box a plot div is laid out in: the bounding rectangle of the
+   * element with id `div`'s parent (callers pass the plot div's own id). An
+   * empty Rectangle when there is no such element or it has no parent.
    * @param div
    */
   public getDomRectangle(div: string) {
     const domRect = new Rectangle();
-    const appDiv: HTMLElement | null = document.getElementById(div);
-    if (appDiv && appDiv.parentNode && appDiv.parentNode.parentElement) {
-      const rect = appDiv.parentNode.parentElement.getBoundingClientRect();
+    const parent = document.getElementById(div)?.parentElement;
+    if (parent) {
+      const rect = parent.getBoundingClientRect();
       domRect.x = Math.round(rect.x);
       domRect.y = Math.round(rect.y);
       domRect.width = Math.round(rect.width);

@@ -536,4 +536,14 @@ describe('PlotUtilities', () => {
     expect((<Polygon>region2.bounds).ypoints).toEqual([20, 20, 60, 60]);
     expect((<Polygon>region2.bounds).coordinates).toEqual([[10, 20], [40, 20], [40, 60], [10, 60]]);
   })
+
+  it('getDomRectangle measures the plot div\'s own parent (CORE-24)', () => {
+    document.body.innerHTML = '<section id="outer"><div id="host"><div id="plot"></div></div></section>';
+    const host = document.getElementById('host')!;
+    jest.spyOn(host, 'getBoundingClientRect').mockReturnValue({ x: 1.4, y: 2.6, width: 300.2, height: 199.7 } as DOMRect);
+    const r = plotUtilities.getDomRectangle('plot');
+    expect([r.x, r.y, r.width, r.height]).toEqual([1, 3, 300, 200]);
+    // No such element → the empty Rectangle.
+    expect(plotUtilities.getDomRectangle('missing').width).toBe(0);
+  });
 });
