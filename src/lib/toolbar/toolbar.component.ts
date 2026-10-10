@@ -1,14 +1,10 @@
-import {
-  ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges,
-} from '@angular/core';
-import { MenuItem } from 'primeng/api';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeId, isBuiltinPlotType, isNapari3d, isNapariIsosurface, isNapariSurface, isNapariScatter, NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE, isSpatialOmics, isSpatialOmics3d } from '../contracts/plot-type';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
-import { MODEL_INFO } from './model-info';
 
 /**
  * Presentational toolbar for the plotting viewport.
@@ -32,7 +28,7 @@ import { MODEL_INFO } from './model-info';
   // the host stays the owner of every value (RT-35).
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ToolbarComponent implements OnChanges {
+export class ToolbarComponent {
   /** Current image (gates which control groups are shown). */
   @Input() imageInfo: IImageInfo | undefined;
   /** A spatial dataset is on offer: its plot modes are a choice even with no image loaded. */
@@ -180,79 +176,7 @@ export class ToolbarComponent implements OnChanges {
 
   displayHelpDialog = false;
 
-  /** Model picker for the Segment button's dropdown menu. The active model
-   *  (`samModelId`) is marked with a check; selecting an item emits
-   *  `samModelChange` (jit-ui#90 P1).
-   *
-   *  Held as a stable array (rebuilt only when `samModels`/`samModelId` change),
-   *  NOT a getter: a getter returns a fresh array with new `command` closures on
-   *  every change-detection tick, which makes the bound `p-menu` overlay rebuild
-   *  its DOM mid-interaction and swallow the click on a menu item.
-   *
-   *  `tooltip` carries the model's description from {@link MODEL_INFO}; the
-   *  menus' shared item template turns it into the hover info icon. p-menu's own
-   *  rendering ignores the field (it reads `item.title`), so it is free to use. */
-  samMenuItems: MenuItem[] = [];
-  /**
-   * Model menus for the contributed tools, keyed by tool id. Same stable-array
-   * reasoning as {@link samMenuItems} — and it is why this is a map rebuilt in
-   * `ngOnChanges` rather than a method called from the template, which would
-   * hand `p-menu` a new array every tick.
-   *
-   * A contributed tool supplies its own per-model description, so unlike the
-   * SAM menu these do not consult {@link MODEL_INFO}: this library has no
-   * copy for checkpoints it does not know about.
-   */
-  toolMenuItems: Record<string, MenuItem[]> = {};
-
-  /** Rebuild the SAM model menu when the model list or active selection
-   *  changes (keeps the array reference stable across other CD ticks). */
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['samModels'] || changes['samModelId']) {
-      this.samMenuItems = this.samModels.map((m) => ({
-        label: m.label,
-        icon: m.id === this.samModelId ? 'pi pi-check' : 'pi pi-fw',
-        tooltip: MODEL_INFO[m.id],
-        command: () => this.samModelChange.emit(m.id),
-      }));
-    }
-    if (changes['contributedTools'] || changes['toolModelIds']) {
-      this.toolMenuItems = {};
-      for (const tool of this.contributedTools) {
-        const active = this.toolModelIds[tool.id] ?? tool.defaultModelId();
-        this.toolMenuItems[tool.id] = tool.models().map((m) => ({
-          label: m.label,
-          icon: m.id === active ? 'pi pi-check' : 'pi pi-fw',
-          tooltip: m.info,
-          command: () => this.toolModelChange.emit({ toolId: tool.id, modelId: m.id }),
-        }));
-      }
-    }
-  }
-
-  /**
-   * Strip markup from a model description so it can be read aloud.
-   *
-   * The copy in MODEL_INFO and in a contribution's `ToolModelOption.info` is
-   * written for a visual tooltip rendered with `[escape]="false"`, so it carries
-   * `<b>` and `<br>`. Passed to `aria-label` verbatim a screen reader announces
-   * the tags, so they are removed and `<br>` becomes a sentence break. Entities
-   * used in that copy (`&nbsp;`, `&times;`, `&amp;`) are decoded for the same
-   * reason.
-   */
-  plainText(html: string): string {
-    return (html ?? '')
-      .replace(/<br\s*\/?>/gi, '. ')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&times;/g, 'x')
-      .replace(/&amp;/g, '&')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  /** Keeps each contributed tool's `p-menu` overlay alive across CD ticks —
-   *  re-creating it mid-interaction swallows the click on a menu item. */
+  /** trackBy for the dialog tools' buttons. */
   trackToolById(_index: number, tool: { id: string }): string {
     return tool.id;
   }

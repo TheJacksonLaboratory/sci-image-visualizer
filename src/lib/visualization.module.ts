@@ -29,6 +29,7 @@ import { AutoCompleteModule } from 'primeng/autocomplete';
 import { VisualizerComponent } from './visualizer.component';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { ToolbarHelpDialogComponent } from './toolbar/toolbar-help-dialog/toolbar-help-dialog.component';
+import { SegmentationToolsComponent } from './toolbar/segmentation-tools/segmentation-tools.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-mask-dialog.component';
 import { SaveRegionsDialogComponent } from './region-editor/save-regions-dialog/save-regions-dialog.component';
@@ -63,6 +64,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     VisualizerComponent,
     ToolbarComponent,
     ToolbarHelpDialogComponent,
+    SegmentationToolsComponent,
     RegionEditorComponent,
     SaveMaskDialogComponent,
     SaveRegionsDialogComponent,
