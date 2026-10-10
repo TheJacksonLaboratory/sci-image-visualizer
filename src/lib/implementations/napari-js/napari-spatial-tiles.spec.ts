@@ -1,4 +1,5 @@
 import { Viewer } from 'napari-js';
+import type { ShapesLayer } from 'napari-js';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
@@ -997,6 +998,115 @@ describe('NapariSpatialTileLayers: the transcripts-in-view estimate', () => {
     const { tiles, plan, estimateChanged } = setup(4, { transcriptMode: 'off' });
     await plan();
     expect(estimateChanged).toHaveBeenLastCalledWith(null);
+    tiles.detach();
+  });
+});
+
+/**
+ * The cell layers: fill, outline or both (with nuclei over them), coloured by the view, with
+ * switched-off groups left out of the geometry, and a colour-only change restyling in place.
+ */
+describe('NapariSpatialTileLayers: drawing cells', () => {
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell'] };
+  // Two cells (observations 0 and 1), side by side.
+  const rings = (): SpatialPolygonTile => ({
+    count: 2, observation: Uint32Array.of(0, 1), offsets: Uint32Array.of(0, 4, 8),
+    coords: Float32Array.of(0, 0, 10, 0, 10, 10, 0, 10, 20, 0, 30, 0, 30, 10, 20, 10),
+  });
+
+  const count = (l: ShapesLayer) => l.offsets!.length - 1;
+
+  function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const getPolygonTile = jest.fn(async () => rings());
+    const getColumn = jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1) }));
+    const dataset = {
+      id: 'd', name: 'd', columns: [meta],
+      observations: { count: 2, x: Float32Array.of(5, 25), y: Float32Array.of(5, 5), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }, { name: 'nucleus', label: 'Nucleus' }],
+        defaultSet: 'cell', levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    let view = { ...DEFAULT_SPATIAL_VIEW, ...patch };
+    const shown = jest.fn();
+    const tiles = new NapariSpatialTileLayers({ getPolygonTile, getColumn } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(2)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: shown,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    tiles.attach(viewer);
+    const addShapes = jest.spyOn(viewer, 'addShapes');
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (p: Partial<typeof view>) => { view = { ...view, ...p }; };
+    const layers = () => viewer.layers.items as unknown as ShapesLayer[];
+    return { tiles, viewer, plan, setView, addShapes, layers, getPolygonTile, shown };
+  }
+
+  it('fills the cells by group by default, and reports the outlines shown', async () => {
+    const { tiles, plan, layers, shown } = setup();
+    await plan();
+    expect(layers().map((l) => [l.name, l.draw])).toEqual([['cells', 'fill']]);
+    expect(count(layers()[0])).toBe(2);
+    expect(layers()[0].values).not.toBeNull(); // coloured through the group colormap
+    expect(shown).toHaveBeenLastCalledWith(true);
+    expect(tiles.outlinesShown).toBe(true);
+    tiles.detach();
+  });
+
+  it('draws outlines alone in the cells\' colours, or dark over a fill, and nuclei over the cells', async () => {
+    const outline = setup({ cellDraw: 'outline' });
+    await outline.plan();
+    expect(outline.layers().map((l) => [l.name, l.draw])).toEqual([['cell outlines', 'outline']]);
+    expect(outline.layers()[0].values).not.toBeNull();
+    outline.tiles.detach();
+
+    const both = setup({ cellDraw: 'both' });
+    await both.plan();
+    expect(both.layers().map((l) => l.name)).toEqual(['cells', 'cell outlines']);
+    expect(both.layers()[1].values).toBeNull(); // a flat dark outline separates neighbours
+    both.tiles.detach();
+
+    const nuclei = setup({ cellSet: 'both' });
+    await nuclei.plan();
+    expect(nuclei.layers().map((l) => l.name)).toEqual(['cells', 'nucleus outlines']);
+    expect(nuclei.getPolygonTile.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['cell', 'nucleus']);
+    nuclei.tiles.detach();
+  });
+
+  it('leaves a switched-off group\'s cells out of the geometry', async () => {
+    const { tiles, plan, layers } = setup({ hiddenGroups: ['B cell'] });
+    await plan();
+    expect(count(layers()[0])).toBe(1);
+    tiles.detach();
+  });
+
+  it('restyles in place on a colour-only change, with no new layer or fetch', async () => {
+    const { tiles, plan, setView, addShapes, layers, getPolygonTile } = setup();
+    await plan();
+    const [fill] = layers();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    setView({ cellOpacity: 0.2, cellColorMode: 'single', cellSingleColor: '#ff0000' });
+    await plan();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    expect(getPolygonTile).toHaveBeenCalledTimes(1);
+    expect(layers()[0]).toBe(fill);
+    expect(fill.opacity).toBe(0.2);
+    expect(fill.values).toBeNull(); // flat colour now
+    expect(Array.from(fill.color)).toEqual([1, 0, 0, 1]);
+    // An unchanged plan touches nothing.
+    await plan();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    tiles.detach();
+  });
+
+  it('drops the cells and hands the markers back when cells are switched off', async () => {
+    const { tiles, plan, setView, layers, shown } = setup();
+    await plan();
+    setView({ showCells: false });
+    await plan();
+    expect(layers()).toHaveLength(0);
+    expect(shown).toHaveBeenLastCalledWith(false);
     tiles.detach();
   });
 });
