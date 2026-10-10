@@ -1117,3 +1117,59 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 });
+
+/**
+ * A transcript plan superseded while it looks up the cell-type column for the hover must not
+ * leave its key (or its markers, for the hover) behind: the newer plan of the same view would
+ * take the old layer for its own and skip drawing.
+ */
+describe('NapariSpatialTileLayers: a transcript plan superseded at its last step', () => {
+  it('lets the newer plan of the same view draw it', async () => {
+    const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell'] };
+    const tile: SpatialTranscriptTile = {
+      count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
+      weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+    };
+    let gate: Promise<void> | null = null;
+    const getColumn = jest.fn(async () => {
+      if (gate) await gate;
+      return { meta, codes: new Uint16Array(1) };
+    });
+    const port = { getTranscriptTile: jest.fn(async () => tile), getColumn } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd', name: 'd', columns: [meta], observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    let view = {
+      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'],
+      transcriptColorBy: 'gene' as const,
+    };
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 40);
+    tiles.attach(viewer);
+    const addPoints = jest.spyOn(viewer, 'addPoints');
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+
+    await plan(); // view A drawn
+    expect(addPoints).toHaveBeenCalledTimes(1);
+    view = { ...view, transcriptGenes: ['A', 'B'] }; // view B
+    let release!: () => void;
+    gate = new Promise<void>((r) => { release = r; });
+    const stale = plan(); // reaches the cell-type lookup and waits there…
+    await flush();
+    gate = null;
+    const current = plan(); // …while the same view is planned again
+    await current;
+    release();
+    await stale;
+
+    expect(addPoints).toHaveBeenCalledTimes(2); // view B was drawn
+    expect(drawnOf<{ genes: string[] }>(tiles).genes).toEqual(['A', 'B']);
+    tiles.detach();
+  });
+});

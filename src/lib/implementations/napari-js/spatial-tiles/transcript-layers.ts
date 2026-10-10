@@ -136,6 +136,10 @@ export class TranscriptLayers {
       ? groupNames[entryGroup[i]] ?? null
       : geneCluster[merged.gene[i]] ?? null);
     const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
+    const typeColumn = cellTypeColumnFor(dataset, view);
+    const types = typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null;
+    // Nothing is recorded before the last await: a superseded plan that had already keyed the
+    // group would make the newer plan of the same view take the old layer for its own.
     if (ctx.stale()) return;
 
     if (ctx.incomplete) this.groups.forgetKey('transcripts');
@@ -150,9 +154,7 @@ export class TranscriptLayers {
       ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
       ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
     }, dataset.micronsPerUnit ?? null);
-    const typeColumn = cellTypeColumnFor(dataset, view);
-    this.hover.setTypes(typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null);
-    if (ctx.stale()) return;
+    this.hover.setTypes(types);
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
     if (mode === 'circles') {
