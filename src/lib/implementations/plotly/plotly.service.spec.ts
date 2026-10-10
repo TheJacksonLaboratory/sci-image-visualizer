@@ -342,23 +342,124 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     expect(service.getRegions()[0].id).toBeDefined();
   });
 
-  it('deleteActiveShape falls back to Plotly\'s _activeShapeIndex when nothing is selected', () => {
+  // ── Plotly follows the store (IVisualizer split (d)): it is not on the write path ──
+
+  /** Make `#plot` look like a live Plotly graph (what liveGd() checks). */
+  function liveGraph(activeShapeIndex = -1): any {
+    const gd: any = document.getElementById('plot');
+    gd._fullLayout = { _activeShapeIndex: activeShapeIndex };
+    return gd;
+  }
+  const lastRelayout = (): any => (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)?.[1];
+  const drawnNames = (): string[] => lastRelayout().shapes.map((d: { name?: string }) => d.name);
+
+  it('a shape clicked on the plot is selected in the store, so a store delete removes it and redraws', () => {
     const a = makeImageInfo('s3://bkt/img.tif', 'img.tif');
     service.setActiveImage(a);
-    service.setRegions([makeRect('s0'), makeRect('s1')]);
+    const regionStore = TestBed.inject(RegionStore);
+    regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
+    liveGraph(1); // Plotly made shape 1 active on a click
+    (service as any).shapeProjection.syncSelectionFromPlot(); // the mousedown handler's sample
+    expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
 
-    // Clear the selection first (this also resets Plotly's active index), then
-    // simulate Plotly tracking a clicked shape — deleteActiveShape should fall
-    // back to it.
-    service.setSelectedShapeIndices([]);
-    const gd: any = document.getElementById('plot');
-    gd._fullLayout = { _activeShapeIndex: 1 };
-    service.deleteActiveShape();
+    regionStore.deleteActiveShape();
 
     expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
-    // ...and the remaining shape is what Plotly is told to draw.
-    const last = (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)[1];
-    expect(last.shapes.map((d: { name?: string }) => d.name)).toEqual(['s0']);
+    expect(drawnNames()).toEqual(['s0']);
+    expect(document.getElementById('plot') as any).toHaveProperty('_fullLayout._activeShapeIndex', -1);
+  });
+
+  it('redraws the shapes on a store undo/redo (heatmap undo)', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    regionStore.beginGesture(); // its own undo step (not folded into the first write)
+    regionStore.setRegions([...regionStore.getRegions(), makeRect('s1')]);
+    regionStore.endGesture();
+    expect(drawnNames()).toEqual(['s0', 's1']);
+
+    regionStore.undo();
+    expect(drawnNames()).toEqual(['s0']);
+    regionStore.redo();
+    expect(drawnNames()).toEqual(['s0', 's1']);
+  });
+
+  it('redraws a Region Editor edit made straight on the store', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    regionStore.moveRegion(regionStore.getRegions()[0].id, 5, 7);
+    expect(lastRelayout().shapes[0]).toMatchObject({ x0: 5, y0: 7 });
+  });
+
+  it('moves the edit handles to the store selection, and leaves a plot that already shows it alone', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
+    const gd = liveGraph();
+    const redraw = jest.spyOn(Plotly, 'redraw').mockResolvedValue(gd);
+
+    regionStore.selectRegion(regionStore.getRegions()[0]);
+    expect(gd._fullLayout._activeShapeIndex).toBe(0);
+    expect(redraw).toHaveBeenCalledTimes(1);
+
+    gd._fullLayout._activeShapeIndex = 1; // a click on the plot…
+    (service as any).shapeProjection.syncSelectionFromPlot(); // …synced into the store
+    expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
+    expect(redraw).toHaveBeenCalledTimes(1); // no redraw for a change the plot made
+  });
+
+  it('commits a shape edited on the canvas without relayouting it back', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+    (Plotly.relayout as unknown as jest.Mock).mockClear();
+
+    (service as any).relayoutEventHandler({ 'shapes[0].x0': 3.4 });
+
+    expect((regionStore.getRegions()[0].bounds as Rectangle).x).toBe(3);
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+  });
+
+  it('draws a transient region set without touching the stored one', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    regionStore.setRegions([makeRect('s0')]);
+
+    regionStore.setRegions([makeRect('t0'), makeRect('t1')], false, false);
+
+    expect(drawnNames()).toEqual(['t0', 't1']);
+    expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
+    expect((service as any).shapeProjection.shapes.map((d: { name: string }) => d.name)).toEqual(['s0']);
+  });
+
+  it('does not redraw an image switch onto the outgoing plot, nor anything without a live graph', () => {
+    const regionStore = TestBed.inject(RegionStore);
+    service.setActiveImage(makeImageInfo('s3://bkt/a.tif', 'a.tif'));
+    regionStore.setRegions([makeRect('s0')]); // no live graph: nothing to relayout
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+
+    liveGraph();
+    service.setActiveImage(makeImageInfo('s3://bkt/b.tif', 'b.tif'));
+    expect(Plotly.relayout).not.toHaveBeenCalled();
+    expect((service as any).shapeProjection.shapes).toEqual([]); // b's (empty) set, for the next plot
+  });
+
+  it('draws a new profile line from the store event (no direct relayout in addProfileLine)', () => {
+    const intensity = TestBed.inject(IntensityProfileService);
+    const line = makeRect('line');
+    jest.spyOn(intensity, 'addProfileLine').mockImplementation(() => {
+      TestBed.inject(RegionStore).setRegions([line]);
+      return line;
+    });
+    service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
+    liveGraph();
+    expect(service.addProfileLine()).toBe(line);
+    expect(drawnNames()).toEqual(['line']);
   });
 });
 

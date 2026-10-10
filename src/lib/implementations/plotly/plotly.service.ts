@@ -211,6 +211,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     });
 
     this.ensureSubscriptions();
+    // Service-lifetime, unlike ensureSubscriptions(): the shapes follow the
+    // store across a view teardown (they no-op while no Plotly graph is live).
+    this.shapeProjection.connect();
   }
 
   /**
@@ -473,18 +476,12 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /**
-   * IIntensityControls: add another profile line (see IntensityProfileService),
-   * and draw it at once when a Plotly plot is on screen (the OSD/napari overlays
-   * render it from the store's region-update event).
+   * IIntensityControls: add another profile line (see IntensityProfileService).
+   * It is a store region, so a Plotly plot on screen draws it from the store's
+   * region-update event, like the OSD/napari overlays.
    */
   public addProfileLine(): Region | null {
-    const region = this.intensity.addProfileLine();
-    if (region && this.plotDiv) {
-      this.shapeProjection.syncFromStore();
-      const gd = this.liveGd();
-      if (gd) void Plotly.relayout(gd, { shapes: this.currentRenderShapes() } as any);
-    }
-    return region;
+    return this.intensity.addProfileLine();
   }
 
   /**
@@ -717,27 +714,14 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * delegate to it, then re-project the store's regions into Plotly's dict
    * working-set. Re-projecting unconditionally (even when the store no-ops for
    * the same image) means Plotly also picks up regions another backend (OSD)
-   * added while it was off-screen. Called from `plot()` and from the router
-   * before any backend renders.
+   * added while it was off-screen. The switch is not redrawn onto the plot on
+   * screen — that still shows the outgoing image, and the next plot draws the
+   * incoming one's shapes. Called from `plot()` and from the router before any
+   * backend renders.
    */
   public setActiveImage(imageInfo: IImageInfo) {
-    this.regionStore.setActiveImage(imageInfo);
+    this.shapeProjection.quietly(() => this.regionStore.setActiveImage(imageInfo));
     this.shapeProjection.syncFromStore();
-  }
-
-  /**
-   * Set plot regions. Delegates the state change to the shared RegionStore
-   * (id/name minting, classification colours, append de-duplication, per-image
-   * cache and the region-update event all live there), then re-projects the
-   * store's regions into Plotly's dict working-set and renders.
-   *
-   * When `isRegionSaveOn` is false the regions are shown transiently — rendered
-   * without altering the stored working-set (preserves the prior behaviour).
-   */
-  public override setRegions(regions: Region[], showRegionLabel?: boolean,
-                             isRegionSaveOn?: boolean, fillColor?: string,
-                             append: boolean = false) {
-    this.shapeProjection.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
   }
 
   /** The plot div while it hosts a live Plotly graph, else null. `plotDiv`
@@ -863,15 +847,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.zoom.zoomIn();
   }
 
-  /**
-   * Delete every currently selected shape. Falls back to the single
-   * `_activeShapeIndex` when no multi-selection is active (covers the case
-   * where Plotly clicked a shape without going through the table).
-   */
-  public override deleteActiveShape() {
-    this.shapeProjection.deleteActiveShape();
-  }
-
   public zoomOut() {
     this.zoom.zoomOut();
   }
@@ -913,22 +888,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
 
   getAutoscaleEvent() {
     return this.autoscaleEvent.asObservable();
-  }
-
-  /**
-   * Programmatically select regions (or clear with []). The shared store owns
-   * the selection state (validates/dedupes/emits); here we additionally point
-   * Plotly's `_activeShapeIndex` at the last selected shape so it gets the edit
-   * handles. No visual change to non-active shapes — Plotly's own active-shape
-   * rendering is the only highlight.
-   */
-  public override setSelectedShapeIndices(indices: number[]) {
-    this.shapeProjection.setSelectedShapeIndices(indices);
-  }
-
-  /** Select a region (IRegionStore.selectRegion), giving its shape the edit handles. */
-  public override selectRegion(region: Region): void {
-    this.shapeProjection.selectRegion(region);
   }
 
   setZIndex(zIndex: number) {

@@ -28,9 +28,9 @@ import { VisualizerStore } from '../store/visualizer-store.service';
  * Backend-specific members — `load`/`plot`/`reset`/zoom/`setZIndex`/readback,
  * the region OVERLAY, the tool host, SAM/Cellpose runs, histograms, scale bar,
  * tiling, colormap LUT application — deliberately stay in each subclass. Plotly keeps a Plotly-shape
- * working-set beside the store, so it overrides the handful of members that
- * must also redraw it (`setRegions`, selection, delete, colormap, reverse
- * scale, and `exportRegions` for the file name).
+ * working-set beside the store and redraws it from the store's update events
+ * (like the OSD/napari overlays), so it overrides only the colormap and reverse
+ * scale (a live restyle) and `exportRegions` (the file name).
  *
  * NOT `@Injectable`: an abstract base doesn't participate in Angular DI. Each
  * subclass stays `@Injectable`, declares its own injected dependencies

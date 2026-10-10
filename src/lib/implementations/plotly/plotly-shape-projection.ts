@@ -1,4 +1,5 @@
 import * as Plotly from 'plotly.js-dist-min';
+import { Subscription } from 'rxjs';
 
 import { Region } from '../../models/region';
 import { ShapeSelection } from '../../models/shape';
@@ -18,17 +19,18 @@ export interface ShapeProjectionHost {
 
 /**
  * Plotly's render projection of the shared RegionStore: `shapes` is the dict
- * array `Plotly.relayout` consumes, kept beside the store. Writes mirror the
- * dicts INTO the store ({@link commitToStore}); image switches and external
- * changes project the store back OUT ({@link syncFromStore}). Also maps the
- * store's selection onto Plotly's `_activeShapeIndex` (the shape with the edit
- * handles) and back.
+ * array `Plotly.relayout` consumes, kept beside the store. Shapes edited or
+ * drawn on the Plotly canvas are mirrored INTO the store ({@link commitToStore});
+ * every other change — wherever it was made — arrives as a store update event
+ * and is projected back OUT and redrawn ({@link connect}). Also maps the store's
+ * selection onto Plotly's `_activeShapeIndex` (the shape with the edit handles)
+ * and back.
  */
 export class PlotlyShapeProjection {
   /** The render projection: one Plotly shape dict per store region. */
   shapes: any[] = [];
-  /** Whether {@link setRegions} saves to the store or only shows transiently. */
-  private isRegionSavedOn = true;
+  /** Nesting depth of {@link quietly}: region updates are not redrawn while > 0. */
+  private muted = 0;
   private readonly utils = new PlotUtilities();
 
   constructor(private readonly host: ShapeProjectionHost, private readonly regionStore: RegionStore) {}
@@ -66,8 +68,9 @@ export class PlotlyShapeProjection {
    */
   commitToStore(): void {
     const regions = this.shapes.map((s) => Object.assign(new ShapeSelection(), s).getRegion());
-    this.regionStore.setRegions(regions, this.regionStore.getShowShapeLabel(), true,
-      this.regionStore.getFillColor(), false);
+    // The canvas already shows these shapes: don't redraw them from the update.
+    this.quietly(() => this.regionStore.setRegions(regions, this.regionStore.getShowShapeLabel(), true,
+      this.regionStore.getFillColor(), false));
     const stored = this.regionStore.getRegions();
     for (let i = 0; i < this.shapes.length && i < stored.length; i++) {
       if (this.shapes[i].id == null) this.shapes[i].id = stored[i].id;
@@ -117,32 +120,6 @@ export class PlotlyShapeProjection {
     }
   }
 
-  /**
-   * Set plot regions through the shared RegionStore (id/name minting,
-   * classification colours, append de-duplication, per-image cache and the
-   * region-update event all live there), then re-project and render. When
-   * `isRegionSaveOn` is false the regions are shown transiently — rendered
-   * without altering the stored working-set.
-   */
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append = false): void {
-    const showLabel = showRegionLabel === undefined ? this.regionStore.getShowShapeLabel() : showRegionLabel;
-    const save = isRegionSaveOn === undefined ? this.isRegionSavedOn : isRegionSaveOn;
-    this.regionStore.setRegions(regions, showRegionLabel, isRegionSaveOn, fillColor, append);
-    this.isRegionSavedOn = save;
-    if (save) {
-      this.syncFromStore();
-      this.render();
-    } else {
-      const dicts = regions.map((r) => {
-        r.filename = this.host.fileName();
-        return { ...r.getShape(showLabel) };
-      });
-      const gd = this.liveGd();
-      if (gd) void Plotly.relayout(gd, this.relayoutPayload(dicts) as Plotly.Layout);
-    }
-  }
-
   /** Push the dict working-set to Plotly (a no-op when another backend owns the div). */
   render(): void {
     const gd = this.liveGd();
@@ -171,31 +148,67 @@ export class PlotlyShapeProjection {
   }
 
   /**
-   * Programmatically select regions (or clear with []): the store owns the
-   * selection; Plotly's `_activeShapeIndex` points at the last selected shape so
-   * it gets the edit handles (Plotly's own active-shape rendering is the only
-   * highlight).
+   * Follow the shared store: redraw the shapes on every region update and move
+   * the edit handles on every selection change, whoever made the change (the
+   * router, an undo, the Region Editor, another backend's overlay, a canvas
+   * tool). Plotly is not on the store's write path any more — it listens, like
+   * the OpenSeadragon and napari-js overlays do. Service-lifetime: both
+   * callbacks no-op while no live Plotly graph holds the div.
    */
-  setSelectedShapeIndices(indices: number[]): void {
-    const valid = (indices || []).filter((i) => Number.isFinite(i) && i >= 0 && i < this.shapes.length);
-    const cleaned = [...new Set(valid)];
-    const gd = this.gd();
-    if (gd?._fullLayout) {
-      gd._fullLayout._activeShapeIndex = cleaned.length > 0 ? cleaned[cleaned.length - 1] : -1;
-      try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
-    }
-    this.regionStore.setSelectedShapeIndices(cleaned);
+  connect(): Subscription {
+    const subs = new Subscription();
+    subs.add(this.regionStore.getRegionUpdateEvent().subscribe((regions) => this.onRegionUpdate(regions)));
+    subs.add(this.regionStore.getSelectedShapeIndices$().subscribe((indices) => this.onSelection(indices)));
+    return subs;
   }
 
-  /** Select a region by identity, giving its rendered shape the edit handles. */
-  selectRegion(region: Region): void {
-    this.regionStore.selectRegion(region);
-    const idx = this.shapes.findIndex((s) => s.id === region?.id);
-    const gd = this.gd();
-    if (gd?._fullLayout && idx >= 0) {
-      gd._fullLayout._activeShapeIndex = idx;
-      try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
+  /**
+   * Run `write` — a store write this projection already reflects (a shape edited
+   * on the canvas, an image switch the next plot draws) — without redrawing from
+   * the update event it causes.
+   */
+  quietly(write: () => void): void {
+    this.muted++;
+    try { write(); } finally { this.muted--; }
+  }
+
+  /**
+   * A region update. The stored set re-projects and redraws; a transient set
+   * (`setRegions(…, isRegionSaveOn = false)`, which the store emits without
+   * storing) is drawn as-is and leaves the working-set alone.
+   */
+  private onRegionUpdate(regions: Region[]): void {
+    if (this.muted > 0) return;
+    const stored = this.regionStore.getRegions();
+    const isStored = regions.length === stored.length && regions.every((r, i) => r === stored[i]);
+    if (isStored) {
+      this.syncFromStore();
+      this.render();
+      return;
     }
+    const gd = this.liveGd();
+    if (!gd) return;
+    const showLabel = this.regionStore.getShowShapeLabel();
+    const dicts = regions.map((r) => {
+      r.filename = this.host.fileName();
+      return { ...r.getShape(showLabel) };
+    });
+    void Plotly.relayout(gd, this.relayoutPayload(dicts) as Plotly.Layout);
+  }
+
+  /**
+   * A selection change: Plotly's `_activeShapeIndex` points at the last selected
+   * shape so it gets the edit handles (Plotly's own active-shape rendering is the
+   * only highlight). Skipped when the plot already shows it — the change came
+   * from a click on the plot ({@link syncSelectionFromPlot}).
+   */
+  private onSelection(indices: number[]): void {
+    const gd = this.liveGd();
+    if (!gd) return;
+    const active = indices.length > 0 ? indices[indices.length - 1] : -1;
+    if ((gd._fullLayout!._activeShapeIndex ?? -1) === active) return;
+    gd._fullLayout!._activeShapeIndex = active;
+    try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
   }
 
   /**
@@ -208,29 +221,6 @@ export class PlotlyShapeProjection {
     const raw = this.gd()?._fullLayout?._activeShapeIndex;
     const idx = (typeof raw === 'number' && raw >= 0 && raw < this.shapes.length) ? raw : -1;
     this.regionStore.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
-  }
-
-  /**
-   * Delete every selected shape — or, with no selection, the one Plotly tracks
-   * as clicked — through the store, then re-project and redraw. Needs no live
-   * plot: when another backend renders, its overlay redraws from the store.
-   */
-  deleteActiveShape(): void {
-    if (this.regionStore.getSelectedShapeIndices().length === 0) {
-      const activeIndex = this.gd()?._fullLayout?._activeShapeIndex;
-      if (activeIndex === undefined || activeIndex < 0) return;
-      this.regionStore.setSelectedShapeIndices([activeIndex]);
-    }
-    this.regionStore.deleteActiveShape();
-    this.syncFromStore();
-    const live = this.liveGd();
-    if (!live) return;
-    live._fullLayout!._activeShapeIndex = -1;
-    const dictArray = this.shapes.map((s) => ({ ...s }));
-    Plotly.relayout(live, { shapes: dictArray } as Plotly.Layout).then(
-      () => { if (live._fullLayout) void Plotly.redraw(live); },
-      (err: unknown) => console.warn('[viz:plotly] shape relayout after delete failed', err),
-    );
   }
 
   /** The shapes-relayout payload: the shapes plus the active-shape fill colour. */
