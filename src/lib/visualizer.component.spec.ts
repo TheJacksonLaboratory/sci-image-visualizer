@@ -128,6 +128,19 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
     );
 }
 
+/** Move the pointer over a viewer's plot (creating the div when there is no template),
+ *  so its keyboard shortcuts apply: keys are scoped per viewer (CORE-2). */
+function hover(c: VisualizerComponent): HTMLElement {
+  let el = document.getElementById(c.plotDivName);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = c.plotDivName;
+    document.body.appendChild(el);
+  }
+  el.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+  return el;
+}
+
 /**
  * A component driven through its real lifecycle (ngOnInit), for the render and
  * teardown specs.
@@ -1156,10 +1169,14 @@ describe('VisualizerComponent — keyboard shortcuts with modifiers (CORE-2)', (
     plotService.redo = jest.fn();
     component = makeComponent(plotService);
     component.ngAfterViewInit();
+    hover(component);
     toggle = jest.spyOn(component, 'toggleDragMode').mockImplementation(() => undefined);
   });
 
-  afterEach(() => component.ngOnDestroy());
+  afterEach(() => {
+    component.ngOnDestroy();
+    document.getElementById(component.plotDivName)?.remove();
+  });
 
   const press = (init: KeyboardEventInit) =>
     document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
@@ -1193,6 +1210,68 @@ describe('VisualizerComponent — keyboard shortcuts with modifiers (CORE-2)', (
     press({ key: 'z', metaKey: true, shiftKey: true });
     expect(plotService.redo).toHaveBeenCalledTimes(1);
     expect(plotService.deleteActiveShape).not.toHaveBeenCalled();
+  });
+});
+
+/** Keys are per viewer: a main view and a pipeline preview must not both act on one key (CORE-2). */
+describe('VisualizerComponent — keyboard shortcuts are scoped to one viewer (CORE-2)', () => {
+  let a: VisualizerComponent;
+  let b: VisualizerComponent;
+  let plotA: ReturnType<typeof mockPlotService>;
+  let plotB: ReturnType<typeof mockPlotService>;
+
+  beforeEach(() => {
+    plotA = mockPlotService();
+    plotB = mockPlotService();
+    a = makeComponent(plotA);
+    b = makeComponent(plotB);
+    a.ngAfterViewInit();
+    b.ngAfterViewInit();
+  });
+
+  afterEach(() => {
+    for (const c of [a, b]) {
+      c.ngOnDestroy();
+      document.getElementById(c.plotDivName)?.remove();
+    }
+  });
+
+  const press = (key: string, target: EventTarget = document.body) =>
+    target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
+
+  it('ignores keys until the pointer has been over a viewer', () => {
+    press('d');
+    expect(plotA.deleteActiveShape).not.toHaveBeenCalled();
+    expect(plotB.deleteActiveShape).not.toHaveBeenCalled();
+  });
+
+  it('sends a key only to the viewer the pointer was last over', () => {
+    hover(b);
+    press('d');
+    expect(plotB.deleteActiveShape).toHaveBeenCalledTimes(1);
+    expect(plotA.deleteActiveShape).not.toHaveBeenCalled();
+    hover(a);
+    press('+');
+    expect(plotA.zoomIn).toHaveBeenCalledTimes(1);
+    expect(plotB.zoomIn).not.toHaveBeenCalled();
+  });
+
+  it('focus inside a viewer wins over where the pointer was', () => {
+    hover(b);
+    const button = document.createElement('button');
+    hover(a).appendChild(button);
+    hover(b); // pointer back over b, but a holds focus
+    button.focus();
+    press('d', button);
+    expect(plotA.deleteActiveShape).toHaveBeenCalledTimes(1);
+    expect(plotB.deleteActiveShape).not.toHaveBeenCalled();
+  });
+
+  it('a destroyed viewer no longer takes keys', () => {
+    hover(a);
+    a.ngOnDestroy();
+    press('d');
+    expect(plotA.deleteActiveShape).not.toHaveBeenCalled();
   });
 });
 
@@ -1332,11 +1411,12 @@ describe('VisualizerComponent — global listeners run outside Angular (CORE-4)'
 
   it('registers every window listener outside the zone, so a mousemove does not run change detection', () => {
     const types = added.map((a) => a.type).sort();
-    expect(types).toEqual(['contextmenu', 'keydown', 'mousemove', 'mouseup', 'resize', 'wheel']);
+    expect(types).toEqual(['contextmenu', 'keydown', 'mousemove', 'mouseup', 'pointerover', 'resize', 'wheel']);
     expect(added.every((a) => a.outside)).toBe(true);
   });
 
   it('steps the slice on ArrowRight/ArrowLeft from the one keydown listener', () => {
+    hover(component).remove();
     component.imageInfo = { isStack: true } as IImageInfo;
     component.maxIndex = 5;
     const press = (key: string) =>
@@ -1799,6 +1879,7 @@ describe('VisualizerComponent — shortcut map (characterization)', () => {
     menuShow.mockClear();
     component.contextMenu = { show: menuShow } as unknown as VisualizerComponent['contextMenu'];
     component.ngAfterViewInit();
+    hover(component);
     toggle = jest.spyOn(component, 'toggleDragMode');
   });
 

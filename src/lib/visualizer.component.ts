@@ -465,6 +465,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Parent of a contributed panel component's injector. Optional only so the
     // specs can construct this component with `new`.
     @Optional() private injector?: Injector,
+    // The `<visualizer>` element: keyboard shortcuts are scoped to it (CORE-2).
+    @Optional() private hostRef?: ElementRef<HTMLElement>,
   ) {
     this.plotModes = new PlotModeController(plotTypeContributions, {
       onActivated: (active) => this.showPlotModePanel(active),
@@ -1084,6 +1086,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private shortcutHost(): ShortcutHost {
     return {
       plotDivName: this.plotDivName,
+      hostElement: this.hostRef?.nativeElement ?? null,
       activeDragMode: () => this.activeDragMode,
       canStepSlice: () => !!this.imageInfo?.isStack && this.isImageView,
       wheelZooms: () => !rendererOwnsWheel(this.basePlotType) && this.isHeatmap,

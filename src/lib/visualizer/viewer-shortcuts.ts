@@ -4,6 +4,9 @@ import { NgZone } from '@angular/core';
 export interface ShortcutHost {
   /** Id of the plot div; the wheel and the context menu act only over it. */
   readonly plotDivName: string;
+  /** The viewer's own element (toolbar + plot); its keys are scoped to it. Falls back
+   *  to the plot div when absent. */
+  readonly hostElement?: HTMLElement | null;
   /** The armed tool — SAM point mode takes Enter / Escape. */
   activeDragMode(): string | null;
   /** ←/→ step the slice: a loaded stack in the Image view. */
@@ -42,8 +45,17 @@ function isTextField(t: HTMLElement | null): boolean {
  * Ctrl/Cmd+Shift+Z or +Y redo; bare Delete/Backspace/d delete the selected region,
  * +/= and -/_ zoom, and single letters toggle tools (`TOOL_KEYS`). Any other
  * modified key is left to the browser (Cmd/Ctrl+D must not delete a region).
+ *
+ * Keys are per viewer: with two live viewers (a main view and a pipeline preview)
+ * one Delete must not delete in both. A key goes to the viewer that holds focus, or
+ * — focus elsewhere — to the viewer the pointer last moved over; any other viewer
+ * ignores it (review CORE-2).
  */
 export class ViewerShortcuts {
+  /** Every attached instance, to find the one holding focus. */
+  private static readonly live = new Set<ViewerShortcuts>();
+  /** The viewer the pointer last moved over. */
+  private static lastHovered: ViewerShortcuts | null = null;
   private readonly listeners: [string, EventListener, boolean | AddEventListenerOptions][] = [];
 
   constructor(private readonly host: ShortcutHost, private readonly zone: NgZone) {}
@@ -54,11 +66,18 @@ export class ViewerShortcuts {
       this.listen('contextmenu', (e) => this.onContextMenu(e as MouseEvent), true);
       this.listen('keydown', (e) => this.onKeydown(e as KeyboardEvent), false);
       this.listen('wheel', (e) => this.onWheel(e as WheelEvent), { capture: true, passive: false });
+      // `pointerover` fires on element transitions only, not on every move.
+      this.listen('pointerover', (e) => {
+        if (this.contains(e.target as Node)) ViewerShortcuts.lastHovered = this;
+      }, true);
     });
+    ViewerShortcuts.live.add(this);
   }
 
   /** Remove every listener {@link attach} added. */
   detach(): void {
+    ViewerShortcuts.live.delete(this);
+    if (ViewerShortcuts.lastHovered === this) ViewerShortcuts.lastHovered = null;
     for (const [type, listener, options] of this.listeners.splice(0)) {
       window.removeEventListener(type, listener, options);
     }
@@ -67,6 +86,21 @@ export class ViewerShortcuts {
   private listen(type: string, listener: EventListener, options: boolean | AddEventListenerOptions): void {
     window.addEventListener(type, listener, options);
     this.listeners.push([type, listener, options]);
+  }
+
+  private contains(node: Node | null): boolean {
+    const el = this.host.hostElement ?? document.getElementById(this.host.plotDivName);
+    return !!node && !!el?.contains(node);
+  }
+
+  /** Whether this viewer takes keys now: it holds focus, or nothing does and the
+   *  pointer was last over it. */
+  private ownsKeys(): boolean {
+    const active = document.activeElement;
+    const focused = active && active !== document.body
+      ? [...ViewerShortcuts.live].find((s) => s.contains(active))
+      : undefined;
+    return (focused ?? ViewerShortcuts.lastHovered) === this;
   }
 
   private overPlot(event: Event): boolean {
@@ -96,6 +130,7 @@ export class ViewerShortcuts {
   }
 
   private onKeydown(event: KeyboardEvent): void {
+    if (!this.ownsKeys()) return;
     const host = this.host;
     const target = event.target as HTMLElement | null;
     if (this.isSliceStepKey(event, target)) {
