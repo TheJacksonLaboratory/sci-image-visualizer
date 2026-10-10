@@ -61,6 +61,7 @@ import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { SpatialDataset } from './contracts/spatial-dataset.contract';
 import { buildVolumeStackImage } from './spatial/spatial-volume-image';
+import { applyImageRois } from './visualizer/region-load';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -990,65 +991,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
               (imgInfo.smallUrls?.length ?? 0) > 0;
             const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
 
-            // Enter per-slice stack mode with the given slice→regions map.
-            // enterStackMode makes zIndex's slice live and resets undo (jit-ui#93).
-            const enterStack = (
-              slices: Map<number, Region[]>,
-              layout: 'combined' | 'per-slice-file',
-            ) => this.plotService.enterStackMode(slices, this.zIndex, layout);
-
-            const applyRoi = () => {
-              // Folder stack: a stack of self-contained per-slice files
-              // (tiled === false; see loadSeriesAsStack). Each slice-file may
-              // carry its own sibling "<stem>.geojson" (roiJsonStrs[z]), but a
-              // fresh folder with none yet leaves roiJsonStrs undefined — key
-              // off `tiled === false`, NOT roiJsonStrs, so an unannotated
-              // folder stack still enters the per-slice-file layout (and saves
-              // back one geojson per slice-file) rather than falling through to
-              // the single-file combined path (jit-ui#93).
-              if (imgInfo.isStack && imgInfo.tiled === false) {
-                const perSlice = imgInfo.roiJsonStrs;
-                const sliceCount = imgInfo.urls?.length ?? perSlice?.length ?? 0;
-                const slices = new Map<number, Region[]>();
-                for (let z = 0; z < sliceCount; z++) {
-                  const json = perSlice?.[z] ?? null;
-                  slices.set(z, json ? this.plotService.importRegions(json) : []);
-                }
-                enterStack(slices, 'per-slice-file');
-                return;
-              }
-              // Single-file z-stack: one sibling geojson holding every slice's
-              // regions indexed by QuPath's geometry.plane.z. Enter per-slice
-              // mode (saving back one combined z-indexed geojson) when the
-              // geojson actually carries slice indices, or when there's nothing
-              // yet to author against. A legacy geojson whose regions are all on
-              // the default plane stays global (shown on every slice) so
-              // existing single-plane annotations aren't confined to slice 0.
-              const roiJson = imgInfo.roiJsonStr;
-              if (imgInfo.isStack) {
-                const regions = roiJson ? this.plotService.importRegions(roiJson) : [];
-                const hasSliceInfo = regions.some((r) => (r.z ?? 0) !== 0);
-                if (!roiJson || hasSliceInfo) {
-                  const slices = new Map<number, Region[]>();
-                  for (const r of regions) {
-                    const z = r.z ?? 0;
-                    const bucket = slices.get(z);
-                    if (bucket) bucket.push(r);
-                    else slices.set(z, [r]);
-                  }
-                  enterStack(slices, 'combined');
-                  return;
-                }
-              }
-              // Single-plane image (or a legacy global z-stack geojson): one
-              // region set for the whole image.
-              if (roiJson) {
-                this.plotService.setRegions(this.plotService.importRegions(roiJson));
-              }
-              // Loading an image's saved ROIs is not a user edit — start the
-              // undo history fresh so the first undo can't wipe them (jit-ui#85).
-              this.plotService.resetUndoHistory();
-            };
+            const applyRoi = () => applyImageRois(imgInfo, this.plotService, this.zIndex);
             let overlayReleased = false;
             const releaseOverlay = () => {
               if (overlayReleased) return;
