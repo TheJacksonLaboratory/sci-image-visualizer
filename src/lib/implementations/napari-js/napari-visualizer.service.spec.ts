@@ -623,7 +623,8 @@ describe('NapariVisualizerService', () => {
     };
     internals.tools.install2dInteraction(internals.viewer, div);
     const emittedInZone: boolean[] = [];
-    const sub = service.getIntensitySampling().getViewportChange$().subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
+    const sub = service.getIntensitySampling().getViewportChange$()
+      .subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
     listeners.forEach((l) => l());
     await new Promise((r) => setTimeout(r, 300));
     expect(emittedInZone).toEqual([true]);

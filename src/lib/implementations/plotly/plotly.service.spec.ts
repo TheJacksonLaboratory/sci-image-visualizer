@@ -345,13 +345,21 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
   // ── Plotly follows the store (IVisualizer split (d)): it is not on the write path ──
 
   /** Make `#plot` look like a live Plotly graph (what liveGd() checks). */
-  function liveGraph(activeShapeIndex = -1): any {
-    const gd: any = document.getElementById('plot');
+  type LiveGd = HTMLElement & { _fullLayout: { _activeShapeIndex: number } };
+  type ShapeDict = { name?: string; x0?: number; y0?: number };
+  /** The private members these specs drive. */
+  const internals = () => service as unknown as {
+    shapeProjection: { shapes: ShapeDict[]; syncSelectionFromPlot(): void };
+    relayoutEventHandler(event: Record<string, unknown>): void;
+  };
+  function liveGraph(activeShapeIndex = -1): LiveGd {
+    const gd = document.getElementById('plot') as LiveGd;
     gd._fullLayout = { _activeShapeIndex: activeShapeIndex };
     return gd;
   }
-  const lastRelayout = (): any => (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)?.[1];
-  const drawnNames = (): string[] => lastRelayout().shapes.map((d: { name?: string }) => d.name);
+  const lastRelayout = (): { shapes: ShapeDict[] } =>
+    (Plotly.relayout as unknown as jest.Mock).mock.calls.at(-1)?.[1];
+  const drawnNames = (): Array<string | undefined> => lastRelayout().shapes.map((d) => d.name);
 
   it('a shape clicked on the plot is selected in the store, so a store delete removes it and redraws', () => {
     const a = makeImageInfo('s3://bkt/img.tif', 'img.tif');
@@ -359,14 +367,14 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     const regionStore = TestBed.inject(RegionStore);
     regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
     liveGraph(1); // Plotly made shape 1 active on a click
-    (service as any).shapeProjection.syncSelectionFromPlot(); // the mousedown handler's sample
+    internals().shapeProjection.syncSelectionFromPlot(); // the mousedown handler's sample
     expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
 
     regionStore.deleteActiveShape();
 
     expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
     expect(drawnNames()).toEqual(['s0']);
-    expect(document.getElementById('plot') as any).toHaveProperty('_fullLayout._activeShapeIndex', -1);
+    expect(document.getElementById('plot')).toHaveProperty('_fullLayout._activeShapeIndex', -1);
   });
 
   it('redraws the shapes on a store undo/redo (heatmap undo)', () => {
@@ -399,14 +407,14 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     service.setActiveImage(makeImageInfo('s3://bkt/img.tif', 'img.tif'));
     regionStore.setRegions([makeRect('s0'), makeRect('s1')]);
     const gd = liveGraph();
-    const redraw = jest.spyOn(Plotly, 'redraw').mockResolvedValue(gd);
+    const redraw = jest.spyOn(Plotly, 'redraw').mockResolvedValue(gd as unknown as Plotly.PlotlyHTMLElement);
 
     regionStore.selectRegion(regionStore.getRegions()[0]);
     expect(gd._fullLayout._activeShapeIndex).toBe(0);
     expect(redraw).toHaveBeenCalledTimes(1);
 
     gd._fullLayout._activeShapeIndex = 1; // a click on the plot…
-    (service as any).shapeProjection.syncSelectionFromPlot(); // …synced into the store
+    internals().shapeProjection.syncSelectionFromPlot(); // …synced into the store
     expect(regionStore.getSelectedShapeIndices()).toEqual([1]);
     expect(redraw).toHaveBeenCalledTimes(1); // no redraw for a change the plot made
   });
@@ -418,7 +426,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     regionStore.setRegions([makeRect('s0')]);
     (Plotly.relayout as unknown as jest.Mock).mockClear();
 
-    (service as any).relayoutEventHandler({ 'shapes[0].x0': 3.4 });
+    internals().relayoutEventHandler({ 'shapes[0].x0': 3.4 });
 
     expect((regionStore.getRegions()[0].bounds as Rectangle).x).toBe(3);
     expect(Plotly.relayout).not.toHaveBeenCalled();
@@ -434,7 +442,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
 
     expect(drawnNames()).toEqual(['t0', 't1']);
     expect(service.getRegions().map((r) => r.name)).toEqual(['s0']);
-    expect((service as any).shapeProjection.shapes.map((d: { name: string }) => d.name)).toEqual(['s0']);
+    expect(internals().shapeProjection.shapes.map((d) => d.name)).toEqual(['s0']);
   });
 
   it('does not redraw an image switch onto the outgoing plot, nor anything without a live graph', () => {
@@ -446,7 +454,7 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
     liveGraph();
     service.setActiveImage(makeImageInfo('s3://bkt/b.tif', 'b.tif'));
     expect(Plotly.relayout).not.toHaveBeenCalled();
-    expect((service as any).shapeProjection.shapes).toEqual([]); // b's (empty) set, for the next plot
+    expect(internals().shapeProjection.shapes).toEqual([]); // b's (empty) set, for the next plot
   });
 
   it('draws a new profile line from the store event (no direct relayout in addProfileLine)', () => {
