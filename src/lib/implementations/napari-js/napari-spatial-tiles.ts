@@ -1,5 +1,5 @@
 import { Colormap, LruCache, colormapFromLut } from 'napari-js';
-import type { ImageLayer, Layer, RGBA, ShapesLayer, Viewer } from 'napari-js';
+import type { ImageLayer, Layer, RGBA, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
@@ -31,6 +31,7 @@ import {
 } from '../../spatial/spatial-tile-merge';
 import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
 import { LoadTracker, PlanContext } from './spatial-tiles/plan-context';
+import { OrderedLayerGroups, TILE_LAYER_ORDER, TileGroup } from './spatial-tiles/layer-groups';
 import { TranscriptHover } from './spatial-tiles/transcript-hover';
 
 /** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
@@ -97,11 +98,6 @@ export interface TranscriptEstimate {
   max: number;
 }
 
-type Group = 'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts' | 'transcriptOutline';
-const ORDER: Group[] = [
-  'cellFill', 'cellOutline', 'nucleusOutline', 'density', 'transcripts', 'transcriptOutline',
-];
-
 /** Transcripts drawn at once. Past this a screen is solid colour anyway; the level
  *  policy keeps a normal view far below it. */
 const MAX_TRANSCRIPTS = 400_000;
@@ -154,9 +150,8 @@ export class NapariSpatialTileLayers {
   /** Consecutive retries of an incomplete view. */
   private tileRetries = 0;
   private token = 0;
-  private readonly layers = new Map<Group, Layer>();
-  /** What each group currently shows, so an unchanged plan is a no-op. */
-  private readonly keys = new Map<Group, string>();
+  /** The overlays' layers, one per group, in their fixed order. */
+  private readonly groups = new OrderedLayerGroups<TileGroup>(TILE_LAYER_ORDER);
   private polygonsShown = false;
   /** Rings currently drawn and the (dataset, set, tiles) they came from. */
   private currentRings: SpatialPolygonTile | null = null;
@@ -189,8 +184,7 @@ export class NapariSpatialTileLayers {
   constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {
     this.lookup = new CategoricalLookup(port);
     this.hover = new TranscriptHover(port, () => {
-      const layer = this.layers.get('transcripts');
-      return !!layer && !!this.viewer?.layers.items.includes(layer);
+      return this.groups.shown('transcripts');
     });
   }
 
@@ -200,6 +194,7 @@ export class NapariSpatialTileLayers {
     if (this.viewer === viewer) return;
     this.detach();
     this.viewer = viewer;
+    this.groups.attach(viewer);
     this.cameraOff = viewer.camera.changed.connect(() => this.schedule());
   }
 
@@ -267,8 +262,7 @@ export class NapariSpatialTileLayers {
 
   /** Whether `layer` is one of the overlays drawn here (density, cells, transcripts). */
   owns(layer: Layer): boolean {
-    for (const l of this.layers.values()) if (l === layer) return true;
-    return false;
+    return this.groups.owns(layer);
   }
 
   detach(): void {
@@ -281,13 +275,7 @@ export class NapariSpatialTileLayers {
     this.tileRetries = 0;
     this.countSource = null;
     this.loads.clear();
-    if (this.viewer) {
-      for (const layer of this.layers.values()) {
-        if (this.viewer.layers.items.includes(layer)) this.viewer.layers.remove(layer);
-      }
-    }
-    this.layers.clear();
-    this.keys.clear();
+    this.groups.detach();
     this.setPolygonsShown(false);
     this.viewer = null;
   }
@@ -304,7 +292,7 @@ export class NapariSpatialTileLayers {
 
   /** Called right after the service adds its marker layer: everything goes back on top. */
   afterObservations(): void {
-    this.restoreOrder(true);
+    this.groups.restoreOrder(true);
   }
 
   // ── planning ──────────────────────────────────────────────────────────────────────
@@ -326,7 +314,7 @@ export class NapariSpatialTileLayers {
     const ctx = new PlanContext(() => token !== this.token || this.viewer !== viewer, this.loads);
 
     if (!dataset) {
-      for (const g of ORDER) this.drop(g);
+      this.groups.dropAll();
       this.dropCells();
       return;
     }
@@ -349,7 +337,7 @@ export class NapariSpatialTileLayers {
       settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, ctx)),
       settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, ctx)),
     ]);
-    this.restoreOrder(false);
+    this.groups.restoreOrder(false);
     if (ctx.stale()) return;
     this.host.geneCountsChanged?.(this.geneCountsIn(rect));
     // A tile that failed left a hole the cache keys do not record, so try the same view
@@ -400,10 +388,7 @@ export class NapariSpatialTileLayers {
       this.selectionRev(selection), view.logScale, view.percentileClip.join(),
       JSON.stringify(view.continuousColormap), view.cellDraw, view.cellOpacity,
     ].join('|');
-    const present = ['cellFill', 'cellOutline', 'nucleusOutline'].some((g) => {
-      const l = this.layers.get(g as Group);
-      return l && this.viewer!.layers.items.includes(l);
-    });
+    const present = (['cellFill', 'cellOutline', 'nucleusOutline'] as const).some((g) => this.groups.shown(g));
     if (!geometryChanged && styleKey === this.cellStyleKey && present) {
       this.setPolygonsShown(true);
       return;
@@ -421,20 +406,20 @@ export class NapariSpatialTileLayers {
     const fill = view.cellDraw !== 'outline';
     const outline = view.cellDraw !== 'fill';
 
-    this.upsertShapes('cellFill', fill, geometryChanged, rings, {
+    this.groups.upsertShapes('cellFill', fill, geometryChanged, rings, {
       name: 'cells', draw: 'fill', opacity: view.cellOpacity, ...colors, ...common,
     });
-    this.upsertShapes('cellOutline', outline, geometryChanged, rings, fill
+    this.groups.upsertShapes('cellOutline', outline, geometryChanged, rings, fill
       // Over a fill, a dark outline separates neighbours of the same type.
       ? { name: 'cell outlines', draw: 'outline', color: [0.08, 0.08, 0.1, 1], opacity: 0.7, ...common }
       : { name: 'cell outlines', draw: 'outline', opacity: 1, ...colors, ...common });
     // "Both": nuclei outlined over the cells, light so they read against any fill.
     if (nuclei) {
-      this.upsertShapes('nucleusOutline', true, geometryChanged, nuclei, {
+      this.groups.upsertShapes('nucleusOutline', true, geometryChanged, nuclei, {
         name: 'nucleus outlines', draw: 'outline', color: [0.95, 0.95, 0.98, 1], opacity: 0.8, ...common,
       });
     } else {
-      this.drop('nucleusOutline');
+      this.groups.drop('nucleusOutline');
     }
     this.setPolygonsShown(true);
   }
@@ -577,8 +562,8 @@ export class NapariSpatialTileLayers {
         : this.geneJob(dataset, view, rect, pxPerUnit))
       : null;
     if (!job) {
-      this.drop('transcripts');
-      this.drop('transcriptOutline');
+      this.groups.drop('transcripts');
+      this.groups.drop('transcriptOutline');
       this.hover.clear();
       this.countSource = null;
       return;
@@ -591,8 +576,7 @@ export class NapariSpatialTileLayers {
       pxPerUnit.toPrecision(4), view.hiddenGroups.join('\u0001'), view.transcriptHiddenGenes.join(','),
       JSON.stringify(view.transcriptGeneColors), JSON.stringify(view.transcriptGeneGroups),
     ].join('|');
-    const current = this.layers.get('transcripts');
-    if (planKey === this.keys.get('transcripts') && current && this.viewer!.layers.items.includes(current)) {
+    if (planKey === this.groups.key('transcripts') && this.groups.shown('transcripts')) {
       return;
     }
     const loaded = await ctx.track('Transcripts', job.load(ctx));
@@ -633,8 +617,8 @@ export class NapariSpatialTileLayers {
     const faces = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
     if (ctx.stale()) return;
 
-    if (ctx.incomplete) this.keys.delete('transcripts');
-    else this.keys.set('transcripts', planKey);
+    if (ctx.incomplete) this.groups.forgetKey('transcripts');
+    else this.groups.setKey('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
     this.hover.setDrawn({
       kind: loaded.kind ?? job.kind,
@@ -651,7 +635,7 @@ export class NapariSpatialTileLayers {
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
     if (mode === 'circles') {
-      this.drop('transcriptOutline');
+      this.groups.drop('transcriptOutline');
       this.drawTranscriptCircles(merged, diam, faces.rgba, view, place);
     } else {
       this.drawTranscriptGlyphs(merged, diam, faces, view, place, pxPerUnit);
@@ -680,7 +664,7 @@ export class NapariSpatialTileLayers {
       scale,
       translate,
     });
-    this.replace('transcripts', layer);
+    this.groups.replace('transcripts', layer);
   }
 
   private drawTranscriptGlyphs(
@@ -711,12 +695,12 @@ export class NapariSpatialTileLayers {
       scale,
       translate,
     });
-    this.replace('transcripts', fill);
+    this.groups.replace('transcripts', fill);
     // A dark rim keeps a few large icons readable over the tissue; on many small ones the
     // rims merge into a solid dark sheet that hides every colour, so they are left off.
     const medianPx = median(diam) * pxPerUnit;
     if (merged.count > GLYPH_OUTLINE_MAX || medianPx < GLYPH_OUTLINE_MIN_PX) {
-      this.drop('transcriptOutline');
+      this.groups.drop('transcriptOutline');
       return;
     }
     const edge = this.viewer!.addShapes(coords, offsets, {
@@ -727,7 +711,7 @@ export class NapariSpatialTileLayers {
       scale,
       translate,
     });
-    this.replace('transcriptOutline', edge);
+    this.groups.replace('transcriptOutline', edge);
   }
 
   /**
@@ -1087,14 +1071,14 @@ export class NapariSpatialTileLayers {
       ? [ALL_GENES]
       : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
     if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
-      this.drop('density');
+      this.groups.drop('density');
       this.densityStats = null;
       return;
     }
     const lut = lutFor(view.densityColormap ?? INFERNO_SCALE);
     const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
       JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
-    if (key === this.keys.get('density') && this.layers.has('density')) return;
+    if (key === this.groups.key('density') && this.groups.has('density')) return;
     const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
     if (ctx.stale()) return;
 
@@ -1121,8 +1105,8 @@ export class NapariSpatialTileLayers {
         interpolation: 'nearest',
       },
     );
-    this.keys.set('density', key);
-    this.replace('density', layer);
+    this.groups.setKey('density', key);
+    this.groups.replace('density', layer);
     this.host.densityChanged?.(this.densityStats);
   }
 
@@ -1164,83 +1148,10 @@ export class NapariSpatialTileLayers {
     this.host.estimateChanged?.({ points: Math.round(selected * share), max: view.transcriptBudget });
   }
 
-  // ── layer bookkeeping ─────────────────────────────────────────────────────────────
-
-  /**
-   * Put a shapes layer in place for `group`: a geometry change builds a new layer, a
-   * colour-only change mutates values/colormap on the existing one.
-   */
-  private upsertShapes(
-    group: Group, wanted: boolean, geometryChanged: boolean, rings: SpatialPolygons,
-    opts: Parameters<Viewer['addShapes']>[2] & object,
-  ): void {
-    if (!wanted) {
-      this.drop(group);
-      return;
-    }
-    const existing = this.layers.get(group) as ShapesLayer | undefined;
-    if (existing && !geometryChanged && this.viewer!.layers.items.includes(existing)) {
-      // Flat colour has no values; clearing them is what switches the layer to `color`.
-      existing.values = opts.values ?? null;
-      if (opts.colormap) existing.colormap = opts.colormap;
-      if (opts.contrastLimits) existing.contrastLimits = opts.contrastLimits;
-      if (opts.color) existing.color = opts.color;
-      if (opts.opacity !== undefined) existing.opacity = opts.opacity;
-      this.viewer!.requestRender();
-      return;
-    }
-    const layer = this.viewer!.addShapes(rings.coords, rings.offsets, opts);
-    this.replace(group, layer);
-  }
-
-  /**
-   * Install `layer` as `group`'s layer. The layer was just added by the caller, so it is on
-   * top: the plan puts the groups that belong above it back in place once it is done
-   * ({@link restoreOrder}), rather than after every replaced group.
-   */
-  private replace(group: Group, layer: Layer): void {
-    const v = this.viewer!;
-    const old = this.layers.get(group);
-    if (old && old !== layer && v.layers.items.includes(old)) v.layers.remove(old);
-    this.layers.set(group, layer);
-    v.requestRender();
-  }
-
-  /**
-   * Put the groups' layers in {@link ORDER}, re-adding only from the first one out of place
-   * (and, with `aboveOthers`, the first one under a layer that is not ours — the service's
-   * markers). Everything before that is already where it belongs and keeps its GPU visual.
-   */
-  private restoreOrder(aboveOthers: boolean): void {
-    const v = this.viewer;
-    if (!v) return;
-    const items = v.layers.items;
-    const wanted = ORDER.map((g) => this.layers.get(g)).filter((l): l is Layer => !!l && items.includes(l));
-    const ours = new Set<Layer>(wanted);
-    let lastOther = -1;
-    if (aboveOthers) items.forEach((l, i) => { if (!ours.has(l)) lastOther = i; });
-    const current = items.filter((l) => ours.has(l));
-    let k = 0;
-    while (k < wanted.length && current[k] === wanted[k] && items.indexOf(wanted[k]) > lastOther) k++;
-    if (k === wanted.length) return;
-    for (const layer of wanted.slice(k)) {
-      v.layers.remove(layer);
-      v.layers.add(layer);
-    }
-    v.requestRender();
-  }
-
-  private drop(group: Group): void {
-    const layer = this.layers.get(group);
-    if (layer && this.viewer?.layers.items.includes(layer)) this.viewer.layers.remove(layer);
-    this.layers.delete(group);
-    this.keys.delete(group);
-  }
-
   private dropCells(): void {
-    this.drop('cellFill');
-    this.drop('cellOutline');
-    this.drop('nucleusOutline');
+    this.groups.drop('cellFill');
+    this.groups.drop('cellOutline');
+    this.groups.drop('nucleusOutline');
     this.currentNuclei = null;
     this.cellGeometryKey = null;
     this.cellStyleKey = null;
