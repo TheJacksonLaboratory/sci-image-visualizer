@@ -2,7 +2,6 @@ import {
   AfterViewInit, Component, Inject, Input, OnDestroy, OnInit,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
-import * as Plotly from 'plotly.js-dist-min';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
 import {
@@ -19,6 +18,7 @@ import {
   BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator,
 } from '../../spatial/embedding-compute-coordinator';
 import { Supersede } from '../../util/supersede';
+import { EMBEDDING_CONFIG, PlotlyChartHost } from './plotly-chart-host';
 import { ChartKindOption, chartKindOptions, embeddingNote, heatmapNote, kindHelp } from './chart-help';
 import {
   OmicsChartKind, OmicsGrouping, benefitsFromGrouping, buildCountTraces, buildHeatmapTraces,
@@ -50,27 +50,6 @@ function ensureHelpTipStyle(): void {
 /** Per-instance chart-div id source — see {@link SpatialChartsComponent.chartDiv}. */
 let chartInstanceSeq = 0;
 
-
-/** Plotly config: a static-ish analysis chart, not an editable figure. */
-const CHART_CONFIG = {
-  displaylogo: false,
-  responsive: true,
-  modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
-};
-
-/**
- * Config for the embedding, which unlike the distributions is a plot you SELECT in.
- *
- * The lasso and box-select are kept — drawing round a cluster is how a population gets
- * picked out of a UMAP — and the wheel zooms, because exploring an embedding means
- * zooming into a cluster and reaching for a toolbar button to do it breaks that.
- */
-const EMBEDDING_CONFIG = {
-  displaylogo: false,
-  responsive: true,
-  scrollZoom: true,
-  modeBarButtonsToRemove: ['autoScale2d'],
-};
 
 /**
  * Distribution charts over the spatial-omics values — histogram, violin, box —
@@ -372,14 +351,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }));
   }
 
-  /**
-   * The height the drawn layout asked for, or null where it autosizes.
-   *
-   * {@link resize} needs this: the counts and heatmap layouts size their height
-   * to their content — one band per bar, per gene row — while the distribution
-   * kinds want to fill whatever height they are given.
-   */
-  private drawnHeight: number | null = null;
+  /** Plotly I/O for both the inline and the detached div. */
+  private readonly plot = new PlotlyChartHost();
 
   /**
    * Re-fit the plot to the panel's current width.
@@ -389,31 +362,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * resizes only, so dragging a dialog edge reaches it through nothing at all.
    */
   resize(): void {
-    this.refit(this.chartDiv);
-  }
-
-  /**
-   * Re-fit whatever is plotted in `div` to its container.
-   *
-   * Shared by the panel and the detached window because the rule is the same and getting
-   * it wrong is invisible until it is not: `autosize` takes BOTH dimensions from the
-   * container, which is right only where the layout did not fix its own height. Measured:
-   * autosizing a layout with an explicit height of 500 replaced it with the container's
-   * 400. The counts and heatmap layouts size themselves to their row count, so the
-   * window resize has to set the width ALONE for them and let the height stand.
-   */
-  private refit(div: string): void {
-    const el = document.getElementById(div);
-    if (!el) return;
-    const width = Math.round(el.clientWidth);
-    // Zero while the section is collapsed or the dialog is closed; relaying out
-    // to a zero box makes Plotly compute a layout it does not recover from.
-    if (width <= 0) return;
-    try {
-      Plotly.relayout(el, this.drawnHeight === null ? { autosize: true } : { width });
-    } catch {
-      // Nothing plotted yet.
-    }
+    this.plot.refit(this.chartDiv);
   }
 
   ngOnDestroy(): void {
@@ -424,13 +373,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.compute.abandon();
     // BOTH divs: a chart left detached at teardown holds its WebGL context in the
     // window's div, which the inline id would never reach.
-    for (const div of [this.chartDiv, this.detachedDiv]) {
-      try {
-        Plotly.purge(div);
-      } catch {
-        // The div may already be gone with the dialog; nothing to clean up.
-      }
-    }
+    for (const div of [this.chartDiv, this.detachedDiv]) this.plot.purge(div);
   }
 
   ngAfterViewInit(): void {
@@ -666,9 +609,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!coords) return;
 
     const target = this.plotTarget;
-    const el = document.getElementById(target);
-    if (!el) return; // the window is closed, or not rendered yet
-    const view = this.liveView(el);
+    if (!document.getElementById(target)) return; // the window is closed, or not rendered yet
+    const view = this.plot.liveView(target);
 
     this.notice = null;
     const input = {
@@ -696,91 +638,15 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // rotating and zooming leave it.
       ...(view ? { view } : {}),
     };
-    await this.draw(buildEmbeddingTraces(input), embeddingLayout(input), EMBEDDING_CONFIG, target);
-    this.bindEmbeddingSelection(target);
-  }
-
-  /**
-   * Turn a lasso in the embedding into a selection of observations.
-   *
-   * This is what makes two views of one dataset worth having side by side: draw round a
-   * cluster here and those cells light up on the tissue, because every view reads the
-   * same mask.
-   *
-   * Bound after each draw, and the previous listener removed first: `Plotly.react`
-   * preserves handlers, so re-binding without removing would fire the selection once per
-   * redraw the plot had ever had.
-   */
-  private bindEmbeddingSelection(div: string): void {
-    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
-    if (!el?.on) return;
-    el.removeAllListeners?.('plotly_selected');
-    el.removeAllListeners?.('plotly_deselect');
-    el.on('plotly_selected', (ev) => {
-      // A lasso that selects nothing arrives as an event with no points; treat it as a
-      // clear, which is what dragging an empty patch looks like it should do.
-      const points = (ev as { points?: readonly unknown[] } | undefined)?.points ?? [];
-      const indices: number[] = [];
-      for (const p of points) {
-        // The observation index rides on `customdata` — see `buildEmbeddingTraces`. A point's
-        // index within its trace is not the observation once the points are split by
-        // category, so this is the only correct source.
-        const id = (p as { customdata?: unknown }).customdata;
-        if (typeof id === 'number') indices.push(id);
-      }
-      if (indices.length === 0) {
-        this.controls?.clearSelection();
-        return;
-      }
-      this.controls?.selectIndices(indices);
+    await this.plot.draw(target, buildEmbeddingTraces(input), embeddingLayout(input), EMBEDDING_CONFIG);
+    // Draw round a cluster here and those cells light up on the tissue: every view reads
+    // the same mask.
+    this.plot.bindSelection(target, {
+      selected: (indices) => this.controls?.selectIndices(indices),
+      deselected: () => this.controls?.clearSelection(),
     });
-    // The modebar's deselect, and a plain click on empty space.
-    el.on('plotly_deselect', () => this.controls?.clearSelection());
   }
 
-  /**
-   * Drop the embedding's selection handlers from a div another kind is about to use.
-   *
-   * The detached window outlives any one kind — switching tabs swaps its content and
-   * keeps the div — so without this the lasso handlers bound for a UMAP stay live under
-   * the counts plot that replaces it. `plotly_deselect` fires on a plain click in ANY
-   * Plotly chart, so the first click on a bar would silently clear the map's selection.
-   */
-  private unbindEmbeddingSelection(div: string): void {
-    const el = document.getElementById(div) as (Plotly.PlotlyHTMLElement | null);
-    if (!el?.removeAllListeners) return;
-    el.removeAllListeners('plotly_selected');
-    el.removeAllListeners('plotly_deselect');
-  }
-
-  /**
-   * The view the user has set up on the live plot, to carry across a redraw.
-   *
-   * `Plotly.react` resets a 3D scene camera and any zoomed 2D range unless the layout
-   * carries them, so selecting a category or recolouring would throw away an orientation
-   * that took work to find. Rotating a cloud to see a structure and losing it on the next
-   * click makes the plot useless for what it is for.
-   */
-  private liveView(
-    el: HTMLElement,
-  ): { camera?: unknown; ranges?: { x: unknown; y: unknown } } | null {
-    const full = (el as {
-      _fullLayout?: {
-        scene?: { camera?: unknown };
-        xaxis?: { range?: unknown; autorange?: boolean };
-        yaxis?: { range?: unknown; autorange?: boolean };
-      };
-    })._fullLayout;
-    if (!full) return null; // nothing drawn here yet
-    if (full.scene?.camera) return { camera: full.scene.camera };
-    // 2D: only once the user has actually zoomed. Passing an autoranged range back would
-    // freeze the axes and stop the plot re-fitting when the data changes.
-    const zoomed = full.xaxis?.autorange === false && full.yaxis?.autorange === false;
-    if (zoomed && full.xaxis?.range && full.yaxis?.range) {
-      return { ranges: { x: full.xaxis.range, y: full.yaxis.range } };
-    }
-    return null;
-  }
 
   /**
    * Whether the plot on screen fixed its own height.
@@ -791,7 +657,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * which, because the two want opposite `flex` and `overflow`.
    */
   get hasFixedHeight(): boolean {
-    return this.drawnHeight !== null;
+    return this.plot.hasFixedHeight;
   }
 
   /** Where the active kind draws: its own window, or the shared chart div. */
@@ -823,11 +689,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   toggleDetached(): void {
     const leaving = this.plotTarget;
     this.detached = !this.detached;
-    try {
-      Plotly.purge(leaving);
-    } catch {
-      // Nothing was plotted there.
-    }
+    this.plot.purge(leaving);
     // Going back INLINE, the div appears with the next change detection, so a task is
     // enough. Going OUT, the window's div does not exist yet — PrimeNG mounts the dialog
     // with a transition — so the dialog's own `onShow` drives that draw instead. A single
@@ -842,7 +704,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** Re-fit the detached window's plot after it is resized. */
   onDetachedResizeEnd(): void {
-    this.refit(this.detachedDiv);
+    this.plot.refit(this.detachedDiv);
   }
 
   /**
@@ -927,29 +789,15 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return embeddingNote(this.embeddingCoords?.meta ?? this.embedding, !!this.categorical, this.selection.count);
   }
 
+  /** Purge the ACTIVE target: purging the inline div while detached would leave the window
+   *  showing a plot the component believes it has cleared. */
   private purgePlot(): void {
-    try {
-      // The ACTIVE target: purging the inline div while detached would leave the
-      // window showing a plot the component believes it has cleared.
-      Plotly.purge(this.plotTarget);
-    } catch {
-      // Nothing plotted.
-    }
+    this.plot.purge(this.plotTarget);
   }
 
-  /**
-   * Draw, remembering whether this layout fixed its own height.
-   *
-   * The layout builders return `unknown` on purpose — they keep Plotly's layout
-   * types out of the pure module — so the height is read back by narrowing
-   * rather than declared. `height` is Plotly's own key, not ours.
-   */
-  private async draw(
-    traces: unknown, layout: unknown, config: unknown = CHART_CONFIG, div = this.plotTarget,
-  ): Promise<void> {
-    const height = (layout as { height?: unknown } | null)?.height;
-    this.drawnHeight = typeof height === 'number' ? height : null;
-    await Plotly.react(div, traces as never, layout as never, config as never);
+  /** Draw into the active target. */
+  private draw(traces: unknown, layout: unknown): Promise<void> {
+    return this.plot.draw(this.plotTarget, traces, layout);
   }
 
   private async render(): Promise<void> {
@@ -960,7 +808,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const target = this.plotTarget;
     if (!document.getElementById(target)) return;
     // Anything but the embedding inherits a div the embedding may have bound handlers on.
-    if (this.kind !== 'embedding') this.unbindEmbeddingSelection(target);
+    if (this.kind !== 'embedding') this.plot.unbindSelection(target);
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.
