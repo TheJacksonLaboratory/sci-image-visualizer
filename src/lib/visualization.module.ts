@@ -49,6 +49,7 @@ import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.com
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
+import { SpatialKeyComponent } from './spatial-controls/spatial-key/spatial-key.component';
 import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
 import { FloatingDragDirective } from './visualizer/floating-drag.directive';
@@ -89,6 +90,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     SpatialChartsComponent,
     IntensityInsetComponent,
     FloatingDragDirective,
+    SpatialKeyComponent,
   ],
   imports: [
     CommonModule,

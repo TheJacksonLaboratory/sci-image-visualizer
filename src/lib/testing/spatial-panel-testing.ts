@@ -2,6 +2,12 @@ import { Directive, Input, forwardRef } from '@angular/core';
 import { ComponentFixture } from '@angular/core/testing';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { By } from '@angular/platform-browser';
+import { BehaviorSubject, Subscription, isObservable } from 'rxjs';
+
+import type { ISpatialControls } from '../contracts/visualizer.contract';
+import type { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
+import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 
 /**
  * Test-only stand-in for the PrimeNG form controls of the spatial-omics panels.
@@ -100,4 +106,58 @@ export function fire(el: Element, name: string, detail: Record<string, unknown> 
 /** Click a native element. */
 export function click(el: Element): void {
   (el as HTMLElement).click();
+}
+
+/**
+ * Feed a child panel its inputs the way the dialog does: a plain value is set once, an
+ * observable's every emission is set and rendered. Returns the subscription to end it.
+ */
+export function bindInputs<T>(
+  fixture: ComponentFixture<T>, inputs: Record<string, unknown>, render = true,
+): Subscription {
+  const subs = new Subscription();
+  for (const [name, value] of Object.entries(inputs)) {
+    if (isObservable(value)) {
+      subs.add(value.subscribe((v) => {
+        fixture.componentRef.setInput(name, v);
+        if (render) fixture.detectChanges();
+      }));
+    } else {
+      fixture.componentRef.setInput(name, value);
+    }
+  }
+  if (render) fixture.detectChanges();
+  return subs;
+}
+
+/** A fake `ISpatialControls` whose writes land in its own subjects, like the real store. */
+export interface SpatialControlsFake {
+  controls: jest.Mocked<ISpatialControls>;
+  dataset$: BehaviorSubject<SpatialDataset | null>;
+  view$: BehaviorSubject<SpatialViewState>;
+  selection$: BehaviorSubject<SpatialSelectionMask>;
+}
+
+/** {@link SpatialControlsFake} over `dataset`, with the default view and no selection. */
+export function fakeSpatialControls(dataset: SpatialDataset | null): SpatialControlsFake {
+  const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+  const view$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
+  const selection$ = new BehaviorSubject<SpatialSelectionMask>(emptySelection());
+  const controls = {
+    getDataset$: jest.fn(() => dataset$),
+    getViewState$: jest.fn(() => view$),
+    viewState: jest.fn(() => view$.value),
+    setViewState: jest.fn((partial: Partial<SpatialViewState>) => view$.next({ ...view$.value, ...partial })),
+    colorByColumn: jest.fn((name: string) => view$.next({ ...view$.value, colorBy: { kind: 'column', name } })),
+    colorByFeature: jest.fn((name: string) => view$.next({ ...view$.value, colorBy: { kind: 'feature', name } })),
+    clearColorBy: jest.fn(() => view$.next({ ...view$.value, colorBy: null })),
+    searchFeatures: jest.fn(async () => ['Ttr']),
+    categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
+    getSelection$: jest.fn(() => selection$),
+    selectFromRegions: jest.fn(() => 0),
+    selectCategory: jest.fn(async () => 0),
+    clearSelection: jest.fn(() => selection$.next(emptySelection())),
+    sampledSections: jest.fn(() => Float32Array.from([0, 10, 20])),
+  } as unknown as jest.Mocked<ISpatialControls>;
+  return { controls, dataset$, view$, selection$ };
 }

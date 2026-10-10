@@ -4,6 +4,7 @@ import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialControlsComponent } from './spatial-controls.component';
+import { SpatialKeyComponent } from './spatial-key/spatial-key.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
@@ -102,7 +103,8 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
   async function build(opts: { is3d?: boolean } = {}) {
     TestBed.resetTestingModule();
     await TestBed.configureTestingModule({
-      declarations: [SpatialControlsComponent, StubValueAccessorDirective],
+      // The dialog and every panel it is made of.
+      declarations: [SpatialControlsComponent, SpatialKeyComponent, StubValueAccessorDirective],
       imports: [FormsModule],
       schemas: [NO_ERRORS_SCHEMA],
       providers: [{

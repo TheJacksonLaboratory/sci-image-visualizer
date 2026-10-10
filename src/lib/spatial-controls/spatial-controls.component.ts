@@ -7,7 +7,7 @@ import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualiz
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
-  ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
+  ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
 } from '../contracts/display-types';
 import { DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
 import {
@@ -15,7 +15,7 @@ import {
 } from '../spatial/spatial-tiles';
 import {
   CLIP_OPTIONS, FAMILY_PREFIX, GLYPH_OPTIONS, allGenesPreparingNote, buildGeneTree, columnOptions,
-  PanelOption, continuousColorBarCss, countGroupRows, densityColorBarCss, familyMembers, glyphPoints,
+  PanelOption, countGroupRows, densityColorBarCss, familyMembers, glyphPoints,
   groupEntryFor, groupOptions, groupVariantOptions, importGeneGroupsPatch, markerColumnOptions,
   markerGeneGroups, markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions,
   toggleHidden,
@@ -26,12 +26,11 @@ import {
 import { parseCssColor, rgbToHex } from '../contracts/color';
 import { Supersede } from '../util/supersede';
 import { GenePickerModel } from './spatial-gene-picker';
+import { SpatialKeyModel, SpatialLegendEntry } from './spatial-key/spatial-key.model';
+import { colorByLabel, colormapNodeFor } from './spatial-key/spatial-key.component';
 
-/** One legend row for a categorical colouring. */
-export interface SpatialLegendEntry {
-  label: string;
-  color: string;
-}
+/** @deprecated Moved to `spatial-key/spatial-key.model`; re-exported for one release. */
+export type { SpatialLegendEntry };
 
 /** @deprecated Moved to `spatial/spatial-panel-model`; re-exported for one release. */
 export { parseGeneGroups };
@@ -124,10 +123,18 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
   selectedGene: string | null = null;
 
+  /** The key — legend or colour bar — for the active colouring. Kept here, not in
+   *  `<spatial-key>`: whether the colouring is categorical decides which knobs the rest of
+   *  the panel offers, whether or not the key is on screen. */
+  readonly key = new SpatialKeyModel((fn) => this.zone.run(fn));
   /** Categorical key, or null when the active colouring is continuous. */
-  legend: SpatialLegendEntry[] | null = null;
+  get legend(): SpatialLegendEntry[] | null {
+    return this.key.legend;
+  }
   /** CSS gradient for a continuous colouring, or null when categorical. */
-  colorBarCss: string | null = null;
+  get colorBarCss(): string | null {
+    return this.key.colorBarCss;
+  }
 
   /** Current selection — drives the count, the Clear button and the muting. */
   selection: SpatialSelectionMask = emptySelection();
@@ -154,20 +161,12 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
    */
   sections: Float32Array | null = null;
 
-  /**
-   * Colormap tree for the continuous colour scale, and the node currently picked
-   * from it. The library's own `COLORMAP_OPTIONS`, shown with the same swatches
-   * the image's colormap picker uses — choosing a gradient is a visual decision,
-   * so a list of names would be the wrong control.
-   */
+  /** Colormap tree for the continuous colour scale and the density map: the library's
+   *  own `COLORMAP_OPTIONS`. */
   colormapOptions: ColormapNode[] = [];
-  selectedColormapNode: ColormapNode | null = null;
 
   private colormap: ColormapNode | null = null;
   private reverse = false;
-  /** Guards the legend/colour-bar rebuild: async, and driven by input the user changes
-   *  faster than it resolves. */
-  private readonly keyLoad = new Supersede();
   private readonly subs = new Subscription();
 
   constructor(
@@ -203,8 +202,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.view = view;
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
-      this.selectedColormapNode = this.colormapNodeFor(view.continuousColormap);
-      this.selectedDensityColormapNode = this.colormapNodeFor(view.densityColormap);
+      this.selectedDensityColormapNode = colormapNodeFor(this.colormapOptions, view.densityColormap);
       this.geneTree = buildGeneTree(view.transcriptGenes, view.transcriptGeneGroups);
       this.geneMenu = this.buildGeneMenu();
       this.refreshDensityWindow();
@@ -1235,22 +1233,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.selectedGene = null;
   }
 
-  /**
-   * Description of the active column, when it has one. Surfaced because a
-   * DERIVED column (k-means clusters, QC totals computed at conversion) must not
-   * read as though it came with the data.
-   */
-  get activeDescription(): string | null {
-    const by = this.view.colorBy;
-    if (!by || by.kind !== 'column') return null;
-    return this.dataset?.columns.find((c) => c.name === by.name)?.description ?? null;
-  }
-
-  /** Label for the current colouring, for the key's heading. */
+  /** Label for the current colouring, for the Distribution heading. */
   get colorByLabel(): string {
-    const by = this.view.colorBy;
-    if (!by) return 'Flat colour';
-    return by.kind === 'feature' ? `Gene · ${by.name}` : by.name;
+    return colorByLabel(this.view);
   }
 
   /** True when the active colouring is a categorical column (drives the key). */
@@ -1266,67 +1251,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   // ── internals ───────────────────────────────────────────────────────────
 
   /** Rebuild the legend or colour bar for the current colouring. */
-  private async refreshKey(): Promise<void> {
-    const by = this.view.colorBy;
-    if (!by || !this.controls) {
-      this.legend = null;
-      this.colorBarCss = null;
-      return;
-    }
-    const meta = by.kind === 'column'
-      ? this.dataset?.columns.find((c) => c.name === by.name)
-      : undefined;
-
-    const current = this.keyLoad.next();
-    if (meta?.kind === 'categorical') {
-      try {
-        const colors = await this.controls.categoryColors(by.name);
-        // Same race, same cost if it is lost: a slower earlier column would paint
-        // its palette into the legend for the column now selected.
-        if (!current()) return;
-        this.legend = meta.categories.map((label, i) => ({ label, color: colors[i] }));
-        this.colorBarCss = null;
-      } catch {
-        if (!current()) return;
-        // The column's values may not have loaded yet; leave the key empty
-        // rather than showing a legend that might not match the render.
-        this.legend = null;
-        this.colorBarCss = null;
-      }
-      return;
-    }
-
-    // Continuous (a numeric column or a gene): a colour bar from the same LUT.
-    this.legend = null;
-    this.colorBarCss = continuousColorBarCss(
-      this.colormap?.data?.value, this.reverse, this.view.continuousColormap,
-    );
-  }
-
-  /**
-   * The continuous colour scale's colormap. Clearing it goes back to following
-   * the image's, which is the default.
-   */
-  onContinuousColormap(node: ColormapNode | null): void {
-    this.selectedColormapNode = node;
-    // The value is a ColormapValue, which is a NAME for the built-in scales and an
-    // inline `[stop, colour]` array for the rest — half the library's colormaps
-    // are the array kind, so anything that only accepts a string silently drops
-    // them. A group row carries no value and clears the setting.
-    this.controls?.setViewState({ continuousColormap: node?.data?.value ?? null });
-  }
-
-  /** The tree node holding a colormap value, so the picker shows what is in use. */
-  private colormapNodeFor(value: ColormapValue | null): ColormapNode | null {
-    if (!value) return null;
-    for (const group of this.colormapOptions) {
-      for (const node of group.children ?? []) {
-        // Reference equality: the value came out of this same tree, and an inline
-        // scale is a 256-entry array not worth comparing element by element.
-        if (node.data?.value === value) return node;
-      }
-      if (group.data?.value === value) return group;
-    }
-    return null;
+  private refreshKey(): Promise<void> {
+    return this.key.refresh(this.controls, this.dataset, this.view, this.colormap, this.reverse);
   }
 }

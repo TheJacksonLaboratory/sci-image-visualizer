@@ -260,28 +260,6 @@ describe('SpatialControlsComponent', () => {
       expect(component.colorByLabel).toBe('Gene · Ttr');
     });
 
-    it('surfaces a column description, so a DERIVED column does not read as measured', async () => {
-      dataset$.next({
-        ...dataset,
-        columns: [{
-          kind: 'categorical', name: 'cluster', categories: ['a', 'b'],
-          description: 'k-means (k=8) — derived for the demo',
-        }],
-      });
-      component.onColumn('cluster');
-      await flush();
-      expect(component.activeDescription).toMatch(/k-means/);
-    });
-
-    it('has no description for a gene or an undescribed column', async () => {
-      component.onGene('Ttr');
-      await flush();
-      expect(component.activeDescription).toBeNull();
-      component.onColumn('region');
-      await flush();
-      expect(component.activeDescription).toBeNull();
-    });
-
     it('shows no key at all when nothing is coloured by', async () => {
       component.onColumn(null);
       await flush();
@@ -349,58 +327,6 @@ describe('SpatialControlsComponent', () => {
       (controls.setViewState as jest.Mock).mockClear();
       component.onGeneMapOpacity(undefined);
       expect(controls.setViewState).not.toHaveBeenCalled();
-    });
-
-    it('writes the picked colormap, and clearing it goes back to the image’s', () => {
-      component.onContinuousColormap({ label: 'Magma', data: { value: 'MAGMA_LUT' } });
-      expect(controls.setViewState).toHaveBeenCalledWith({ continuousColormap: 'MAGMA_LUT' });
-      component.onContinuousColormap(null);
-      expect(controls.setViewState).toHaveBeenCalledWith({ continuousColormap: null });
-      // A group row carries no value, so picking one must not set a bogus colormap.
-      component.onContinuousColormap({ label: 'Sequential', data: null } as never);
-      expect(controls.setViewState).toHaveBeenLastCalledWith({ continuousColormap: null });
-    });
-
-    it('writes an INLINE colour scale, which is what most options become', () => {
-      // COLORMAP_OPTIONS ships `*_LUT` KEYS, and the store rewrites them in place
-      // with 256-stop `[stop, colour]` arrays once assets/plotting/colormap-luts.json
-      // loads — so at runtime most of the library's colormaps are arrays, not
-      // names. (No HTTP here, so the tree still holds the keys; the array case is
-      // built explicitly.) A handler that only accepts strings shows the pick in
-      // the dropdown and changes nothing on screen, which is the worst of both.
-      const resolved = {
-        label: 'Plasma',
-        data: { value: [[0, 'rgb(12,7,134)'], [1, 'rgb(239,248,33)']] as [number, string][] },
-      };
-      component.onContinuousColormap(resolved);
-      expect(controls.setViewState).toHaveBeenCalledWith({
-        continuousColormap: resolved.data.value,
-      });
-
-      // And an unresolved key is still a name, which must pass through too.
-      const key = component.colormapOptions
-        .flatMap((g) => g.children ?? [])
-        .find((n) => n.label === 'Plasma')!;
-      expect(key.data!.value).toBe('PLASMA_LUT');
-      component.onContinuousColormap(key);
-      expect(controls.setViewState).toHaveBeenCalledWith({ continuousColormap: 'PLASMA_LUT' });
-    });
-
-    it('shows the colormap in use, found in the option tree', async () => {
-      // The picker has to reflect state set from anywhere — a host calling
-      // setViewState, or a restored session — not just its own clicks.
-      view$.next({ ...view$.value, continuousColormap: 'MAGMA_LUT' });
-      await flush();
-      expect(component.selectedColormapNode?.label).toBe('Magma');
-
-      view$.next({ ...view$.value, continuousColormap: null });
-      await flush();
-      expect(component.selectedColormapNode).toBeNull();
-
-      // An unknown value selects nothing rather than throwing.
-      view$.next({ ...view$.value, continuousColormap: 'NOT_A_LUT' });
-      await flush();
-      expect(component.selectedColormapNode).toBeNull();
     });
 
     it('builds the colour bar from the colormap the renderer would use', async () => {
@@ -486,7 +412,7 @@ describe('SpatialControlsComponent', () => {
       // cloud sees one flat colour, and a console warning is not something anyone
       // reads — so the panel says why, and what does render it.
       component.is3d = true;
-      (component as any).legend = Array.from({ length: 338 }, (_, i) => ({
+      (component.key as { legend: unknown }).legend = Array.from({ length: 338 }, (_, i) => ({
         label: `s${i}`, color: '#888888',
       }));
       expect(component.exceedsCloudPalette).toBe(true);
@@ -494,13 +420,13 @@ describe('SpatialControlsComponent', () => {
       // missing value, and the panel must publish what the renderer enforces —
       // at 96 the cloud drew flat with no warning at all.
       expect(component.cloudPaletteLimit).toBe(95);
-      (component as any).legend = Array.from({ length: 96 }, () => ({ label: 'c', color: '#888' }));
+      (component.key as { legend: unknown }).legend = Array.from({ length: 96 }, () => ({ label: 'c', color: '#888' }));
       expect(component.exceedsCloudPalette).toBe(true);
 
       // Within the ceiling, or in 2D, there is nothing to warn about.
-      (component as any).legend = Array.from({ length: 95 }, () => ({ label: 'c', color: '#888' }));
+      (component.key as { legend: unknown }).legend = Array.from({ length: 95 }, () => ({ label: 'c', color: '#888' }));
       expect(component.exceedsCloudPalette).toBe(false);
-      (component as any).legend = Array.from({ length: 338 }, () => ({ label: 'c', color: '#888' }));
+      (component.key as { legend: unknown }).legend = Array.from({ length: 338 }, () => ({ label: 'c', color: '#888' }));
       component.is3d = false;
       expect(component.exceedsCloudPalette).toBe(false);
     });
@@ -512,7 +438,7 @@ describe('SpatialControlsComponent', () => {
       // …and how to actually see them: the cloud is drawn over the fields.
       expect(component.densityNote).toContain('Lower Opacity');
 
-      (component as any).legend = [{ label: 'A', color: '#f00' }];
+      (component.key as { legend: unknown }).legend = [{ label: 'A', color: '#f00' }];
       expect(component.densityNote).toContain('largest clusters');
     });
 
