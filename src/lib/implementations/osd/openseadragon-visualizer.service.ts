@@ -25,6 +25,7 @@ import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import { PlotModeRect, PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
 import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
 import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
+import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { SliceCache } from './slice-cache';
 import { DisplayPipeline } from './display-pipeline';
 import { HistogramSampler } from './histogram-sampler';
@@ -205,12 +206,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  (napari-js waits less — it falls back to a single tile, not a backend.) */
   private readonly tilesInfoTimeoutMs = 600000; // 10 min
 
-  /** Per-channel fit-view tile budget (tiles at the coarsest real level × channels).
-   *  Above it, a multichannel image renders server-composited instead of per-channel
-   *  — its full-res reads (it has no overview pyramid) would be too many × N channels.
-   *  64 (e.g. a 4x4 single-FOV z-stack × 4ch) stays per-channel; a whole-slide
-   *  (hundreds–thousands) falls back. */
-  private readonly MAX_MULTICHANNEL_FIT_TILES = 256;
 
   /** Pixel display pipeline (window/gamma/invert/colormap + additive tint) —
    *  shared by tile recoloring and the composite export so they stay identical
@@ -760,38 +755,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // A tiled image is going on screen: no simple-mode state may survive it
       // (load() normally cleared it already; plot() is what mounts the image).
       this.resetSimpleState();
-      // Multichannel fluorescence (indexed/LUT-bearing stacks) composite client-side
-      // from per-channel tiles. Trust the server's explicit `multichannel` flag — the
-      // old `channels>1 && grayscale` heuristic also matched RGB photos Bio-Formats
-      // reads as separated planes (channels>1, rgbChannels==1), splitting them into N
-      // per-channel TiledImages that flooded the tile endpoint and hung on load.
-      this.realLevels = d.realLevels ?? d.levels.length;
-      // Tiles to cover the whole image at the coarsest REAL Bio-Formats level (the
-      // smallest level that has real, per-channel-fetchable tiles — synthetic overview
-      // levels are server-composited only). A pyramidal image's coarsest real level is
-      // tiny (few tiles); a flat/no-pyramid image's is the full-res grid (many tiles).
-      const coarse = d.levels[this.realLevels - 1] ?? d.levels[d.levels.length - 1];
-      const coarseW = coarse ? Math.ceil(coarse.width / d.tileSize) : 1;
-      const coarseH = coarse ? Math.ceil(coarse.height / d.tileSize) : 1;
-      const coarseTiles = coarseW * coarseH;
-      this.isMultiChannel = !!d.multichannel;
-      if (this.isMultiChannel) {
-        // Per-channel rendering can only use the REAL levels, so OSD requests the
-        // coarsest real level's whole tile grid × N channels at fit. When that's large
-        // (a whole-slide), it's too many (often slow, pyramid-less) full-res reads —
-        // fall back to the single server-composited source (which keeps the fast
-        // synthetic overviews). A small single-FOV z-stack stays per-channel. Size in
-        // BYTES isn't the signal — tile count is.
-        const fitTiles = coarseTiles * Math.max(1, d.channels ?? 1);
-        if (fitTiles > this.MAX_MULTICHANNEL_FIT_TILES) {
-          this.isMultiChannel = false;
-          console.warn(
-            '[OSD] multichannel composite too large for per-channel rendering: ' +
-            `${coarseW}x${coarseH} tiles x ${d.channels} channels = ${fitTiles} at the coarsest ` +
-            `real level (> ${this.MAX_MULTICHANNEL_FIT_TILES}); rendering server-composited for speed.`,
-          );
-        }
-      }
+      const plan = planTiledMount(d);
+      this.realLevels = plan.realLevels;
+      this.isMultiChannel = plan.multiChannel;
       this.cache.clearChannelGroups();
       this.destroyViewer();
       // Auto-range grayscale tiles to the image's actual intensity span (like the
@@ -808,7 +774,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // Size the slice cache for this image: LRU cap to hold the whole stack
       // (capped) and skip background preloading for stacks too large to preload
       // (would flood full-res reads). Normal stacks keep the flicker-free pre-cache.
-      this.cache.configure(d.z ?? 1, coarseTiles);
+      this.cache.configure(d.z ?? 1, plan.coarseTiles);
     }
 
     // Simple mode: OSD's single-image source decodes the URL (blob:/data:/http)
@@ -973,57 +939,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     setTimeout(() => ro.disconnect(), 5000);
   }
 
-  /**
-   * Custom tile source built from the descriptor. OSD numbers levels
-   * coarsest-first; the backend numbers resolutions full-res-first, so
-   * `res = (levels-1) - osdLevel`. Overriding getLevelScale/getNumTiles lets us
-   * honour Bio-Formats' actual per-level dimensions (not assume power-of-two).
-   */
-  private buildTileSource(d: TileDescriptor, infoB64: string, z: number, channel?: number): any {
-    // Multichannel images composite from per-channel tiles, which only exist at
-    // real Bio-Formats resolutions — so drive OSD off the real levels alone and
-    // skip the synthetic (server-composited) overviews. Every displayed tile is
-    // then per-channel-fetchable at any zoom.
-    const levels = this.isMultiChannel ? d.levels.slice(0, this.realLevels) : d.levels;
-    const n = levels.length;
-    const t = d.tileSize;
-    const base = this.api;
-
-    // OSD level i (0 = coarsest) <-> backend resolution (n-1-i) (res 0 = full).
-    // The backend pyramid is NOT necessarily power-of-two, so we drive OSD off
-    // the backend's real per-level dimensions. We override ONLY getLevelScale:
-    // OSD derives getNumTiles, getTileBounds AND its per-zoom level selection
-    // from getLevelScale, so they all stay consistent — requesting exactly the
-    // tiles each resolution actually has (no out-of-range 400s, no flood).
-    const resForLevel = (level: number) => n - 1 - level;
-    const ts: any = new (OSD as any).TileSource({
-      width: d.width,
-      height: d.height,
-      tileSize: t,
-      tileOverlap: 0,
-      minLevel: 0,
-      maxLevel: n - 1,
+  /** The `GET /tile` source for slice `z` (one channel's, when given) — see
+   *  {@link buildOsdTileSource}. Multichannel draws off the real levels only. */
+  private buildTileSource(d: TileDescriptor, infoB64: string, z: number, channel?: number): Record<string, unknown> {
+    return buildOsdTileSource(d, {
+      api: this.api, infoB64, z, channel,
+      realLevelsOnly: this.isMultiChannel ? this.realLevels : undefined,
     });
-    ts.getLevelScale = (level: number) => {
-      const lvl = levels[resForLevel(level)];
-      return lvl ? lvl.width / d.width : 1;
-    };
-    // Drive the tile COUNT off each level's own (independently-rounded) dimensions,
-    // not OSD's default `ceil(scale * fullDimension / tileSize)`. Synthetic AND real
-    // Bio-Formats levels aren't exact proportional scales of the full image, so
-    // `scale * fullHeight` can round up to one more row (or column) than the level
-    // actually has — OSD then requests an out-of-range tile that the server 400s
-    // ("Tile (col,row) out of range"). Using the level's real w/h matches the
-    // server's own bounds check exactly.
-    const Point = (OSD as any).Point;
-    ts.getNumTiles = (level: number) => {
-      const lvl = levels[resForLevel(level)];
-      if (!lvl) return new Point(0, 0);
-      return new Point(Math.ceil(lvl.width / t), Math.ceil(lvl.height / t));
-    };
-    ts.getTileUrl = (level: number, x: number, y: number) =>
-      buildTileUrl(base, infoB64, { res: resForLevel(level), col: x, row: y, z, tileSize: t, channel });
-    return ts;
   }
 
   /** Collapse a burst of display-state changes into ONE invalidation on the next
