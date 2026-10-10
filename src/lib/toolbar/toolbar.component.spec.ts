@@ -63,11 +63,7 @@ describe('ToolbarComponent', () => {
     expect(component.effectivePlotType).toBe(PlotType.HEATMAP);
   });
 
-  it('isPiIcon distinguishes PrimeNG glyphs from SVG asset paths', () => {
-    expect(component.isPiIcon('pi pi-image')).toBe(true);
-    expect(component.isPiIcon('assets/plotting/surface.svg')).toBe(false);
-    expect(component.isPiIcon(undefined)).toBe(false);
-  });
+  // isPiIcon is covered in plot-type-selector.component.spec.ts.
 
   it('isIsosurfaceMode is true only for the Isosurface plot type', () => {
     component.selectedPlotType = PlotType.ISOSURFACE;

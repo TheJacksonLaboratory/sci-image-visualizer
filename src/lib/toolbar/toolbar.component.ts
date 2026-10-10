@@ -158,11 +158,6 @@ export class ToolbarComponent {
   @Output() brushSizeChange = new EventEmitter<number | undefined>();
   @Output() vertexEraserRadiusChange = new EventEmitter<number | undefined>();
 
-  /** Iso slider bounds — toolbar UI constants (the values are host-owned). */
-  readonly isoValueMin = 0;
-  readonly isoValueMax = 255;
-  readonly isoValueStep = 1;
-
   displayHelpDialog = false;
 
   /** trackBy for the dialog tools' buttons. */
@@ -188,12 +183,6 @@ export class ToolbarComponent {
    *  million overlapping points. */
   get isSpatialMode(): boolean {
     return isSpatialOmics(this.effectivePlotType) || isSpatialOmics3d(this.effectivePlotType);
-  }
-
-  /** A plot-type icon is a PrimeNG font glyph (e.g. `pi pi-image`) rather than an
-   *  SVG asset path — drives which element the selector item template renders. */
-  isPiIcon(icon: string | undefined): boolean {
-    return !!icon && icon.startsWith('pi ');
   }
 
   /** Backends with a vertex-editing region overlay: OSD Image and napari-js WebGPU image
@@ -251,11 +240,6 @@ export class ToolbarComponent {
    *  Image plot types, which show the Intensity tool group. */
   get isIntensityCapable(): boolean {
     return this.effectivePlotType === PlotType.HEATMAP || this.effectivePlotType === PlotType.IMAGE;
-  }
-
-  /** The iso band slider reports its `[low, high]` pair (or nothing). */
-  onIsoRange(value: number | number[] | undefined): void {
-    this.isoRangeChange.emit(Array.isArray(value) ? value : undefined);
   }
 
   showHelp(): void {
