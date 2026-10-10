@@ -15,7 +15,9 @@ import {
 } from '../../spatial/spatial-selection';
 import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
 import { geneOptionsFor } from '../../spatial/gene-search';
-import { ComputeProgress, EmbeddingComputeRun } from '../../spatial/embedding-compute';
+import {
+  BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator,
+} from '../../spatial/embedding-compute-coordinator';
 import { Supersede } from '../../util/supersede';
 import { ChartKindOption, chartKindOptions, embeddingNote, heatmapNote, kindHelp } from './chart-help';
 import {
@@ -151,72 +153,32 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    */
   detached = false;
   /**
-   * A t-SNE the dataset does not publish, offered so it can be computed here.
-   *
-   * A dropped-in `.h5ad` typically carries one UMAP and a PCA, and no t-SNE — the two
-   * views answer different questions, so having only one is a real gap. Computing it
-   * needs no expression data: t-SNE runs on the PCA scores, which is why this can happen
-   * in the browser at all while PCA cannot.
+   * Largest dataset this will offer to embed in the browser — see
+   * {@link BROWSER_TSNE_MAX_OBSERVATIONS}.
    */
-  private static readonly COMPUTABLE: SpatialEmbeddingMeta[] = [
-    { name: 'local:tsne', label: 't-SNE (compute)', dims: 2, derived: true },
-    { name: 'local:tsne3d', label: 't-SNE 3D (compute)', dims: 3, derived: true },
-  ];
+  static readonly BROWSER_TSNE_MAX_OBSERVATIONS = BROWSER_TSNE_MAX_OBSERVATIONS;
 
-  /** The menu suffix that says a click will start work; not part of the name. */
-  private static readonly COMPUTE_SUFFIX = ' (compute)';
-
-  /**
-   * Largest dataset this will offer to embed in the browser.
-   *
-   * t-SNE is O(N²) per iteration — vectorised on the GPU, but not approximated — so the
-   * cost is quadratic in observations. Measured end to end in Firefox on WebGPU: 2,688
-   * points took 95 s. That scales to roughly five and a half minutes at this threshold,
-   * and to about 76 minutes at seqFISH's 19,416, which was also measured offline.
-   *
-   * Past this the option is WITHDRAWN rather than offered with a warning. An hour-long
-   * job started from a button is not a choice a reader can meaningfully consent to in a
-   * dialog, and a t-SNE that large belongs in the offline pipeline, where it can run
-   * once and be served to everyone.
-   */
-  static readonly BROWSER_TSNE_MAX_OBSERVATIONS = 5000;
-
-  /** Measured anchor for the estimate: seconds for 2,688 points on WebGPU. */
-  private static readonly TSNE_SECONDS_AT = { seconds: 95, observations: 2688 };
-
-  /** Coordinates computed in this browser, by name. Not persisted: a reload recomputes. */
-  private readonly computed = new Map<string, SpatialEmbedding>();
-
-  /** The live run, when one is going. */
-  private computeRun: EmbeddingComputeRun | null = null;
-
-  /**
-   * Invalidated by every dataset change and by teardown, so a computation in progress can
-   * tell that what it is computing is no longer what is on screen.
-   *
-   * A run is several awaits long — the PCA scores arrive over HTTP, then the worker takes
-   * a minute or more — and the dataset can change at any of them, including BEFORE
-   * `computeRun` exists to be terminated. Without a token, the scores fetched for one
-   * dataset get embedded and drawn over another's observations: a plot of two datasets at
-   * once, which reads as a strange-looking t-SNE rather than as a bug.
-   */
-  private readonly computeLoad = new Supersede();
+  /** The t-SNE computed in this browser: what to offer, the run, its progress, its results. */
+  private readonly compute = new EmbeddingComputeCoordinator();
 
   /** 0..1 while running, or null before the first report. Drives the progress bar. */
-  computeFraction: number | null = null;
-
+  get computeFraction(): number | null {
+    return this.compute.state.fraction;
+  }
   /** Which backend the worker got — 'webgpu', 'wasm' or 'cpu'. Shown while running. */
-  computeBackend: string | null = null;
-
-  computeMessage: string | null = null;
-
-  computeError: string | null = null;
-
+  get computeBackend(): string | null {
+    return this.compute.state.backend;
+  }
+  get computeMessage(): string | null {
+    return this.compute.state.message;
+  }
+  get computeError(): string | null {
+    return this.compute.state.error;
+  }
   /** True when a t-SNE is missing but the dataset is too big to embed here. */
-  tsneTooLarge = false;
-
-  /** Observations in the live dataset, kept for the cost estimate. */
-  private observationCount = 0;
+  get tsneTooLarge(): boolean {
+    return this.compute.tooLarge;
+  }
 
   /** The kinds the ACTIVE subject can be drawn as. A category code is a label,
    *  not a magnitude, so a histogram of it would be meaningless — what a
@@ -383,20 +345,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       // Embeddings belong to the dataset, so they are re-read with it and the loaded
       // coordinates dropped: a UMAP from the previous dataset over these observations
       // would be a plot of two different things at once.
-      this.computed.clear();
-      this.abandonCompute();
-      const published = dataset?.embeddings ? [...dataset.embeddings] : [];
       // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
-      // its own — otherwise the menu advertises work that cannot start, or duplicates
-      // what is already served.
-      const hasPca = published.some((e) => /pca/i.test(e.label ?? e.name));
-      const hasTsne = published.some((e) => /tsne|t-sne/i.test(e.label ?? e.name));
-      this.observationCount = dataset?.observations.count ?? 0;
-      this.tsneTooLarge = hasPca && !hasTsne
-        && this.observationCount > SpatialChartsComponent.BROWSER_TSNE_MAX_OBSERVATIONS;
-      this.embeddings = hasPca && !hasTsne && !this.tsneTooLarge
-        ? [...published, ...SpatialChartsComponent.COMPUTABLE]
-        : published;
+      // its own; anything computed or computing for the previous dataset is dropped.
+      this.embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
       this.embedding = this.embeddings[0] ?? null;
       this.embeddingCoords = null;
       // Nothing to draw for the kind that was selected; fall back rather than sit blank.
@@ -470,7 +421,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // A worker outlives the component that started it: closing the panel mid-run would
     // otherwise leave a t-SNE saturating a GPU for minutes with nothing left to receive
     // the answer.
-    this.abandonCompute();
+    this.compute.abandon();
     // BOTH divs: a chart left detached at teardown holds its WebGL context in the
     // window's div, which the inline id would never reach.
     for (const div of [this.chartDiv, this.detachedDiv]) {
@@ -686,7 +637,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const current = this.embeddingLoad.next();
     // Computed here, not served: a local result is the same shape as a fetched one, so
     // everything downstream — colouring, lasso selection, the camera — is unchanged.
-    const local = this.computed.get(meta.name);
+    const local = this.compute.result(meta.name);
     if (local) {
       this.embeddingCoords = local;
     } else if (this.isComputable) {
@@ -912,175 +863,49 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     this.refreshGeneOptions();
   }
 
-  /**
-   * Roughly how long a run will take, in seconds, from the measured anchor.
-   *
-   * Shown before the click. A progress bar tells you a job is going; only an estimate
-   * tells you whether to start it.
-   */
+  /** Roughly how long a run will take, in seconds, from the measured anchor. */
   get computeEstimateSeconds(): number {
-    const n = this.observationCount;
-    const { seconds, observations } = SpatialChartsComponent.TSNE_SECONDS_AT;
-    return Math.max(1, Math.round(seconds * (n / observations) ** 2));
+    return this.compute.estimateSeconds;
   }
 
   /** That estimate as something to put on a button. */
   get computeEstimateLabel(): string {
-    const secs = this.computeEstimateSeconds;
-    if (secs < 90) return `~${secs}s`;
-    return `~${Math.round(secs / 60)} min`;
+    return this.compute.estimateLabel;
   }
 
   /** Why the option is absent, when a dataset is past the threshold. */
   get tsneTooLargeNote(): string {
-    const n = this.observationCount;
-    return `t-SNE is not offered here for ${n.toLocaleString()} observations — it is `
-      + `quadratic, so it would take roughly ${this.computeEstimateLabel} in the browser. `
-      + 'Compute it offline and serve it with the dataset.';
+    return this.compute.tooLargeNote;
   }
 
   /** Whether the selected embedding is one this browser would have to compute. */
   get isComputable(): boolean {
-    return !!this.embedding && this.embedding.name.startsWith('local:');
+    return this.compute.isComputable(this.embedding);
   }
 
   /** Whether it has already been computed in this session. */
   get isComputed(): boolean {
-    return !!this.embedding && this.computed.has(this.embedding.name);
+    return this.compute.isComputed(this.embedding);
   }
 
   get isComputing(): boolean {
-    return !!this.computeRun?.running;
+    return this.compute.running;
   }
 
-  /**
-   * Compute the selected embedding here, in a worker.
-   *
-   * The PCA scores come from the port as an ordinary embedding — the server derives them,
-   * because PCA needs the whole expression matrix (185 MB for a Visium dataset) while
-   * t-SNE needs only the scores (0.51 MB). Sending the matrix to the browser to save a
-   * few seconds of arithmetic would be a far slower answer.
-   */
+  /** Compute the selected embedding here, in a worker, then draw it. */
   async computeEmbedding(): Promise<void> {
     const meta = this.embedding;
     const controls = this.controls;
     if (!meta || !controls?.getEmbedding || this.isComputing) return;
-    this.computeError = null;
-    this.computeMessage = null;
-    this.computeFraction = null;
-    this.computeBackend = null;
-
-    // Every early return and every await below is checked against this. `run` is held
-    // locally as well as on the instance: after an await `this.computeRun` may already be
-    // a newer run's, and clearing or terminating that one is how a fresh computation gets
-    // killed by the tail of the one it replaced.
-    const current = this.computeLoad.next();
-    const superseded = () => !current();
-    let run: EmbeddingComputeRun | null = null;
-
-    try {
-      // Prefer the 3-D scores: they carry a third component for free, and t-SNE on more
-      // components than it needs is not better — the PCA basis is the input either way.
-      const source = await this.loadPcaScores(controls);
-      if (superseded()) return;
-      if (!source) {
-        this.computeError = 'This dataset serves no PCA to embed.';
-        return;
-      }
-      run = new EmbeddingComputeRun();
-      this.computeRun = run;
-      const result = await run.run(
-        {
-          scores: source.scores,
-          nObs: source.nObs,
-          nDims: source.nDims,
-          dims: meta.dims,
-        },
-        {
-          ...meta,
-          label: (meta.label ?? meta.name)
-            .replace(SpatialChartsComponent.COMPUTE_SUFFIX, ''),
-        },
-        (progress: ComputeProgress) => {
-          // Progress from a superseded run must not drive the bar a newer one is using.
-          if (superseded()) return;
-          this.computeFraction = progress.fraction;
-          this.computeBackend = progress.backend ?? this.computeBackend;
-          if (progress.message) this.computeMessage = progress.message;
-        },
-      );
-      // A terminated run resolves null, so this covers abandonment as well as Cancel —
-      // but the token is still checked, because the dataset can change between the
-      // worker's `done` and this line.
-      if (result && !superseded()) {
-        this.computed.set(meta.name, result);
-        this.embeddingCoords = result;
-        await this.render();
-      }
-    } catch (err) {
-      if (!superseded()) this.computeError = (err as Error)?.message ?? String(err);
-    } finally {
-      run?.terminate();
-      // Only if it is still ours: a dataset switch has already terminated this run and
-      // may have started another, and `this.computeRun = null` here would orphan it —
-      // leaving a worker nothing can cancel and a Cancel button that does nothing.
-      if (this.computeRun === run) {
-        this.computeRun = null;
-        this.computeFraction = null;
-      }
-    }
+    const result = await this.compute.start(meta, this.embeddings, (name) => controls.getEmbedding!(name));
+    if (!result) return;
+    this.embeddingCoords = result;
+    await this.render();
   }
 
   /** Stop a run. It settles shortly after, leaving no embedding. */
   cancelCompute(): void {
-    this.computeRun?.cancel();
-  }
-
-  /**
-   * Drop any computation in progress, because what it is computing no longer applies.
-   *
-   * Distinct from {@link cancelCompute}, which is the user's Cancel and asks the worker to
-   * stop politely. This one does not wait: the run is settled and the worker killed, so a
-   * dataset switch or a teardown cannot leave a t-SNE grinding on in the background over
-   * observations nothing is showing any more.
-   */
-  private abandonCompute(): void {
-    this.computeLoad.cancel();
-    this.computeRun?.terminate();
-    this.computeRun = null;
-    this.computeFraction = null;
-    this.computeBackend = null;
-    this.computeMessage = null;
-  }
-
-  /**
-   * The dataset's PCA, as row-major scores.
-   *
-   * Assembled from whichever PCA the source offers, widest first — a 3-D one gives t-SNE
-   * three components instead of two for the same request.
-   */
-  private async loadPcaScores(
-    controls: ISpatialControls,
-  ): Promise<{ scores: Float32Array; nObs: number; nDims: number } | null> {
-    const candidates = this.embeddings
-      .filter((e) => /pca/i.test(e.label ?? e.name) && !e.name.startsWith('local:'))
-      .sort((a, b) => b.dims - a.dims);
-    for (const candidate of candidates) {
-      try {
-        const pca = await controls.getEmbedding!(candidate.name);
-        const planes = [pca.x, pca.y, ...(pca.z ? [pca.z] : [])];
-        const nObs = pca.x.length;
-        const nDims = planes.length;
-        const scores = new Float32Array(nObs * nDims);
-        for (let i = 0; i < nObs; i++) {
-          for (let d = 0; d < nDims; d++) scores[i * nDims + d] = planes[d][i];
-        }
-        return { scores, nObs, nDims };
-      } catch {
-        // Try the next; a source may advertise one it cannot actually serve.
-      }
-    }
-    return null;
+    this.compute.cancel();
   }
 
   /** Which embedding to draw, when the dataset publishes more than one. */
