@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
-import { Observable, Subscription, combineLatest, firstValueFrom, merge } from 'rxjs';
+import { Observable, combineLatest, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -11,20 +11,8 @@ import { OpenSeadragonVisualizerService } from './implementations/osd/openseadra
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
 import { IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
-import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions, SpatialColorBy } from './contracts/display-types';
-import { SpatialDataset, isCategoricalColumn } from './contracts/spatial-dataset.contract';
-import { resolveCategoryColors } from './spatial/spatial-encoding';
-import { sectionsOf } from './spatial/spatial-sections';
-import {
-  observationsInSlice, volumeImageRef,
-} from './spatial/spatial-volume-image';
-import {
-  emptySelection,
-  selectByCategory,
-  selectByIndices,
-  selectInRegions,
-  selectInRegionsProjected,
-} from './spatial/spatial-selection';
+import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
+import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
@@ -559,213 +547,35 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getIntensityControls(): IIntensityControls | null { return this.plotly.getIntensityControls(); }
 
   /**
-   * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound.
-   *
-   * Implemented HERE rather than on a backend because the state is
-   * backend-neutral: the view state lives in the shared `VisualizerStore` (like
-   * the colormap), so the controls keep working across a plot-type switch and a
-   * host can drive them before any backend has mounted.
+   * Spatial-omics controls, or null when no `SPATIAL_DATA_PORT` is bound. Served by a
+   * backend-neutral {@link SpatialControlsFacade} (state in the shared stores), so the
+   * controls work across a plot-type switch and before any backend has mounted.
    */
   getSpatialControls(): ISpatialControls | null {
-    const port = this.spatialData;
-    if (!port) return null;
-    // Mirror the dataset (and drop a stale selection when it changes — the masks
-    // are index-based, so they are meaningless against different observations).
-    this.spatialDatasetSub ??= port.getDataset$().subscribe((dataset) => {
-      const changed = dataset?.id !== this.currentSpatialDataset?.id;
-      this.currentSpatialDataset = dataset;
-      if (!changed) return;
-      this.selectionStore.set(emptySelection(dataset?.observations.count ?? 0));
-      // A colour source the new dataset cannot satisfy would leave the map flat
-      // while the panel and the charts kept naming the old column — so drop it,
-      // and only it: point size, opacity and the rest are the user's preferences,
-      // not the previous dataset's state.
-      const by = this.store.currentSpatialView().colorBy;
-      if (by && !this.canColorBy(dataset, by)) this.store.setSpatialView({ colorBy: null });
+    if (!this.spatialData) return null;
+    this.spatialFacade ??= new SpatialControlsFacade(this.spatialData, {
+      store: this.store,
+      regionStore: this.regionStore,
+      selectionStore: this.selectionStore,
+      napari: this.napari,
+      plotType: () => this.currentPlotType,
+      zIndex: () => this.currentZIndex,
     });
-    this.spatialControls ??= {
-      getDataset$: () => port.getDataset$(),
-      getViewState$: () => this.store.getSpatialView$(),
-      viewState: () => this.store.currentSpatialView(),
-      setViewState: (partial) => this.store.setSpatialView(partial),
-      // The hint SEEDS the toggle when the source changes, and nothing consults it
-      // afterwards. It used to be ORed in at render time, which meant an unchecked
-      // box could not turn log scaling off for a hinted column — and the linked
-      // chart, which reads `logScale` alone, disagreed with the map about what it
-      // was showing. One authority, set once per source.
-      colorByColumn: (name: string) => {
-        const meta = this.currentSpatialDataset?.columns.find((c) => c.name === name);
-        const hint = meta?.kind === 'continuous' ? !!meta.logScaleHint : false;
-        this.store.setSpatialView({ colorBy: { kind: 'column', name }, logScale: hint });
-      },
-      colorByFeature: (name: string) =>
-        this.store.setSpatialView({
-          colorBy: { kind: 'feature', name },
-          logScale: !!this.currentSpatialDataset?.features?.logScaleHint,
-        }),
-      clearColorBy: () => this.store.setSpatialView({ colorBy: null }),
-      searchFeatures: async (query: string, limit = 50) => {
-        // Prefer the port's search (a 31k-gene dataset does not ship its names);
-        // otherwise filter whatever the manifest inlined.
-        if (port.searchFeatures) return port.searchFeatures(query, limit);
-        const dataset = await firstValueFrom(port.getDataset$());
-        const names = dataset?.features?.names ?? [];
-        const q = query.toLowerCase();
-        return names.filter((n) => n.toLowerCase().includes(q)).slice(0, limit);
-      },
-      ...(port.importGroups ? {
-        importGroups: (label: string, table: string) => port.importGroups!(label, table),
-      } : {}),
-      ...(port.getTranscriptCounts ? {
-        transcriptCounts: (genes: string[]) => port.getTranscriptCounts!(genes),
-      } : {}),
-      ...(port.getMarkerGenes ? {
-        markerGenes: (column: string, perGroup?: number) => port.getMarkerGenes!(column, perGroup),
-      } : {}),
-      getTranscriptEstimate$: () => this.napari.transcriptEstimate$.asObservable(),
-      getGeneCountsInView$: () => this.napari.geneCountsInView$.asObservable(),
-      getDensityStats$: () => this.napari.densityStats$.asObservable(),
-      categoryColors: async (name: string) => {
-        const column = await port.getColumn(name);
-        if (!isCategoricalColumn(column)) {
-          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
-        }
-        // Resolved by the SAME function the renderer uses, so a legend swatch
-        // can never disagree with the colour on screen.
-        return resolveCategoryColors(column.meta);
-      },
-
-      continuousValues: async (source) => {
-        if (source.kind === 'feature') return port.getFeatureVector(source.name);
-        const column = await port.getColumn(source.name);
-        if (isCategoricalColumn(column)) {
-          throw new Error(
-            `[spatial] column "${source.name}" is categorical — it has no values to chart`,
-          );
-        }
-        return column.values;
-      },
-
-      categoricalView: async (name: string) => {
-        const column = await port.getColumn(name);
-        if (!isCategoricalColumn(column)) {
-          throw new Error(`[spatial] column "${name}" is continuous — it has no categories`);
-        }
-        return {
-          name,
-          categories: column.meta.categories,
-          colors: resolveCategoryColors(column.meta),
-          codes: column.codes,
-        };
-      },
-
-      // Spread rather than always defined: `getEmbedding` is optional on both the port
-      // and this facade, and a panel checks for its presence to decide whether the view
-      // is offered at all. Defining it as a function that rejects would make an
-      // embedding-less source look like a broken one.
-      ...(port.getEmbedding
-        ? { getEmbedding: (name: string) => port.getEmbedding!(name) }
-        : {}),
-
-      categoricalColumns: () => (this.currentSpatialDataset?.columns ?? [])
-        .filter((c) => c.kind === 'categorical')
-        .map((c) => c.name),
-
-      // Memoized on the observations object, so the renderer's own lookup and
-      // this one are the same single scan of up to 3.7M z values.
-      sampledSections: () => {
-        const obs = this.currentSpatialDataset?.observations;
-        return obs ? sectionsOf(obs) : null;
-      },
-
-      getSelection$: () => this.selectionStore.getSelection$(),
-
-      selectFromRegions: () => {
-        const dataset = this.currentSpatialDataset;
-        if (!dataset) return 0;
-        const regions = this.regionStore.getRegions();
-        // The union of every drawn region — so every ROI tool the library
-        // already has doubles as a spatial selection tool.
-        //
-        // In the 3D cloud there is no data-space affine to push a drawn shape
-        // through, so the observations are projected to canvas pixels by the
-        // renderer (which owns the camera) and tested in screen space instead.
-        // Falls back to the 2D path whenever the cloud is not mounted.
-        const projected = isSpatialOmics3d(this.currentPlotType)
-          ? this.napari.getSpatialScreenProjection(dataset.observations)
-          : null;
-        // In the 2D view of a volume-backed dataset the shape was drawn over ONE
-        // section, in the volume's pixel grid: it selects the cells of that
-        // section, not the whole depth of brain standing behind them.
-        const volume = !dataset.imageRef ? dataset.volume : undefined;
-        const selection = projected
-          ? selectInRegionsProjected(projected, dataset.observations.count, regions)
-          : selectInRegions(
-              dataset.observations,
-              volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
-              regions,
-              volume
-                ? observationsInSlice(dataset.observations, volume, this.currentZIndex)
-                : undefined,
-            );
-        this.selectionStore.set(selection);
-        return selection.count;
-      },
-
-      selectCategory: async (column: string, categoryIndex: number) => {
-        const loaded = await port.getColumn(column);
-        if (!isCategoricalColumn(loaded)) {
-          throw new Error(`[spatial] column "${column}" is continuous — it has no categories`);
-        }
-        const selection = selectByCategory(loaded.codes, categoryIndex);
-        this.selectionStore.set(selection);
-        return selection.count;
-      },
-
-      selectIndices: (indices: Iterable<number>) => {
-        const count = this.currentSpatialDataset?.observations.count ?? 0;
-        if (count === 0) return 0;
-        const selection = selectByIndices(indices, count);
-        this.selectionStore.set(selection);
-        return selection.count;
-      },
-
-      clearSelection: () => this.selectionStore.clear(),
-    };
-    return this.spatialControls;
+    return this.spatialFacade.controls;
   }
 
-  /**
-   * Whether `dataset` can answer this colour source.
-   *
-   * A column is checkable against the declared list. A gene is checkable only when
-   * the dataset inlines its feature names — a dataset too wide to inline them
-   * (typeahead-only) keeps the source, and a name that turns out not to exist
-   * surfaces as the chart's "could not be charted" rather than as a silent reset.
-   */
-  private canColorBy(dataset: SpatialDataset | null, by: SpatialColorBy): boolean {
-    if (!dataset) return false;
-    if (by.kind === 'column') return dataset.columns.some((c) => c.name === by.name);
-    const names = dataset.features?.names;
-    return !!dataset.features && (!names || names.includes(by.name));
-  }
-
-  /** Memoised so consumers can hold the object across calls. */
-  private spatialControls: ISpatialControls | null = null;
-  /** Latest dataset, mirrored so `selectFromRegions()` can answer synchronously
-   *  — it runs from a button click and must not await a round-trip. */
-  private currentSpatialDataset: SpatialDataset | null = null;
+  /** Created on first use; owns the dataset subscription. */
+  private spatialFacade: SpatialControlsFacade | null = null;
   /** Displayed slice. Only a volume-backed spatial dataset reads it, to keep a
    *  region drawn over one section from selecting the whole depth behind it. */
   private currentZIndex = 0;
-  private spatialDatasetSub: Subscription | null = null;
 
   /** Angular calls this when the injector providing the router is destroyed — the host
    *  component for a `provideVisualization()` chain. The dataset subscription would
    *  otherwise keep the whole isolated chain reachable from the root data port. */
   ngOnDestroy(): void {
-    this.spatialDatasetSub?.unsubscribe();
-    this.spatialDatasetSub = null;
+    this.spatialFacade?.dispose();
+    this.spatialFacade = null;
   }
 
   /** Load pixel frames for intensity sampling when OpenSeadragon owns the image
