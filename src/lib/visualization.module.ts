@@ -33,6 +33,9 @@ import { SaveMaskDialogComponent } from './region-editor/save-mask-dialog/save-m
 import { SaveRegionsDialogComponent } from './region-editor/save-regions-dialog/save-regions-dialog.component';
 import { RegionEditorHelpComponent } from './region-editor/region-editor-help/region-editor-help.component';
 import { RegionColorDialogComponent } from './region-editor/region-color-dialog/region-color-dialog.component';
+import {
+  ManageClassesDialogComponent,
+} from './region-editor/manage-classes-dialog/manage-classes-dialog.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
@@ -61,6 +64,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     SaveRegionsDialogComponent,
     RegionEditorHelpComponent,
     RegionColorDialogComponent,
+    ManageClassesDialogComponent,
     HexColorPickerComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,

@@ -1540,19 +1540,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     expect(added.find((p) => p.name === 'Optic-disc').color).toBe('#123456');
   });
 
-  it('add/remove helpers mutate the draft', () => {
-    component.openManageDialog();
-    const n = component.presetDraft!.classes.length;
-    component.addPresetClass();
-    expect(component.presetDraft!.classes.length).toBe(n + 1);
-    component.removePresetClass(0);
-    expect(component.presetDraft!.classes.length).toBe(n);
-    const f = component.presetDraft!.fallbackPalette.length;
-    component.addFallbackColor();
-    expect(component.presetDraft!.fallbackPalette.length).toBe(f + 1);
-    component.removeFallbackColor(0);
-    expect(component.presetDraft!.fallbackPalette.length).toBe(f);
-  });
+  // The draft's add/remove helpers are covered in manage-classes-dialog.component.spec.ts.
 
   // ── docked Classes panel ──
   it('classCount reflects region labels', () => {

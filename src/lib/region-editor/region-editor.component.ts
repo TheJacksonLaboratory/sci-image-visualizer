@@ -53,10 +53,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   readonly defaultClassName = 'Region';
   /** Classes as shown in the panel: sorted by region count (desc), then name. */
   displayClasses: ClassPreset[] = [];
-  readonly matchModeOptions = [
-    { label: 'Exact', value: 'exact' },
-    { label: 'Normalized', value: 'normalized' },
-  ];
 
   paginatorFirst = 0;
   paginatorRows = 10;
@@ -624,18 +620,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       matchMode: s.matchMode === 'normalized' ? 'normalized' : 'exact',
     };
   }
-  addPresetClass(): void {
-    this.presetDraft?.classes.push({ name: '', color: '#888888', source: 'user' });
-  }
-  removePresetClass(i: number): void {
-    this.presetDraft?.classes.splice(i, 1);
-  }
-  addFallbackColor(): void {
-    this.presetDraft?.fallbackPalette.push('#888888');
-  }
-  removeFallbackColor(i: number): void {
-    this.presetDraft?.fallbackPalette.splice(i, 1);
-  }
   /** Commit the draft: drop blank/duplicate names, persist, and recolour
    *  non-overridden regions with the updated presets. */
   applyManageDialog(close: boolean): void {
@@ -653,7 +637,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       seen.add(key);
       classes.push({ ...c, name });
     }
-    this.presetDraft.classes = classes;
+    this.presetDraft = { ...draft, classes };
     // Classes dropped in the dialog: their regions revert to the default "Region"
     // class (else syncClassesFromRegions would just re-add them) (jit-ui#70).
     const kept = new Set(classes.map((c) => keyOf(c.name)));

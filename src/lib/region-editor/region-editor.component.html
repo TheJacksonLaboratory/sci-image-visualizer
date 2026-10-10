@@ -257,72 +257,11 @@
                      (apply)="applyColorToSelected($event)">
 </region-color-dialog>
 
-<!-- Manage annotation classes (jit-ui#70): CRUD + fallback palette + matching/auto-add
-     settings + reset/import/export. Edits a working copy, committed on Apply/Done. -->
-<p-dialog header="Manage annotation classes" [(visible)]="showManageDialog" [modal]="true" appendTo="body"
-          [style]="{width: '34rem'}" [draggable]="true" [resizable]="false">
-  <div *ngIf="presetDraft" class="manage-dialog flex flex-column gap-3 pt-2">
-    <div class="manage-classes flex flex-column gap-2">
-      <div *ngFor="let c of presetDraft.classes; let i = index"
-           class="manage-class-row flex align-items-center gap-2">
-        <hex-color-picker [color]="c.color" (colorChange)="c.color = $event"></hex-color-picker>
-        <input type="text" pInputText class="p-inputtext-sm flex-1"
-               [(ngModel)]="c.name" placeholder="Class name"/>
-        <button pButton type="button" icon="pi pi-trash"
-                class="p-button-sm p-button-text p-button-warning"
-                pTooltip="Remove class" tooltipPosition="bottom"
-                (click)="removePresetClass(i)"></button>
-      </div>
-      <button pButton type="button" icon="pi pi-plus" label="Add class"
-              class="p-button-sm p-button-text align-self-start" (click)="addPresetClass()"></button>
-    </div>
-
-    <div class="manage-section flex flex-column gap-2">
-      <span class="section-title font-medium">Fallback palette
-        <small class="text-color-secondary">— colours for classes not listed</small></span>
-      <div class="fallback-palette flex align-items-center flex-wrap gap-2">
-        <span *ngFor="let col of presetDraft.fallbackPalette; let i = index"
-              class="fallback-swatch flex align-items-center">
-          <hex-color-picker [color]="col" (colorChange)="presetDraft.fallbackPalette[i] = $event"></hex-color-picker>
-          <i class="pi pi-times icon-hover ml-1" pTooltip="Remove" tooltipPosition="bottom"
-             (click)="removeFallbackColor(i)"></i>
-        </span>
-        <button pButton type="button" icon="pi pi-plus"
-                class="p-button-sm p-button-text" pTooltip="Add fallback colour"
-                tooltipPosition="bottom" (click)="addFallbackColor()"></button>
-      </div>
-    </div>
-
-    <div class="flex align-items-center gap-2">
-      <p-checkbox [(ngModel)]="presetDraft.autoPromote" [binary]="true" inputId="autoPromote"></p-checkbox>
-      <label for="autoPromote">Auto-add detected classes to this list as they appear</label>
-    </div>
-
-    <div class="flex align-items-center gap-3">
-      <span class="font-medium">Label matching</span>
-      <p-selectButton [options]="matchModeOptions" [(ngModel)]="presetDraft.matchMode"
-                      optionLabel="label" optionValue="value"></p-selectButton>
-    </div>
-  </div>
-
-  <ng-template pTemplate="footer">
-    <div class="manage-footer flex align-items-center flex-wrap gap-2 w-full">
-      <span class="flex align-items-center flex-wrap gap-1">
-        <p-button label="Reset" icon="pi pi-refresh" [text]="true"
-                  (onClick)="resetPresetsToDefaults()"></p-button>
-        <p-button label="Import" icon="pi pi-upload" [text]="true"
-                  (onClick)="presetFileInput.click()"></p-button>
-        <input #presetFileInput type="file" accept=".json,application/json" hidden
-               (change)="importPresets($event); presetFileInput.value = ''"/>
-        <p-button label="Export" icon="pi pi-download" [text]="true"
-                  (onClick)="exportPresets()"></p-button>
-      </span>
-      <span class="flex-1"></span>
-      <!-- Apply persists to the server and closes; it replaces the old Apply+Done pair. -->
-      <p-button label="Apply" icon="pi pi-check" (onClick)="applyManageDialog(true)"></p-button>
-    </div>
-  </ng-template>
-</p-dialog>
+<!-- Manage annotation classes (jit-ui#70): edits a working copy, committed on Apply. -->
+<region-manage-classes-dialog [(visible)]="showManageDialog" [(draft)]="presetDraft"
+                              (apply)="applyManageDialog(true)" (resetDefaults)="resetPresetsToDefaults()"
+                              (importFile)="importPresets($event)" (export)="exportPresets()">
+</region-manage-classes-dialog>
 
 <region-editor-help [(visible)]="displayHelpDialog"></region-editor-help>
 
