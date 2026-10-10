@@ -4,6 +4,7 @@ import { saveAs } from 'file-saver';
 import { Subscription } from 'rxjs';
 
 import { Rectangle, Region } from '../models/region';
+import { withRegionPatch } from '../models/region-clone';
 import { PresetSet, ClassPreset, defaultPresetSet, parsePresetSet } from '../models/class-preset';
 import { colorForLabel, presetKey } from '../store/class-color.util';
 import { ConfirmationService, MessageService } from 'primeng/api';
@@ -224,12 +225,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * fallback colour and rebuilds its local label→colour lookup.
    */
   private applyRegionColors(regions: Region[]): Region[] {
-    for (const region of regions) {
-      region.color =
-        region.color ||
-        this.regionApi.getClassificationColors().get(region.label ?? '') ||
-        this.shapeColor;
-    }
+    // A region without a colour gets a coloured copy: the store's instances are
+    // shared with its undo history and must not be changed in place (RT-1).
+    const classColors = this.regionApi.getClassificationColors();
+    regions = regions.map((region) => region.color
+      ? region
+      : withRegionPatch(region, { color: classColors.get(region.label ?? '') || this.shapeColor }));
     // Rebuild labelColors: seed from persisted map, then overlay actual region colors
     this.labelColors.clear();
     for (const [label, color] of this.regionApi.getClassificationColors()) {

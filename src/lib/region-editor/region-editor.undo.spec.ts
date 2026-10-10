@@ -186,6 +186,15 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
     expect((live().bounds as Rectangle).height).toBe(700);
   });
 
+  it('showing an uncoloured region does not paint the fallback colour onto the store instance', () => {
+    const plain = new Region();
+    plain.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 });
+    seed(plain);
+    expect(editor.regions[0].color).toBe('#00ffff'); // the editor shows the default
+    expect(live().color).toBeUndefined();           // the stored region is untouched
+    expect(store.canUndo()).toBe(false);
+  });
+
   // ── label edits (RT-18) ────────────────────────────────────────────────
 
   function typeLabel(text: string): HTMLInputElement {
