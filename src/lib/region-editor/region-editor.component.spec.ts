@@ -235,7 +235,7 @@ describe('RegionEditorComponent', () => {
   });
 
   it('save/export propose <name>.geojson for an extension-less file name (RT-19)', () => {
-    const io = (component as any).regionIo as RegionIoPort;
+    const io = (component as any).persistence.io as RegionIoPort;
     io.getSelectedFileName = () => 'image';
     component.regions = [Object.assign(new Region(), { id: 1, bounds: new Rectangle() })];
     component.persistRegions();
@@ -275,7 +275,7 @@ describe('RegionEditorComponent', () => {
   });
 
   it('stops the save-as exists check on destroy (RT-32)', fakeAsync(() => {
-    const io = (component as any).regionIo as RegionIoPort;
+    const io = (component as any).persistence.io as RegionIoPort;
     const exists = jest.fn(() => of(true));
     io.roiFileExists = exists;
     component.ngOnDestroy();

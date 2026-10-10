@@ -1,17 +1,15 @@
 import { Component, Inject, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { OverlayPanel } from 'primeng/overlaypanel';
 import { saveAs } from 'file-saver';
-import { Subject, Subscription } from 'rxjs';
-import { debounceTime, switchMap } from 'rxjs/operators';
+import { Subscription } from 'rxjs';
 
 import { Rectangle, Region } from '../models/region';
 import { PresetSet, ClassPreset, defaultPresetSet, parsePresetSet } from '../models/class-preset';
 import { colorForLabel, presetKey } from '../store/class-color.util';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
-import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
-import { fileStem } from './file-stem';
+import { RegionPersistenceService } from './region-persistence.service';
 import { MaskExportService, MaskMode } from './mask-export.service';
 import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
 
@@ -19,6 +17,7 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
   selector: 'region-editor',
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
+  providers: [RegionPersistenceService],
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
   @ViewChild('op') overlayPanel!: OverlayPanel;
@@ -73,12 +72,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
    *  progress bar and Cancel button (parity with the Save-mask dialog). */
   saveAsBusy = false;
-  private _saveAsCheck$ = new Subject<string>();
+  /** The running GeoJSON save; unsubscribing cancels it (Cancel / destroy). */
   private _saveAsSub?: Subscription;
   private _saveAsCheckSub = new Subscription();
-  /** Handle for the deferred-serialize timer so Cancel/destroy can abort it
-   *  before it fires (otherwise the upload would still start). */
-  private _saveAsTimer?: ReturnType<typeof setTimeout>;
 
   showExportDialog = false;
   exportFilename = '';
@@ -120,7 +116,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     @Inject(REGION_EDITOR_API) private regionApi: IRegionEditorApi,
     public messageService: MessageService,
     private confirmationService: ConfirmationService,
-    @Inject(REGION_IO_PORT) private regionIo: RegionIoPort,
+    private persistence: RegionPersistenceService,
     private maskExport: MaskExportService,
   ) {}
 
@@ -165,10 +161,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.recomputeClassCounts();
     });
 
-    this._saveAsCheckSub = this._saveAsCheck$.pipe(
-      debounceTime(400),
-      switchMap(name => this.regionIo.roiFileExists(name)),
-    ).subscribe({
+    this._saveAsCheckSub = this.persistence.fileExists$.subscribe({
       next: exists => { this.saveAsFileExists = exists; },
       error: () => { this.saveAsFileExists = false; },
     });
@@ -205,7 +198,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._metaSub.unsubscribe();
     this._presetSub.unsubscribe();
     this._saveAsCheckSub.unsubscribe();
-    if (this._saveAsTimer !== undefined) clearTimeout(this._saveAsTimer);
     this._saveAsSub?.unsubscribe();
     this.maskJob?.unsubscribe();
   }
@@ -722,12 +714,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     saveAs(new Blob([json], { type: 'application/json' }), 'annotation-classes.json');
   }
   importPresets(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => this.applyImportedPresets(reader.result as string);
-    reader.readAsText(file);
+    this.persistence.readChosenFile(event, (text) => this.applyImportedPresets(text));
   }
 
   /** Validate and apply an imported annotation-classes JSON file. */
@@ -747,12 +734,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   importRois(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => this.applyImportedRois(reader.result as string);
-    reader.readAsText(file);
+    this.persistence.readChosenFile(event, (text) => this.applyImportedRois(text));
   }
 
   /** Replace the regions with an imported GeoJSON file's. */
@@ -776,23 +758,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Regions to serialize on save/export. For a single-file z-stack the store
-   * keeps only the current slice live, so pull EVERY slice's annotations (each
-   * tagged with its zero-based Region.z) to write one combined z-indexed
-   * geojson (jit-ui#93). Otherwise (single-plane image, or a folder stack whose
-   * slices save to their own per-slice files) the current set. (jit-ui#93)
-   */
+  /** Regions to serialize on save/export (every slice for a combined z-stack). */
   private regionsForSave(): Region[] {
-    if (this.regionApi.isStackMode() && this.regionApi.getStackSaveLayout() === 'combined') {
-      return this.regionApi.getSliceAnnotationRegions();
-    }
-    return this.regions;
+    return this.persistence.regionsForSave(this.regions);
   }
 
   exportRois() {
     if (!this.regionsForSave().length) return;
-    this.exportFilename = `${fileStem(this.regionIo.getSelectedFileName(), 'rois')}.geojson`;
+    this.exportFilename = this.persistence.defaultExportName();
     this.showExportDialog = true;
   }
 
@@ -801,15 +774,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const regions = this.regionsForSave();
     if (!filename || !regions.length) return;
     this.showExportDialog = false;
-    const jsonString = this.regionApi.getGeoJsonString(regions);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    saveAs(blob, filename);
+    this.persistence.download(regions, filename);
   }
 
   /** Open the "Save mask" dialog, seeded with `<image-stem>_mask.png`. */
   openSaveMaskDialog() {
     if (!this.regions.length) return;
-    this.saveMaskFilename = `${fileStem(this.regionIo.getSelectedFileName(), 'regions')}_mask.png`;
+    this.saveMaskFilename = this.persistence.defaultMaskName();
     this.maskMode = 'binary';
     this.showSaveMaskDialog = true;
   }
@@ -834,7 +805,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.maskProgress = 0;
     this.maskJob = this.maskExport.export({
       regions: this.regions, imageSize: size, mode: this.maskMode,
-      sourceName: this.regionIo.getSelectedFileName(),
+      sourceName: this.persistence.selectedFileName(),
     }).subscribe({
       next: (e) => {
         switch (e.type) {
@@ -888,110 +859,61 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   persistRegions() {
     // Folder stack: write each slice's regions back to its own slice-file's
-    // sibling geojson — no single-filename prompt (the filenames are the slice
-    // files'). (jit-ui#93)
-    if (this.regionApi.isStackMode() && this.regionApi.getStackSaveLayout() === 'per-slice-file') {
+    // sibling geojson — no single-filename prompt (jit-ui#93).
+    if (this.persistence.savesPerSlice()) {
       this.saveStackSlices();
       return;
     }
-    const name = this.regionIo.getSelectedFileName();
-    if (!name || !this.regionsForSave().length) return;
+    const filename = this.persistence.defaultSaveName();
+    if (!filename || !this.regionsForSave().length) return;
 
-    this.saveAsFilename = `${fileStem(name, name)}.geojson`;
+    this.saveAsFilename = filename;
     this.saveAsFileExists = false;
     this.showSaveAsDialog = true;
-    this._saveAsCheck$.next(this.saveAsFilename);
+    this.persistence.checkExists(this.saveAsFilename);
   }
 
-  /**
-   * Save a folder stack's regions as one geojson per slice-file (jit-ui#93).
-   * Groups the store's per-slice regions by slice index and serializes each on
-   * the default plane (z=0) — each slice-file is itself one plane, and the
-   * loader re-derives the slice index from the file's position in the series.
-   * Slices cleared since load are included (empty) so their file is overwritten.
-   */
+  /** Save a folder stack's regions as one geojson per slice-file (jit-ui#93). */
   private saveStackSlices() {
-    const bySlice = this.regionApi.getStackSaveAnnotationSlices();
-    if (!bySlice.size) return;
-    const slices: { z: number; geoJsonStr: string }[] = [];
-    for (const [z, regs] of bySlice) {
-      const flat = regs.map((r) => Object.assign(new Region(), r, { z: 0 }));
-      slices.push({ z, geoJsonStr: this.regionApi.getGeoJsonString(flat) });
-    }
+    const slices = this.persistence.sliceGeoJsons();
+    if (!slices.length) return;
     this.saveAsBusy = true;
-    this._saveAsSub = this.regionIo.saveSliceGeoJsons(slices).subscribe({
+    this._saveAsSub = this.persistence.saveSlices(slices).subscribe({
       next: () => {
         this.saveAsBusy = false;
-        this.messageService.add({
-          key: VIZ_TOAST_KEY,
-          severity: 'success',
-          summary: 'Regions saved',
-          detail: `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`,
-        });
+        this.toast('success', 'Regions saved', `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`);
       },
       error: (err) => {
         this.saveAsBusy = false;
-        this.messageService.add({
-          key: VIZ_TOAST_KEY,
-          severity: 'error',
-          summary: 'Error saving regions',
-          detail: `${(err as Error)?.message ?? err}`,
-        });
+        this.toast('error', 'Error saving regions', `${(err as Error)?.message ?? err}`);
       },
     });
   }
 
   checkSaveAsFileExists() {
-    this._saveAsCheck$.next(this.saveAsFilename);
+    this.persistence.checkExists(this.saveAsFilename);
   }
 
   confirmSaveAs() {
-    if (!this.regionIo.getSelectedFileName()) return;
+    if (!this.persistence.selectedFileName()) return;
 
     const filename = this.saveAsFilename.trim();
     if (!filename) return;
 
+    // Keep the dialog open showing an (indeterminate) progress bar while the
+    // regions serialize and upload, then close on success.
     const doSave = () => {
-      // Keep the dialog open showing an (indeterminate) progress bar while the
-      // regions serialize and upload, then close on success. Defer one tick so
-      // the bar paints before a large synchronous GeoJSON serialize.
       this.saveAsBusy = true;
-      this._saveAsTimer = setTimeout(() => {
-        this._saveAsTimer = undefined;
-        let geoJsonStr: string;
-        try {
-          geoJsonStr = this.regionApi.getGeoJsonString(this.regionsForSave());
-        } catch (err) {
+      this._saveAsSub = this.persistence.save(() => this.regionsForSave(), filename).subscribe({
+        next: () => {
           this.saveAsBusy = false;
-          this.messageService.add({
-            key: VIZ_TOAST_KEY,
-            severity: 'error',
-            summary: 'Error saving regions',
-            detail: `${(err as Error)?.message ?? err}`,
-          });
-          return;
-        }
-        this._saveAsSub = this.regionIo.saveGeoJson(geoJsonStr, filename).subscribe({
-          next: () => {
-            this.saveAsBusy = false;
-            this.showSaveAsDialog = false;
-            this.messageService.add({
-              key: VIZ_TOAST_KEY,
-              severity: 'success',
-              summary: 'Regions saved',
-              detail: `Saved as ${filename}`,
-            });
-          },
-          error: (err) => {
-            this.saveAsBusy = false;
-            this.messageService.add({
-              key: VIZ_TOAST_KEY,
-              severity: 'error',
-              summary: 'Error saving regions',
-              detail: `${err.message || err}`,
-            });
-          },
-        });
+          this.showSaveAsDialog = false;
+          this.toast('success', 'Regions saved', `Saved as ${filename}`);
+        },
+        error: (err) => {
+          this.saveAsBusy = false;
+          this.toast('error', 'Error saving regions', `${(err as Error)?.message || err}`);
+        },
       });
     };
 
@@ -1010,12 +932,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Cancel an in-progress GeoJSON persist: abort the deferred serialize and/or
    *  the in-flight upload, and reset state. */
   cancelSaveAs() {
-    if (this._saveAsTimer !== undefined) {
-      clearTimeout(this._saveAsTimer);
-      this._saveAsTimer = undefined;
-    }
     this._saveAsSub?.unsubscribe();
     this._saveAsSub = undefined;
     this.saveAsBusy = false;
+  }
+
+  private toast(severity: 'success' | 'error' | 'info', summary: string, detail: string): void {
+    this.messageService.add({ key: VIZ_TOAST_KEY, severity, summary, detail });
   }
 }
