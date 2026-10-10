@@ -1,6 +1,6 @@
 import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Observable, Subscription, combineLatest, firstValueFrom, of } from 'rxjs';
+import { BehaviorSubject, EMPTY, Observable, firstValueFrom, of } from 'rxjs';
 import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
@@ -26,7 +26,7 @@ import { elementToImage } from './osd-coords';
 import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
 import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { SliceCache } from './slice-cache';
-import { DisplayPipeline } from './display-pipeline';
+import { OsdTileRecolorer } from './tile-recolor';
 import { HistogramSampler } from './histogram-sampler';
 import {
   TileDescriptor, exportTiffFilename, exportTiffUrl, httpFetchJson, pollDescriptor, throwIfAborted,
@@ -44,8 +44,8 @@ import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
 import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
-import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
-import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
+
+import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { saveAs } from 'file-saver';
 
 /** Wait between two `/tiles/info` polls while the server answers 202. */
@@ -147,27 +147,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private plotDiv = '';
   /** Current file name, tagged onto wand-created shapes. */
   private currentFileName: string | undefined;
-  /** 256-entry RGB LUT for the active colormap, applied to grayscale tiles via
-   *  the tile-invalidated pixel pipeline (mirrors Plotly's heatmap colorscale).
-   *  Null while options resolve; recoloring is skipped until it's built. */
-  private colorLut: Rgb[] | null = null;
   /** Only grayscale images get a colormap (RGB tiles pass through untouched). */
   private isGrayscaleImage = false;
-  private colormapSub: Subscription | null = null;
-  /** Bumped by every display invalidation. A recolor round captures it and, after
-   *  each `await`, abandons the tile once a newer round has started. Writing a
-   *  superseded context back is not merely wasted work: OSD's conversion sees a
-   *  canvas the newer round already replaced, throws `DOMException`, and
-   *  `_handleConversionError` DESTROYS the cache record and unloads the tile
-   *  (unlike the drawer's rasterBlob path, it does not re-prepare). Enough of
-   *  those and the viewer goes white mid-drag. */
-  private displayToken = 0;
-  /** Pending coalesced invalidation (see {@link scheduleInvalidate}). */
-  private invalidateHandle: number | null = null;
-  /** Latest per-channel display state (window/gamma/visibility) from the store,
-   *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
-   *  R/G/B (indices 0-2) drive RGB per-channel windowing. */
-  private channelStates: IChannelState[] = [];
   /** True for multichannel fluorescence (channelCount > 1, not RGB): tiles are
    *  composited client-side from per-channel single-band fetches (see
    *  recolorMultiChannelTile) rather than recolored in place. */
@@ -176,9 +157,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  here). For multichannel images the tile source is built from these alone so
    *  every displayed tile supports a per-channel fetch. */
   private realLevels = 0;
-  /** Inverted background (white = zero): inverts the display value before the
-   *  LUT (grayscale) / per channel (RGB). */
-  private invertBg = false;
   /** Bearer token for OSD's own tile fetches (HttpClient calls get it via the
    *  interceptor; OSD's loader does not, so we pass it as an ajax header). */
   private authHeaders: Record<string, string> = {};
@@ -198,15 +176,19 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private readonly tilesInfoTimeoutMs = 600000; // 10 min
 
 
-  /** Pixel display pipeline (window/gamma/invert/colormap + additive tint) —
-   *  shared by tile recoloring and the composite export so they stay identical
-   *  (see DisplayPipeline). Host closures read the service's live fields. */
-  private readonly display = new DisplayPipeline({
+  /** Window/gamma/colormap/invert and per-channel tints, applied to the tiles
+   *  through OSD's pixel pipeline (see OsdTileRecolorer and the README's recolor
+   *  invariant). Its DisplayPipeline also drives the compositor and the export. */
+  private readonly recolor: OsdTileRecolorer = new OsdTileRecolorer({
+    viewer: () => this.viewer,
     isGrayscale: () => this.isGrayscaleImage,
-    colorLut: () => this.colorLut,
-    channelStates: () => this.channelStates,
-    invertBg: () => this.invertBg,
-  });
+    isMultiChannel: () => this.isMultiChannel,
+    isSimpleMultichannel: () => this.simpleMultichannel,
+    currentZ: () => this.currentZ,
+    revealChannelSlice: (z) => this.cache.revealChannelSlice(z),
+    invalidateChannelDisplay: (z) => this.cache.invalidateChannelDisplay(z),
+    recomposite: (token) => void this.recompositeAndOpen(token),
+  }, this.store);
 
   /** Histogram + auto-window sampling (see HistogramSampler). Constructed in
    *  the ctor body because it captures the resolved API base URL. */
@@ -216,14 +198,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  plan Step 3). The host accessors are live closures, so the cache always
    *  reads the service's current viewer/descriptor/z — exactly the fields the
    *  moved code used to read directly. */
-  private readonly cache = new SliceCache({
+  private readonly cache: SliceCache = new SliceCache({
     viewer: () => this.viewer,
     hasImage: () => !!(this.viewer && this.descriptor && this.infoB64),
     sliceCount: () => this.descriptor?.z ?? 1,
     currentZ: () => this.currentZ,
     isMultiChannel: () => this.isMultiChannel,
-    channelCount: () => Math.max(1, this.channelStates.length || (this.descriptor?.channels ?? 1)),
-    channelVisible: (c: number) => this.channelStates[c]?.visible !== false,
+    channelCount: () => Math.max(1, this.recolor.channelStates.length || (this.descriptor?.channels ?? 1)),
+    channelVisible: (c: number) => this.recolor.channelStates[c]?.visible !== false,
     buildTileSource: (z: number, channel?: number) =>
       this.buildTileSource(this.descriptor!, this.infoB64, z, channel),
     onCompositeSliceAdded: (z: number) => this.sampler.computeImageWindow(this.descriptor!, this.infoB64, z),
@@ -265,7 +247,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.api = config.slideCropServer;
     this.sampler = new HistogramSampler(this.http, this.api, {
       realLevels: () => this.realLevels,
-      channelCount: (d) => this.channelStates.length || (d.channels ?? 1),
+      channelCount: (d) => this.recolor.channelStates.length || (d.channels ?? 1),
       isGrayscale: () => this.isGrayscaleImage,
       // Nudge the channel-states stream so the pane re-reads getHistogram now,
       // in case its bounded retry window already lapsed.
@@ -273,10 +255,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       // Background-preloaded slices are sampled too (histograms per slice), but
       // only the displayed slice's window may seed or re-invalidate the display.
       onGrayWindowSampled: (min, max, z) => {
-        if (z === this.currentZ) this.seedGrayWindow(min, max);
+        if (z === this.currentZ) this.recolor.seedGrayWindow(min, max);
       },
     });
-    this.ensureColormapSubscription();
+    this.recolor.ensureSubscription();
   }
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
@@ -291,62 +273,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   // Region state (regions, selection, the update event) lives in the shared
   // RegionStore; image metadata and classification colours in the shared
   // VisualizerStore — the inherited IRegionStore/display methods delegate there.
-
-  /**
-   * Subscribe to the shared VisualizerStore colormap/reverse so OSD recolors in
-   * lock-step with Plotly. Idempotent and self-healing: this service is a root
-   * singleton, but `unsubscribe()` (called on VisualizerComponent destroy)
-   * tears the subscription down — and the constructor never runs again. So
-   * `plot()` calls this to re-establish it after a component teardown/recreate
-   * (e.g. switching images), otherwise colormap changes would be silently
-   * dropped on every image after the first switch.
-   */
-  private ensureColormapSubscription(): void {
-    if (this.colormapSub) return;
-    // Colormap/reverse + per-channel window/gamma/visibility + invert all live in
-    // the shared VisualizerStore. Rebuild the LUT and re-run the pixel pipeline
-    // whenever any of them changes, so the Channels & Histogram pane updates the
-    // image live and OSD stays in lock-step with Plotly.
-    this.colormapSub = combineLatest([
-      this.store.getColormap(),
-      this.store.getReverseScale(),
-      this.store.getChannelStates(),
-      this.store.getInvert(),
-    ]).subscribe(([cm, rev, channels, invert]) => {
-      this.colorLut = buildColormapLut(cm?.data?.value, !!rev);
-      this.channelStates = channels;
-      this.invertBg = !!invert;
-      // Multichannel: each channel is its own TiledImage — visibility is the
-      // image's opacity (window/gamma/colour are applied by recolorChannelTile
-      // on the invalidate below). Re-applying the current slice's reveal picks up
-      // the new per-channel visibility (cached slices stay hidden).
-      if (this.isMultiChannel) {
-        this.cache.revealChannelSlice(this.currentZ);
-      }
-      // requestInvalidate(true) restores each tile to its original data before
-      // re-running recolorTile, so a change always maps afresh (no compounding).
-      // RGB now recolors too (per-channel window/visibility), so don't gate on
-      // grayscale. Coalesced: PrimeNG's slider fires (onChange) continuously, so
-      // a single drag would otherwise queue dozens of overlapping restore +
-      // re-process rounds over every channel image. (Serverless multichannel
-      // re-composites from its cached planes instead — see invalidateDisplay.)
-      this.scheduleInvalidate();
-    });
-  }
-
-  /** Seed the Intensity channel with a measured auto-window while it's still
-   *  at full range (never clobber the user's manual window); if the user
-   *  already windowed, just re-invalidate so painted tiles pick the LUT up. */
-  private seedGrayWindow(min: number, max: number): void {
-    const ch0 = this.store.currentChannelStates()[0];
-    if (ch0 && ch0.min === 0 && ch0.max === 255) {
-      this.store.setChannelState(0, { min, max });
-    } else if (this.viewer && this.colorLut) {
-      // Coalesced (and visible-slice-only for multichannel) — not a raw
-      // whole-world restore + re-recolor per sampled slice.
-      this.scheduleInvalidate();
-    }
-  }
 
   // ── IDataRenderer ────────────────────────────────────────────────────
 
@@ -577,7 +503,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (!planes.length) return undefined;
     const w = planes[0].width, h = planes[0].height;
     if (!w || !h) return undefined;
-    const out = this.display.compositeChannels(
+    const out = this.recolor.display.compositeChannels(
       planes.map((p) => (p.width === w && p.height === h ? p.data : null)),
       this.store.currentChannelStates(),
     );
@@ -598,7 +524,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private async recompositeAndOpen(token: number): Promise<void> {
     const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
     if (!url) return;
-    if (token !== this.displayToken || !this.viewer) {
+    if (!this.recolor.isCurrent(token) || !this.viewer) {
       URL.revokeObjectURL(url); // superseded — never displayed
       return;
     }
@@ -674,7 +600,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // Re-establish the colormap subscription if a prior component teardown
     // (unsubscribe()) tore it down — this service is a root singleton, so the
     // constructor won't run again to recreate it.
-    this.ensureColormapSubscription();
+    this.recolor.ensureSubscription();
     // A new image: a stroke or SAM prompt in progress belonged to the old one.
     if (!inPlace) this.canvasTools.resetAll();
     // OSD tiles natively, so the in-place (large) pass is normally a no-op
@@ -832,18 +758,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         this.viewer!.addHandler('viewport-change', () => {
           this.viewportPixels = null;
         });
-        // Grayscale tiles get the active colormap via the pixel pipeline. The
-        // handler runs per tile on load (and on requestInvalidate); recoloring
-        // is a no-op for RGB images or before the LUT resolves.
-        // (isGrayscaleImage is set from imageInfo.isGrayscale in plot() above.)
-        this.viewer!.addHandler('tile-invalidated', (event: any) => this.recolorTile(event));
-        // The overview navigator is a separate mini-viewer with its own tiles,
-        // so it doesn't receive the main viewer's tile-invalidated events. Apply
-        // the same recolor pipeline to it so the minimap tracks the main image's
-        // colormap/LUT instead of staying grayscale.
-        const nav = this.viewer!.navigator;
-        nav?.addHandler('tile-invalidated', (event: any) => this.recolorTile(event));
-        if ((this.isGrayscaleImage && this.colorLut) || this.isMultiChannel) this.invalidateWorld();
+        // Recolor every tile (main viewer and navigator) through the display pipeline.
+        this.recolor.attach(this.viewer!);
         // Prefetch adjacent z-slices once the view settles (and on each settle,
         // so it tracks the current viewport as the user pans/zooms). Simple mode
         // has a single frame, so there's nothing to prefetch.
@@ -879,54 +795,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       api: this.api, infoB64, z, channel,
       realLevelsOnly: this.isMultiChannel ? this.realLevels : undefined,
     });
-  }
-
-  /** Collapse a burst of display-state changes into ONE invalidation on the next
-   *  frame. Dragging a window slider emits per pixel of travel, and each round
-   *  restores and re-processes every tile of every channel — so the burst is both
-   *  wasted work and the race that breaks cache records (see {@link displayToken}).
-   *  The store write stays live, so the pane itself remains responsive. */
-  private scheduleInvalidate(): void {
-    if (this.invalidateHandle !== null) return; // already queued for this frame
-    const raf =
-      typeof requestAnimationFrame === 'function'
-        ? requestAnimationFrame
-        : (cb: FrameRequestCallback) => setTimeout(() => cb(0), 16) as unknown as number;
-    this.invalidateHandle = raf(() => {
-      this.invalidateHandle = null;
-      this.invalidateDisplay();
-    });
-  }
-
-  /** Re-apply the display pipeline (window/gamma/colour/invert) after a state change.
-   *  Multichannel invalidates ONLY the visible slice's channel images — invalidating
-   *  the whole world would re-process every hidden/preloaded slice's tiles (hundreds),
-   *  flooding OSD with "[CacheRecord] … InvalidStateError" and wasting work on tiles
-   *  that aren't on screen. The other cached slices are marked stale and re-tinted
-   *  lazily when revealed. Composite/grayscale invalidate the world; serverless
-   *  multichannel re-composites its cached planes. */
-  private invalidateDisplay(): void {
-    // Supersede any in-flight recolor round before restarting one (see displayToken).
-    this.displayToken++;
-    const v = this.viewer;
-    if (!v) return;
-    if (this.simpleMultichannel) {
-      void this.recompositeAndOpen(this.displayToken);
-      return;
-    }
-    if (this.isMultiChannel) {
-      this.cache.invalidateChannelDisplay(this.currentZ);
-      return;
-    }
-    this.invalidateWorld();
-  }
-
-  /** Restore and re-recolor every tile of the main viewer and the navigator. */
-  private invalidateWorld(): void {
-    const v = this.viewer;
-    if (!v) return;
-    quiet(() => v.world.requestInvalidate(true));
-    quiet(() => v.navigator?.world?.requestInvalidate(true));
   }
 
   private destroyViewer(): void {
@@ -1052,7 +920,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
           if (this.currentZ !== z || this.simpleChannelUrls !== image || !this.viewer) return;
           this.simpleChannelPlanes = planes;
           this.sampler.computeSimpleMultichannelHistograms(z, planes);
-          this.scheduleInvalidate(); // recomposite + open, coalesced with slider changes
+          this.recolor.scheduleInvalidate(); // recomposite + open, coalesced with slider changes
         })();
         return;
       }
@@ -1283,111 +1151,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return this.viewportPixels;
   }
 
-  /**
-   * Recolor a grayscale tile through the active colormap LUT, using OSD's
-   * tile-invalidated pixel pipeline (OSD 5+/6). Maps each pixel's grayscale
-   * value (r==g==b) to the LUT's RGB. No-op for RGB images or until the LUT is
-   * built. Handler is async — OSD awaits it (raiseEventAwaiting).
-   */
-  private async recolorTile(event: any): Promise<void> {
-    if (this.isMultiChannel) {
-      await this.recolorChannelTile(event);
-      return;
-    }
-    const token = this.displayToken;
-    const gray = this.isGrayscaleImage;
-    if (gray) {
-      if (!this.colorLut) return;
-    } else if (!this.display.rgbNeedsRecolor()) {
-      return; // RGB at default (all visible, full window, γ=1, no invert) → passthrough
-    }
-
-    const px = await this.readTilePixels(event);
-    if (!px || !this.display.applyToRgba(px.img.data)) return; // nothing opaque
-    await this.writeTilePixels(event, px, token);
-  }
-
-  /**
-   * Tint a single channel's tile in place. Each channel is its own OpenSeadragon
-   * TiledImage (a single-band grayscale tile); OSD composites the N images
-   * additively ('lighter') in its drawer — so this just maps the tile's intensity
-   * through the channel's window/gamma and its pseudo-colour. Synchronous (no
-   * cross-tile fetch) → no race, no seams. Channel is parsed from the tile URL.
-   */
-  private async recolorChannelTile(event: any): Promise<void> {
-    const token = this.displayToken;
-    const tile = event?.tile;
-    const url: string = (tile && (typeof tile.getUrl === 'function' ? tile.getUrl() : tile.url)) || '';
-    const m = /[?&]channel=(\d+)/.exec(url);
-    const ch = m ? parseInt(m[1], 10) : 0;
-    const st = this.channelStates[ch];
-
-    const px = await this.readTilePixels(event);
-    if (!px) return;
-
-    // Precompute lum(0..255) → tinted RGB once, then map each pixel by lookup —
-    // the channel tile is single-band, so this turns ~262k per-pixel
-    // channelIntensity() (with Math.pow for gamma) calls into 256 — the difference
-    // between a snappy and a sluggish slider on a 4-channel stack.
-    const { r: rL, g: gL, b: bL } = this.display.channelRgbLut(st);
-    const d = px.img.data;
-    let changed = false;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) continue;
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      const lum = r >= g ? (r >= b ? r : b) : g >= b ? g : b; // single-band → max
-      d[i] = rL[lum];
-      d[i + 1] = gL[lum];
-      d[i + 2] = bL[lum];
-      changed = true;
-    }
-    if (!changed) return;
-    await this.writeTilePixels(event, px, token);
-  }
-
-  /**
-   * Read a tile's pixels for recoloring. Prefers the tile's rendering context,
-   * but some tile caches (ajax PNG blobs) convert to an *empty* context2d —
-   * recoloring that would blank the tile (white canvas). So if the context has
-   * no opaque pixels, the tile's own bitmap/image is drawn to a scratch canvas
-   * and read instead. Null when no pixels can be read: leave the tile untouched.
-   */
-  private async readTilePixels(event: any): Promise<{ ctx: CanvasRenderingContext2D; img: ImageData } | null> {
-    let ctx: CanvasRenderingContext2D | null = null;
-    try { ctx = await event.getData('context2d'); } catch { /* try the bitmap below */ }
-    if (ctx && ctx.canvas && ctx.canvas.width && ctx.canvas.height) {
-      let img: ImageData | null = null;
-      try { img = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height); } catch { /* tainted/gone */ }
-      if (img && this.hasOpaque(img.data)) return { ctx, img };
-    }
-    let src: any = null;
-    try { src = await event.getData('imageBitmap'); } catch { /* try the image below */ }
-    if (!src || !src.width) { try { src = await event.getData('image'); } catch { /* none */ } }
-    if (!src || !src.width) return null;
-    const c = document.createElement('canvas');
-    c.width = src.width;
-    c.height = src.height;
-    const scratch = c.getContext('2d', { willReadFrequently: true });
-    if (!scratch) return null;
-    scratch.drawImage(src, 0, 0);
-    return { ctx: scratch, img: scratch.getImageData(0, 0, c.width, c.height) };
-  }
-
-  /** Write recolored pixels back to the tile — unless a newer display round
-   *  (`token`, see {@link displayToken}) has already restored it: writing a
-   *  superseded context back makes OSD's conversion throw DOMException, which
-   *  destroys the cache record and unloads the tile. */
-  private async writeTilePixels(
-    event: any, px: { ctx: CanvasRenderingContext2D; img: ImageData }, token: number,
-  ): Promise<void> {
-    if (token !== this.displayToken) return;
-    px.ctx.putImageData(px.img, 0, 0);
-    // The tile's cache can still be evicted between the awaits and here (a
-    // slice change), making setData throw a DOMException on a dead canvas.
-    // Swallow it — the tile is gone, so there's nothing to recolor.
-    try { await event.setData(px.ctx, 'context2d'); } catch { /* tile evicted */ }
-  }
-
   /** Per-channel histogram for the Channels & Histogram pane, from the current
    *  slice's sampled tiles (grayscale → channel 0; RGB → R/G/B). Null until the
    *  async sampling resolves or if it was skipped. */
@@ -1422,8 +1185,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    */
   async exportData(): Promise<void> {
     if (!this.infoB64) return;
-    const visible = this.channelStates.filter((c) => c.visible).map((c) => c.index);
-    const url = exportTiffUrl(this.api, this.infoB64, this.currentZ, visible, this.channelStates.length);
+    const states = this.recolor.channelStates;
+    const visible = states.filter((c) => c.visible).map((c) => c.index);
+    const url = exportTiffUrl(this.api, this.infoB64, this.currentZ, visible, states.length);
     const saveName = exportTiffFilename(this.currentFileName);
     try {
       const resp = await firstValueFrom(
@@ -1498,7 +1262,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     };
     try {
       if (this.isMultiChannel) {
-        const states = this.channelStates;
+        const states = this.recolor.channelStates;
         const nCh = Math.max(1, states.length || (desc.channels ?? 1));
         let out: Uint8ClampedArray | null = null;
         let imageData: ImageData | null = null;
@@ -1507,7 +1271,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
           await stitch(c);
           imageData = ctx.getImageData(0, 0, lw, lh);
           out ??= new Uint8ClampedArray(imageData.data.length);
-          this.display.addChannel(out, imageData.data, states[c]);
+          this.recolor.display.addChannel(out, imageData.data, states[c]);
         }
         if (imageData && out) {
           for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
@@ -1519,7 +1283,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       } else {
         await stitch();
         const imageData = ctx.getImageData(0, 0, lw, lh);
-        if (this.display.applyToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
+        if (this.recolor.display.applyToRgba(imageData.data)) ctx.putImageData(imageData, 0, 0);
       }
     } catch (err) {
       // Keep the un-recolored composite if readback fails — but say why.
@@ -1531,14 +1295,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     }, 'image/png');
   }
 
-  /** True if any pixel in the RGBA buffer is non-transparent. */
-  private hasOpaque(d: Uint8ClampedArray): boolean {
-    for (let i = 3; i < d.length; i += 4) {
-      if (d[i] !== 0) return true;
-    }
-    return false;
-  }
-
   // ── IDisplayOptions ──────────────────────────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
   // VisualizerStore, so OSD and Plotly stay in lock-step. OSD applies the
@@ -1547,14 +1303,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   // ── IVisualizer ──────────────────────────────────────────────────────
   unsubscribe(): void {
-    this.colormapSub?.unsubscribe();
-    this.colormapSub = null;
-    // Drop a queued invalidation so it can't fire against a torn-down viewer.
-    if (this.invalidateHandle !== null) {
-      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.invalidateHandle);
-      else clearTimeout(this.invalidateHandle as unknown as ReturnType<typeof setTimeout>);
-      this.invalidateHandle = null;
-    }
+    // The store subscription, and a queued invalidation that must not fire
+    // against a torn-down viewer.
+    this.recolor.unsubscribe();
     this.destroyViewer();
     this.resetSimpleState();
   }

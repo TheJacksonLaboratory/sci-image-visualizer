@@ -79,7 +79,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     compositeSimpleMultichannel(): Promise<string | undefined>;
     simpleMultichannel: boolean;
     simpleChannelUrls: string[][];
-    scheduleInvalidate(): void;
+    recolor: { scheduleInvalidate(): void };
     simpleChannelPlanes: unknown[];
   };
   const internals = () => service as unknown as Internals;
@@ -144,7 +144,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     const tiledViewer = viewers[1];
     tiledViewer.open.mockClear();
 
-    const invalidate = jest.spyOn(internals(), 'scheduleInvalidate');
+    const invalidate = jest.spyOn(internals().recolor, 'scheduleInvalidate');
     store.setChannelStates([{ index: 0, name: 'Intensity', color: '#ffffff', min: 5, max: 200,
       gamma: 1, visible: true }]);
     await new Promise((r) => setTimeout(r, 0));

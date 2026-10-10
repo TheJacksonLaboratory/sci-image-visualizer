@@ -480,21 +480,21 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       svc.currentZ = 3;
       const order: string[] = [];
       jest.spyOn(svc.cache, 'revealChannelSlice').mockImplementation((z: unknown) => { order.push(`reveal:${z}`); });
-      jest.spyOn(svc, 'scheduleInvalidate').mockImplementation(() => { order.push('invalidate'); });
+      jest.spyOn(svc.recolor, 'scheduleInvalidate').mockImplementation(() => { order.push('invalidate'); });
       TestBed.inject(VisualizerStore).setChannelStates([channel]);
       expect(order).toEqual(['reveal:3', 'invalidate']);
-      expect(svc.channelStates).toEqual([channel]);
+      expect(svc.recolor.channelStates).toEqual([channel]);
     });
 
     it('any other image only schedules the invalidation, with the LUT and invert picked up', () => {
       const svc = service as any;
       const reveal = jest.spyOn(svc.cache, 'revealChannelSlice');
-      const schedule = jest.spyOn(svc, 'scheduleInvalidate').mockImplementation(() => undefined);
+      const schedule = jest.spyOn(svc.recolor, 'scheduleInvalidate').mockImplementation(() => undefined);
       TestBed.inject(VisualizerStore).setInvert(true);
       expect(reveal).not.toHaveBeenCalled();
       expect(schedule).toHaveBeenCalledTimes(1);
-      expect(svc.invertBg).toBe(true);
-      expect(Array.isArray(svc.colorLut)).toBe(true);
+      expect(svc.recolor.invertBg).toBe(true);
+      expect(Array.isArray(svc.recolor.colorLut)).toBe(true);
     });
 
     it('invalidateDisplay picks the round by image kind and supersedes the previous one', () => {
@@ -506,20 +506,20 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       const channelInvalidate = jest.spyOn(svc.cache, 'invalidateChannelDisplay').mockImplementation(() => undefined);
       svc.currentZ = 4;
 
-      const before = svc.displayToken;
-      svc.invalidateDisplay(); // composite / grayscale: the whole world + navigator
-      expect(svc.displayToken).toBe(before + 1);
+      const before = svc.recolor.displayToken;
+      svc.recolor.invalidateDisplay(); // composite / grayscale: the whole world + navigator
+      expect(svc.recolor.displayToken).toBe(before + 1);
       expect(world.requestInvalidate).toHaveBeenCalledWith(true);
       expect(navWorld.requestInvalidate).toHaveBeenCalledWith(true);
 
       svc.isMultiChannel = true; // per-channel: only the visible slice's images
-      svc.invalidateDisplay();
+      svc.recolor.invalidateDisplay();
       expect(channelInvalidate).toHaveBeenCalledWith(4);
       expect(world.requestInvalidate).toHaveBeenCalledTimes(1);
 
       svc.simpleMultichannel = true; // serverless: re-composite the cached planes
-      svc.invalidateDisplay();
-      expect(recomposite).toHaveBeenCalledWith(svc.displayToken);
+      svc.recolor.invalidateDisplay();
+      expect(recomposite).toHaveBeenCalledWith(svc.recolor.displayToken);
       expect(channelInvalidate).toHaveBeenCalledTimes(1);
     });
   });
@@ -597,8 +597,8 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   it('coalesces a burst of display changes into ONE invalidation', async () => {
     const svc = service as any;
-    const invalidate = jest.spyOn(svc, 'invalidateDisplay');
-    for (let i = 0; i < 10; i++) svc.scheduleInvalidate(); // a drag's worth of emissions
+    const invalidate = jest.spyOn(svc.recolor, 'invalidateDisplay');
+    for (let i = 0; i < 10; i++) svc.recolor.scheduleInvalidate(); // a drag's worth of emissions
     expect(invalidate).not.toHaveBeenCalled(); // deferred, not synchronous
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(invalidate).toHaveBeenCalledTimes(1);
@@ -607,7 +607,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('a superseded recolor round does not write back (would destroy the cache record)', async () => {
     const svc = service as any;
     svc.isMultiChannel = true;
-    svc.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+    svc.recolor.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
 
     const ctx = {
       canvas: { width: 1, height: 1 },
@@ -620,13 +620,13 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       // A newer display round lands while this one is awaiting its pixels —
       // exactly what the next tick of a slider drag does.
       getData: jest.fn(async (type: string) => {
-        if (type === 'context2d') { svc.displayToken++; return ctx; }
+        if (type === 'context2d') { svc.recolor.displayToken++; return ctx; }
         return null;
       }),
       setData,
     };
 
-    await svc.recolorChannelTile(event);
+    await svc.recolor.recolorChannelTile(event);
 
     expect(setData).not.toHaveBeenCalled();
     expect(ctx.putImageData).not.toHaveBeenCalled();
@@ -635,7 +635,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   it('an uncontested recolor round still writes back', async () => {
     const svc = service as any;
     svc.isMultiChannel = true;
-    svc.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
+    svc.recolor.channelStates = [{ index: 0, name: 'c', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true }];
 
     const ctx = {
       canvas: { width: 1, height: 1 },
@@ -643,7 +643,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       putImageData: jest.fn(),
     };
     const setData = jest.fn();
-    await svc.recolorChannelTile({
+    await svc.recolor.recolorChannelTile({
       tile: { url: 'https://example/tile?channel=0' },
       getData: jest.fn(async (type: string) => (type === 'context2d' ? ctx : null)),
       setData,
@@ -705,7 +705,7 @@ describe('OpenSeadragonVisualizerService — exportComposite', () => {
   it('merges each visible channel\'s tiles with its tint for a multichannel image', async () => {
     const s = service as any;
     s.isMultiChannel = true;
-    s.channelStates = [
+    s.recolor.channelStates = [
       { index: 0, name: 'a', color: '#ff0000', min: 0, max: 255, gamma: 1, visible: true },
       { index: 1, name: 'b', color: '#00ff00', min: 0, max: 255, gamma: 1, visible: false },
       { index: 2, name: 'c', color: '#0000ff', min: 0, max: 255, gamma: 1, visible: true },
