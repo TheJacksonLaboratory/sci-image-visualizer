@@ -29,6 +29,7 @@ import {
 import {
   clusterMarkers, filterRings, filterTranscripts, hiddenGeneSlots, median, mergePolygonTiles, mergeTranscriptTiles,
 } from '../../spatial/spatial-tile-merge';
+import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
 
 /** The all-gene pyramid's finest bin (250 µm source tiles / 128) and default level count, used
  *  to group a gene selection on the same ladder when a dataset has no pyramid. */
@@ -205,7 +206,11 @@ export class NapariSpatialTileLayers {
   /** The density window in use and the densest bin, for the panel's threshold control. */
   densityStats: { lo: number; hi: number; max: number } | null = null;
 
-  constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {}
+  private readonly lookup: CategoricalLookup;
+
+  constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {
+    this.lookup = new CategoricalLookup(port);
+  }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────────────
 
@@ -410,7 +415,7 @@ export class NapariSpatialTileLayers {
     }
 
     // Groups switched off in the list: their cells are left out of the geometry.
-    const hidden = await this.hiddenCodes(dataset, view);
+    const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
     const label = view.cellSet === 'both' ? 'Cells and nuclei'
       : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
@@ -515,7 +520,7 @@ export class NapariSpatialTileLayers {
     const name = mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
       ? 'segmentation_method'
       : cellTypeColumnFor(dataset, view);
-    const codes = name ? await this.categoricalCodes(name) : null;
+    const codes = name ? await this.lookup.codes(name) : null;
     const { colormap, valueOf } = this.categoricalColormap(codes?.meta ?? null);
     const values = new Float32Array(owners.length);
     for (let i = 0; i < owners.length; i++) {
@@ -524,25 +529,6 @@ export class NapariSpatialTileLayers {
       values[i] = valueOf(code === NO_CATEGORY ? -1 : code);
     }
     return { values, colormap, contrastLimits: [0, 1] };
-  }
-
-  /** Codes of the group column that are switched off, or null when none are. */
-  private async hiddenCodes(
-    dataset: SpatialDataset, view: SpatialViewState,
-  ): Promise<{ codes: Uint16Array; hidden: Uint8Array } | null> {
-    if (!view.hiddenGroups.length) return null;
-    const name = cellTypeColumnFor(dataset, view);
-    const col = name ? await this.categoricalCodes(name) : null;
-    if (!col || col.meta.kind !== 'categorical') return null;
-    const off = new Set(view.hiddenGroups);
-    const hidden = Uint8Array.from(col.meta.categories, (c) => (off.has(c) ? 1 : 0));
-    return { codes: col.codes, hidden };
-  }
-
-  private async categoricalCodes(name: string):
-    Promise<{ codes: Uint16Array; meta: SpatialColumn['meta'] } | null> {
-    const column = await this.port.getColumn(name);
-    return isCategoricalColumn(column) ? { codes: column.codes, meta: column.meta } : null;
   }
 
   private categoricalColormap(meta: SpatialColumn['meta'] | null):
@@ -646,7 +632,7 @@ export class NapariSpatialTileLayers {
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
     this.countSource = (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
       ? { merged: loaded.merged, genes: [...view.transcriptGenes] } : null;
-    const hidden = await this.hiddenCodes(dataset, view);
+    const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
     // Density-grid markers carry no cells and were built from the visible genes only.
     const filtered = loaded.clustered ? { merged: loaded.merged, px: loaded.px }
@@ -692,7 +678,7 @@ export class NapariSpatialTileLayers {
     this.hoverCache.clear();
     this.micronsPerUnit = dataset.micronsPerUnit ?? null;
     const typeColumn = cellTypeColumnFor(dataset, view);
-    this.hoverTypes = typeColumn ? await this.categoricalCodes(typeColumn).catch(() => null) : null;
+    this.hoverTypes = typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null;
     if (ctx.stale()) return;
     const ref = dataset.imageRef;
     const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
@@ -1194,7 +1180,7 @@ export class NapariSpatialTileLayers {
       // A cluster named like a group of the cells' grouping takes that group's colour, so a
       // cluster's transcripts and its cells agree; any other cluster takes a palette colour.
       const name = cellTypeColumnFor(dataset, view);
-      const codes = name ? await this.categoricalCodes(name).catch(() => null) : null;
+      const codes = name ? await this.lookup.codes(name).catch(() => null) : null;
       const cellColor = new Map<string, string>();
       if (codes?.meta.kind === 'categorical') {
         const colors = resolveCategoryColors(codes.meta);
@@ -1229,7 +1215,7 @@ export class NapariSpatialTileLayers {
       codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
     } else {
       const name = cellTypeColumnFor(dataset, view);
-      const codes = name ? await this.categoricalCodes(name) : null;
+      const codes = name ? await this.lookup.codes(name) : null;
       rgb = codes?.meta.kind === 'categorical' ? resolveCategoryColors(codes.meta).map(parseHex) : [];
       codeOf = (i) => {
         const o = t.observation[i];
