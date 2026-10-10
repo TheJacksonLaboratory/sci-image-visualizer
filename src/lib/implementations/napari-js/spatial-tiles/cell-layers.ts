@@ -17,6 +17,7 @@ import {
 } from '../../../spatial/lod';
 import { discreteColormapStops } from '../../../spatial/density-raster';
 import { filterRings, mergePolygonTiles } from '../../../spatial/spatial-tile-merge';
+import { ContrastWindowCache } from '../napari-spatial-encoding';
 import type { CategoricalLookup, HiddenCodes } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
@@ -49,6 +50,9 @@ export class CellLayers {
   /** Selection identity → revision, so a change key can name a selection cheaply. */
   private lastSelection: SpatialSelectionMask | null = null;
   private selectionRevision = 0;
+  /** Continuous colourings' windows, per (vector, clip, log): `contrastWindow` sorts every
+   *  value, and a selection or opacity change recolours with the vector unchanged (SPATIAL-12). */
+  private readonly contrastWindows = new ContrastWindowCache();
 
   constructor(
     private readonly port: SpatialDataPort,
@@ -171,10 +175,11 @@ export class CellLayers {
         const v = raw[owners[i]] ?? NaN;
         values[i] = log ? Math.log1p(Math.max(0, v)) : v;
       }
-      const [lo, hi] = contrastWindow(
-        log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw,
-        view.percentileClip[0], view.percentileClip[1],
-      );
+      const [clipLo, clipHi] = view.percentileClip;
+      // Keyed by the SOURCE vector (the log copy would be new on every call), as the 3D cloud's.
+      const [lo, hi] = this.contrastWindows.get(raw, clipLo, clipHi, log, () => contrastWindow(
+        log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw, clipLo, clipHi,
+      ));
       return {
         values,
         colormap: colormapFromLut('spatial-continuous', this.host.continuousLut(view)),

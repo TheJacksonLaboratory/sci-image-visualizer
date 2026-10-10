@@ -6,6 +6,7 @@ import {
   SpatialDataset, SpatialPolygonTile, SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
 import { densityAutoRange } from '../../spatial/density-raster';
+import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 
@@ -1026,6 +1027,9 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
   function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
     const getPolygonTile = jest.fn(async () => rings());
     const getColumn = jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1) }));
+    // One expression value per cell; replaced to stand for a new gene vector.
+    let expression = Float32Array.of(3, 40);
+    const getFeatureVector = jest.fn(async () => expression);
     const dataset = {
       id: 'd', name: 'd', columns: [meta],
       observations: { count: 2, x: Float32Array.of(5, 25), y: Float32Array.of(5, 5), radius: 5 },
@@ -1036,7 +1040,8 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     } as unknown as SpatialDataset;
     let view = { ...DEFAULT_SPATIAL_VIEW, ...patch };
     const shown = jest.fn();
-    const tiles = new NapariSpatialTileLayers({ getPolygonTile, getColumn } as unknown as SpatialDataPort, {
+    const port = { getPolygonTile, getColumn, getFeatureVector } as unknown as SpatialDataPort;
+    const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(2)],
       canvasSize: () => [400, 400], continuousLut: () => LUT, polygonsShownChanged: shown,
     });
@@ -1047,7 +1052,8 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
     const setView = (p: Partial<typeof view>) => { view = { ...view, ...p }; };
     const layers = () => viewer.layers.items as unknown as ShapesLayer[];
-    return { tiles, viewer, plan, setView, addShapes, layers, getPolygonTile, shown };
+    const setExpression = (v: Float32Array) => { expression = v; };
+    return { tiles, viewer, plan, setView, setExpression, addShapes, layers, getPolygonTile, shown };
   }
 
   it('fills the cells by group by default, and reports the outlines shown', async () => {
@@ -1104,6 +1110,42 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     // An unchanged plan touches nothing.
     await plan();
     expect(addShapes).toHaveBeenCalledTimes(1);
+    tiles.detach();
+  });
+
+  it('computes a gene colouring\'s contrast window once per (vector, clip, log) (SPATIAL-12)', async () => {
+    const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
+    const { tiles, plan, setView, setExpression, layers } = setup({ cellColorMode: 'gene', cellColorGene: 'G' });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(1);
+    // The window is taken on the log1p values (gene expression is log-scaled).
+    const window = spatialEncoding.contrastWindow(
+      Float32Array.of(Math.log1p(3), Math.log1p(40)), 0.01, 0.99,
+    );
+    expect(layers()[0].contrastLimits).toEqual(window);
+    sort.mockClear();
+
+    setView({ cellOpacity: 0.3 }); // a restyle with the same vector: the cached window
+    await plan();
+    expect(layers()[0].opacity).toBe(0.3);
+    expect(sort).not.toHaveBeenCalled();
+
+    setView({ percentileClip: [0.05, 0.95] }); // a new clip: a new window
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(1);
+
+    setExpression(Float32Array.of(3, 40)); // a new vector (same values): computed afresh
+    setView({ cellOpacity: 0.4 });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(2);
+
+    setView({ percentileClip: [0.01, 0.99], cellOpacity: 0.5 }); // back to a clip seen for this vector
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(3); // the new vector had not been windowed at this clip
+    setView({ percentileClip: [0.05, 0.95], cellOpacity: 0.6 });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(3); // ...but it had at this one
+    sort.mockRestore();
     tiles.detach();
   });
 
