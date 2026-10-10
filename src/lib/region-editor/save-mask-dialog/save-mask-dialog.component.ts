@@ -1,4 +1,12 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { SharedModule } from 'primeng/api';
+import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
+import { InputTextModule } from 'primeng/inputtext';
+import { ProgressBarModule } from 'primeng/progressbar';
+import { RadioButtonModule } from 'primeng/radiobutton';
 
 import { MaskMode } from '../mask-export.service';
 
@@ -10,17 +18,28 @@ import { MaskMode } from '../mask-export.service';
  */
 @Component({
   selector: 'region-save-mask-dialog',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, SharedModule, ButtonModule, DialogModule, InputTextModule, ProgressBarModule,
+    RadioButtonModule,
+  ],
   templateUrl: './save-mask-dialog.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SaveMaskDialogComponent {
+  /** The dialog is open. */
   @Input() visible = false;
+  /** The dialog was closed (`false`); two-way with {@link visible}. */
   @Output() visibleChange = new EventEmitter<boolean>();
 
+  /** The PNG filename. */
   @Input() filename = '';
+  /** The filename was edited; two-way with {@link filename}. */
   @Output() filenameChange = new EventEmitter<string>();
 
+  /** The mask type: binary, or one label value per class. */
   @Input() mode: MaskMode = 'binary';
+  /** The mask type was changed; two-way with {@link mode}. */
   @Output() modeChange = new EventEmitter<MaskMode>();
 
   /** True while the export runs (the form is replaced by progress). */
@@ -35,7 +54,7 @@ export class SaveMaskDialogComponent {
   /** Cancel clicked while the export runs. */
   @Output() cancelExport = new EventEmitter<void>();
 
-  close(): void {
+  protected close(): void {
     this.visibleChange.emit(false);
   }
 }

@@ -40,9 +40,9 @@ describe('ClassesPanelComponent', () => {
   it('the in-use default class cannot be removed; others can', () => {
     const del = Array.from(el().querySelectorAll('.row-del')) as HTMLButtonElement[];
     expect(del.map((b) => b.disabled)).toEqual([true, false, false]);
-    expect(panel.removeTooltip('Region')).toContain('cannot be removed');
-    expect(panel.removeTooltip('Tumor')).toBe('Remove class — its regions revert to Region');
-    expect(panel.removeTooltip('Stroma')).toBe('Remove class');
+    expect(panel['removeTooltip']('Region')).toContain('cannot be removed');
+    expect(panel['removeTooltip']('Tumor')).toBe('Remove class — its regions revert to Region');
+    expect(panel['removeTooltip']('Stroma')).toBe('Remove class');
   });
 
   it('a row click picks the class; the trash removes without picking', () => {
@@ -55,9 +55,18 @@ describe('ClassesPanelComponent', () => {
     expect(remove.mock.calls).toEqual([['Stroma']]);
   });
 
+  it('re-derives the counts when a new count map arrives', () => {
+    fixture.componentRef.setInput('counts', new Map([['stroma', 4]]));
+    fixture.detectChanges();
+    expect(Array.from(el().querySelectorAll('.row-count')).map((c) => c.textContent?.trim()))
+      .toEqual(['0', '0', '4']);
+    // The default class is no longer in use, so it can be removed.
+    expect((el().querySelector('.row-del') as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('the row tooltip depends on whether regions are selected', () => {
-    expect(panel.rowTooltip('Tumor')).toContain('active');
+    expect(panel['rowTooltip']('Tumor')).toContain('active');
     fixture.componentRef.setInput('selectedCount', 2);
-    expect(panel.rowTooltip('Tumor')).toContain('selected region');
+    expect(panel['rowTooltip']('Tumor')).toContain('selected region');
   });
 });

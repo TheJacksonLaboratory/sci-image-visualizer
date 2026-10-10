@@ -31,7 +31,7 @@
                             (onChange)="classPick.emit({ region: region, name: $event.value })">
                   <ng-template pTemplate="selectedItem">
                     <span class="dd-value">
-                      <span class="chip-swatch" [style.background]="classColor(region.label)"></span>
+                      <span class="chip-swatch" [style.background]="rowView.get(region)?.color"></span>
                       <span class="class-name" [pTooltip]="region.label"
                             tooltipPosition="bottom">{{ region.label || '—' }}</span>
                     </span>
@@ -65,7 +65,7 @@
             </ng-template>
           </td>
           <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
-          <td class="surface-cell">{{ area(region) || '—' }}</td>
+          <td class="surface-cell">{{ rowView.get(region)?.area || '—' }}</td>
           <td>
             <button pButton pRipple icon="pi pi-trash" aria-label="Delete region"
                     class="p-button-sm p-button-rounded p-button-text p-button-warning"

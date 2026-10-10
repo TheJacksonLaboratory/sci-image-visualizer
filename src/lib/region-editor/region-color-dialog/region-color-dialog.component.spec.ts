@@ -38,7 +38,7 @@ describe('RegionColorDialogComponent', () => {
   it('edits a copy and applies the edited colours', () => {
     const applied = jest.fn();
     dialog.apply.subscribe(applied);
-    dialog.setColor(0, '#abcdef');
+    dialog['setColor'](0, '#abcdef');
     (document.querySelectorAll('.p-dialog-footer button')[1] as HTMLButtonElement).click();
     expect(applied).toHaveBeenCalledWith([{ label: 'Tumor', color: '#abcdef' }, { label: '', color: '#222222' }]);
     expect(seeded[0].color).toBe('#111111');

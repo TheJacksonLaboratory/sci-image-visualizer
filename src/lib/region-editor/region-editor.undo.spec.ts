@@ -103,9 +103,9 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
         store.setRegions(regions, show, save, fill),
     };
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, RegionTableComponent],
-      imports: [CommonModule, FormsModule, NoopAnimationsModule, TableModule, DropdownModule, InputTextModule,
-        RadioButtonModule, SelectButtonModule, CheckboxModule],
+      declarations: [RegionEditorComponent],
+      imports: [RegionTableComponent, CommonModule, FormsModule, NoopAnimationsModule, TableModule, DropdownModule,
+        InputTextModule, RadioButtonModule, SelectButtonModule, CheckboxModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         MessageService,

@@ -40,6 +40,13 @@ describe('RegionTableComponent', () => {
     expect(el().querySelector('.p-paginator-current')?.textContent?.trim()).toBe('11 to 12 of 12');
   });
 
+  it('re-derives the area column when the pixel size changes', () => {
+    fixture.componentRef.setInput('mpp', { mppX: 0.5, mppY: 0.5 });
+    fixture.detectChanges();
+    expect(Array.from(el().querySelectorAll('td.surface-cell')).map((td) => td.textContent?.trim()))
+      .toEqual(['25 µm²', '50 µm²']);
+  });
+
   it('a row trash button reports the row index across pages', () => {
     const del = jest.fn();
     table.deleteRow.subscribe(del);

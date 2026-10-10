@@ -42,23 +42,23 @@ describe('ManageClassesDialogComponent', () => {
   });
 
   it('add/remove helpers emit new drafts and never change the given one', () => {
-    dialog.addClass();
+    dialog['addClass']();
     expect(emitted.at(-1)!.classes.map((c) => c.name)).toEqual(['Tumor', 'Stroma', '']);
-    dialog.removeClass(0);
+    dialog['removeClass'](0);
     expect(emitted.at(-1)!.classes.map((c) => c.name)).toEqual(['Stroma', '']);
-    dialog.addFallbackColor();
+    dialog['addFallbackColor']();
     expect(emitted.at(-1)!.fallbackPalette.length).toBe(3);
-    dialog.removeFallbackColor(0);
+    dialog['removeFallbackColor'](0);
     expect(emitted.at(-1)!.fallbackPalette).toEqual(['#222222', '#888888']);
     expect(draft.classes.length).toBe(2);
     expect(draft.fallbackPalette.length).toBe(2);
   });
 
   it('field edits patch one class, the palette, auto-add and matching', () => {
-    dialog.patchClass(1, { name: 'Stroma 2' });
-    dialog.setFallbackColor(0, '#000000');
-    dialog.setAutoPromote(true);
-    dialog.setMatchMode('normalized');
+    dialog['patchClass'](1, { name: 'Stroma 2' });
+    dialog['setFallbackColor'](0, '#000000');
+    dialog['setAutoPromote'](true);
+    dialog['setMatchMode']('normalized');
     const last = emitted.at(-1)!;
     expect(last.classes[1]).toEqual({ name: 'Stroma 2', color: '#44AAFF' });
     expect(last.fallbackPalette[0]).toBe('#000000');

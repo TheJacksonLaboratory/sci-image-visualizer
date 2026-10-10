@@ -1,4 +1,10 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { SharedModule } from 'primeng/api';
+import { ButtonModule } from 'primeng/button';
+import { DialogModule } from 'primeng/dialog';
+
+import { HexColorPickerComponent } from '../../hex-color-picker/hex-color-picker.component';
 
 /** One class's colour in the dialog; `label` '' groups unclassified regions. */
 export interface ClassColorEdit {
@@ -13,11 +19,15 @@ export interface ClassColorEdit {
  */
 @Component({
   selector: 'region-color-dialog',
+  standalone: true,
+  imports: [CommonModule, SharedModule, ButtonModule, DialogModule, HexColorPickerComponent],
   templateUrl: './region-color-dialog.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RegionColorDialogComponent {
+  /** The dialog is open. */
   @Input() visible = false;
+  /** The dialog was closed (`false`); two-way with {@link visible}. */
   @Output() visibleChange = new EventEmitter<boolean>();
 
   /** Number of selected regions, for the caption. */
@@ -31,13 +41,13 @@ export class RegionColorDialogComponent {
   /** Apply clicked: the edited colours per class. */
   @Output() apply = new EventEmitter<ClassColorEdit[]>();
 
-  draft: ClassColorEdit[] = [];
+  protected draft: ClassColorEdit[] = [];
 
-  setColor(i: number, color: string): void {
+  protected setColor(i: number, color: string): void {
     this.draft = this.draft.map((e, k) => (k === i ? { ...e, color } : e));
   }
 
-  close(): void {
+  protected close(): void {
     this.visibleChange.emit(false);
   }
 }
