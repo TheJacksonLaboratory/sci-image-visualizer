@@ -5,79 +5,49 @@ import { saveAs } from 'file-saver';
 import { Viewer } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
-
-import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
-
+import { IHistogram } from '../../contracts/channel-histogram-api.contract';
+import { CanvasToolId } from '../../contracts/display-types';
+import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
-
-import { TranscriptEstimate } from './napari-spatial-tiles';
-
-import { LoadingBadgeState } from './napari-loading-state';
-import { NapariToolBridge } from './napari-tool-bridge';
-
-import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
-import { SpatialSession } from './napari-spatial-scene';
-import { Spatial3dScene } from './napari-spatial-3d-scene';
-import { Spatial2dScene } from './napari-spatial-2d-scene';
-import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
-import { SurfaceScene } from './napari-surface-scene';
-import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
-import { cameraDragMode } from './napari-axes-gizmo';
-import { NapariDisplayState } from './napari-display-state';
-import { NapariTileClient } from './napari-tile-client';
-
-import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
-import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
-
-import { SpatialSelectionStore } from '../../store/spatial-selection.service';
-
+import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
+import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
+import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
+import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
+import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import {
-  PlotType,
-  PlotTypeDescriptor,
-  PLOT_TYPE_DESCRIPTORS,
-  isNapari3d,
-  isNapariIsosurface,
-  isNapariSurface,
-  isNapariScatter,
-  isNapariScatter3d,
-  isSpatialOmics,
-  isSpatialOmics3d,
-  NAPARI_DEFAULT_DECIMATE,
+  PlotType, PlotTypeDescriptor, PLOT_TYPE_DESCRIPTORS, NAPARI_DEFAULT_DECIMATE, isNapari3d,
+  isNapariIsosurface, isNapariScatter, isNapariScatter3d, isNapariSurface, isSpatialOmics, isSpatialOmics3d,
 } from '../../contracts/plot-type';
 import {
-  IViewerBackend,
-  PixelData,
-  IntensityProfile,
-  IIsosurfaceControls,
-  IIntensityControls,
-  ISurface3dControls,
+  IViewerBackend, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
 } from '../../contracts/visualizer.contract';
-import {
-  ViewerCapabilities,
-  ViewerFeature,
-  capabilitiesOf,
-} from '../../contracts/capabilities.contract';
-import { IRegionOverlay } from '../../contracts/region-overlay.contract';
-import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-
-import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
-import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
-import { BaseStoreVisualizer } from '../base-store-visualizer';
-
-import { TileDescriptor, throwIfAborted } from '../tile-server';
-import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-
+import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
-
 import { WandService } from '../../toolbar/wand/wand.service';
-import { CanvasToolId } from '../../contracts/display-types';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
 import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
-import { ICellSegmenter, CELL_SEGMENTER } from '../../contracts/cell-segmenter.contract';
+import { BaseStoreVisualizer } from '../base-store-visualizer';
+import { throwIfAborted } from '../tile-server';
+import { SimpleSliceAccessService } from '../simple-slice-access.service';
+import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
+import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
+import { TranscriptEstimate } from './napari-spatial-tiles';
+import { NapariTileClient } from './napari-tile-client';
+import { NapariDisplayState } from './napari-display-state';
+import { LoadingBadgeState } from './napari-loading-state';
+import { NapariToolBridge } from './napari-tool-bridge';
+import { cameraDragMode } from './napari-axes-gizmo';
+import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
+import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
+import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
+import { SurfaceScene } from './napari-surface-scene';
+import { SpatialSession } from './napari-spatial-scene';
+import { Spatial2dScene } from './napari-spatial-2d-scene';
+import { Spatial3dScene } from './napari-spatial-3d-scene';
 
 /** Opaque handle from {@link NapariVisualizerService.load}, passed back to plot(). */
 interface NapariLoaded {
@@ -120,7 +90,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     ViewerFeature.Isosurface,
   ]);
 
-  private readonly api: string;
   /** The jit-service tile server: descriptor, slices, tiled sources, histograms, export. */
   private readonly tileClient: NapariTileClient;
   /** napari-js's render loop and the hot pointer/timer paths run outside the Angular zone
@@ -131,7 +100,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private canvas: HTMLCanvasElement | null = null;
   private host: HTMLElement | null = null;
   private loaded: NapariLoaded | null = null;
-  private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
   /** For the panel: the transcripts-in-view estimate and the density window in use. */
   readonly transcriptEstimate$ = new BehaviorSubject<TranscriptEstimate | null>(null);
   /** Transcripts of each selected gene in view (see NapariSpatialTileLayers.geneCountsIn). */
@@ -164,12 +132,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /**
    * Frame loading (volume assembly, surface preload): aborted by {@link reset} AND by
    * {@link cancelLoading}, so a Cancel actually stops fetching frames instead of running to
-   * completion in the background, while the scene itself stays mounted.
-   *
-   * The narrower per-request tokens below ({@link sliceReq}, {@link navigatorToken},
-   * {@link spatialRebuildToken}, {@link hoverSourceToken}) are "latest wins WITHIN a scene".
+   * completion in the background, while the scene itself stays mounted. (Latest-wins WITHIN a
+   * scene — a scrub, a colour rebuild, a hover-source fetch — is each scene's own business.)
    */
   private loading = new AbortController();
+  /** The image's full-resolution size as the last scene drew it (it outlives the scene). */
   private imageW = 0;
   private imageH = 0;
   /** The region overlay, the pixel tools and the displayed-pixel readback they read. */
@@ -190,24 +157,23 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   }>();
 
   constructor(
-    @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
+    @Inject(TILE_ACCESS_PORT) tiles: TileAccessPort,
     store: VisualizerStore,
     regionStore: RegionStore,
     wandService: WandService,
     private readonly samTool: SamToolService,
     private readonly samPointTool: SamPointToolService,
-    private readonly cellSegmentTool: CellSegmentToolService,
-    @Optional() @Inject(CELL_SEGMENTER) private readonly cellSegmenter: ICellSegmenter | null,
+    cellSegmentTool: CellSegmentToolService,
+    @Optional() @Inject(CELL_SEGMENTER) cellSegmenter: ICellSegmenter | null,
     private readonly simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
     // Optional: only a host that serves spatial-omics data provides it, and
     // without it the SPATIAL_OMICS plot type is never offered anyway.
-    @Optional() @Inject(SPATIAL_DATA_PORT) private readonly spatialData: SpatialDataPort | null = null,
-    private readonly selectionStore: SpatialSelectionStore | null = null,
+    @Optional() @Inject(SPATIAL_DATA_PORT) spatialData: SpatialDataPort | null = null,
+    selectionStore: SpatialSelectionStore | null = null,
   ) {
     super(regionStore, store);
-    this.api = config.slideCropServer;
-    this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
+    this.tileClient = new NapariTileClient(tiles, simpleStack, config.slideCropServer);
     this.tileClient.startScene(this.lifetime.signal);
     this.display = new NapariDisplayState(store);
     this.spatial = new SpatialSession(spatialData, selectionStore, {
@@ -272,16 +238,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     };
   }
 
-  /** The image on screen, as {@link load} recorded it. */
-  private info(): IImageInfo | undefined {
-    return this.loaded?.imageInfo;
-  }
-
-  /** The pyramid descriptor of the image on screen, or null when it has none. */
-  private currentDescriptor(): TileDescriptor | null {
-    return this.tileClient.currentDescriptor(this.info());
-  }
-
   // ── IDataRenderer: load / render / viewport ───────────────────────────────
   /**
    * Record the image to draw. No network work happens here — the descriptor poll and the tile,
@@ -320,7 +276,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     const scene = this.lifetime.signal;
     this.host = host;
     this.badge.attach(host);
-    this.currentPlotType = plotType;
 
     const canvas = document.createElement('canvas');
     canvas.style.display = 'block';
@@ -366,32 +321,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       await viewer.ready;
       if (scene.aborted) return false;
 
-      if (isSpatialOmics3d(plotType)) {
-        this.scene = new Spatial3dScene(this.sceneContext(viewer, host, canvas), this.spatial);
-        await this.scene.mount();
-      } else if (isSpatialOmics(plotType)) {
-        // No loaded image: an image-less dataset opened before any image (the visualizer's
-        // plotSpatialWithoutImage) — the observations alone.
-        const ctx = this.sceneContext(viewer, host, canvas);
-        this.scene = new Spatial2dScene(ctx, this.spatial, imageLoaded == null);
-        await this.scene.mount();
-      } else if (isNapariScatter(plotType)) {
-        this.scene = new ScatterRegionsScene(this.sceneContext(viewer, host, canvas));
-        await this.scene.mount();
-      } else if (isNapariScatter3d(plotType)) {
-        this.scene = new Scatter3dScene(this.sceneContext(viewer, host, canvas), info);
-        await this.scene.mount();
-      } else if (isNapariSurface(plotType)) {
-        this.scene = new SurfaceScene(this.sceneContext(viewer, host, canvas));
-        await this.scene.mount();
-      } else if (isNapari3d(plotType)) {
-        const rendering = isNapariIsosurface(plotType) ? 'iso' : 'mip';
-        this.scene = new VolumeScene(this.sceneContext(viewer, host, canvas), info, rendering);
-        await this.scene.mount();
-      } else {
-        this.scene = new Image2dScene(this.sceneContext(viewer, host, canvas));
-        await this.scene.mount();
-      }
+      // No loaded image: an image-less spatial dataset opened before any image (the visualizer's
+      // plotSpatialWithoutImage) — the observations alone.
+      this.scene = this.createScene(plotType, this.sceneContext(viewer, host, canvas), info, imageLoaded == null);
+      await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
     } catch (err) {
@@ -400,7 +333,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     }
   }
 
-  // ── Channels: per-channel composite, LUT, native histograms (jit-ui#102) ──────────────────
+  /** The scene a plot type mounts. */
+  private createScene(
+    plotType: PlotType, ctx: SceneContext, info: IImageInfo | undefined, noImage: boolean,
+  ): NapariScene {
+    if (isSpatialOmics3d(plotType)) return new Spatial3dScene(ctx, this.spatial);
+    if (isSpatialOmics(plotType)) return new Spatial2dScene(ctx, this.spatial, noImage);
+    if (isNapariScatter(plotType)) return new ScatterRegionsScene(ctx);
+    if (isNapariScatter3d(plotType)) return new Scatter3dScene(ctx, info);
+    if (isNapariSurface(plotType)) return new SurfaceScene(ctx);
+    if (isNapari3d(plotType)) return new VolumeScene(ctx, info, isNapariIsosurface(plotType) ? 'iso' : 'mip');
+    return new Image2dScene(ctx);
+  }
 
   /** Show/hide the overview navigator (same setting as OSD's). */
   setNavigatorVisible(visible: boolean): void {
@@ -564,8 +508,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     void this.exportComposite();
   }
 
-  setPlotType(plotType: PlotType): void {
-    this.currentPlotType = plotType;
+  /** No-op: the mounted scene is fixed per {@link plot}; a new plot type takes a re-plot. */
+  setPlotType(_plotType: PlotType): void {
+    /* the scene is chosen by plot() */
   }
 
   /** Map a Plotly-style 3D drag mode onto napari-js's camera drag mode. */
@@ -689,7 +634,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
     // >8-bit channels: the true native distribution from the server (the displayed pixels are
     // 8-bit, so the client histogram would be clipped). 8-bit channels use the client path.
-    return this.tileClient.nativeHistogram$(this.info(), this.loaded?.z ?? 0, channelIndex, bins)
+    return this.tileClient.nativeHistogram$(this.loaded?.imageInfo, this.loaded?.z ?? 0, channelIndex, bins)
       ?? of(this.getHistogram(channelIndex, bins));
   }
 
