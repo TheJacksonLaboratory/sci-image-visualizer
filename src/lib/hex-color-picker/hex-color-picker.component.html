@@ -2,7 +2,7 @@
   <button #swatchBtn type="button" class="hex-picker-swatch" [style.background]="color"
           (click)="toggle()" [title]="color">
   </button>
-  <div #dropdown class="hex-picker-dropdown" [hidden]="!open">
+  <div #dropdown class="hex-picker-dropdown" [hidden]="!open()">
     <!-- Hexagon grid -->
     <div class="hex-grid">
       <div *ngFor="let row of colorRows;"
@@ -34,24 +34,24 @@
     <div class="slider-section">
       <div class="slider-row">
         <label>H</label>
-        <input type="range" min="0" max="360" [ngModel]="hue"
-               (ngModelChange)="hue=$event; onHslChange()" (change)="commitColor()"
+        <input type="range" min="0" max="360" [ngModel]="hue()"
+               (ngModelChange)="hue.set($event); onHslChange()" (change)="commitColor()"
                class="slider slider-hue" [style.background]="hueGradient">
-        <span class="slider-value">{{hue}}</span>
+        <span class="slider-value">{{ hue() }}</span>
       </div>
       <div class="slider-row">
         <label>S</label>
-        <input type="range" min="0" max="100" [ngModel]="saturation"
-               (ngModelChange)="saturation=$event; onHslChange()" (change)="commitColor()"
-               class="slider slider-sat" [style.background]="satGradient">
-        <span class="slider-value">{{saturation}}</span>
+        <input type="range" min="0" max="100" [ngModel]="saturation()"
+               (ngModelChange)="saturation.set($event); onHslChange()" (change)="commitColor()"
+               class="slider slider-sat" [style.background]="satGradient()">
+        <span class="slider-value">{{ saturation() }}</span>
       </div>
       <div class="slider-row">
         <label>L</label>
-        <input type="range" min="0" max="100" [ngModel]="lightness"
-               (ngModelChange)="lightness=$event; onHslChange()" (change)="commitColor()"
-               class="slider slider-light" [style.background]="lightGradient">
-        <span class="slider-value">{{lightness}}</span>
+        <input type="range" min="0" max="100" [ngModel]="lightness()"
+               (ngModelChange)="lightness.set($event); onHslChange()" (change)="commitColor()"
+               class="slider slider-light" [style.background]="lightGradient()">
+        <span class="slider-value">{{ lightness() }}</span>
       </div>
     </div>
 
@@ -59,18 +59,18 @@
     <div class="rgb-section">
       <div class="rgb-field">
         <label>R</label>
-        <input type="number" min="0" max="255" [ngModel]="red"
-               (ngModelChange)="red=$event; onRgbChange()" (change)="commitColor()">
+        <input type="number" min="0" max="255" [ngModel]="red()"
+               (ngModelChange)="red.set($event); onRgbChange()" (change)="commitColor()">
       </div>
       <div class="rgb-field">
         <label>G</label>
-        <input type="number" min="0" max="255" [ngModel]="green"
-               (ngModelChange)="green=$event; onRgbChange()" (change)="commitColor()">
+        <input type="number" min="0" max="255" [ngModel]="green()"
+               (ngModelChange)="green.set($event); onRgbChange()" (change)="commitColor()">
       </div>
       <div class="rgb-field">
         <label>B</label>
-        <input type="number" min="0" max="255" [ngModel]="blue"
-               (ngModelChange)="blue=$event; onRgbChange()" (change)="commitColor()">
+        <input type="number" min="0" max="255" [ngModel]="blue()"
+               (ngModelChange)="blue.set($event); onRgbChange()" (change)="commitColor()">
       </div>
     </div>
   </div>

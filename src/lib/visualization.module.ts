@@ -90,7 +90,6 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     ManageClassesDialogComponent,
     ClassesPanelComponent,
     RegionTableComponent,
-    HexColorPickerComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,
     SpatialChartsComponent,
@@ -110,6 +109,7 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
   imports: [
     // Standalone components used by the declared ones.
     ToolbarComponent,
+    HexColorPickerComponent,
     CommonModule,
     FormsModule,
     ToolbarModule,

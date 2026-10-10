@@ -84,8 +84,8 @@ describe('RegionEditorComponent', () => {
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -409,8 +409,8 @@ describe('RegionEditorComponent with shapes', () => {
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -501,8 +501,8 @@ describe('SelectionDialogComponent with open path shape', () => {
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -585,8 +585,8 @@ describe('RegionEditorComponent persist / save-as', () => {
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: mockMessageService },
@@ -1048,8 +1048,8 @@ describe('RegionEditorComponent export', () => {
     } as unknown as RegionIoPort;
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: mockVisualizer },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -1173,8 +1173,8 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         { provide: MessageService, useValue: MockService(MessageService) },
@@ -1375,8 +1375,8 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
     });
 
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent, HexColorPickerComponent],
-      imports: [FormsModule],
+      declarations: [RegionEditorComponent],
+      imports: [HexColorPickerComponent, FormsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         { provide: MessageService, useValue: MockService(MessageService) },
