@@ -3,12 +3,13 @@ import { Subscription } from 'rxjs';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
-import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../spatial/world-grid';
+
 import {
-  ToScreen, hitHandle, nearestEdge, nearestVertex, regionContains, regionsInRect,
+  hitHandle, nearestEdge, nearestVertex, regionContains, regionsInRect,
 } from '../../region-overlay/region-geometry';
-import { Affine, affineFromProjection } from '../../region-overlay/svg-region-renderer';
+
 import { DragBox, NapariRegionSvgRenderer } from './region-overlay/region-svg-renderer';
+import { OverlayProjection } from './region-overlay/overlay-projection';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
@@ -91,6 +92,8 @@ export interface OverlayViewer {
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;
   private readonly renderer: NapariRegionSvgRenderer;
+  /** Client ↔ svg-local ↔ world conversions, with the svg origin read once per gesture/redraw. */
+  private readonly projection: OverlayProjection;
   private readonly subs = new Subscription();
   private readonly disconnectCamera: () => void;
 
@@ -135,6 +138,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     } as Partial<CSSStyleDeclaration>);
     this.host.appendChild(this.svg);
     this.renderer = new NapariRegionSvgRenderer(this.svg, this.store);
+    this.projection = new OverlayProjection(this.svg, this.viewer);
 
     this.svg.addEventListener('pointerdown', this.onPointerDown);
     this.svg.addEventListener('pointermove', this.onPointerMove);
@@ -189,19 +193,11 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   /**
-   * How finely a drawn vertex may be placed, in world units.
-   *
-   * One by default, because for an image the world IS pixels and a region should align to
-   * them. A dataset whose coordinates are not pixels sets it finer — seqFISH's whole
-   * sample spans about 5 x 7 units, where whole-unit vertices leave roughly six by eight
-   * placeable positions and no ROI can be drawn at all.
+   * How finely a drawn vertex may be placed, in world units: one (an image's pixels) by
+   * default, finer for a dataset whose coordinates are not pixels (see OverlayProjection).
    */
-  private worldQuantum = PIXEL_WORLD_QUANTUM;
-
   setWorldQuantum(quantum: number): void {
-    this.worldQuantum = Number.isFinite(quantum) && quantum > 0
-      ? quantum
-      : PIXEL_WORLD_QUANTUM;
+    this.projection.setWorldQuantum(quantum);
   }
 
   destroy(): void {
@@ -218,79 +214,15 @@ export class NapariRegionOverlay implements IRegionOverlay {
     if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
   }
 
-  // ── coordinate transforms ─────────────────────────────────────────────────
-  /** Pointer client coords → world coords, snapped to {@link worldQuantum}. */
-  private toImage(clientX: number, clientY: number): [number, number] {
-    const [wx, wy] = this.viewer.canvasToWorld(clientX, clientY);
-    return [
-      snapToWorldGrid(wx, this.worldQuantum),
-      snapToWorldGrid(wy, this.worldQuantum),
-    ];
-  }
-
-  /**
-   * World units spanned by one screen pixel, measured through the viewer's own transform.
-   *
-   * Read from the transform rather than from the camera, so it holds for both the 2D and
-   * the 3D screen-space adapters without either having to expose a zoom. Falls back to 1
-   * if the transform gives nothing usable, which keeps the established pixel behaviour
-   * rather than collapsing the threshold to zero and recording a point per event.
-   */
-  private worldPerCanvasPixel(): number {
-    const [x0] = this.viewer.canvasToWorld(0, 0);
-    const [x1] = this.viewer.canvasToWorld(1, 0);
-    const per = Math.abs(x1 - x0);
-    return Number.isFinite(per) && per > 0 ? per : 1;
-  }
-
-  /**
-   * The svg's client origin, cached while a {@link withOrigin} block runs.
-   *
-   * Every vertex is converted through it, and an uncached read per vertex — interleaved with the
-   * elements a redraw appends — forced a synchronous layout per vertex.
-   */
-  private origin: { left: number; top: number } | null = null;
-
-  private svgOrigin(): { left: number; top: number } {
-    return this.origin ?? this.svg.getBoundingClientRect();
-  }
-
-  /** Run `fn` with the svg's client origin read once (nested calls reuse it). */
-  private withOrigin<T>(fn: () => T): T {
-    if (this.origin) return fn();
-    const r = this.svg.getBoundingClientRect();
-    this.origin = { left: r.left, top: r.top };
-    try {
-      return fn();
-    } finally {
-      this.origin = null;
-    }
-  }
-
-  /** Client px → SVG-local px. */
-  private clientToLocal(clientX: number, clientY: number): [number, number] {
-    const o = this.svgOrigin();
-    return [clientX - o.left, clientY - o.top];
-  }
-
-  /** Image coords → SVG-local px (the svg overlays the canvas at the same client rect). */
-  private toLocal(imgX: number, imgY: number): [number, number] {
-    const [cx, cy] = this.viewer.worldToCanvas(imgX, imgY);
-    return this.clientToLocal(cx, cy);
-  }
-
-  /** {@link toLocal} as the shared region geometry takes it. */
-  private readonly toScreen: ToScreen = (x, y) => this.toLocal(x, y);
-
   // ── pointer handlers ──────────────────────────────────────────────────────
   private readonly onPointerDown = (e: PointerEvent): void => {
     if (this.mode === 'none') return;
     e.preventDefault();
-    this.withOrigin(() => this.pointerDown(e));
+    this.projection.withOrigin(() => this.pointerDown(e));
   };
 
   private pointerDown(e: PointerEvent): void {
-    const [ix, iy] = this.toImage(e.clientX, e.clientY);
+    const [ix, iy] = this.projection.toImage(e.clientX, e.clientY);
     if (this.mode === 'drawrect') {
       this.draftRect = { x0: ix, y0: iy, x1: ix, y1: iy };
       this.drawing = true;
@@ -312,7 +244,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
   }
 
   private readonly onPointerMove = (e: PointerEvent): void => {
-    const [ix, iy] = this.toImage(e.clientX, e.clientY);
+    const [ix, iy] = this.projection.toImage(e.clientX, e.clientY);
     if (this.marquee) {
       this.marquee.x1 = ix;
       this.marquee.y1 = iy;
@@ -329,7 +261,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.draftRect.x1 = ix;
       this.draftRect.y1 = iy;
     } else if (this.draftPath) {
-      const step = FREEHAND_STEP_PX * this.worldPerCanvasPixel();
+      const step = FREEHAND_STEP_PX * this.projection.worldPerCanvasPixel();
       const last = this.draftPath[this.draftPath.length - 1];
       if (Math.abs(ix - last[0]) >= step || Math.abs(iy - last[1]) >= step) {
         this.draftPath.push([ix, iy]);
@@ -376,7 +308,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       const w = Math.abs(x1 - x0);
       const h = Math.abs(y1 - y0);
       this.draftRect = null;
-      const min = MIN_RECT_DRAG_PX * this.worldPerCanvasPixel();
+      const min = MIN_RECT_DRAG_PX * this.projection.worldPerCanvasPixel();
       if (w >= min && h >= min) this.commitRectangle(x, y, w, h);
     } else if (this.draftPath) {
       const pts = this.draftPath;
@@ -423,7 +355,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return;
     }
     const near =
-      this.screenDist(clientX, clientY, this.draftPath[0][0], this.draftPath[0][1]) <= CLOSE_SNAP_PX &&
+      this.projection.screenDist(clientX, clientY, this.draftPath[0][0], this.draftPath[0][1]) <= CLOSE_SNAP_PX &&
       this.draftPath.length >= 3;
     if (near) {
       const pts = this.draftPath;
@@ -450,13 +382,6 @@ export class NapariRegionOverlay implements IRegionOverlay {
     return i != null && i >= 0 && i < regions.length ? regions[i] : null;
   }
 
-  /** Screen distance (px) between a client point and an image coord. */
-  private screenDist(clientX: number, clientY: number, imgX: number, imgY: number): number {
-    const [lx, ly] = this.toLocal(imgX, imgY);
-    const [px, py] = this.clientToLocal(clientX, clientY);
-    return Math.hypot(px - lx, py - ly);
-  }
-
   /**
    * Start a select/move interaction: grab a handle (rectangle corner) or vertex of the already-
    * selected region first; otherwise select the topmost region under the cursor and drag its body.
@@ -475,9 +400,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
     // Hit-test bodies, topmost first (last drawn renders on top), at the exact pointer
     // position — snapping is for placing vertices, not for picking.
     const regions = this.store.getRegions();
-    const [wx, wy] = this.viewer.canvasToWorld(e.clientX, e.clientY);
+    const [wx, wy] = this.projection.toWorld(e.clientX, e.clientY);
     for (let i = regions.length - 1; i >= 0; i--) {
-      if (regionContains(regions[i], wx, wy, { toScreen: this.toScreen, tolPx: OPEN_PATH_HIT_PX })) {
+      if (regionContains(regions[i], wx, wy, { toScreen: this.projection.toScreen, tolPx: OPEN_PATH_HIT_PX })) {
         this.store.selectRegion(regions[i]);
         this.store.beginBatch();
         this.edit = { kind: 'body', id: regions[i].id, last: [ix, iy] };
@@ -500,9 +425,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private updateMarqueeEl(): void {
     if (!this.marquee) return;
     const { x0, y0, x1, y1 } = this.marquee;
-    const [[lx, ly], [rx, ry]] = this.withOrigin(() => [
-      this.toLocal(Math.min(x0, x1), Math.min(y0, y1)),
-      this.toLocal(Math.max(x0, x1), Math.max(y0, y1)),
+    const [[lx, ly], [rx, ry]] = this.projection.withOrigin(() => [
+      this.projection.toLocal(Math.min(x0, x1), Math.min(y0, y1)),
+      this.projection.toLocal(Math.max(x0, x1), Math.max(y0, y1)),
     ]);
     this.renderer.showMarquee(lx, ly, rx, ry);
   }
@@ -522,8 +447,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
     | { kind: 'holevertex'; holeIndex: number; vertexIndex: number }
     | { kind: 'holebezier'; holeIndex: number; vertexIndex: number; side: 'in' | 'out' }
     | null {
-    const [lx, ly] = this.clientToLocal(clientX, clientY);
-    const hit = hitHandle(region, lx, ly, this.toScreen, HANDLE_HIT_PX);
+    const [lx, ly] = this.projection.clientToLocal(clientX, clientY);
+    const hit = hitHandle(region, lx, ly, this.projection.toScreen, HANDLE_HIT_PX);
     if (!hit) return null;
     if (hit.kind === 'corner') return { kind: 'corner', anchor: hit.anchor };
     if (hit.kind === 'vertex') {
@@ -583,8 +508,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private handleAddPoint(ix: number, iy: number, clientX: number, clientY: number): void {
     const sel = this.selectedRegion();
     if (!sel) return;
-    const [lx, ly] = this.clientToLocal(clientX, clientY);
-    const edge = nearestEdge(sel, lx, ly, this.toScreen);
+    const [lx, ly] = this.projection.clientToLocal(clientX, clientY);
+    const edge = nearestEdge(sel, lx, ly, this.projection.toScreen);
     if (!edge) return;
     if (edge.ring < 0) this.store.addVertex(sel.id, edge.segIndex, ix, iy);
     else this.store.addHoleVertex(sel.id, edge.ring, edge.segIndex, ix, iy);
@@ -608,7 +533,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     const x1 = Math.max(m.x0, m.x1);
     const y0 = Math.min(m.y0, m.y1);
     const y1 = Math.max(m.y0, m.y1);
-    const min = MIN_MARQUEE_PX * this.worldPerCanvasPixel();
+    const min = MIN_MARQUEE_PX * this.projection.worldPerCanvasPixel();
     if (x1 - x0 < min && y1 - y0 < min) {
       this.store.setSelectedShapeIndices([]);
       return;
@@ -652,14 +577,9 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
-  /** The renderer's world → svg-local affine for the current camera (one svg rect read). */
-  private currentAffine(): Affine {
-    return this.withOrigin(() => affineFromProjection(this.toScreen));
-  }
-
   /** Follow a camera move: one transform attribute plus the screen-space elements. */
   private updateCamera(): void {
-    this.renderer.setCamera(this.currentAffine());
+    this.renderer.setCamera(this.projection.affine());
   }
 
   /**
@@ -667,8 +587,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
    * group), their labels, and the overlay. The svg's origin is read once.
    */
   redraw(): void {
-    this.withOrigin(() => {
-      this.renderer.setCamera(this.currentAffine());
+    this.projection.withOrigin(() => {
+      this.renderer.setCamera(this.projection.affine());
       this.renderer.render(this.regionsVisible ? this.store.getRegions() : [], this.selected);
       this.renderOverlay();
     });
