@@ -57,7 +57,6 @@ import { throwIfAborted } from '../tile-server/transport';
 // './contracts/plot-type' directly, drop this re-export.
 export { PlotType } from '../../contracts/plot-type';
 
-
 @Injectable({
   providedIn: 'root'
 })
@@ -133,17 +132,11 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   // current index of image in stack (if stack), 0 if single image
   private zIndex = new BehaviorSubject<number>(0);
   private autoscaleEvent = new Subject<any>();
-  // The region update event and selection stream are owned by the shared
-  // RegionStore; getRegionUpdateEvent()/getSelectedShapeIndices$() delegate to
-  // it so every consumer (and the OSD backend) sees one stream.
   /** The ISOSURFACE band, mapped onto the measured volume (see PlotlyIsosurfaceControls). */
   private readonly iso = new PlotlyIsosurfaceControls(
     () => this.plotType === PlotType.ISOSURFACE && !!this.plotDiv && !!this.liveGd(),
     (update) => void Plotly.restyle(this.liveGd(), update as Plotly.Data),
   );
-  // Id minting and the selection index stream are owned by the shared
-  // RegionStore. Selection still drives Plotly's `_activeShapeIndex` (so a
-  // single shape gets the edit handles) — see setSelectedShapeIndices().
   private imageCached = false;
   private imageCachedSubscription?: Subscription;
   private filenameSubscription?: Subscription;
@@ -273,18 +266,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /**
-   *
-   * @param plotDiv
-   * @param imageLoaded object with data, ratios and sizes key
-   * @param imageInfo ImageInfo object
-   * @param screenHeight size of the available screen height
-   * @param plotType type of plotting
-   */
-  /**
-   * @param inPlace when true, updates the existing plot via Plotly.react
-   *   instead of Plotly.purge + Plotly.newPlot. Used by the multi-tier
-   *   diagram swap (small → large) so the canvas doesn't briefly blank
-   *   between phases.
+   * Plot a loaded image (see {@link load}) as `plotType`. `inPlace` updates the
+   * existing plot via Plotly.react instead of purge + newPlot — the multi-tier
+   * swap (small → large) — so the canvas doesn't briefly blank between phases.
    */
   public plot(plotDiv: string, imageLoaded: any, imageInfo: IImageInfo, screenHeight: number,
               plotType: PlotType, inPlace: boolean = false) {
@@ -292,13 +276,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // A new image: a stroke or SAM prompt in progress belonged to the old one.
     if (!inPlace) this.canvasTools.resetAll();
     this.renderGen++;
-    const trueImageSize: number[] = [];
     this.zoom.zoomCoordinates = [];
-    // [x0, x1, y0, y1]
-    trueImageSize[0] = 0;
-    trueImageSize[1] = imageInfo.trueImageSize[0];
-    trueImageSize[2] = 0;
-    trueImageSize[3] = imageInfo.trueImageSize[1];
+    const trueImageSize = [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]]; // [x0, x1, y0, y1]
     // Save the current image's regions and pull in any cached regions for the
     // image we're about to display, before Plotly.newPlot reads the shape projection.
     this.setActiveImage(imageInfo);
