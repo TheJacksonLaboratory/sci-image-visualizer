@@ -5,7 +5,8 @@
     "entryFile": "src/index.ts"
   },
   "assets": [
-    "src/lib/assets"
+    "src/lib/assets",
+    "src/lib/styles"
   ],
   "allowedNonPeerDependencies": [
     "cellpose-js",

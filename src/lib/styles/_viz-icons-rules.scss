@@ -1,0 +1,60 @@
+@use 'sass:list';
+
+// The visualizer's toolbar / context-menu icon classes, as a mixin so the same rules can
+// be emitted from two places with the right asset path for each:
+//  - `viz-icons.scss`, the stylesheet the package ships for hosts (global styles);
+//  - the visualizer component, inside `::ng-deep`, so nothing changes for a host that
+//    does not include the shipped stylesheet.
+// They must be global either way: the context menu and the toolbar overlays are appended
+// to <body>, outside the component's view.
+
+$icons: (
+  'zoom-box-off-icon': 'zoom-box',
+  'wand-icon': 'wand',
+  'brush-icon': 'paintbrush',
+  'polyline-icon': 'polyline',
+  'polygon-vertices-icon': 'polygon-vertices',
+  'vertex-add-icon': 'vertex-add',
+  'vertex-delete-icon': 'vertex-delete',
+  'region-move-icon': 'region-move',
+  'to-bezier-icon': 'to-bezier',
+  'to-polygon-icon': 'to-polygon'
+);
+
+// Icons inverted to white on the highlighted (active) context-menu entry.
+$context-menu-icons: (
+  'zoom-box-off-icon', 'wand-icon', 'polyline-icon', 'polygon-vertices-icon', 'vertex-add-icon',
+  'vertex-delete-icon', 'region-move-icon', 'to-bezier-icon', 'to-polygon-icon'
+);
+
+/// Emit the icon and active-context-menu rules. `$assets` is the path, relative to the
+/// stylesheet being compiled, of the package's `src/lib/assets` folder.
+@mixin rules($assets) {
+  .context-menu-active > .p-menuitem-content {
+    background-color: var(--primary-color) !important;
+  }
+
+  .context-menu-active > .p-menuitem-content .p-menuitem-icon,
+  .context-menu-active > .p-menuitem-content .p-menuitem-text {
+    color: #ffffff !important;
+  }
+
+  $active: ();
+  @each $class in $context-menu-icons {
+    $active: list.append($active, '.context-menu-active > .p-menuitem-content .#{$class}', $separator: comma);
+  }
+  #{$active} {
+    filter: brightness(0) invert(1);
+  }
+
+  @each $class, $file in $icons {
+    .#{$class} {
+      background: url('#{$assets}/#{$file}.svg') no-repeat center center;
+      background-size: contain;
+      width: 1.25rem;
+      height: 1.25rem;
+      display: inline-block;
+      filter: brightness(0) invert(47%) sepia(98%) saturate(567%) hue-rotate(181deg) brightness(103%) contrast(98%);
+    }
+  }
+}

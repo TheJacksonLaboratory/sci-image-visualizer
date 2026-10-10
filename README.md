@@ -71,6 +71,15 @@ it working.
 4. **onnxruntime-web sidecars** at `/assets/ort/` (copy
    `node_modules/onnxruntime-web/dist/*.{wasm,mjs}`), or call `setOrtWasmBase(url)`
    once at startup.
+5. **Icon stylesheet (optional):** the toolbar and context-menu icon classes
+   (`.wand-icon`, `.brush-icon`, … and the active context-menu entry) are global,
+   because those menus are appended to `<body>`. The visualizer defines them when
+   it first loads; to have them defined up front and independent of stylesheet
+   order (say, for a host menu that reuses the icons), add the shipped stylesheet
+   to `angular.json`:
+   ```json
+   "styles": ["node_modules/@jax-data-science/sci-image-visualizer/src/lib/styles/viz-icons.scss"]
+   ```
 
 ## Quick start
 

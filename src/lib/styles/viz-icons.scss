@@ -1,0 +1,14 @@
+// Global icon rules of the visualizer's toolbar and context menu, shipped for hosts.
+//
+// The visualizer component also emits these when it loads, so including this file is
+// optional. Include it to have the classes defined before any visualizer has loaded (a
+// host toolbar or menu that reuses them), and independent of stylesheet load order. In
+// angular.json:
+//
+//   "styles": ["node_modules/@jax-data-science/sci-image-visualizer/src/lib/styles/viz-icons.scss"]
+//
+// The icon URLs are relative to this file (`../assets/*.svg`, the package's assets folder),
+// which the Angular CLI resolves and bundles.
+@use 'viz-icons-rules';
+
+@include viz-icons-rules.rules('../assets');

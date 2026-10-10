@@ -54,6 +54,19 @@ import 'primeng/resources/themes/saga-blue/theme.css'; // or your PrimeNG theme
 The templates use `pi pi-*` icons and PrimeFlex utility classes, so the viewer
 renders unstyled without them.
 
+The toolbar and context-menu icon classes (`.wand-icon`, `.brush-icon`, … and the
+highlighted context-menu entry) have to be global, because PrimeNG appends those
+menus to `<body>`, outside the visualizer's view. The visualizer defines them when it
+first loads. The package also ships them as a stylesheet, so a host can define them
+up front, independent of stylesheet order (a host menu that reuses the icons, say):
+
+```json
+"styles": ["node_modules/@jax-data-science/sci-image-visualizer/src/lib/styles/viz-icons.scss"]
+```
+
+Its icon URLs are relative to the stylesheet (`../assets/*.svg`), and the Angular CLI
+bundles them, so they work whether or not `assets/plotting/` is served.
+
 ## 4. Assets
 
 The library loads its icons, colormap previews and `colormap-luts.json` from
