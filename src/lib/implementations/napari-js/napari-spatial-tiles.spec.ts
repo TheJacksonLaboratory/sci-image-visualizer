@@ -618,7 +618,8 @@ describe('NapariSpatialTileLayers: overlapping plans', () => {
     await flush();
     expect(getPolygonTile).toHaveBeenCalledTimes(2);
     // …because it was cached as complete.
-    expect((tiles as unknown as { cellGeometryKey: string | null }).cellGeometryKey).not.toBeNull();
+    const cells = (tiles as unknown as { cells: { cellGeometryKey: string | null } }).cells;
+    expect(cells.cellGeometryKey).not.toBeNull();
     tiles.detach();
   });
 });
