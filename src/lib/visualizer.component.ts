@@ -845,7 +845,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   autoscaleImage() {
-    this.plotService.autoscale();
+    this.plotService.fitToView();
   }
 
   /** Toolbar pixel/smooth toggle: flip smoothing and apply to the active backend. */
@@ -976,13 +976,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     };
   }
 
+  /** 3D scene interaction mode (orbit / turntable / pan / zoom); no-op on a 2D-only backend. */
   toggleSurface3dMode(mode: string) {
     this.activeSurface3dMode = mode;
-    this.plotService.setSurfaceDragMode(mode);
+    this.plotService.getSurface3dControls()?.setSurfaceDragMode(mode);
   }
 
   resetSurfaceCamera() {
-    this.plotService.resetSurfaceCamera();
+    this.plotService.getSurface3dControls()?.resetSurfaceCamera();
   }
 
   /** Toggle the napari 3D coordinate-axes / scale gizmo (volume/isosurface). No-op on backends

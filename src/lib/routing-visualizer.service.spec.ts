@@ -40,6 +40,7 @@ function mockBackend(): any {
     relayout: jest.fn(),
     resetAxes: jest.fn(),
     autoscale: jest.fn(),
+    fitToView: jest.fn(),
     zoomIn: jest.fn(),
     zoomOut: jest.fn(),
     setDragMode: jest.fn(),
@@ -387,7 +388,7 @@ describe('RoutingVisualizerService (characterization)', () => {
   it.each<[string, any[]]>([
     ['relayout', [[10, 20]]],
     ['resetAxes', []],
-    ['autoscale', []],
+    ['fitToView', []],
     ['zoomIn', []],
     ['zoomOut', []],
     ['setDragMode', ['pan']],
@@ -455,8 +456,6 @@ describe('RoutingVisualizerService (characterization)', () => {
 
   // ── methods pinned to a specific backend, regardless of the renderer ──
   it.each<[string, any[]]>([
-    ['setSurfaceDragMode', ['orbit']],
-    ['resetSurfaceCamera', []],
     ['getPlotTypeDescriptors', []],
     ['setStackLoading', [true]],
     ['isStackLoading', []],
@@ -474,6 +473,19 @@ describe('RoutingVisualizerService (characterization)', () => {
   ])('routes %s to Plotly (the full-featured backend)', (method, args) => {
     (router as any)[method](...args);
     expect(plotly[method]).toHaveBeenCalledWith(...args);
+  });
+
+  it('the deprecated autoscale is fitToView; the 3D camera members go through getSurface3dControls()', () => {
+    router.autoscale();
+    expect(plotly.fitToView).toHaveBeenCalledTimes(1);
+    const controls = { setSurfaceDragMode: jest.fn(), resetSurfaceCamera: jest.fn() };
+    plotly.getSurface3dControls.mockReturnValue(controls);
+    router.setSurfaceDragMode('orbit');
+    router.resetSurfaceCamera();
+    expect(controls.setSurfaceDragMode).toHaveBeenCalledWith('orbit');
+    expect(controls.resetSurfaceCamera).toHaveBeenCalled();
+    plotly.getSurface3dControls.mockReturnValue(null); // a 2D-only backend: a no-op, not a throw
+    expect(() => router.resetSurfaceCamera()).not.toThrow();
   });
 
   it('surfaces the autoscale event of every backend, not only Plotly (CORE-5)', () => {

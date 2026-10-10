@@ -208,7 +208,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   relayout(trueImageSize?: number[]): void { this.renderer().relayout(trueImageSize); }
   resetAxes(): void { this.renderer().resetAxes(); }
-  autoscale(): void { this.renderer().autoscale(); }
+  fitToView(): void { this.renderer().fitToView(); }
+  /** @deprecated Use {@link fitToView}. */
+  autoscale(): void { this.fitToView(); }
   zoomIn(): void { this.renderer().zoomIn(); }
   zoomOut(): void { this.renderer().zoomOut(); }
   setDragMode(mode: string | false): void { this.renderer().setDragMode(mode); }
@@ -244,8 +246,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.currentPlotType = plotType;
     this.plotly.setPlotType(plotType);
   }
-  setSurfaceDragMode(mode: string): void { this.renderer().setSurfaceDragMode(mode); }
-  resetSurfaceCamera(): void { this.renderer().resetSurfaceCamera(); }
+  /** @deprecated Use `getSurface3dControls()`. */
+  setSurfaceDragMode(mode: string): void { this.getSurface3dControls()?.setSurfaceDragMode(mode); }
+  /** @deprecated Use `getSurface3dControls()`. */
+  resetSurfaceCamera(): void { this.getSurface3dControls()?.resetSurfaceCamera(); }
   setResolutionScale(scale: number): void { this.renderer().setResolutionScale?.(scale); }
   getResolutionScale(): number { return this.renderer().getResolutionScale?.() ?? 1; }
   /** The viewport of the backend on screen, for a contributed plot mode. Null

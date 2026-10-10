@@ -143,6 +143,12 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   /** The view is going away: release what is bound to it (`IViewerBackend.detach`). */
   detach(): void { this.unsubscribe(); }
 
+  /** Each backend's own fit (Plotly autorange, OSD home, napari camera fit). */
+  abstract autoscale(): void;
+
+  /** Fit the image into the view (`IViewerBackend.fitToView`). */
+  fitToView(): void { this.autoscale(); }
+
   // ── Classification colours → shared VisualizerStore ──────────────────────
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void {

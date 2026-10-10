@@ -63,7 +63,7 @@ function mockPlotService(): any {
     setShowStack: jest.fn(),
     setStackLoading: jest.fn(),
     downloadImage: jest.fn(),
-    autoscale: jest.fn(),
+    fitToView: jest.fn(),
     resetAxes: jest.fn(),
     zoomIn: jest.fn(),
     zoomOut: jest.fn(),
@@ -1041,7 +1041,7 @@ describe('VisualizerComponent (UI shell)', () => {
       component.zoomOut();
       component.deleteRegion();
       expect(plotService.downloadImage).toHaveBeenCalled();
-      expect(plotService.autoscale).toHaveBeenCalled();
+      expect(plotService.fitToView).toHaveBeenCalled();
       expect(plotService.resetAxes).toHaveBeenCalled();
       expect(plotService.zoomIn).toHaveBeenCalled();
       expect(plotService.zoomOut).toHaveBeenCalled();
@@ -1715,8 +1715,8 @@ describe('VisualizerComponent — context menu (characterization)', () => {
 
   beforeEach(() => {
     plot = mockPlotService();
-    plot.resetSurfaceCamera = jest.fn();
-    plot.setSurfaceDragMode = jest.fn();
+    const controls = { setSurfaceDragMode: jest.fn(), resetSurfaceCamera: jest.fn() };
+    plot.getSurface3dControls = jest.fn().mockReturnValue(controls);
     component = makeComponent(plot);
   });
 
@@ -1783,14 +1783,14 @@ describe('VisualizerComponent — context menu (characterization)', () => {
     run('Zoom in');
     expect(plot.zoomIn).toHaveBeenCalled();
     run('Autoscale');
-    expect(plot.autoscale).toHaveBeenCalled();
+    expect(plot.fitToView).toHaveBeenCalled();
     run('Rectangle');
     expect(component.activeDragMode).toBe('drawrect');
     view(PlotType.SURFACE, true);
     run('Pan');
     expect(component.activeSurface3dMode).toBe('pan');
     run('Reset camera');
-    expect(plot.resetSurfaceCamera).toHaveBeenCalled();
+    expect(plot.getSurface3dControls().resetSurfaceCamera).toHaveBeenCalled();
   });
 });
 

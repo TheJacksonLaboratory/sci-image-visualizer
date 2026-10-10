@@ -82,11 +82,16 @@ export interface IDataRenderer {
   reloadAndPlot(): void;
   reset(): void;
   relayout(trueImageSize?: number[]): void;
-  /** @deprecated Plotly-specific (axis reset); the OSD backend no-ops it. Gate
-   *  on {@link ViewerCapabilities} before calling. */
+  /**
+   * Fit the whole image (or scene) into the view — every backend does: Plotly
+   * autoranges its axes, OpenSeadragon goes home, napari-js fits its camera. The
+   * backend then emits on {@link getAutoscaleEvent}.
+   */
+  fitToView(): void;
+  /** Reset the view to the image extent. Same intent as {@link fitToView}; kept for
+   *  callers of the original name. */
   resetAxes(): void;
-  /** @deprecated Plotly-specific (autoscale); the OSD backend no-ops it. Gate
-   *  on {@link ViewerCapabilities} before calling. */
+  /** @deprecated Use {@link fitToView} — the same operation under its backend-neutral name. */
   autoscale(): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -136,13 +141,13 @@ export interface IDataRenderer {
   setResolutionScale?(scale: number): void;
   /** The current napari 3D decimate factor (to initialize the Resolution control). Optional. */
   getResolutionScale?(): number;
-  /** @deprecated Use `getSurface3dControls()` — 3D scene controls only exist on
-   *  a backend that renders 3D plot types; this method silently no-ops on OSD. */
+  /** @deprecated Use `getSurface3dControls()?.setSurfaceDragMode()` — 3D scene controls
+   *  only exist on a backend that renders 3D plot types; this silently no-ops on OSD. */
   setSurfaceDragMode(mode: string): void;
   /** @deprecated Use `getSurface3dControls()` — see {@link setSurfaceDragMode}. */
   resetSurfaceCamera(): void;
 
-  /** Emits whenever the backend fits the view (its autoscale / "fit to view"). */
+  /** Emits whenever the backend fits the view ({@link fitToView}). */
   getAutoscaleEvent(): Observable<unknown>;
 
   /** Plot types this backend advertises (drives the UI selector). */
