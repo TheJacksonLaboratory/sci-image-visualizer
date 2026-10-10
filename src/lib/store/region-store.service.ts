@@ -52,8 +52,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private currentImageKey: string | undefined;
   /** The current image's regions — the live, edited array. */
   private regions: Region[] = [];
-  /** Last saved snapshot, restorable via plotPreviousShapes(). */
-  private previousRegions: Region[] = [];
 
   /**
    * Undo/redo history (jit-ui#85): up to {@link UNDO_LIMIT} snapshots of the
@@ -198,7 +196,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       if (normalized.length) this.stackInitialNonEmpty.add(z);
     }
     this.regions = (this.regionsBySlice.get(this.currentSliceZ) ?? []).slice();
-    this.previousRegions = this.regions.slice();
     this.selectedIds = [];
     this.syncCache();
     this.resetUndoHistory();
@@ -230,7 +227,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
     this.currentSliceZ = next;
     this.regions = (this.regionsBySlice.get(next) ?? []).slice();
-    this.previousRegions = this.regions.slice();
     this.selectedIds = [];
     this.syncCache();
     this.resetUndoHistory();
@@ -388,21 +384,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   getClassificationColors(): Map<string, string> { return this.store.getClassificationColors(); }
   setClassificationColor(label: string, color: string): void { this.store.setClassificationColor(label, color); }
-
-  // ── IRegionStore: previous-shapes buffer ───────────────────────────────
-  // Nothing reads this buffer back (only setPreviousShapes is ever called), and
-  // it aliases live instances, so it isn't a snapshot either (RT-24). It stays
-  // until the IRegionStore contract drops it.
-
-  /** Re-show the last saved snapshot (transient — does not alter stored state).
-   *  @deprecated Never called; will be removed with the contract member. */
-  plotPreviousShapes(): void {
-    this.regionUpdate$.next(this.previousRegions.slice());
-  }
-  /** @deprecated Write-only; will be removed with the contract member. */
-  setPreviousShapes(shapes: any[]): void { this.previousRegions = (shapes as Region[]).slice(); }
-  /** @deprecated Never called; will be removed with the contract member. */
-  getPreviousShapes(): any[] { return this.previousRegions.slice(); }
 
   // ── IRegionStore: undo / redo (jit-ui#85) ──────────────────────────────
 
@@ -689,7 +670,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regions = (newKey && this.regionsByImageKey.get(newKey))
       ? (this.regionsByImageKey.get(newKey) as Region[]).slice()
       : [];
-    this.previousRegions = this.regions.slice();
     this.selectedIds = [];
     // Undo never crosses an image switch.
     this.resetUndoHistory();

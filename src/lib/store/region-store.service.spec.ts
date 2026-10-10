@@ -904,17 +904,6 @@ describe('RegionStore', () => {
       store.setClassificationColor('Tumor', '#112233');
       expect(store.getClassificationColors().get('Tumor')).toBe('#112233');
     });
-
-    it('buffers and replays the previous-shapes snapshot without touching stored regions', () => {
-      store.setPreviousShapes([polyRegion([0, 1, 2], [0, 1, 2])]);
-      expect(store.getPreviousShapes().length).toBe(1);
-
-      const replayed: Region[][] = [];
-      store.getRegionUpdateEvent().subscribe(rs => replayed.push(rs as Region[]));
-      store.plotPreviousShapes();
-      expect(replayed[replayed.length - 1].length).toBe(1);
-      expect(store.getRegions().length).toBe(0); // stored state untouched
-    });
   });
 
   describe('GeoJSON round-trip helpers', () => {
