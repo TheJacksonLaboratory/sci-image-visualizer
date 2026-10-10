@@ -148,7 +148,7 @@
        background. Lets the user see the blurry image underneath but makes
        it clear something is still loading so they don't mistake the
        low-res render for the final image. -->
-  <div *ngIf="sharpening && !imgLoading && !stackLoading && !isCaching" class="sharpening-overlay">
+  <div *ngIf="render.sharpening && !imgLoading && !stackLoading && !isCaching" class="sharpening-overlay">
     <div class="spinner"></div>
     <span class="text-loading">Sharpening preview...</span>
   </div>

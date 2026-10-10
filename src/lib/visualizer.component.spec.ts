@@ -732,7 +732,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.reloadAndPlot = jest.fn();
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
-        (c as any).viewReady = true;
+        (c as any).render.viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'xenium', name: 'Cervical', observations: { count: 3 }, columns: [] });
         await flush();
@@ -816,11 +816,11 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.plot = jest.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
-        (c as any).viewReady = true;
+        (c as any).render.viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
-        (c as any).renderToken++; // a newer image starts rendering
+        (c as any).render.supersede.next(); // a newer image starts rendering
         const state = (c as any).state;
         state.setImageLoading.mockClear();
         finish(true);
@@ -832,7 +832,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.plot = jest.fn(async () => false); // napari without WebGPU resolves false
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
-        (c as any).viewReady = true;
+        (c as any).render.viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
@@ -847,7 +847,7 @@ describe('VisualizerComponent (UI shell)', () => {
         plotService.plot = jest.fn(async () => true);
         const c = makeComponent(plotService, port);
         (c as any).imageInfo = undefined;
-        (c as any).viewReady = true;
+        (c as any).render.viewReady = true;
         (c as any).watchSpatialDataset();
         dataset$.next({ id: 'one', name: 'One', observations: { count: 3 }, columns: [] });
         await flush();
@@ -1329,12 +1329,12 @@ describe('VisualizerComponent — render preemption (#5)', () => {
 
     // The overlay belongs to B now, and B is still rendering.
     expect(state.setImageLoading).not.toHaveBeenCalled();
-    expect((component as any).running).toBe(true);
+    expect((component as any).render.running).toBe(true);
 
     // B's own callbacks still work.
     liveHost.finished(false);
     expect(state.setImageLoading).toHaveBeenCalledWith(false);
-    expect((component as any).running).toBe(false);
+    expect((component as any).render.running).toBe(false);
   });
 
   it('a superseded renderPhase does not issue a load at all', async () => {

@@ -14,7 +14,8 @@ import { Polygon } from './models/region';
 import { RegionOpsService } from './region-ops.service';
 import { VIZ_TOAST_KEY, VIZ_ALERT_TOAST_KEY } from './toast-outlets';
 import { VisualizerStore } from './store/visualizer-store.service';
-import { RenderOrchestrator, SliceScrubber } from './render-orchestrator';
+import { SliceScrubber } from './render-orchestrator';
+import { ImageRenderSession, errorMessage } from './render-session';
 import {
   PlotType,
   PlotTypeDescriptor,
@@ -49,7 +50,6 @@ import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
-import { SpatialDataset } from './contracts/spatial-dataset.contract';
 import { applyImageRois } from './visualizer/region-load';
 import {
   ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
@@ -65,13 +65,6 @@ import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
  *  same DOM id — `getElementById` would otherwise return whichever came first.
  *  Styling hangs off the `.viz-plot` class instead of the id. */
 let plotInstanceSeq = 0;
-
-/** A user-facing message for a failure: an HttpErrorResponse's server message, an
- *  Error's message, or the status text, else the value itself. */
-function errorMessage(err: unknown): string {
-  const e = err as { error?: { message?: string }; message?: string; statusText?: string } | null;
-  return e?.error?.message || e?.message || e?.statusText || String(err);
-}
 
 @Component({
   selector: 'visualizer',
@@ -156,34 +149,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   // local cache PVC on first click. When set, the loading overlay swaps the
   // spinner for a determinate progress bar with a "Caching image" message.
   public cacheProgress: number | null = null;
-  // True between the small-tier render landing and the large-tier render
-  // landing in the multi-tier rendering path. The template uses this to
-  // overlay a translucent spinner on top of the blurry small-tier image so
-  // the user doesn't mistake it for the final preview.
-  public sharpening = false;
   /** A jit-service cache copy is actively in progress (determinate 0..99). Drives the cache
    *  progress bar independently of `imgLoading` so the bar can't be dropped — or masked by the
    *  "Sharpening preview..." overlay — mid-download if the loading flag flips early. */
   get isCaching(): boolean {
     return this.cacheProgress !== null && this.cacheProgress < 100;
   }
-  private running = false;
-
-  /**
-   * Monotonic render generation. Bumped when a render starts, so a render that
-   * has been superseded by a newer image can be recognised and made inert: its
-   * callbacks return early instead of painting, clearing `running`, releasing
-   * the newer render's overlay, or applying its ROIs.
-   */
-  private renderToken = 0;
-  /** Aborts the current render's backend loads; replaced with each new render. */
-  private renderAbort: AbortController | null = null;
   /** Host image-info objects whose one-shot `initialZIndex` was already applied. */
   private readonly consumedSliceHints = new WeakSet<IImageInfo>();
-  /** Set once the template, and with it the plot div, exists (see ngAfterViewInit). */
-  private viewReady = false;
-  /** An image-less dataset whose draw waits for the view: see plotSpatialWithoutImage. */
-  private pendingSpatialDraw: SpatialDataset | null = null;
   public zIndex = 0;
   public maxIndex = 0;
 
@@ -267,6 +240,29 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  isn't found — to a quarter of the page (see openRegionEditor). */
   regionEditorWidth = '25vw';
   readonly plotDivName = `viz-plot-${plotInstanceSeq++}`;
+  /** The render pipeline: the newest image (or image-less dataset) always wins. */
+  readonly render: ImageRenderSession = new ImageRenderSession({
+    plotDivName: this.plotDivName,
+    visualizer: this.plotService,
+    zIndex: () => this.zIndex,
+    plotType: () => this.plotType,
+    isHeatmap: () => this.isHeatmap,
+    isCaching: () => this.isCaching,
+    beforeReset: () => this.contributions.endSessions(),
+    prepare: (info) => this.layOutSlices(info),
+    releaseOverlay: (info) => {
+      if (info.isStack && info.showStack) this.stackLoading = false;
+      this.state.setImageLoading(false);
+    },
+    landed: (info) => {
+      applyImageRois(info, this.plotService, this.zIndex);
+      this.contributions.activate();
+    },
+    setImageLoading: (loading) => this.state.setImageLoading(loading),
+    alert: (severity, summary, detail) =>
+      this.messageService.add({ key: this.vizAlertToastKey, severity, summary, detail }),
+    detectChanges: () => this.cdr.detectChanges(),
+  });
   plotType = PlotType.IMAGE;
   isHeatmap = true;
   activeSurface3dMode = 'turntable';
@@ -594,164 +590,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
           }
           this.loadedFileName = imgInfo.fileName;
           this.plotService.setImageMeta(imgInfo.imageMeta, imgInfo.fileName);
-          const urls = imgInfo.urls;
-          // A newer image ALWAYS preempts an in-flight render. This was
-          // `if (!this.running)`, which DROPPED the new image while the old one
-          // finished: identity above had already flipped to the new file, so the
-          // app reported image B as loaded while image A stayed on screen. Worse,
-          // a cold image holds the slot for its whole server-side cache fill, so
-          // every click for 1-2 minutes was discarded against a blank viewport
-          // and a "Loading image..." overlay that never resolved.
-          if (urls) {
-            const token = ++this.renderToken;
-            const isCurrent = () => this.renderToken === token;
-            const signal = this.restartRenderAbort();
-            if (this.running) {
-              // Stop the previous render's frame streaming (napari volume/surface
-              // preload keeps fetching otherwise) and clear its sharpen flag. Its
-              // callbacks are already inert via the token, so it can neither paint
-              // nor release the overlay this render now owns.
-              this.plotService.cancelLoading?.();
-              this.sharpening = false;
-            }
-            // image size — measure the plot div directly so the toolbar height is excluded
-            const plotDiv: HTMLElement | null = document.getElementById(this.plotDivName);
-            const screenHeight = plotDiv?.offsetHeight || 500;
-            // A contributed mode's session is bound to the base view about to be
-            // torn down, so it ends here — before reset(), before anything new
-            // draws. If the mode is still selected once this render lands, a
-            // fresh session starts for it (see activateSelectedPlotMode).
-            this.contributions.endSessions();
-            this.plotService.reset();
-            this.stackLoading = imgInfo.isStack && imgInfo.showStack;
-            // set max index of stack — computed before updateZIndex so a
-            // fresh stack (shorter or longer than whatever was previously
-            // loaded) clamps against ITS bounds, not the stale ones.
-            // One URL per slice (0-indexed), so the last reachable index is
-            // length-1 — earlier `length-2` dropped the final slice.
-            this.maxIndex = urls.length > 1 ? urls.length - 1 : 0;
-            // One-shot hint: jump straight to a specific slice (e.g. the
-            // file the user actually clicked within a numbered series).
-            // Consumed immediately so redelivering the same ImageInfo later
-            // (a plot-type switch, reloadAndPlot) doesn't reset the user's
-            // current scrub position back to it.
-            // The host's object is never written to (a host store may freeze it):
-            // keep a copy without the hint as the component's own image info, which
-            // is what reloadAndPlot re-emits, and remember the host object so the
-            // very same emission repeated does not jump again.
-            if (imgInfo.initialZIndex !== undefined) {
-              if (!this.consumedSliceHints.has(imgInfo)) {
-                this.consumedSliceHints.add(imgInfo);
-                this.zIndex = imgInfo.initialZIndex;
-              }
-              this.imageInfo = { ...imgInfo, initialZIndex: undefined };
-            }
-            // make sure the zindex is within bounds
-            this.updateZIndex();
-            this.running = true;
-            // Multi-tier rendering (small blurry tier first, then sharpen in
-            // place) — sequencing lives in RenderOrchestrator; this component
-            // supplies the phase render and owns the UI flags via callbacks.
-            // 3D plot types render single-pass: the in-place large pass doesn't
-            // rebuild a 3D gl-mesh isosurface, so the sharpen step blanked it.
-            const hasSmallTier =
-              this.isHeatmap &&
-              (imgInfo.smallUrls?.length ?? 0) === urls.length &&
-              (imgInfo.smallUrls?.length ?? 0) > 0;
-            const smallImgInfo = hasSmallTier ? { ...imgInfo, urls: imgInfo.smallUrls as string[] } : null;
-
-            const applyRoi = () => applyImageRois(imgInfo, this.plotService, this.zIndex);
-            let overlayReleased = false;
-            const releaseOverlay = () => {
-              if (overlayReleased) return;
-              overlayReleased = true;
-              if (imgInfo.isStack && imgInfo.showStack) this.stackLoading = false;
-              this.state.setImageLoading(false);
-            };
-
-            new RenderOrchestrator({
-              // inPlace=true updates the existing render instead of rebuilding
-              // it, so the canvas doesn't blank during the small→large swap.
-              renderPhase: (phaseInfo, inPlace) => {
-                // Superseded BEFORE this phase started — don't even issue the load.
-                // RenderOrchestrator calls renderPhase once per tier and retries the
-                // sharpen pass on failure, so checking only after the load resolves
-                // would let a preempted render keep fetching slices/tiles for an
-                // image nobody is looking at.
-                if (!isCurrent()) return Promise.resolve(null);
-                return this.plotService.load(phaseInfo, this.zIndex, signal).then((loadedImage) => {
-                  // Preempted while this phase was loading — drop it on the floor.
-                  if (!isCurrent()) return null;
-                  // Guard against a newer click reaching us mid-render.
-                  if (phaseInfo.fileName !== loadedImage.filename) return null;
-                  return this.plotService.plot(
-                    this.plotDivName,
-                    loadedImage,
-                    phaseInfo,
-                    screenHeight,
-                    this.plotType,
-                    inPlace,
-                  ).then((drawn) => {
-                    // A backend that cannot draw (no plot target, no WebGPU, no tile
-                    // descriptor) resolves false rather than throwing. That is a failed
-                    // phase, not a finished one: reject so the retry/failure paths run.
-                    if (drawn === false && isCurrent()) throw new Error('the renderer could not draw the image');
-                    return drawn;
-                  });
-                });
-              },
-              smallShown: () => {
-                if (!isCurrent()) return; // superseded by a newer image
-                // If the file is still being cached/prepared server-side, keep the full
-                // cache-progress overlay up instead of dropping to the translucent "Sharpening
-                // preview..." spinner over a blank canvas (a large uncached image renders its
-                // small preview before its tiles exist). finished() releases the overlay once
-                // the real render lands.
-                if (this.isCaching) return;
-                // Small tier on screen — drop the full overlay but keep a translucent spinner so
-                // the blurry render isn't mistaken for the final image.
-                releaseOverlay();
-                this.sharpening = true;
-              },
-              sharpenSettled: () => {
-                if (!isCurrent()) return; // superseded by a newer image
-                this.sharpening = false;
-              },
-              finished: () => {
-                if (!isCurrent()) return; // superseded by a newer image
-                // Idempotent — releases now if smallShown deferred it (caching) or was skipped.
-                releaseOverlay();
-                this.running = false;
-                applyRoi();
-                this.contributions.activate();
-              },
-              sharpenFailed: (err: unknown) => {
-                if (!isCurrent()) return; // superseded by a newer image
-                // The small tier stays on screen as the fallback — tell the
-                // user the sharper version isn't coming.
-                const msg = errorMessage(err);
-                this.messageService.add({
-                  key: this.vizAlertToastKey,
-                  severity: 'warn',
-                  summary: 'Preview not sharpened',
-                  detail: `The full-resolution preview did not load (${msg}). The low-resolution preview is still shown. Try clicking the image again.`,
-                });
-                this.running = false;
-                applyRoi();
-                this.contributions.activate();
-              },
-              renderFailed: (err: unknown) => {
-                if (!isCurrent()) return; // superseded by a newer image
-                const msg = errorMessage(err);
-                this.messageService.add({
-                  key: this.vizAlertToastKey,
-                  severity: 'error',
-                  summary: 'Could not draw the image',
-                  detail: `${imgInfo.fileName ?? 'The image'}: ${msg}. Try opening it again.`,
-                });
-              },
-            }).render(imgInfo, smallImgInfo);
-          }
+          // A newer image always preempts an in-flight render (see ImageRenderSession).
+          if (imgInfo.urls) this.render.render(imgInfo);
         }
       },
       error: (err: unknown) => {
@@ -767,10 +607,31 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         });
         this.stackLoading = false;
         this.state.setImageLoading(false);
-        this.running = false;
+        this.render.running = false;
         this.plotService.reset();
       },
     });
+  }
+
+  /**
+   * Lay a new image out once the old view is gone: the stack flag, the slice bounds (one
+   * url per slice, so the last index is length-1), and the one-shot `initialZIndex` hint
+   * (e.g. the file the user clicked within a numbered series). The hint is consumed so
+   * re-delivering the same info (a plot-type switch, reloadAndPlot) does not reset the
+   * user's scrub; the host's object is never written to (a host store may freeze it) —
+   * the component keeps a copy without the hint, and remembers the host object.
+   */
+  private layOutSlices(info: IImageInfo): void {
+    this.stackLoading = info.isStack && info.showStack;
+    this.maxIndex = info.urls.length > 1 ? info.urls.length - 1 : 0;
+    if (info.initialZIndex !== undefined) {
+      if (!this.consumedSliceHints.has(info)) {
+        this.consumedSliceHints.add(info);
+        this.zIndex = info.initialZIndex;
+      }
+      this.imageInfo = { ...info, initialZIndex: undefined };
+    }
+    this.updateZIndex();
   }
 
   ngAfterViewInit() {
@@ -784,16 +645,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** The plot div exists now: run an image-less draw that arrived before it did. */
   private onViewReady(): void {
-    this.viewReady = true;
-    const pending = this.pendingSpatialDraw;
-    this.pendingSpatialDraw = null;
-    // Only if it is still the dataset on offer and no image has arrived meanwhile. By id, not by
-    // object: the port may re-emit the same dataset as a new object (a colour-column change does),
-    // and then the current object is the one to draw.
-    const current = this.spatial.dataset;
-    if (pending && current && current.id === pending.id && !this.imageInfo) {
-      void this.plotSpatialWithoutImage(current);
-    }
+    this.render.viewIsReady(this.spatial.dataset, !!this.imageInfo);
   }
 
   /** What the keyboard, wheel and context-menu shortcuts act on. */
@@ -845,8 +697,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
     this.state.setDiagram(null);
-    this.renderToken++;
-    this.renderAbort?.abort();
+    this.render.cancel();
     this.spatial.dispose();
     this.scrubber.cancel();
     this.unsub.next();
@@ -969,65 +820,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     } else if (this.spatial.dataset && (isSpatialOmics(this.plotType) || isSpatialOmics3d(this.plotType))) {
       // A spatial dataset that brings no image, opened with no image loaded (a host's
       // first view): there is no image info to re-drive, so draw the spatial mode itself.
-      void this.plotSpatialWithoutImage(this.spatial.dataset);
+      void this.render.plotWithoutImage(this.spatial.dataset);
     } else {
       this.plotService.reloadAndPlot();
     }
-  }
-
-  /**
-   * Draw a spatial mode with no image behind it: the observations alone, framed on their own
-   * extent, as the seqFISH example shows them. The image info is a placeholder naming the
-   * dataset, so regions drawn here are kept per dataset like any image's.
-   */
-  private async plotSpatialWithoutImage(dataset: SpatialDataset): Promise<void> {
-    if (!this.viewReady) {
-      // A host that creates the visualizer AFTER publishing the dataset (jit-ui opening a file
-      // from its tree) has it replayed into ngOnInit, before the template and its plot div
-      // exist; drawing now finds no target. Draw once the view is ready (onViewReady).
-      this.pendingSpatialDraw = dataset;
-      return;
-    }
-    // The same generation as the image pipeline: a newer image or dataset supersedes this
-    // draw, and a superseded draw neither reports nor releases the newer one's loading state.
-    const token = ++this.renderToken;
-    this.restartRenderAbort();
-    const div = document.getElementById(this.plotDivName);
-    const info: IImageInfo = {
-      isGrayscale: false, trueImageSize: [0, 0], urls: [], isStack: false, showStack: false,
-      scaleRatio: true, fileName: `spatial:${dataset.id}`, imageMeta: [],
-    };
-    let failure: unknown = null;
-    try {
-      // A backend that cannot draw (no WebGPU, no plot target) resolves false rather than throwing.
-      if (!(await this.plotService.plot(this.plotDivName, null, info, div?.offsetHeight || 500, this.plotType))) {
-        failure = 'the renderer could not start';
-      }
-    } catch (err) {
-      failure = err;
-    }
-    if (token !== this.renderToken) return;
-    if (failure) {
-      console.warn('[visualizer] could not draw the spatial dataset', failure);
-      const e = failure as { message?: string };
-      this.messageService.add({
-        key: this.vizAlertToastKey,
-        severity: 'error',
-        summary: 'Could not draw the dataset',
-        // An image-less dataset has no tissue image to fall back on, so say so rather than
-        // leave an empty canvas that looks finished.
-        detail: `${dataset.name ?? dataset.id}: ${e?.message ?? String(failure)}.`,
-      });
-    }
-    this.state.setImageLoading(false);
-    this.cdr.detectChanges();
-  }
-
-  /** Abort the previous render's loads and arm a fresh signal for the next one. */
-  private restartRenderAbort(): AbortSignal {
-    this.renderAbort?.abort();
-    this.renderAbort = new AbortController();
-    return this.renderAbort.signal;
   }
 
   cancelLoading() {
@@ -1036,14 +832,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.cancelLoading?.();
     // The cancelled render is superseded, not just aborted: its aborted load must not
     // come back as "Could not draw the image", nor apply ROIs for an image left unshown.
-    this.renderToken++;
-    this.renderAbort?.abort();
+    this.render.cancel();
     this.stackLoading = false;
     this.imgLoading = false;
     this.state.setImageLoading(false);
     this.zIndex = 0;
     this.plotService.setZIndex(this.zIndex);
-    this.running = false;
     this.plotService.setStackLoading(false);
   }
 
