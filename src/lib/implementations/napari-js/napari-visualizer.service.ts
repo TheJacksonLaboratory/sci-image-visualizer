@@ -64,6 +64,7 @@ import { NapariNavigator } from './napari-navigator';
 import { NapariLoadingBadge } from './napari-loading-badge';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
+import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
 import {
   type ExpressionField, type ExpressionVolumeField, colorExpressionField,
   encodeExpressionVolume, expressionField, expressionVolume, fieldContrastWindow,
@@ -256,10 +257,6 @@ function surfaceResolutionFor(scale: number): { maxGrid: number } {
  *  (the grid is flat-strided down to this) — keeps the billboard count interactive. */
 const SCATTER3D_MAX_XY = 64;
 const SCATTER3D_MAX_POINTS = 150000;
-
-/** Zoom factor per zoom-button press / +/- key — the OSD backend's step (`openseadragon-visualizer
- *  .service.ts`); both should come from one shared constant (review NAPARI-SVC-13). */
-const ZOOM_BUTTON_STEP = 1.3;
 
 /** How long a pan/zoom must settle before the viewport (and, for pixel tools, the canvas
  *  readback) is refreshed — coalesces the camera's per-frame changes. */

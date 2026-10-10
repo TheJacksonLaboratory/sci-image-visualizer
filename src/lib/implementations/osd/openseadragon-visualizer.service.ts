@@ -5,7 +5,7 @@ import { startWith, timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 import { OSD, quiet } from './osd-lib';
-import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
+import { OSD_ZOOM_PER_SCROLL, ZOOM_BUTTON_STEP } from './osd-zoom';
 
 
 import { VisualizerStore } from '../../store/visualizer-store.service';
@@ -1239,11 +1239,11 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.viewer?.viewport.goHome();
   }
   zoomIn(): void {
-    this.viewer?.viewport.zoomBy(1.3);
+    this.viewer?.viewport.zoomBy(ZOOM_BUTTON_STEP);
     this.viewer?.viewport.applyConstraints();
   }
   zoomOut(): void {
-    this.viewer?.viewport.zoomBy(1 / 1.3);
+    this.viewer?.viewport.zoomBy(1 / ZOOM_BUTTON_STEP);
     this.viewer?.viewport.applyConstraints();
   }
   setDragMode(mode: string | false): void {
