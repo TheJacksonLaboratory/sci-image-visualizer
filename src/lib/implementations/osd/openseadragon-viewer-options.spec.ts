@@ -6,6 +6,7 @@ import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { PlotType } from '../../contracts/plot-type';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
+import { buildViewerOptions } from './openseadragon-viewer-options';
 
 /**
  * Viewer-option coverage.
@@ -111,6 +112,31 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     return capturedOptions[0];
   }
 
+  /** The options for a single, flat image — straight from the pure builder. */
+  const options = (over: Partial<Parameters<typeof buildViewerOptions>[0]> = {}): any =>
+    buildViewerOptions({
+      id: 'plotdiv', navigatorVisible: true, smoothing: false, authHeaders: {}, sliceCount: 1, maxSlices: 8,
+      ...over,
+    });
+
+  it('hands the factory the builder\'s options for the image being mounted', () => {
+    const o = optionsFromPlot();
+    expect(o).toEqual(buildViewerOptions({
+      id: 'plotdiv', navigatorVisible: true, smoothing: false,
+      authHeaders: {}, sliceCount: 1, maxSlices: 0,
+    }));
+  });
+
+  it('passes the navigator, smoothing and auth through, and sizes the tile cache by the stack', () => {
+    const o = options({ navigatorVisible: false, smoothing: true, authHeaders: { Authorization: 'Bearer t' } });
+    expect(o).toMatchObject({ showNavigator: false, imageSmoothingEnabled: true,
+      ajaxHeaders: { Authorization: 'Bearer t' } });
+    expect(o.maxImageCacheCount).toBe(150); // a single image keeps the lean default
+    expect(options({ sliceCount: 5, maxSlices: 8 }).maxImageCacheCount).toBe(600);
+    expect(options({ sliceCount: 50, maxSlices: 30 }).maxImageCacheCount).toBe(1200);
+    expect(options({ sliceCount: 500, maxSlices: 100 }).maxImageCacheCount).toBe(2400);
+  });
+
   it('passes minPixelRatio=0.5 — raising it selects COARSER levels, not finer', () => {
     // This assertion previously pinned 1, on the mistaken reading that
     // minPixelRatio meant "minimum sharpness". It is the opposite: in
@@ -123,13 +149,13 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     // Guarding the exact value, not just "not 1": 0.25 is finer still but jumps
     // two rungs and fetches ~4x the tiles for no visible gain, and the ingress
     // does not cache tiles, so every viewer pays that.
-    expect(optionsFromPlot().minPixelRatio).toBe(0.5);
+    expect(options().minPixelRatio).toBe(0.5);
   });
 
   it('keeps the zoom limits that let the user inspect individual pixels', () => {
     // Past 1:1 the blocks are genuine source pixels, so maxZoomPixelRatio must
     // stay well above OSD's default 1.1 (jit-ui#94).
-    const o = optionsFromPlot();
+    const o = options();
     expect(o.maxZoomPixelRatio).toBe(20);
     expect(o.minZoomImageRatio).toBe(0.01);
   });
@@ -139,7 +165,7 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     // tool is active. If these two drift apart, the zoom changes pace the moment a
     // tool is picked up — which is why the value is one shared constant rather
     // than a number written in both places, as it was.
-    expect(optionsFromPlot().zoomPerScroll).toBe(OSD_ZOOM_PER_SCROLL);
+    expect(options().zoomPerScroll).toBe(OSD_ZOOM_PER_SCROLL);
   });
 
   it('scrolls gently enough that a trackpad burst does not fly', () => {
