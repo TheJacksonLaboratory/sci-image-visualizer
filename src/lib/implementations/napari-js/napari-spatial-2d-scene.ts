@@ -15,7 +15,10 @@ import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
-import { colorExpressionField, expressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
+import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
+import { computeExpressionFieldAsync } from '../../workers/spatial-math';
+import { Supersede } from '../../util/supersede';
+import { isAbortError } from '../tile-server';
 import { NapariSpatialTileLayers } from './napari-spatial-tiles';
 import { Image2dScene } from './napari-image-2d-scene';
 import {
@@ -56,6 +59,10 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   private geneMapKey: string | null = null;
   /** The dataset the camera has been framed on — see {@link frameOnce}. */
   private framed: string | null = null;
+  /** The gene-map estimate in flight (off the main thread past the worker threshold,
+   *  SPATIAL-19): a new field key supersedes — and aborts — it; a rebuild that leaves the key
+   *  alone lets it finish. */
+  private readonly geneMapLoads = new Supersede();
 
   /** `noImage`: an image-less dataset opened before any image — the observations alone. */
   constructor(ctx: SceneContext, session: SpatialSession, noImage = false) {
@@ -99,6 +106,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
 
   dispose(): void {
     this.disposeSpatial();
+    this.geneMapLoads.cancel();
     this.session.releaseTiles(this);
     this.image.dispose();
   }
@@ -464,6 +472,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     const step = Math.max(1, Math.ceil(Math.max(imageW, imageH) / GENE_MAP_MAX_SIDE));
 
     if (fieldKey !== cache.key) {
+      const load = this.geneMapLoads.next();
       let values: Float32Array;
       try {
         values = await port.getFeatureVector(gene);
@@ -472,19 +481,27 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
         this.geneMapKey = null;
         return;
       }
-      if (this.ctx.signal.aborted || this.geneMapKey !== key) return;
+      if (!load() || this.geneMapKey !== key) return;
       const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
-      cache.field = expressionField(dataset.observations, {
-        ref: slab?.ref ?? dataset.imageRef,
-        width: Math.ceil(imageW / step),
-        height: Math.ceil(imageH / step),
-        step,
-        sigma: GENE_MAP_SIGMA * smoothing,
-        values,
-        // A plane wins over a selection: the 2D view is showing one section, so a
-        // field spanning the specimen's depth would not be the thing on screen.
-        indices: slab?.indices ?? inSelection,
-      });
+      let estimated: ExpressionField | null;
+      try {
+        estimated = await computeExpressionFieldAsync(dataset.observations, {
+          ref: slab?.ref ?? dataset.imageRef,
+          width: Math.ceil(imageW / step),
+          height: Math.ceil(imageH / step),
+          step,
+          sigma: GENE_MAP_SIGMA * smoothing,
+          values,
+          // A plane wins over a selection: the 2D view is showing one section, so a
+          // field spanning the specimen's depth would not be the thing on screen.
+          indices: slab?.indices ?? inSelection,
+        }, { signal: load.signal });
+      } catch (err) {
+        if (isAbortError(err)) return; // superseded by a newer map, or the scene went away
+        throw err;
+      }
+      if (!load() || this.geneMapKey !== key) return;
+      cache.field = estimated;
       cache.key = fieldKey;
     }
     const field = cache.field;
@@ -508,6 +525,14 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
         blending: 'translucent',
       },
     );
+    // A newer rebuild that kept this map's key drew the cells while the field was computing, so
+    // the map just landed OVER them: put the cells back on top.
+    if (this.points) {
+      viewer.layers.remove(this.points);
+      this.points = null;
+      this.layerKey = null;
+      this.redrawMarkers();
+    }
     viewer.requestRender();
   }
 

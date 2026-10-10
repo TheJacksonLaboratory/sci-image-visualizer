@@ -3311,6 +3311,36 @@ describe('NapariVisualizerService', () => {
         );
       });
 
+      it('keeps the cells over a map that lands after an overlapping redraw (SPATIAL-19)', async () => {
+        // The field is estimated asynchronously now (a worker past the threshold). A display-only
+        // change while it is pending redraws the cells first; the map landing afterwards must not
+        // end up on top of them.
+        const vector = new Float32Array([1, 5, 9]);
+        let holdOnce = false;
+        let release: () => void = () => undefined;
+        spatialPort.getFeatureVector.mockImplementation(() => {
+          if (!holdOnce) return Promise.resolve(vector);
+          holdOnce = false;
+          return new Promise<Float32Array>((resolve) => { release = () => resolve(vector); });
+        });
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        // The colouring's fetch is already out; hold the next one — the map's own.
+        holdOnce = true;
+        await flush();
+        store.setSpatialView({ pointScale: 2 }); // same map key: this redraw draws the cells
+        await flush();
+        release();
+        await flush();
+        await flush();
+        const names = ((service as unknown as { viewer: { layers: { items: readonly { name?: string }[] } } })
+          .viewer.layers.items).map((l) => l.name ?? '');
+        const map = names.findIndex((n) => n.startsWith('gene map'));
+        expect(map).toBeGreaterThanOrEqual(0);
+        expect(names.lastIndexOf('observations')).toBeGreaterThan(map);
+        expect(names.filter((n) => n === 'observations')).toHaveLength(1);
+      });
+
       it('does not re-estimate the field for a recolour, only for a new gene', async () => {
         // Counted on the estimator itself, not on the fetch: the points path fetches
         // the same vector to colour the markers, so a fetch count says nothing about
