@@ -13,6 +13,8 @@ import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { HexColorPickerComponent } from '../hex-color-picker/hex-color-picker.component';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
 import { PresetSet } from '../models/class-preset';
+import { pickMpp } from './region-metrics';
+import { IImageMetadata } from '../contracts/image.contract';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 import { saveAs } from 'file-saver';
@@ -1202,26 +1204,14 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   it('regionArea reports physical units when mpp is known', () => {
-    (component as any).mppX = 2; (component as any).mppY = 2;
+    component.mpp = { mppX: 2, mppY: 2 };
     expect(component.regionArea(rect())).toContain('µm²'); // 1200·4 = 4800 µm²
   });
 
-  it('pickMpp reads calibration off a non-[0] entry and squares a single axis', () => {
-    const pick = (m: any) => (component as any).pickMpp(m);
-    // Calibration on entry 1 (entry 0 unscaled) — must not be missed.
-    expect(pick([{ mppX: 0, mppY: 0 }, { mppX: 0.5, mppY: 0.5 }]))
-      .toEqual({ mppX: 0.5, mppY: 0.5 });
-    // Only mppX reported → square pixels (mppY = mppX), so it still shows µm².
-    expect(pick([{ mppX: 0.25 }])).toEqual({ mppX: 0.25, mppY: 0.25 });
-    // Genuinely unscaled → undefined → px².
-    expect(pick([{ mppX: 0, mppY: 0 }])).toEqual({ mppX: undefined, mppY: undefined });
-    expect(pick(undefined)).toEqual({ mppX: undefined, mppY: undefined });
-  });
+  // pickMpp itself is covered in region-metrics.spec.ts.
 
   it('regionArea uses physical units when calibration is on a non-[0] entry', () => {
-    const { mppX, mppY } = (component as any).pickMpp([{ mppX: 0 }, { mppX: 2, mppY: 2 }]);
-    (component as any).mppX = mppX;
-    (component as any).mppY = mppY;
+    component.mpp = pickMpp([{ mppX: 0 }, { mppX: 2, mppY: 2 }] as IImageMetadata[]);
     expect(component.regionArea(rect())).toContain('µm²'); // would have been px² before
   });
 

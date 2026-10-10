@@ -4,16 +4,16 @@ import { saveAs } from 'file-saver';
 import { Subject, Subscription } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 
-import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
+import { Rectangle, Region } from '../models/region';
 import { PresetSet, ClassPreset, defaultPresetSet, parsePresetSet } from '../models/class-preset';
 import { colorForLabel, presetKey } from '../store/class-color.util';
-import { IImageMetadata } from '../contracts/image.contract';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { RegionIoPort, REGION_IO_PORT } from '../contracts/ports/region-io.port';
 import { regionToParts, scaleParts, maskScaleFor } from './mask-raster';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { fileStem } from './file-stem';
+import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
 
 @Component({
   selector: 'region-editor',
@@ -113,9 +113,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private _presetSub = new Subscription();
 
   /** Physical pixel size (µm/pixel) of the active image, for region areas in
-   *  µm². Undefined when the format reports no physical size. */
-  private mppX?: number;
-  private mppY?: number;
+   *  µm²; empty when the format reports no physical size. */
+  mpp: PixelSize = {};
 
   constructor(
     @Inject(REGION_EDITOR_API) private regionApi: IRegionEditorApi,
@@ -174,14 +173,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
 
     // Physical pixel size of the active image (for region areas in µm²/mm²).
-    // Mirror PlotlyService.currentMpp: the calibration may sit on any channel
-    // entry, not necessarily [0], so pick the first entry with a positive mppX
-    // rather than reading [0] blindly. Fall back to square pixels (mppY = mppX)
-    // when only one axis is reported.
     this._metaSub = this.regionApi.getImageMeta().subscribe((meta) => {
-      const { mppX, mppY } = this.pickMpp(meta);
-      this.mppX = mppX;
-      this.mppY = mppY;
+      this.mpp = pickMpp(meta);
     });
 
     this._selectedIdxSub = this.regionApi.getSelectedRegions$().subscribe((selected) => {
@@ -448,71 +441,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Region area for display: in µm² (or mm²) when the image reports a physical
-   * pixel size, otherwise in px². Empty string for degenerate regions.
-   */
+  /** Region area for display (µm²/mm² when the image is scaled, else px²);
+   *  empty for a degenerate region. See `region-metrics`. */
   regionArea(region: Region): string {
-    const px = this.areaInPixels(region);
-    if (px <= 0) return '';
-    if (this.mppX && this.mppY && this.mppX > 0 && this.mppY > 0) {
-      const um2 = px * this.mppX * this.mppY;
-      return um2 >= 1e6 ? `${this.fmtArea(um2 / 1e6)} mm²` : `${this.fmtArea(um2)} µm²`;
-    }
-    return `${this.fmtArea(px)} px²`;
-  }
-
-  /**
-   * Choose the physical pixel size (µm/pixel) for area display from the image
-   * meta. The calibration may sit on any channel entry — not necessarily [0] —
-   * so pick the first entry with a positive mppX (mirrors
-   * PlotlyService.currentMpp). Falls back to square pixels (mppY = mppX) when
-   * only one axis is reported, so a scaled image shows µm²/mm² rather than px².
-   */
-  private pickMpp(meta: IImageMetadata[] | undefined): { mppX?: number; mppY?: number } {
-    const m = Array.isArray(meta)
-      ? (meta.find((e) => e && (e.mppX ?? 0) > 0) ?? meta[0])
-      : undefined;
-    const mx = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : undefined;
-    const my = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : undefined;
-    return { mppX: mx, mppY: my ?? mx };
-  }
-
-  /** Pixel area: width·height for rectangles, shoelace formula for polygons.
-   *  Interior rings (holes) are subtracted, so a donut reports the annulus area,
-   *  not the filled exterior (jit-ui#85). */
-  private areaInPixels(region: Region): number {
-    const b = region.bounds;
-    if (b instanceof Rectangle) return Math.abs(b.width * b.height);
-    if (b instanceof Polygon) return this.polygonArea(b);
-    // Multi-part region: sum each part's (exterior − holes) area (jit-ui#85).
-    if (b instanceof MultiPolygon) {
-      return b.polygons.reduce((sum, p) => sum + this.polygonArea(p), 0);
-    }
-    return 0;
-  }
-
-  /** Polygon area: exterior shoelace minus each interior ring (hole). */
-  private polygonArea(p: Polygon): number {
-    if ((p.xpoints?.length ?? 0) < 3) return 0;
-    let a = this.ringArea(p.xpoints, p.ypoints);
-    if (p.holes) {
-      for (const ring of p.holes) a -= this.ringArea(ring.map(pt => pt[0]), ring.map(pt => pt[1]));
-    }
-    return Math.max(0, a);
-  }
-
-  /** Absolute shoelace area of a single ring. */
-  private ringArea(xs: number[], ys: number[]): number {
-    const n = xs?.length ?? 0;
-    if (n < 3) return 0;
-    let a = 0;
-    for (let i = 0, j = n - 1; i < n; j = i++) a += (xs[j] + xs[i]) * (ys[j] - ys[i]);
-    return Math.abs(a / 2);
-  }
-
-  private fmtArea(n: number): string {
-    return (n >= 1000 ? Math.round(n) : Math.round(n * 100) / 100).toLocaleString();
+    return formatArea(regionAreaPx(region), this.mpp);
   }
 
   /**
