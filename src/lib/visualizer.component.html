@@ -58,7 +58,7 @@
   [dialogTools]="dialogTools"
   [openDialogToolId]="openDialogToolId"
   (toggleDialogTool)="toggleDialogTool($event)"
-  [toolModelIds]="toolModelIds"
+  [toolModelIds]="toolParams.toolModelIds"
   [vertexEraserRadius]="vertexEraserRadius"
   [canUndo]="regionActions.canUndo"
   [canRedo]="regionActions.canRedo"
@@ -231,7 +231,7 @@
      the toolbar can lay every tool out the same way and a plugin needs no
      PrimeNG of its own. Defaults come from the active checkpoint, since they
      encode what it was trained for. -->
-<p-dialog *ngIf="openParams as open"
+<p-dialog *ngIf="toolParams.openParams as open"
           [header]="open.tool.label + ' parameters'"
           [visible]="true" (visibleChange)="closeToolParams()"
           [modal]="true"

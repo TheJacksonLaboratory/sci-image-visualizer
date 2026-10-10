@@ -36,6 +36,7 @@ import {
 } from './contracts/plot-type-contribution.contract';
 import { ActivePlotMode, PlotModeController } from './plot-mode/plot-mode-controller';
 import { computePlotTypeMenu, reconcilePlotType } from './plot-mode/plot-type-menu';
+import { ToolParamsModel } from './plot-mode/tool-params-model';
 import { IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
 import { CanvasToolOptions } from './contracts/display-types';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
@@ -45,9 +46,6 @@ import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool
 import { SegmentationRunner } from './toolbar/segmentation/segmentation-runner';
 import {
   TOOLBAR_TOOLS,
-  NumberParamSpec,
-  SelectParamSpec,
-  ToolParamSpec,
   ToolbarContribution,
   ToolbarDialogToolContribution,
   ToolbarToolContribution,
@@ -230,6 +228,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    * and help dialog simply omit that group.
    */
   contributedTools: ToolbarToolContribution[] = [];
+  /** Checkpoints and parameter values of {@link contributedTools}, and their dialog. */
+  readonly toolParams: ToolParamsModel;
   /**
    * Dialog tools registered through {@link TOOLBAR_TOOLS} (`kind: 'dialog'`),
    * sorted. Their buttons sit with the host's own actions and show in the Image
@@ -242,24 +242,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   toolDialog: { title: string; width: string; host: HTMLElement } | null = null;
   /** Dialog-tool sessions: the same lifecycle and isolation as contributed plot modes. */
   private readonly toolDialogs: PlotModeController;
-  /** Active checkpoint per contributed tool. */
-  toolModelIds: Record<string, string> = {};
-  /**
-   * Parameter values per contributed tool, seeded from each tool's own defaults
-   * — which encode the scale and crowding its checkpoint was trained for.
-   */
-  toolParams: Record<string, Record<string, unknown>> = {};
-  /**
-   * The open parameter dialog, built once by {@link openToolParams}: the tool, its
-   * live values, and each field's spec already narrowed for the template (an
-   * `*ngSwitchCase` does not narrow a union in the template type checker). Null
-   * while closed. Built up front so change detection only reads properties.
-   */
-  openParams: {
-    tool: ToolbarToolContribution;
-    values: Record<string, unknown>;
-    fields: { spec: ToolParamSpec; number: NumberParamSpec | null; select: SelectParamSpec | null }[];
-  } | null = null;
   readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /**
    * Outlet for the library's own result/error notices.
@@ -469,6 +451,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       onFailed: (contribution) => this.fallBackFromPlotMode(contribution),
     });
     this.contributedTools = visibleToolContributions(toolContributions);
+    this.toolParams = new ToolParamsModel(this.contributedTools);
     this.dialogTools = dialogToolContributions(toolContributions);
     // A dialog tool's session is run by the plot-mode lifecycle, adapted: its "base
     // type" is the Image view it draws over. Its body is NOT a controller panel: the
@@ -1399,94 +1382,23 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     );
   }
 
-  /**
-   * Parameters currently bound by the generic parameter dialog, for whichever
-   * tool is open. Seeded lazily: a tool's defaults are only asked for when the
-   * user first touches it, so registering a tool costs nothing until used.
-   */
-  paramsFor(toolId: string): Record<string, unknown> {
-    const tool = this.contributedTools.find((t) => t.id === toolId);
-    if (!tool) return {};
-    if (!this.toolParams[toolId]) {
-      // Through `seedParams`, not `defaultParams` directly: the active
-      // checkpoint's own `ToolModelOption.defaults` have to be merged on top.
-      // Calling `defaultParams` here bypassed them, so the very first run of a
-      // tool used the tool's baseline thresholds and tiling rather than the
-      // model's — and it only corrected itself once the user switched
-      // checkpoints or hit Reset. Every entry point now goes through one path.
-      this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
-    }
-    return this.toolParams[toolId]!;
-  }
-
-  /** Active checkpoint for a tool, falling back to the tool's own default. */
-  modelIdFor(tool: ToolbarToolContribution): string {
-    return this.toolModelIds[tool.id] ?? tool.defaultModelId();
-  }
-
-  /** Switching checkpoint re-seeds the parameters, since the defaults belong to
-   *  the model rather than to the tool. */
+  // ── contributed tool parameters (see ToolParamsModel) ─────────────────
+  paramsFor(toolId: string): Record<string, unknown> { return this.toolParams.paramsFor(toolId); }
   onToolModelChange(e: { toolId: string; modelId: string }): void {
-    const tool = this.contributedTools.find((t) => t.id === e.toolId);
-    if (!tool) return;
-    // Reassigned rather than mutated so the toolbar's ngOnChanges sees a new
-    // reference and rebuilds that tool's model menu with the check mark moved.
-    this.toolModelIds = { ...this.toolModelIds, [e.toolId]: e.modelId };
-    tool.onModelChange?.(e.modelId);
-    this.toolParams[e.toolId] = this.seedParams(tool, e.modelId);
-    this.rebindOpenParams(e.toolId);
+    this.toolParams.setModel(e.toolId, e.modelId);
   }
-
-  /** A tool's defaults for a checkpoint, with that checkpoint's own overrides
-   *  applied on top — per-model defaults beat per-tool ones. */
-  private seedParams(tool: ToolbarToolContribution, modelId: string): Record<string, unknown> {
-    const model = tool.models().find((m) => m.id === modelId);
-    return { ...tool.defaultParams(modelId), ...(model?.defaults ?? {}) };
-  }
-
-  openToolParams(toolId: string): void {
-    const tool = this.contributedTools.find((t) => t.id === toolId);
-    if (!tool) return;
-    this.openParams = {
-      tool,
-      values: this.paramsFor(toolId), // seeds them on first use
-      fields: tool.params.map((spec) => ({
-        spec,
-        number: spec.type === 'number' ? spec : null,
-        select: spec.type === 'select' ? spec : null,
-      })),
-    };
-  }
-
-  closeToolParams(): void {
-    this.openParams = null;
-  }
-
-  /** A tool's values object was replaced (reset / checkpoint switch): point an
-   *  open dialog for it at the new one. */
-  private rebindOpenParams(toolId: string): void {
-    if (this.openParams?.tool.id === toolId) {
-      this.openParams = { ...this.openParams, values: this.paramsFor(toolId) };
-    }
-  }
-
-  resetToolParams(toolId: string): void {
-    const tool = this.contributedTools.find((t) => t.id === toolId);
-    if (!tool) return;
-    this.toolParams[toolId] = this.seedParams(tool, this.modelIdFor(tool));
-    this.rebindOpenParams(toolId);
-  }
+  openToolParams(toolId: string): void { this.toolParams.open(toolId); }
+  closeToolParams(): void { this.toolParams.close(); }
+  resetToolParams(toolId: string): void { this.toolParams.reset(toolId); }
 
   /** Run a contributed tool over the current view. No prompt: these sweep the
    *  whole view rather than being pointed at something. Reuses the shared
    *  segmentation toast so progress reads the same as the SAM/cellpose tools. */
   async runTool(toolId: string): Promise<void> {
-    const tool = this.contributedTools.find((t) => t.id === toolId);
+    const tool = this.toolParams.find(toolId);
     if (!tool) return;
-    const params = { ...this.paramsFor(toolId), modelId: this.modelIdFor(tool) };
-    await this.segmentation.run(tool.label, tool.progress, () =>
-      tool.run(this.plotService, params),
-    );
+    const params = this.toolParams.runParams(tool);
+    await this.segmentation.run(tool.label, tool.progress, () => tool.run(this.plotService, params));
   }
 
   /** Pick the SAM model the segment tools use (jit-ui#90 P1). */
