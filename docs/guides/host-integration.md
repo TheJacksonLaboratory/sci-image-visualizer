@@ -39,7 +39,8 @@ bootstrapApplication(AppComponent, {
   and the toasts inject them, and the library does not provide them.
 
 An NgModule app puts the same providers in its root module and imports
-`BrowserAnimationsModule` instead of `provideAnimations()`.
+`BrowserAnimationsModule` instead of `provideAnimations()`. It can keep importing
+`VisualizationModule`, which is deprecated and re-exports the standalone components.
 
 ## 3. Styles
 
@@ -108,14 +109,16 @@ tokens, which you provide at the root or on the component that embeds
 
 ```ts
 import {
-  VisualizationModule, IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG,
+  VisualizerComponent, RegionEditorComponent, provideVisualization,
+  IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG,
 } from '@jax-data-science/sci-image-visualizer';
 
 @Component({
   standalone: true,
-  imports: [VisualizationModule],
+  imports: [VisualizerComponent, RegionEditorComponent],
   template: `<visualizer></visualizer> <region-editor></region-editor>`,
   providers: [
+    ...provideVisualization(),
     { provide: IMAGE_STATE_PORT, useClass: MyImageStateAdapter },
     { provide: TILE_ACCESS_PORT, useClass: MyTileAccessAdapter },
     { provide: REGION_IO_PORT, useClass: MyRegionIoAdapter },
@@ -135,7 +138,8 @@ own ports.
 
 ## 6. Components
 
-All are exported by `VisualizationModule` and use unprefixed selectors.
+All are standalone components (import them directly; the deprecated `VisualizationModule`
+re-exports them for NgModule hosts) and use unprefixed selectors.
 
 | Selector | Inputs | Outputs |
 |---|---|---|

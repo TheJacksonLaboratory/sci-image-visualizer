@@ -86,8 +86,8 @@ it working.
 ```ts
 import { Component } from '@angular/core';
 import {
-  VisualizationModule, IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG,
-  setSamModelUrls,
+  VisualizerComponent, RegionEditorComponent, provideVisualization,
+  IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG, setSamModelUrls,
 } from '@jax-data-science/sci-image-visualizer';
 
 // Once at startup: where the SAM model files are hosted.
@@ -98,9 +98,12 @@ setSamModelUrls('microsam-vit-t-lm',
 @Component({
   selector: 'app-viewer',
   standalone: true,
-  imports: [VisualizationModule],
+  imports: [VisualizerComponent, RegionEditorComponent],
   template: `<visualizer></visualizer> <region-editor></region-editor>`,
   providers: [
+    // The viewer chain. In `bootstrapApplication` providers it is the one app-wide
+    // viewer; in a component's providers it is an isolated viewer for that subtree.
+    ...provideVisualization(),
     // Your adapters: the library reaches the host only through these ports.
     { provide: IMAGE_STATE_PORT, useClass: MyImageStateAdapter },
     { provide: TILE_ACCESS_PORT, useClass: MyTileAccessAdapter },
@@ -114,6 +117,9 @@ export class ViewerComponent {}
 `CELL_SEGMENTER` is optional: override it only to replace the default
 `CellposeSegmenterService`. `SPATIAL_DATA_PORT` and `PREFERENCES_PORT` are
 optional too.
+
+All components are standalone. `VisualizationModule` still works for NgModule hosts but is
+deprecated: import the components and add `provideVisualization()` instead.
 
 The embeddable components use plain, unprefixed selectors: `visualizer`,
 `region-editor`, `channel-histogram`, `hex-color-picker`, `spatial-controls` and

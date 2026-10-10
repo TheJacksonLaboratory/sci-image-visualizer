@@ -17,13 +17,14 @@ router, backends, data) and [`diagrams/siv-regions.mmd`](./diagrams/siv-regions.
 
 ```
 host app
-  │  imports VisualizationModule (or provideVisualization() for an isolated viewer)
+  │  imports the standalone components + provideVisualization() (deprecated: VisualizationModule)
   │  provides the ports: IMAGE_STATE_PORT, TILE_ACCESS_PORT, REGION_IO_PORT, VIZ_CONFIG, …
   ▼
 components         <visualizer> · <region-editor> · <channel-histogram> · <spatial-controls> · …
   │  inject only the contract tokens: VISUALIZER, REGION_EDITOR_API, CHANNEL_HISTOGRAM_API
   ▼
-RoutingVisualizerService      implements all three tokens; picks a backend per plot type
+RoutingVisualizerService      implements all three tokens; picks a backend (IViewerBackend) per plot
+                              type; serves region/display state from the stores
   │
   ├── OpenSeadragonVisualizerService   implementations/osd/        tiled image view
   ├── PlotlyService                    implementations/plotly/     2D/3D plots, intensity profiles
@@ -46,46 +47,52 @@ that reason: `SpatialSelectionMask` is in `spatial-dataset.contract.ts`, not
 
 | Path | Owns |
 |---|---|
-| `contracts/` | Interfaces and DI tokens: `visualizer.contract.ts` (`IVisualizer`, `VISUALIZER`), `capabilities.contract.ts`, `plot-type.ts` (`PlotType`, descriptors), `region-overlay.contract.ts`, `region-store.contract.ts`, `coordinate-transform.contract.ts`, `toolbar-tool.contract.ts`, `plot-type-contribution.contract.ts`, `viz-config.ts`, the segmenter contracts, `spatial-dataset.contract.ts`, `display-types.ts`, `colormap-lut.ts`, `intensity.ts` |
+| `contracts/` | Interfaces and DI tokens: `visualizer.contract.ts` (`IVisualizer` for hosts, `IViewerBackend` for backends with capability getters, `VISUALIZER`), `capabilities.contract.ts`, `plot-type.ts` (`PlotType`, descriptors), `region-overlay.contract.ts`, `region-store.contract.ts`, `coordinate-transform.contract.ts`, `toolbar-tool.contract.ts`, `plot-type-contribution.contract.ts`, `viz-config.ts`, the segmenter contracts, `spatial-dataset.contract.ts`, `display-types.ts`, `colormap-lut.ts`, `intensity.ts` |
 | `contracts/ports/` | What the host implements: `image-state`, `tile-access`, `region-io`, `preferences`, `spatial-data` |
 | `routing-visualizer.service.ts` | The composition-root service behind `VISUALIZER` / `REGION_EDITOR_API` / `CHANNEL_HISTOGRAM_API` |
-| `implementations/osd/` | OpenSeadragon backend: service, SVG region overlay, tile client, slice cache, display pipeline, histogram sampler, scale bar |
-| `implementations/plotly/` | Plotly backend: service, region overlay (Plotly shapes), trace builders, omics chart builders (public) |
-| `implementations/napari-js/` | WebGPU backend: service, SVG region overlay, spatial tiles (LOD loop for outlines, transcripts, density), navigator, scale bar, axes, volume z-handle |
+| `implementations/osd/` | OpenSeadragon backend: a coordinator service over `OsdSimpleSource`, `OsdTileRecolorer`, `OsdViewportAdapter`, `OsdNavigatorChrome`, `buildViewerOptions`, tile source / export / readback modules; SVG region overlay, slice cache, display pipeline, histogram sampler, scale bar |
+| `implementations/plotly/` | Plotly backend: a coordinator service over `plotly-layouts`, trace builders, `PlotlyShapeProjection` (follows `RegionStore`), `PlotlyZoomController`, `PlotlyIsosurfaceControls`, `PlotlyImageLoader`, readback; omics chart builders (public) |
+| `implementations/napari-js/` | WebGPU backend: a coordinator service that mounts one `NapariScene` per plot (`napari-*-scene.ts`: image 2D, volume, surface, scatter, spatial 2D/3D) over `NapariTileClient`, `NapariDisplayState`, `NapariToolBridge`, `SpatialHover`, `Axes3dGizmo`; `region-overlay/` (gesture controller + SVG renderer), `spatial-tiles/` (the LOD loop's collaborators behind `NapariSpatialTileLayers`), navigator, scale bar, axes, volume z-handle. See its `IMPLEMENTATION-STATUS.md` |
+| `implementations/tile-server/` | The jit-service client shared by OSD and napari: descriptor poll, tile URLs, native histogram, TIFF export, auth transport |
+| `region-overlay/` | Backend-neutral region geometry, hit tests and the world-space `SvgRegionRenderer` both SVG overlays use |
+| `overlays/` | `scale-bar-core.ts` behind the OSD and napari scale bars |
+| `intensity/` | `IntensityProfileService`: intensity-profile lines and their own sampling frames, for every backend |
 | `implementations/spatial-data-http/` | Optional reference `SpatialDataPort` adapter and wire decoders for the example server's format |
 | `implementations/base-store-visualizer.ts` | Abstract base that forwards the region/display API to the stores; OSD, napari and Plotly extend it |
 | `implementations/simple-slice-access.service.ts` | Per-slice URL loading for non-tiled stacks (OSD and napari) |
-| `store/` | `VisualizerStore`, `RegionStore`, `SpatialSelectionStore`, class-colour helpers |
-| `models/` | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts`, and `polygon-factory.ts` (the one place `Polygon`/`Region` are built and cloned) |
+| `store/` | `VisualizerStore`, `SpatialSelectionStore`, and `RegionStore` (copy-on-write façade over `RegionHistory`, `RegionSelection`, `RegionScopeCache`), class-colour helpers |
+| `models/` | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts`, `polygon-factory.ts` (the one place `Polygon`/`Region` are built), `polygon-edit.ts` (copy-on-write edits), `region-clone.ts`, `region-geojson.ts`, `svg-path.ts` |
 | `geometry/` | Pure, worker-safe geometry: `ring.ts` (bounds, containment with holes, vertex dropping, simplification), `raster.ts` (polygon rasterization, `BBoxMask` set operations), `contour.ts` (mask or label map → polygons with holes) |
 | `util/` | Framework-free helpers shared across areas: `supersede.ts` (`Supersede`, latest-wins with an `AbortSignal` per task) |
-| `visualizer.component.ts` | `<visualizer>`: render pipeline, plot-type selector, dialogs, toast outlets |
+| `visualizer.component.ts` + `visualizer/` | `<visualizer>`: inputs/outputs, toasts, slice navigation and dialogs; its collaborators live in `visualizer/` (`RegionActions`, `ViewerShortcuts`, `ToolModes`, `SpatialDatasetBinder`, context menu, ROI import) plus `render-session.ts` (`ImageRenderSession`), `intensity-inset/`, `plot-mode/contribution-host.ts` |
 | `render-orchestrator.ts` | Two-pass render (small tier first, then the large tier, one retry) and the slice scrubber |
-| `toolbar/` | `<plotting-toolbar>` (internal) and the tool services: `brush/`, `wand/`, `vertex-eraser/`, `zoom-to-box/`, `crop/`, `segmentation/` (SAM box/point over one `SamSessionService`, cellpose, ONNX session + worker, model registry with per-model cache revisions, ORT config) |
+| `toolbar/` | `<plotting-toolbar>` (internal; split into plot-type, stack, view, region-tool, segmentation and help children) and the canvas tools (plain `ICanvasTool` classes per backend): `brush/`, `wand/`, `vertex-eraser/`, `zoom-to-box/`, `crop/`, `segmentation/` (SAM box/point over one `SamSessionService`, cellpose, ONNX session + worker, model registry with per-model cache revisions, ORT config) |
 | `toolbar/tool-kit/` | What the on-canvas tools share: `ToolOverlayCanvas` (pointer overlay lifecycle), `MaskStrokeEditor` (the wand/brush stroke accumulator), `MatrixFrame` (data ↔ readback-matrix coordinates), `UndoGesture` (one drag = one undo step), `AsyncToolStatus` |
 | `plot-mode/` | `PlotModeController`: lifecycle of contributed plot modes |
-| `region-editor/` | `<region-editor>` and mask export (`mask-raster.ts`, `mask.worker.ts`) |
-| `region-ops.service.ts` | Merge / inverse / ungroup through the wand mask pipeline |
+| `region-editor/` | `<region-editor>` and its OnPush children (table, classes panel, dialogs, help), `MaskExportService`, `RegionPersistenceService`, mask export (`mask-raster.ts`, `mask.worker.ts`) |
+| `region-ops.service.ts` | Merge / inverse / ungroup through the pure `geometry/` raster and contour modules |
 | `channel-histogram/` | `<channel-histogram>`, the Channels & Histogram dialog |
 | `spatial/` | Pure spatial-omics logic: encoding, selection, tiles/LOD planning, density, expression, heatmap, hover, sections, `stats.ts` (quantiles, percentile windows), t-SNE |
 | `workers/` | `spatial-math.worker.ts` and its client `spatial-math.ts`: async, off-main-thread versions of the spatial field and density math |
-| `spatial-controls/` | `<spatial-controls>` and `<spatial-charts>` (UI only) |
+| `spatial-controls/` | `<spatial-controls>` (a dialog shell over key, cells, groups, transcripts, gene-tree, marker-genes and observations panels) and `<spatial-charts>` (over `ChartDataModel`, `PlotlyChartHost`, `EmbeddingComputeCoordinator`, chart help); UI only |
 | `hex-color-picker/` | `<hex-color-picker>` |
 | `processing/` | `ProcessingImage`, `cropImage`, `ImageConverterService` (public utilities) |
 | `plot.utilities.ts` | `COLORMAP_OPTIONS`, Plotly config, GeoJSON helpers |
 | `toast-outlets.ts` | The library's toast keys |
-| `provide-visualization.ts` | `provideVisualization()` for an isolated viewer |
+| `provide-visualization.ts` | `provideVisualization()`: the viewer chain, app-wide or per component |
 | `testing/` | Jest-only: the napari-js stub and port stubs |
 | `assets/` | Toolbar SVGs, colormap PNGs (`icons/`), `colormap-luts.json` |
 | `styles/` | `viz-icons.scss`: the global toolbar/context-menu icon rules, shipped for hosts (the component emits the same rules from `_viz-icons-rules.scss`) |
 
 ## How a host connects
 
-`VisualizationModule` declares the components and binds the three contract
-tokens to `RoutingVisualizerService` with `useExisting`. The backends and
-stores are `providedIn: 'root'`, so one app shares one viewer by default.
-`provideVisualization()` re-provides the chain at component scope for a second,
-isolated viewer (a modal over the main view, for example). It lists every
+Every component is standalone and `OnPush`. A host imports the components it uses and adds
+`provideVisualization()`: in `bootstrapApplication` providers it binds the one app-wide chain;
+in a component's providers it re-provides the chain at that scope for a second, isolated
+viewer (a modal over the main view, for example). The deprecated `VisualizationModule` is a
+re-export shim for NgModule hosts that binds the three contract tokens to
+`RoutingVisualizerService` at root, as before. The backends and stores are
+`providedIn: 'root'`, so without `provideVisualization()` one app shares one viewer. It lists every
 stateful service of the chain (router, backends, stores, the tool services) and
 binds the three tokens at that scope; `provide-visualization.spec.ts` fails when a
 new stateful `@Injectable` is neither listed nor allow-listed as deliberately shared.
@@ -237,8 +244,8 @@ the build if a dynamic `import()` survives.
 `rasterizeDensityAsync`, `computeHeatmapMatrixAsync`). A call runs in the worker
 above `SPATIAL_MATH_WORKER_MIN_OBSERVATIONS` and on the main thread below it, where
 `Worker` does not exist (jsdom) or when the worker fails; the answer is the same
-either way. It takes an `AbortSignal`. The napari service and the charts still call
-the synchronous functions; they switch over with the service split.
+either way. It takes an `AbortSignal`. The napari scenes (gene maps, density volumes) and
+the charts' heatmap call it.
 
 ## Spatial omics
 
@@ -251,8 +258,8 @@ the synchronous functions; they switch over with the service split.
   an async, worker-backed form in `workers/spatial-math.ts`.
 - **UI:** `spatial-controls/` holds the controls dialog and the linked charts.
 - **Rendering:** napari draws the observations in 2D and 3D.
-  `napari-spatial-tiles.ts` runs the camera-driven tile loop for cell outlines,
-  transcripts and the density map.
+  `napari-spatial-tiles.ts` coordinates the camera-driven tile loop for cell outlines,
+  transcripts and the density map; its collaborators are in `napari-js/spatial-tiles/`.
 
 See [guides/spatial-omics.md](./guides/spatial-omics.md).
 
@@ -301,9 +308,8 @@ revision, and described here once they land:
   first await, `task.isCurrent()` after each one, and `task.signal` passed to
   whatever is awaited (`fetch`, a worker call, `IDataRenderer.load(info, z, signal)`)
   so superseded work stops at the source; `cancel()` on teardown or a dataset switch.
-  The spatial controls, charts and the spatial HTTP adapter use it; the napari
-  service and the component still carry hand-written generation counters, which
-  move to it with the god-class splits.
+  The spatial controls, charts, the spatial HTTP adapter, the napari scenes and the
+  visualizer's render session use it.
 - **Assets:** code references `assets/plotting/…`, and the host serves
   `src/lib/assets` there. Component styles inline their own `url()`s at build
   time; `styles/viz-icons.scss` resolves its icons relative to itself. onnxruntime-web sidecars default to `/assets/ort/`
