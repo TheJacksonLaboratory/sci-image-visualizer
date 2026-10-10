@@ -9,7 +9,9 @@ import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../co
 import {
   SpatialSelectionMask, emptySelection, maskToIndices,
 } from '../../spatial/spatial-selection';
-import { cellsAsGroups, heatmapMatrix } from '../../spatial/spatial-heatmap';
+import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
+import { computeHeatmapMatrixAsync } from '../../workers/spatial-math';
+import { Supersede } from '../../util/supersede';
 import {
   BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator,
 } from '../../spatial/embedding-compute-coordinator';
@@ -291,6 +293,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     }));
   }
 
+  /** Latest wins among heatmap draws, whose matrix may be computed in a worker. */
+  private readonly heatmapRender = new Supersede();
+
   /** Plotly I/O for both the inline and the detached div. */
   private readonly plot = new PlotlyChartHost();
 
@@ -311,6 +316,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // otherwise leave a t-SNE saturating a GPU for minutes with nothing left to receive
     // the answer.
     this.compute.abandon();
+    this.heatmapRender.cancel();
     // BOTH divs: a chart left detached at teardown holds its WebGL context in the
     // window's div, which the inline id would never reach.
     for (const div of [this.chartDiv, this.detachedDiv]) this.plot.purge(div);
@@ -636,6 +642,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     if (!document.getElementById(target)) return;
     // Anything but the embedding inherits a div the embedding may have bound handlers on.
     if (this.kind !== 'embedding') this.plot.unbindSelection(target);
+    // A heatmap still computing must not draw over the kind that replaced it.
+    if (this.kind !== 'heatmap') this.heatmapRender.cancel();
     // The heatmap answers a different question from the other kinds — which
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.
@@ -699,20 +707,32 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         SpatialChartsComponent.HEATMAP_CELL_COLUMNS)
       : null;
 
-    const matrix = heatmapMatrix(
-      genes,
-      cells ? cells.groups : { codes: grouping.codes, categories: grouping.categories },
-      {
-        ...(cells ? { indices: cells.indices, minCells: 1 } : {}),
-        // Outside the per-cell view a selection still narrows the means, the way
-        // the violin and box narrow rather than overlay.
-        ...(!cells && selected ? { indices: selected } : {}),
-        // Only the grouped view: `cellsAsGroups` already caps by even thinning,
-        // and re-ranking those columns would lose the selection's spread.
-        ...(cells ? {} : { maxCols: SpatialChartsComponent.HEATMAP_MAX_COLUMNS }),
-        zScore: this.heatmapZScore,
-      },
-    );
+    // Off the main thread for a big dataset (genes × cells past the worker threshold), and
+    // superseded by the next heatmap draw: a slow matrix for an earlier gene list or
+    // selection must not land over the current one, and its worker stops.
+    const task = this.heatmapRender.next();
+    let matrix: HeatmapMatrix | null;
+    try {
+      matrix = await computeHeatmapMatrixAsync(
+        genes,
+        cells ? cells.groups : { codes: grouping.codes, categories: grouping.categories },
+        {
+          ...(cells ? { indices: cells.indices, minCells: 1 } : {}),
+          // Outside the per-cell view a selection still narrows the means, the way
+          // the violin and box narrow rather than overlay.
+          ...(!cells && selected ? { indices: selected } : {}),
+          // Only the grouped view: `cellsAsGroups` already caps by even thinning,
+          // and re-ranking those columns would lose the selection's spread.
+          ...(cells ? {} : { maxCols: SpatialChartsComponent.HEATMAP_MAX_COLUMNS }),
+          zScore: this.heatmapZScore,
+        },
+        { signal: task.signal },
+      );
+    } catch (err) {
+      if (!task.isCurrent()) return;
+      throw err;
+    }
+    if (!task.isCurrent()) return;
     if (!matrix) {
       this.purgePlot();
       this.notice = 'No group has enough measured cells for a mean.';

@@ -11,6 +11,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import { GENE_OPTIONS_MAX } from '../../spatial/gene-search';
 import { EmbeddingComputeRun } from '../../spatial/embedding-compute';
+import * as spatialMath from '../../workers/spatial-math';
 
 jest.mock('plotly.js-dist-min', () => ({
   react: jest.fn().mockResolvedValue(undefined),
@@ -738,6 +739,36 @@ describe('SpatialChartsComponent', () => {
       expect(component.groupBy).toBe('region');
       await flush();
       expect(lastPlot().traces[0].type).toBe('heatmap');
+    });
+
+    it('computes the matrix off the main thread when large, and drops one a later draw overtook', async () => {
+      const real = spatialMath.computeHeatmapMatrixAsync;
+      let releaseFirst!: () => void;
+      const signals: AbortSignal[] = [];
+      const spy = jest.spyOn(spatialMath, 'computeHeatmapMatrixAsync')
+        .mockImplementationOnce((genes, groups, opts, options) => {
+          signals.push(options!.signal!);
+          // The first matrix (Ttr alone) is slow; the second (both genes) answers at once.
+          return new Promise((resolve) => { releaseFirst = () => resolve(real(genes, groups, opts)); });
+        })
+        .mockImplementation((genes, groups, opts, options) => {
+          signals.push(options!.signal!);
+          return real(genes, groups, opts);
+        });
+      component.onKind('heatmap');
+      await flush();
+      await component.onHeatmapGenes(['Ttr']);
+      await component.onHeatmapGenes(['Ttr', 'Mbp']);
+      await flush();
+      expect(lastPlot().traces[0].y).toEqual(['Mbp', 'Ttr']);
+      // The overtaken computation was told to stop…
+      expect(signals[0].aborted).toBe(true);
+      (Plotly.react as jest.Mock).mockClear();
+      releaseFirst();
+      await flush();
+      // …and its late answer is not drawn.
+      expect(Plotly.react).not.toHaveBeenCalled();
+      spy.mockRestore();
     });
 
     it('draws one row per gene and one column per category', async () => {
