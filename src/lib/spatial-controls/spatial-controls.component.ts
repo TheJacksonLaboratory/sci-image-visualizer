@@ -15,7 +15,7 @@ import {
 } from '../spatial/spatial-tiles';
 import {
   CLIP_OPTIONS, FAMILY_PREFIX, GLYPH_OPTIONS, allGenesPreparingNote, buildGeneTree, columnOptions,
-  continuousColorBarCss, countGroupRows, densityColorBarCss, familyMembers, geneOption, glyphPoints,
+  PanelOption, continuousColorBarCss, countGroupRows, densityColorBarCss, familyMembers, glyphPoints,
   groupEntryFor, groupOptions, groupVariantOptions, importGeneGroupsPatch, markerColumnOptions,
   markerGeneGroups, markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions,
   toggleHidden,
@@ -23,9 +23,9 @@ import {
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
-import { searchGeneNames } from '../spatial/gene-search';
 import { parseCssColor, rgbToHex } from '../contracts/color';
 import { Supersede } from '../util/supersede';
+import { GenePickerModel } from './spatial-gene-picker';
 
 /** One legend row for a categorical colouring. */
 export interface SpatialLegendEntry {
@@ -101,27 +101,28 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /**
    * Gene picker: a filterable dropdown rather than a free-text typeahead, so the
    * options are visible before anything is typed and each keystroke narrows a list
-   * the user can see.
-   *
-   * `geneOptions` is the full name list when the dataset inlines it (a targeted
-   * panel: 8 for the ABC demo, 300–5,000 for Xenium/CosMx). A whole-transcriptome
-   * dataset does not ship its ~31k names, so there the list is what the port's last
-   * search returned and filtering is server-side — same control either way.
+   * the user can see. One model feeds every gene dropdown of the panel.
    */
-  geneOptions: { label: string; value: string }[] = [];
-  /**
-   * Every gene the dataset inlined, whether or not it is currently an option.
-   *
-   * Held as plain strings and searched per keystroke. A whole-transcriptome dataset
-   * inlines ~18k names — cheap to keep, ruinous to hand a dropdown all at once — so
-   * {@link geneOptions} is only ever the best few hundred of these.
-   */
-  private geneNames: string[] = [];
+  readonly genes = new GenePickerModel(
+    () => this.controls,
+    () => [
+      ...(this.view?.transcriptGenes ?? []),
+      ...(this.view?.colorBy?.kind === 'feature' ? [this.view.colorBy.name] : []),
+    ],
+    (fn) => this.zone.run(fn),
+  );
+  /** The gene dropdowns' options. */
+  get geneOptions(): PanelOption<string>[] {
+    return this.genes.options;
+  }
+  /** True when the options come from the port per keystroke rather than a resident list. */
+  get genesAreRemote(): boolean {
+    return this.genes.remote;
+  }
+  get geneSearchFailed(): boolean {
+    return this.genes.failed;
+  }
   selectedGene: string | null = null;
-  /** True when the options come from the port per keystroke rather than a resident
-   *  list, which changes what an empty list means (nothing matched *yet*). */
-  genesAreRemote = false;
-  geneSearchFailed = false;
 
   /** Categorical key, or null when the active colouring is continuous. */
   legend: SpatialLegendEntry[] | null = null;
@@ -164,12 +165,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   private colormap: ColormapNode | null = null;
   private reverse = false;
-  /** Guards the gene typeahead and the legend/colour-bar rebuild: both are async
-   *  and both are driven by input the user changes faster than they resolve. */
-  private readonly geneSearch = new Supersede();
+  /** Guards the legend/colour-bar rebuild: async, and driven by input the user changes
+   *  faster than it resolves. */
   private readonly keyLoad = new Supersede();
-  /** Guards the whole-transcriptome gene-list preload against a dataset switch. */
-  private readonly geneListLoad = new Supersede();
   private readonly subs = new Subscription();
 
   constructor(
@@ -187,16 +185,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.columnOptions = columnOptions(dataset);
       // A new dataset almost certainly has different columns; drop stale UI state.
       this.selectedGene = null;
-      this.geneSearchFailed = false;
-      // A gene search or list preload still in flight answers for the previous dataset.
-      this.geneSearch.cancel();
-      this.geneListLoad.cancel();
-      this.geneListLoading = false;
-      const names = dataset?.features?.names;
-      this.genesAreRemote = !!dataset?.features && !names;
-      this.geneNames = names ? [...names] : [];
-      // The head of the list, not all of it: see `geneNames`.
-      this.geneOptions = searchGeneNames(this.geneNames, '').map(geneOption);
+      this.genes.setDataset(dataset);
       this.sections = this.controls?.sampledSections() ?? null;
       this.buildTileOptions(dataset);
       this.groupRowsFor = null;
@@ -275,93 +264,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.controls?.colorByColumn(name);
   }
 
-  /**
-   * A keystroke in the gene dropdown's filter box.
-   *
-   * With the names resident the dropdown filters them itself and this only clears a
-   * stale failure. Without them there is nothing to filter, so the query goes to the
-   * port and its answer BECOMES the option list — the same control, filtering one
-   * hop further away.
-   */
-  async onGeneFilter(query: string): Promise<void> {
-    this.geneSearchFailed = false;
-    if (!this.genesAreRemote) {
-      // Resident names: search them here and materialise only the top matches. The
-      // dropdown's own filter then runs over those and agrees — they were chosen by the
-      // same query — so the control behaves as if it still held the whole list.
-      this.geneOptions = this.withSelected(searchGeneNames(this.geneNames, query));
-      return;
-    }
-    if (!this.controls) return;
-    // Typing outruns the lookup, so a slow answer for an earlier query would
-    // replace the options for the text now in the box — including a failure, which
-    // would wrongly mark the current query as failed.
-    const current = this.geneSearch.next();
-    if (!query) {
-      this.geneOptions = [];
-      return;
-    }
-    try {
-      const names = await this.controls.searchFeatures(query, 50);
-      if (!current()) return;
-      this.zone.run(() => { this.geneOptions = this.withSelected(names); });
-    } catch {
-      if (!current()) return;
-      // A failed lookup must not wedge the control — show none and say so.
-      this.zone.run(() => {
-        this.geneOptions = this.withSelected([]);
-        this.geneSearchFailed = true;
-      });
-    }
+  /** A keystroke in a gene dropdown's filter box — see {@link GenePickerModel.onFilter}. */
+  onGeneFilter(query: string): Promise<void> {
+    return this.genes.onFilter(query);
   }
 
-  /**
-   * Opening either gene dropdown — "Colour by gene" or the transcript genes. Both share
-   * one list and one search, so each opens on the head of the full list rather than on
-   * whatever the other was last filtered to.
-   *
-   * A whole-transcriptome dataset does not inline its ~30k names; they are fetched here,
-   * once, on first open — the list is then resident and every keystroke filters locally,
-   * exactly as for a targeted panel. Until it arrives the dropdown falls back to asking
-   * the server per keystroke.
-   */
-  async ensureGeneList(): Promise<void> {
-    if (this.genesAreRemote && this.controls && !this.geneListLoading) {
-      this.geneListLoading = true;
-      // A switch to another remote-gene dataset mid-fetch would otherwise hand it this
-      // dataset's names as its own.
-      const current = this.geneListLoad.next();
-      try {
-        const names = await this.controls.searchFeatures('', SpatialControlsComponent.GENE_LIST_MAX);
-        if (current() && names.length && this.genesAreRemote) {
-          this.zone.run(() => {
-            this.geneNames = names;
-            this.genesAreRemote = false;
-          });
-        }
-      } catch {
-        // Keep the per-keystroke search; the list is a convenience, not a requirement.
-      } finally {
-        if (current()) this.geneListLoading = false;
-      }
-    }
-    this.zone.run(() => {
-      this.geneOptions = this.withSelected(
-        this.genesAreRemote ? [] : searchGeneNames(this.geneNames, ''),
-      );
-    });
-  }
-
-  /** Most names fetched for the lazy list — well above any panel, whole-transcriptome included. */
-  private static readonly GENE_LIST_MAX = 100_000;
-  private geneListLoading = false;
-
-  /** Options for `names`, plus the genes already chosen (a multi-select shows a chip only
-   *  for a value it can find among its options). */
-  private withSelected(names: readonly string[]): { label: string; value: string }[] {
-    const chosen = [...(this.view?.transcriptGenes ?? []), ...(this.selectedGene ? [this.selectedGene] : [])];
-    const seen = new Set(names);
-    return [...chosen.filter((g) => !seen.has(g)), ...names].map(geneOption);
+  /** A gene dropdown opened — see {@link GenePickerModel.ensureList}. */
+  ensureGeneList(): Promise<void> {
+    return this.genes.ensureList();
   }
 
   /** A gene was picked; it supersedes any column selection. */
@@ -864,7 +774,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** Real genes in the panel — the tree's denominator. */
   get geneTotal(): number {
-    return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.geneNames.length;
+    return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.genes.residentCount;
   }
 
   collapsedGeneGroups = new Set<string>();
