@@ -1,5 +1,16 @@
-import { Component, Inject, OnDestroy, OnInit, ViewChild } from '@angular/core';
-import { OverlayPanel } from 'primeng/overlaypanel';
+import {
+  ChangeDetectionStrategy, ChangeDetectorRef, Component, DestroyRef, Inject, OnDestroy, OnInit, ViewChild, inject,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
+import { ConfirmDialogModule } from 'primeng/confirmdialog';
+import { DropdownModule } from 'primeng/dropdown';
+import { InputTextModule } from 'primeng/inputtext';
+import { OverlayPanel, OverlayPanelModule } from 'primeng/overlaypanel';
+import { ToolbarModule } from 'primeng/toolbar';
+import { TooltipModule } from 'primeng/tooltip';
 import { saveAs } from 'file-saver';
 import { Subject, Subscription } from 'rxjs';
 
@@ -7,88 +18,112 @@ import { Rectangle, Region } from '../models/region';
 import { withRegionPatch } from '../models/region-clone';
 import { PresetSet, ClassPreset, defaultPresetSet, parsePresetSet } from '../models/class-preset';
 import { colorForLabel, presetKey } from '../store/class-color.util';
-import { ConfirmationService, MessageService } from 'primeng/api';
+import { ConfirmationService, MessageService, SharedModule } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { RegionPersistenceService } from './region-persistence.service';
-import { ClassColorEdit } from './region-color-dialog/region-color-dialog.component';
+import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialog/region-color-dialog.component';
+import { ClassesPanelComponent } from './classes-panel/classes-panel.component';
+import { RegionTableComponent } from './region-table/region-table.component';
+import { SaveRegionsDialogComponent } from './save-regions-dialog/save-regions-dialog.component';
+import { SaveMaskDialogComponent } from './save-mask-dialog/save-mask-dialog.component';
+import { ManageClassesDialogComponent } from './manage-classes-dialog/manage-classes-dialog.component';
+import { RegionEditorHelpComponent } from './region-editor-help/region-editor-help.component';
 import { MaskExportService, MaskMode } from './mask-export.service';
 import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
 
+/**
+ * The Region Editor (`<region-editor>`): the table of the active image's
+ * annotation regions with class presets, colours, labels, GeoJSON import /
+ * export / server save and mask export. Self-contained: it talks to the viewer
+ * only through {@link REGION_EDITOR_API} (and the host's REGION_IO_PORT), so it
+ * has no inputs or outputs.
+ *
+ * OnPush: template events re-render it; state that lands asynchronously (the
+ * API's region / selection / preset / image-meta streams, save and mask-export
+ * progress, file reads) marks it for check.
+ */
 @Component({
   selector: 'region-editor',
+  standalone: true,
+  imports: [
+    CommonModule, FormsModule, SharedModule, ButtonModule, ConfirmDialogModule, DropdownModule, InputTextModule,
+    OverlayPanelModule, ToolbarModule, TooltipModule,
+    ClassesPanelComponent, RegionTableComponent, SaveRegionsDialogComponent, SaveMaskDialogComponent,
+    RegionColorDialogComponent, ManageClassesDialogComponent, RegionEditorHelpComponent,
+  ],
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [RegionPersistenceService],
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
-  @ViewChild('op') overlayPanel!: OverlayPanel;
+  @ViewChild('op') private overlayPanel!: OverlayPanel;
 
-  regions: Region[] = [];
-  selectedRegions: Region[] = [];
-  showShapeLabel!: boolean;
-  shapeColor!: string;
-  fillColor!: string;
-  displayHelpDialog = false;
-  showColorDialog = false;
+  protected regions: Region[] = [];
+  protected selectedRegions: Region[] = [];
+  protected showShapeLabel!: boolean;
+  protected shapeColor!: string;
+  protected fillColor!: string;
+  protected displayHelpDialog = false;
+  protected showColorDialog = false;
   /** One colour editor per unique class among the selected regions, shown in the
    *  "edit colour of selected regions" dialog. Unclassified regions (no label)
    *  are grouped under a single entry with an empty `label`. */
-  classColorEdits: ClassColorEdit[] = [];
+  protected classColorEdits: ClassColorEdit[] = [];
   /** "Edit class on selected rows" popup: chosen existing class, and a new-class name. */
-  bulkClass = '';
-  newBulkClass = '';
+  protected bulkClass = '';
+  protected newBulkClass = '';
 
   // ── annotation-class presets (jit-ui#70) ──
   /** Local mirror of the per-user preset set (chip strip, Class dropdown, dialog). */
-  presetSet: PresetSet = defaultPresetSet();
+  protected presetSet: PresetSet = defaultPresetSet();
   /** The class last picked in the panel; a chip-click applies it to the selected rows. */
-  activeClass: string | null = null;
-  showManageDialog = false;
+  protected activeClass: string | null = null;
+  protected showManageDialog = false;
   /** Working copy edited inside the Manage-classes dialog; committed on Apply/Done. */
-  presetDraft: PresetSet | null = null;
+  protected presetDraft: PresetSet | null = null;
   /** class name (match-mode keyed) → number of regions currently using it. */
-  classCounts = new Map<string, number>();
+  protected classCounts = new Map<string, number>();
   /** Fallback class that a region reverts to when its class is deleted (jit-ui#70). */
-  readonly defaultClassName = 'Region';
+  protected readonly defaultClassName = 'Region';
   /** Classes as shown in the panel: sorted by region count (desc), then name. */
-  displayClasses: ClassPreset[] = [];
+  protected displayClasses: ClassPreset[] = [];
 
-  paginatorFirst = 0;
-  paginatorRows = 10;
-  readonly rowsPerPageOptions = [10, 25, 50];
+  protected paginatorFirst = 0;
+  protected paginatorRows = 10;
+  protected readonly rowsPerPageOptions = [10, 25, 50];
   /** Regions whose Class cell is currently in edit mode → the label being typed.
    *  The draft is committed on Enter and discarded on Escape/✕, so typing never
    *  writes into the store's region (RT-18). Keyed by object identity, which
    *  avoids needing a unique id field. */
-  editingLabelRegions = new Map<Region, string>();
+  protected editingLabelRegions = new Map<Region, string>();
 
-  showSaveAsDialog = false;
-  saveAsFilename = '';
-  saveAsFileExists = false;
+  protected showSaveAsDialog = false;
+  protected saveAsFilename = '';
+  protected saveAsFileExists = false;
   /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
    *  progress bar and Cancel button (parity with the Save-mask dialog). */
-  saveAsBusy = false;
+  protected saveAsBusy = false;
   /** The running GeoJSON save; unsubscribing cancels it (Cancel / destroy). */
   private _saveAsSub?: Subscription;
-  private _saveAsCheckSub = new Subscription();
   /** Save-as file names to check for an existing file (debounced). */
   private readonly saveAsCheck$ = new Subject<string>();
 
-  showExportDialog = false;
-  exportFilename = '';
+  protected showExportDialog = false;
+  protected exportFilename = '';
 
-  showSaveMaskDialog = false;
-  saveMaskFilename = '';
+  protected showSaveMaskDialog = false;
+  protected saveMaskFilename = '';
   /** Mask type chosen in the Save-mask dialog: a binary foreground/background
    *  mask, or a multi-class mask with a distinct id per region. */
-  maskMode: MaskMode = 'binary';
+  protected maskMode: MaskMode = 'binary';
   /** True while the mask worker is rasterizing/encoding — drives the progress
    *  bar and the Cancel button in the dialog. */
-  maskBusy = false;
+  protected maskBusy = false;
   /** 0–100 rasterization progress; switches to indeterminate during encoding. */
-  maskProgress = 0;
-  maskEncoding = false;
+  protected maskProgress = 0;
+  protected maskEncoding = false;
   /** The running mask export; unsubscribing cancels it (terminates its worker). */
   private maskJob?: Subscription;
 
@@ -98,22 +133,20 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * of the selection. When false, every click toggles. Default true to
    * match the most common spreadsheet-like UX.
    */
-  metaKey = true;
+  protected metaKey = true;
 
   private _updatingFromEditor = false;
   private _suppressSelectionSyncToPlot = false;
-  private _regionSub = new Subscription();
-  private _selectedIdxSub = new Subscription();
-  private _metaSub = new Subscription();
-  private _presetSub = new Subscription();
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   /** Physical pixel size (µm/pixel) of the active image, for region areas in
    *  µm²; empty when the format reports no physical size. */
-  mpp: PixelSize = {};
+  protected mpp: PixelSize = {};
 
   constructor(
     @Inject(REGION_EDITOR_API) private regionApi: IRegionEditorApi,
-    public messageService: MessageService,
+    private messageService: MessageService,
     private confirmationService: ConfirmationService,
     private persistence: RegionPersistenceService,
     private maskExport: MaskExportService,
@@ -131,9 +164,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (initialPresets) this.presetSet = initialPresets;
     const presets$ = this.regionApi.getPresetSet$?.();
     if (presets$) {
-      this._presetSub = presets$.subscribe((set) => {
+      presets$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((set) => {
         if (set) this.presetSet = set;
         this.updateDisplayClasses();
+        this.cdr.markForCheck();
       });
     }
     // Seed from the visualizer's current regions — already scoped to the
@@ -147,7 +181,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
     // The update event is just a change signal; re-read the regions from the
     // visualizer rather than parsing whatever payload it carries.
-    this._regionSub = this.regionApi.getRegionUpdateEvent().subscribe(() => {
+    this.regionApi.getRegionUpdateEvent().pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       if (this._updatingFromEditor) return;
       const updated = this.applyRegionColors(this.regionApi.getAnnotationRegions());
       // preserve selection for regions that still exist (by id, since name
@@ -158,18 +192,23 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.clampPaginatorFirst();
       this.syncClassesFromRegions(updated);
       this.recomputeClassCounts();
+      this.cdr.markForCheck();
     });
 
-    this._saveAsCheckSub = this.persistence.fileExists(this.saveAsCheck$).subscribe((exists) => {
-      this.saveAsFileExists = exists;
-    });
+    this.persistence.fileExists(this.saveAsCheck$)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((exists) => {
+        this.saveAsFileExists = exists;
+        this.cdr.markForCheck();
+      });
 
     // Physical pixel size of the active image (for region areas in µm²/mm²).
-    this._metaSub = this.regionApi.getImageMeta().subscribe((meta) => {
+    this.regionApi.getImageMeta().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((meta) => {
       this.mpp = pickMpp(meta);
+      this.cdr.markForCheck();
     });
 
-    this._selectedIdxSub = this.regionApi.getSelectedRegions$().subscribe((selected) => {
+    this.regionApi.getSelectedRegions$().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((selected) => {
       if (this._suppressSelectionSyncToPlot) return;
       // Map the contract's selected regions to the editor's own instances by id.
       const next = selected
@@ -187,15 +226,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
           if (pageStart !== this.paginatorFirst) this.paginatorFirst = pageStart;
         }
       }
+      this.cdr.markForCheck();
     });
   }
 
+  /** Cancels a running GeoJSON save (aborts its upload) and mask export (terminates
+   *  its worker); the API subscriptions end through `takeUntilDestroyed`. */
   ngOnDestroy() {
-    this._regionSub.unsubscribe();
-    this._selectedIdxSub.unsubscribe();
-    this._metaSub.unsubscribe();
-    this._presetSub.unsubscribe();
-    this._saveAsCheckSub.unsubscribe();
     this._saveAsSub?.unsubscribe();
     this.maskJob?.unsubscribe();
   }
@@ -206,7 +243,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * the package maps them to its internal index space (which includes the
    * intensity-profile lines the editor never sees).
    */
-  onSelectionChanged() {
+  protected onSelectionChanged() {
     this._suppressSelectionSyncToPlot = true;
     try {
       this.regionApi.setSelectedRegions(this.selectedRegions ?? []);
@@ -247,6 +284,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
     this.syncClassesFromRegions(next);
     this.recomputeClassCounts();
+    this.cdr.markForCheck();
   }
 
   /**
@@ -277,7 +315,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** Set one region's outline colour (an explicit override) and commit live. */
-  changeRegionColor(region: Region, color: string): void {
+  protected changeRegionColor(region: Region, color: string): void {
     if (!color || region.color === color) return;
     // colorOverridden: explicit per-region colour — preserve it against preset (re)apply (jit-ui#70)
     this.patchRegions((r) => (r === region ? { color, colorOverridden: true } : null));
@@ -289,7 +327,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * class colour (preset or fallback, as the store will), and commit when
    * `commit` is set.
    */
-  labelRegionUpdate(region: Region, commit = false) {
+  protected labelRegionUpdate(region: Region, commit = false) {
     this.fillClassColors();
     if (commit) this.commit();
   }
@@ -301,7 +339,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** The current page of the table. Memoized on (regions, first, rows), so
    *  change detection doesn't hand p-table a new array every tick (RT-20). */
-  get pagedRegions(): Region[] {
+  protected get pagedRegions(): Region[] {
     const key = this._pageKey;
     if (key.regions !== this.regions || key.first !== this.paginatorFirst || key.rows !== this.paginatorRows) {
       this._pageKey = { regions: this.regions, first: this.paginatorFirst, rows: this.paginatorRows };
@@ -312,18 +350,18 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private _pageKey: { regions?: Region[]; first?: number; rows?: number } = {};
   private _page: Region[] = [];
 
-  onPageChange(event: { first?: number; rows?: number }) {
+  protected onPageChange(event: { first?: number; rows?: number }) {
     this.paginatorFirst = event.first ?? 0;
     this.paginatorRows = event.rows ?? this.paginatorRows;
   }
 
   /** Select every region in the table (and highlight them on the diagram). */
-  selectAllRegions() {
+  protected selectAllRegions() {
     this.selectedRegions = [...this.regions];
     this.onSelectionChanged();
   }
 
-  deleteSelectedRegions() {
+  protected deleteSelectedRegions() {
     if (this.selectedRegions && this.selectedRegions.length > 0) {
       // Filter by id — object identity isn't reliable across re-parses,
       // and name is a user-editable label that may collide.
@@ -336,7 +374,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  clearAllRegions() {
+  protected clearAllRegions() {
     this.confirmationService.confirm({
       key: 'positionDialog',
       message: 'Are you sure you want to delete all regions?',
@@ -349,7 +387,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  deleteRegion(shapeIdx: number) {
+  protected deleteRegion(shapeIdx: number) {
     const removed = this.regions[shapeIdx];
     if (removed) {
       this.selectedRegions = this.selectedRegions.filter((r) => r.id !== removed.id);
@@ -370,26 +408,26 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.paginatorFirst = maxFirst;
     }
   }
-  changeShowShapeLabel(showLabel: boolean) {
+  protected changeShowShapeLabel(showLabel: boolean) {
     this.commit();
   }
 
-  isEditingLabel(region: Region): boolean {
+  protected isEditingLabel(region: Region): boolean {
     return this.editingLabelRegions.has(region);
   }
 
-  startEditLabel(region: Region, event?: Event): void {
+  protected startEditLabel(region: Region, event?: Event): void {
     event?.stopPropagation(); // don't toggle row selection
     // A new map per start/stop, so the OnPush table sees the change.
     this.editingLabelRegions = new Map(this.editingLabelRegions).set(region, region.label ?? '');
   }
 
   /** The label typed so far for a row in edit mode (no re-render needed). */
-  setLabelDraft(region: Region, value: string): void {
+  protected setLabelDraft(region: Region, value: string): void {
     if (this.editingLabelRegions.has(region)) this.editingLabelRegions.set(region, value);
   }
 
-  stopEditLabel(region: Region, commit: boolean, event?: Event): void {
+  protected stopEditLabel(region: Region, commit: boolean, event?: Event): void {
     event?.stopPropagation();
     const draft = this.editingLabelRegions.get(region);
     if (this.editingLabelRegions.has(region)) {
@@ -409,14 +447,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Region area for display (µm²/mm² when the image is scaled, else px²);
    *  empty for a degenerate region. See `region-metrics`. */
-  regionArea(region: Region): string {
+  protected regionArea(region: Region): string {
     return formatArea(regionAreaPx(region), this.mpp);
   }
 
   /**
    * This method rounds all the rectangle regions lengths to multiple of 512
    */
-  roundRectangleLengths() {
+  protected roundRectangleLengths() {
     this.patchRegions((region) => {
       const rect = region.bounds;
       if (!(rect instanceof Rectangle)) return null;
@@ -430,14 +468,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.commit();
   }
 
-  showHelp() {
+  protected showHelp() {
     this.displayHelpDialog = true;
   }
 
   /** Open the colour dialog for the currently-selected region(s), building one
    *  colour picker per unique class in the selection. Each picker is seeded with
    *  the first selected region of that class's colour (else the class colour). */
-  openColorDialog() {
+  protected openColorDialog() {
     if (!this.selectedRegions?.length) return;
     const seedByLabel = new Map<string, string>();
     for (const region of this.selectedRegions) {
@@ -451,7 +489,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Apply each class's chosen colour to the selected regions of that class (an
    *  explicit override) and commit live. */
-  applyColorToSelected(edits: ClassColorEdit[] = this.classColorEdits) {
+  protected applyColorToSelected(edits: ClassColorEdit[] = this.classColorEdits) {
     const colorByLabel = new Map(edits.map((e) => [e.label, e.color]));
     const selected = new Set(this.selectedRegions ?? []);
     this.patchRegions((region) => {
@@ -469,7 +507,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   // ── annotation-class presets (jit-ui#70) ─────────────────────────────
 
   /** Resolve the display colour for a class name (preset colour or deterministic fallback). */
-  colorForName(name?: string): string {
+  protected colorForName(name?: string): string {
     return name ? colorForLabel(name, this.presetSet) : this.shapeColor;
   }
 
@@ -522,12 +560,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** Number of regions currently using a class (keyed by the active match mode). */
-  classCount(name: string): number {
+  protected classCount(name: string): number {
     return this.classCounts.get(presetKey(this.presetSet, name)) ?? 0;
   }
 
   /** Recolour a class from its panel swatch and repaint its (non-overridden) regions. */
-  setClassColor(name: string, color: string): void {
+  protected setClassColor(name: string, color: string): void {
     if (!color) return;
     this.regionApi.setClassificationColor(name, color);
     this.commit();
@@ -536,7 +574,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Remove a class. Any regions still using it fall back to the default
    *  "Region" class, so they aren't orphaned (and the class isn't immediately
    *  re-added from its regions by syncClassesFromRegions). */
-  deleteClass(name: string): void {
+  protected deleteClass(name: string): void {
     this.reassignRegionsToDefaultClass([name]);
     this.regionApi.removeClass(name);
     if (this.activeClass === name) this.activeClass = null;
@@ -561,7 +599,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
    *  dropdown; choosing a class opts the region back into the preset colour. */
-  applyPresetToRegion(region: Region, className: string): void {
+  protected applyPresetToRegion(region: Region, className: string): void {
     const name = (className ?? '').trim();
     const patch: Partial<Region> = { label: name, colorOverridden: false };
     if (name) patch.color = colorForLabel(name, this.presetSet);
@@ -571,7 +609,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Make a class active (used for new regions) and, if rows are selected, apply
    *  it to them in one commit. */
-  selectActiveClass(name: string): void {
+  protected selectActiveClass(name: string): void {
     this.activeClass = name;
     this.applyClassToSelected(name);
   }
@@ -586,14 +624,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** "Edit class on selected rows" popup — apply the chosen existing class. */
-  applyBulkClass(): void {
+  protected applyBulkClass(): void {
     if (!this.bulkClass) return;
     this.applyClassToSelected(this.bulkClass);
     this.overlayPanel?.hide();
   }
 
   /** "Edit class on selected rows" popup — add a new class and set it on the selection. */
-  addAndApplyBulkClass(): void {
+  protected addAndApplyBulkClass(): void {
     const name = this.newBulkClass.trim();
     if (!name) return;
     const key = presetKey(this.presetSet, name);
@@ -608,7 +646,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   // ── Manage-classes dialog ──
-  openManageDialog(): void {
+  protected openManageDialog(): void {
     this.presetDraft = this.clonePresetSet(this.presetSet);
     this.showManageDialog = true;
   }
@@ -622,7 +660,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
   /** Commit the draft: drop blank/duplicate names, persist, and recolour
    *  non-overridden regions with the updated presets. */
-  applyManageDialog(close: boolean): void {
+  protected applyManageDialog(close: boolean): void {
     if (!this.presetDraft) return;
     // De-duplicate using the active match mode's key so normalized mode can't keep
     // both "Tumor" and "tumor" (which would collide at runtime in findPreset()).
@@ -649,16 +687,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.commit(); // recolour existing (non-overridden) regions from the new presets
     if (close) this.showManageDialog = false;
   }
-  resetPresetsToDefaults(): void {
+  protected resetPresetsToDefaults(): void {
     this.regionApi.resetPresets();
     this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
     this.commit();
   }
-  exportPresets(): void {
+  protected exportPresets(): void {
     const json = JSON.stringify(this.regionApi.getPresetSet(), null, 2);
     saveAs(new Blob([json], { type: 'application/json' }), 'annotation-classes.json');
   }
-  importPresets(event: Event): void {
+  protected importPresets(event: Event): void {
     this.persistence.readChosenFile(event, (text) => this.applyImportedPresets(text));
   }
 
@@ -676,9 +714,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'error',
         summary: 'Import failed', detail: `${(err as Error)?.message ?? err}` });
     }
+    this.cdr.markForCheck();
   }
 
-  importRois(event: Event) {
+  protected importRois(event: Event) {
     this.persistence.readChosenFile(event, (text) => this.applyImportedRois(text));
   }
 
@@ -704,13 +743,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     return this.persistence.regionsForSave(this.regions);
   }
 
-  exportRois() {
+  protected exportRois() {
     if (!this.regionsForSave().length) return;
     this.exportFilename = this.persistence.defaultExportName();
     this.showExportDialog = true;
   }
 
-  confirmExport() {
+  protected confirmExport() {
     const filename = this.exportFilename.trim();
     const regions = this.regionsForSave();
     if (!filename || !regions.length) return;
@@ -719,7 +758,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** Open the "Save mask" dialog, seeded with `<image-stem>_mask.png`. */
-  openSaveMaskDialog() {
+  protected openSaveMaskDialog() {
     if (!this.regions.length) return;
     this.saveMaskFilename = this.persistence.defaultMaskName();
     this.maskMode = 'binary';
@@ -732,7 +771,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * freezes on whole-slide images and the job can be cancelled (jit-ui#95);
    * the dialog stays open with a progress bar until done.
    */
-  confirmSaveMask() {
+  protected confirmSaveMask() {
     const filename = this.saveMaskFilename.trim();
     if (!filename || !this.regions.length || this.maskBusy) return;
 
@@ -749,6 +788,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       sourceName: this.persistence.selectedFileName(),
     }).subscribe({
       next: (e) => {
+        this.cdr.markForCheck();
         switch (e.type) {
           case 'planned':
             if (e.scale < 1) {
@@ -765,12 +805,15 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
           case 'done': this.finishMask(e.blob, filename); break;
         }
       },
-      error: (err: Error) => this.maskError(err.message),
+      error: (err: Error) => {
+        this.maskError(err.message);
+        this.cdr.markForCheck();
+      },
     });
   }
 
   /** Cancel an in-progress mask export (terminates its worker) and reset state. */
-  cancelSaveMask() {
+  protected cancelSaveMask() {
     this.maskJob?.unsubscribe();
     this.maskJob = undefined;
     this.maskBusy = false;
@@ -798,7 +841,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  persistRegions() {
+  protected persistRegions() {
     // Folder stack: write each slice's regions back to its own slice-file's
     // sibling geojson — no single-filename prompt (jit-ui#93).
     if (this.persistence.savesPerSlice()) {
@@ -822,20 +865,22 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this._saveAsSub = this.persistence.saveSlices(slices).subscribe({
       next: () => {
         this.saveAsBusy = false;
+        this.cdr.markForCheck();
         this.toast('success', 'Regions saved', `Saved ROIs for ${slices.length} slice${slices.length === 1 ? '' : 's'}`);
       },
       error: (err) => {
         this.saveAsBusy = false;
+        this.cdr.markForCheck();
         this.toast('error', 'Error saving regions', `${(err as Error)?.message ?? err}`);
       },
     });
   }
 
-  checkSaveAsFileExists() {
+  protected checkSaveAsFileExists() {
     this.saveAsCheck$.next(this.saveAsFilename);
   }
 
-  confirmSaveAs() {
+  protected confirmSaveAs() {
     if (!this.persistence.selectedFileName()) return;
 
     const filename = this.saveAsFilename.trim();
@@ -845,14 +890,18 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     // regions serialize and upload, then close on success.
     const doSave = () => {
       this.saveAsBusy = true;
+      // Also run from the overwrite confirmation, which the host's dialog may answer.
+      this.cdr.markForCheck();
       this._saveAsSub = this.persistence.save(() => this.regionsForSave(), filename).subscribe({
         next: () => {
           this.saveAsBusy = false;
           this.showSaveAsDialog = false;
+          this.cdr.markForCheck();
           this.toast('success', 'Regions saved', `Saved as ${filename}`);
         },
         error: (err) => {
           this.saveAsBusy = false;
+          this.cdr.markForCheck();
           this.toast('error', 'Error saving regions', `${(err as Error)?.message || err}`);
         },
       });
@@ -872,7 +921,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Cancel an in-progress GeoJSON persist: abort the deferred serialize and/or
    *  the in-flight upload, and reset state. */
-  cancelSaveAs() {
+  protected cancelSaveAs() {
     this._saveAsSub?.unsubscribe();
     this._saveAsSub = undefined;
     this.saveAsBusy = false;

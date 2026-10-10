@@ -154,7 +154,7 @@ describe('RegionEditorComponent (DOM)', () => {
   });
 
   it('clicking a class row with rows selected re-classifies them', () => {
-    editor.selectedRegions = [editor.regions[0]];
+    editor['selectedRegions'] = [editor['regions'][0]];
     render();
     const rows = Array.from(el.querySelectorAll('.classes-panel .class-row'));
     const tumor = rows.find((r) => r.querySelector('.row-name')?.textContent?.trim() === 'Tumor') as HTMLElement;
@@ -178,9 +178,9 @@ describe('RegionEditorComponent (DOM)', () => {
   });
 
   it('opens the dialogs with their seeded state', async () => {
-    editor.persistRegions();
-    editor.openSaveMaskDialog();
-    editor.exportRois();
+    editor['persistRegions']();
+    editor['openSaveMaskDialog']();
+    editor['exportRois']();
     render();
     await fixture.whenStable(); // ngModel writes its value a tick later
     render();

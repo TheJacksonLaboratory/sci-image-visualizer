@@ -102,10 +102,16 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
       setAnnotationRegions: (regions: Region[], show?: boolean, save?: boolean, fill?: string) =>
         store.setRegions(regions, show, save, fill),
     };
+    // The editor's template with the real table and form controls; its other children stay unknown elements.
+    TestBed.overrideComponent(RegionEditorComponent, {
+      set: {
+        imports: [CommonModule, FormsModule, RegionTableComponent, TableModule, DropdownModule, InputTextModule,
+          RadioButtonModule, SelectButtonModule, CheckboxModule],
+        schemas: [NO_ERRORS_SCHEMA],
+      },
+    });
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent],
-      imports: [RegionTableComponent, CommonModule, FormsModule, NoopAnimationsModule, TableModule, DropdownModule,
-        InputTextModule, RadioButtonModule, SelectButtonModule, CheckboxModule],
+      imports: [RegionEditorComponent, NoopAnimationsModule],
       providers: [
         { provide: REGION_EDITOR_API, useValue: api },
         MessageService,
@@ -134,7 +140,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('a per-row recolour is undone by undo()', () => {
     seed(square('Tumor', '#111111'));
-    editor.changeRegionColor(editor.regions[0], '#222222');
+    editor['changeRegionColor'](editor['regions'][0], '#222222');
     expect(live().color).toBe('#222222');
     store.undo();
     expect(live().color).toBe('#111111');
@@ -142,9 +148,9 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('recolouring the selection is undone by undo()', () => {
     seed(square('Tumor', '#111111'));
-    editor.selectedRegions = [editor.regions[0]];
-    editor.classColorEdits = [{ label: 'Tumor', color: '#333333' }];
-    editor.applyColorToSelected();
+    editor['selectedRegions'] = [editor['regions'][0]];
+    editor['classColorEdits'] = [{ label: 'Tumor', color: '#333333' }];
+    editor['applyColorToSelected']();
     expect(live().color).toBe('#333333');
     store.undo();
     expect(live().color).toBe('#111111');
@@ -153,7 +159,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('a class change from the row dropdown is undone by undo()', () => {
     seed(square('Tumor', '#111111'));
-    editor.applyPresetToRegion(editor.regions[0], 'Stroma');
+    editor['applyPresetToRegion'](editor['regions'][0], 'Stroma');
     expect(live().label).toBe('Stroma');
     store.undo();
     expect(live().label).toBe('Tumor');
@@ -162,8 +168,8 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('a class applied to the selection is undone by undo()', () => {
     seed(square('Tumor', '#111111'), square('Tumor', '#111111'));
-    editor.selectedRegions = [...editor.regions];
-    editor.selectActiveClass('Stroma');
+    editor['selectedRegions'] = [...editor['regions']];
+    editor['selectActiveClass']('Stroma');
     expect(store.getRegions().map((r) => r.label)).toEqual(['Stroma', 'Stroma']);
     store.undo();
     expect(store.getRegions().map((r) => r.label)).toEqual(['Tumor', 'Tumor']);
@@ -171,7 +177,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('deleting a class (its regions revert to Region) is undone by undo()', () => {
     seed(square('Tumor', '#111111'));
-    editor.deleteClass('Tumor');
+    editor['deleteClass']('Tumor');
     expect(live().label).toBe('Region');
     store.undo();
     expect(live().label).toBe('Tumor');
@@ -180,7 +186,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   it('rounding rectangle sizes to 512 is undone by undo()', () => {
     seed(rect());
-    editor.roundRectangleLengths();
+    editor['roundRectangleLengths']();
     expect((live().bounds as Rectangle).width).toBe(512);
     store.undo();
     expect((live().bounds as Rectangle).width).toBe(300);
@@ -191,7 +197,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
     const plain = new Region();
     plain.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 });
     seed(plain);
-    expect(editor.regions[0].color).toBe('#00ffff'); // the editor shows the default
+    expect(editor['regions'][0].color).toBe('#00ffff'); // the editor shows the default
     expect(live().color).toBeUndefined();           // the stored region is untouched
     expect(store.canUndo()).toBe(false);
   });
@@ -199,7 +205,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
   // ── label edits (RT-18) ────────────────────────────────────────────────
 
   function typeLabel(text: string): HTMLInputElement {
-    editor.startEditLabel(editor.regions[0]);
+    editor['startEditLabel'](editor['regions'][0]);
     fixture.detectChanges();
     const input = fixture.nativeElement.querySelector('td.class-cell input') as HTMLInputElement;
     expect(input).toBeTruthy();
@@ -216,8 +222,8 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     fixture.detectChanges();
     expect(live().label).toBe('Tumor');
-    expect(editor.regions[0].label).toBe('Tumor');
-    expect(editor.isEditingLabel(editor.regions[0])).toBe(false);
+    expect(editor['regions'][0].label).toBe('Tumor');
+    expect(editor['isEditingLabel'](editor['regions'][0])).toBe(false);
   });
 
   it('Enter commits the typed label, and undo() restores the old one', () => {
