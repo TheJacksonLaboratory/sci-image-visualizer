@@ -34,6 +34,7 @@ import {
 import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { CachedImageData, WandToolService, WandToolHost } from '../../toolbar/wand/wand-tool.service';
+import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
@@ -1759,7 +1760,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
 
   /**
-   * Read back the *currently rendered* OSD canvas as the wand's pixel matrix.
+   * Read back the *currently rendered* OSD canvas as the pixel tools' frame.
    * The matrix covers only the visible viewport at screen resolution, so when
    * the user is zoomed into a sub-region the wand samples that region's detail
    * (rather than the whole image at preview resolution). `originX/originY` and
@@ -1777,18 +1778,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
     const w = canvas.width; // device pixels
     const h = canvas.height;
-    const data = ctx.getImageData(0, 0, w, h).data; // RGBA, row-major
-    // Build the [y][x] = [r,g,b] matrix the wand expects for RGB frames.
-    const matrix: number[][][] = new Array(h);
-    for (let y = 0; y < h; y++) {
-      const row: number[][] = new Array(w);
-      const base = y * w * 4;
-      for (let x = 0; x < w; x++) {
-        const o = base + x * 4;
-        row[x] = [data[o], data[o + 1], data[o + 2]];
-      }
-      matrix[y] = row;
-    }
+    // The RGBA readback is the tools' frame as-is (packed, RT-17): no per-pixel arrays.
+    const data = ctx.getImageData(0, 0, w, h).data;
 
     // Image-coord span the readback covers (CSS px in, image coords out). Route
     // through world item 0 (osd-coords) so it stays accurate — and quiet — when
@@ -1801,7 +1792,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const ratioY = (br.y - tl.y) / h;
 
     this.viewportPixels = {
-      frames: [matrix],
+      frames: [packedFrame(data, w, h)],
       width: w,
       height: h,
       ratios: [ratioX, ratioY],

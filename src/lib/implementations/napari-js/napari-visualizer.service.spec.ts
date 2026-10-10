@@ -26,6 +26,8 @@ import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
+import type { CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { isPackedFrame, PackedFrame } from '../../toolbar/tool-kit/frame-pixels';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -450,6 +452,26 @@ describe('NapariVisualizerService', () => {
     const url = String((globalThis.fetch as jest.Mock).mock.calls.at(-1)[0]);
     expect(url).toContain('histogram?info=INFO&channel=1&z=0&bins=3');
     expect(url).toMatch(/&_=\d+$/);
+  });
+
+  it('hands the pixel tools the readback as a packed frame, without per-pixel arrays (NAPARI-SVC-23)', () => {
+    // A 2560×1440 readback: the old path built 3.7 M [r,g,b] arrays from it.
+    const px = { width: 2560, height: 1440, channels: 4, data: new Uint8ClampedArray(2560 * 1440 * 4) };
+    type Internals = {
+      viewer: unknown;
+      lastPixels: unknown;
+      lastPixelsRect: unknown;
+      cachedImageData(): CachedImageData | null;
+    };
+    const internals = service as unknown as Internals;
+    internals.viewer = {};
+    internals.lastPixels = px;
+    internals.lastPixelsRect = { x: 10, y: 20, width: 1280, height: 2880 };
+    const cached = internals.cachedImageData()!;
+    expect(isPackedFrame(cached.frames[0])).toBe(true);
+    expect((cached.frames[0] as PackedFrame).data).toBe(px.data); // the readback itself, not a copy
+    expect(cached).toMatchObject({ width: 2560, height: 1440, ratios: [0.5, 2], originX: 10, originY: 20 });
+    expect(internals.cachedImageData()).toBe(cached); // cached until the readback changes
   });
 
   it('reads the canvas back after a pan only while a pixel tool needs it', async () => {

@@ -9,6 +9,8 @@ import { saveAs } from 'file-saver';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
 import * as tileClient from './tile-client';
 import { VisualizerStore } from '../../store/visualizer-store.service';
+import type { CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { isPackedFrame, PackedFrame } from '../../toolbar/tool-kit/frame-pixels';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -47,6 +49,26 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     // request is expected; anything else from an unmounted service is not.
     http.match((req) => req.url.includes('colormap-luts')).forEach((r) => r.flush({}));
     http.verify();
+  });
+
+  it('hands the pixel tools the canvas readback as a packed frame, without per-pixel arrays (RT-17)', () => {
+    // A 2560×1440 device-pixel readback: the old path built 3.7 M [r,g,b] arrays from it.
+    const w = 2560;
+    const h = 1440;
+    const data = new Uint8ClampedArray(w * h * 4);
+    const getImageData = jest.fn(() => ({ data }));
+    (service as unknown as { viewer: unknown }).viewer = {
+      destroy: () => undefined,
+      drawer: { canvas: { width: w, height: h, clientWidth: w / 2, clientHeight: h / 2,
+        getContext: () => ({ getImageData }) } },
+      viewport: { viewerElementToImageCoordinates: (p: { x: number; y: number }) => ({ x: 100 + p.x * 4, y: 50 + p.y * 2 }) },
+    };
+    const cached = (service as unknown as { readbackViewport(): CachedImageData | null }).readbackViewport()!;
+    const frame = cached.frames[0];
+    expect(isPackedFrame(frame)).toBe(true);
+    expect((frame as PackedFrame).data).toBe(data); // the readback itself, not a copy
+    expect(cached).toMatchObject({ width: w, height: h, isGrayscale: false, originX: 100, originY: 50 });
+    expect(cached.ratios).toEqual([(w / 2 * 4) / w, (h / 2 * 2) / h]);
   });
 
   it('constructs against the port stubs (no viewer, no DOM)', () => {

@@ -160,6 +160,7 @@ import {
   ICoordinateTransform,
 } from '../../contracts/coordinate-transform.contract';
 import { WandToolService, WandToolHost, CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
 import { WandOptions } from '../../toolbar/wand/wand.service';
 import { BrushToolService, BrushOptions } from '../../toolbar/brush/brush-tool.service';
 import {
@@ -4660,30 +4661,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
     v.requestRender();
   }
 
-  /** Build CachedImageData from the most recent readback (RGBA device pixels → [y][x]=[r,g,b]),
-   *  with ratios/origin mapping image coords ↔ readback pixels. Cached until the readback changes. */
+  /** Build CachedImageData from the most recent readback — its RGBA device pixels are the frame
+   *  as-is (packed, no per-pixel arrays: NAPARI-SVC-23) — with ratios/origin mapping image coords
+   *  ↔ readback pixels. Cached until the readback changes. */
   private cachedImageData(): CachedImageData | null {
     const px = this.lastPixels;
     if (!px || !this.viewer) return null;
     if (this.cachedImage && this.cachedImageSource === px) return this.cachedImage;
     const w = px.width;
     const h = px.height;
-    const data = px.data;
-    const matrix: number[][][] = new Array(h);
-    for (let y = 0; y < h; y++) {
-      const row: number[][] = new Array(w);
-      const base = y * w * 4;
-      for (let x = 0; x < w; x++) {
-        const o = base + x * 4;
-        row[x] = [data[o], data[o + 1], data[o + 2]];
-      }
-      matrix[y] = row;
-    }
     // Use the rect captured WITH this readback (not the live one) so ratios/origin match the
     // matrix's camera — otherwise a pan/zoom since the readback mis-scales the traced region.
     const rect = this.lastPixelsRect ?? this.viewer.visibleWorldRect();
     this.cachedImage = {
-      frames: [matrix],
+      frames: [packedFrame(px.data, w, h)],
       width: w,
       height: h,
       ratios: [rect.width / w, rect.height / h],
