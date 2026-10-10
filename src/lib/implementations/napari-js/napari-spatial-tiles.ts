@@ -1,26 +1,24 @@
 import { Colormap, colormapFromLut } from 'napari-js';
-import type { ImageLayer, Layer, RGBA, Viewer } from 'napari-js';
+import type { Layer, RGBA, Viewer } from 'napari-js';
 
 import type { Rgb } from '../../contracts/colormap-lut';
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
 import {
   NO_CATEGORY, NO_OBSERVATION, SpatialColumn, SpatialDataset, SpatialPolygonTile, SpatialPolygons,
-  SpatialTranscriptCounts, SpatialTranscriptTile, isCategoricalColumn,
+  SpatialTranscriptTile, isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import {
-  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, contrastWindow, lutFor, parseHex, resolveCategoryColors,
+  DEFAULT_CATEGORICAL_PALETTE, MISSING_COLOR, contrastWindow, parseHex, resolveCategoryColors,
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import {
   DataRect, POLYGON_LEVEL_MIN_CELL_PX, cellTypeColumnFor, cellsShown, pixelsPerDataUnit, polygonLevelFor, tileId,
-  tilesInRect, typicalCellDiameter, visibleArea, visibleDataRect,
+  tilesInRect, typicalCellDiameter, visibleDataRect,
 } from '../../spatial/lod';
 import { clusterColorMap } from '../../spatial/transcript-grouping';
 import { TranscriptGlyph, defaultGlyphFor, glyphOutline, glyphRings } from '../../spatial/glyphs';
-import {
-  INFERNO_SCALE, colorDensityWindow, densityAutoRange, discreteColormapStops,
-} from '../../spatial/density-raster';
+import { discreteColormapStops } from '../../spatial/density-raster';
 import {
   filterRings, filterTranscripts, hiddenGeneSlots, median, mergePolygonTiles,
 } from '../../spatial/spatial-tile-merge';
@@ -29,6 +27,11 @@ import { LoadTracker, PlanContext } from './spatial-tiles/plan-context';
 import { OrderedLayerGroups, TILE_LAYER_ORDER, TileGroup } from './spatial-tiles/layer-groups';
 import { TranscriptHover } from './spatial-tiles/transcript-hover';
 import { TranscriptJobPlanner, groupSelection } from './spatial-tiles/transcript-jobs';
+import {
+  DensityLayer, DensityStats, TranscriptEstimate, TranscriptEstimator,
+} from './spatial-tiles/density-layer';
+
+export type { TranscriptEstimate } from './spatial-tiles/density-layer';
 
 /** Icons get a dark rim only while there are at most this many, at least this big (px). */
 const GLYPH_OUTLINE_MAX = 20_000;
@@ -74,21 +77,13 @@ export interface SpatialTileHost {
   /** Outlines appeared or disappeared: the markers' visibility follows. */
   polygonsShownChanged(shown: boolean): void;
   /** The density window changed (auto-derived or set). */
-  densityChanged?(stats: { lo: number; hi: number; max: number }): void;
+  densityChanged?(stats: DensityStats): void;
   /** Estimated transcripts in view for the current selection, against the budget. */
   estimateChanged?(estimate: TranscriptEstimate | null): void;
   /** Transcripts of each selected gene inside the view, or null when not known. */
   geneCountsChanged?(counts: Record<string, number> | null): void;
   /** The layers whose data is in flight now ("Transcripts", "Cells"…); empty when none. */
   loadingChanged?(layers: string[]): void;
-}
-
-/** Xenium Explorer's "Estimated Transcript Points". */
-export interface TranscriptEstimate {
-  /** Transcripts of the visible genes estimated to be in view. */
-  points: number;
-  /** The marker budget. */
-  max: number;
 }
 
 /** Where a layer sits in world space: the dataset's affine onto its tissue image. */
@@ -130,19 +125,17 @@ export class NapariSpatialTileLayers {
 
   // density + estimate
 
-  /** Per-gene dataset totals for the in-view estimate, for the latest gene set. */
-  private countsCache: { key: string; counts: Promise<SpatialTranscriptCounts> } | null = null;
-
-  /** The density window in use and the densest bin, for the panel's threshold control. */
-  densityStats: { lo: number; hi: number; max: number } | null = null;
-
   private readonly lookup: CategoricalLookup;
   private readonly jobs: TranscriptJobPlanner;
+  private readonly density: DensityLayer;
+  private readonly estimator: TranscriptEstimator;
   private readonly hover: TranscriptHover;
 
   constructor(private readonly port: SpatialDataPort, private readonly host: SpatialTileHost) {
     this.lookup = new CategoricalLookup(port);
     this.jobs = new TranscriptJobPlanner(port);
+    this.density = new DensityLayer(port, this.groups, (stats) => host.densityChanged?.(stats));
+    this.estimator = new TranscriptEstimator(port, (estimate) => host.estimateChanged?.(estimate));
     this.hover = new TranscriptHover(port, () => {
       return this.groups.shown('transcripts');
     });
@@ -209,6 +202,11 @@ export class NapariSpatialTileLayers {
     return this.polygonsShown;
   }
 
+  /** The density window in use and the densest bin, for the panel's threshold control. */
+  get densityStats(): DensityStats | null {
+    return this.density.stats;
+  }
+
   /** Dataset, view or selection changed: re-plan now rather than on camera idle. */
   refresh(): void {
     this.schedule(0);
@@ -248,7 +246,7 @@ export class NapariSpatialTileLayers {
     const pxPerUnit = pixelsPerDataUnit(viewer.camera.zoom, ref);
     if (!rect) return;
 
-    this.planEstimate(dataset, view, viewer, w, h, ctx)
+    this.estimator.plan(dataset, view, viewer, w, h, ctx)
       .catch((err) => console.warn('[napari-js] transcript estimate failed', err));
     // A group whose request failed (a column, a feature vector, a density grid) leaves the
     // others drawn and marks the plan incomplete, so it is retried like a failed tile.
@@ -257,7 +255,7 @@ export class NapariSpatialTileLayers {
       ctx.markIncomplete();
     });
     await Promise.all([
-      settle('density', this.planDensity(dataset, view, ctx)),
+      settle('density', this.density.plan(dataset, view, ctx)),
       settle('cells', this.planCells(dataset, view, selection, rect, pxPerUnit, ctx)),
       settle('transcripts', this.planTranscripts(dataset, view, rect, pxPerUnit, ctx)),
     ]);
@@ -698,93 +696,6 @@ export class NapariSpatialTileLayers {
       values[i] = valueOf(c);
     }
     return { rgba, values, colormap: new Colormap('transcript-categories', stops) };
-  }
-
-  // ── density ───────────────────────────────────────────────────────────────────────
-
-  private async planDensity(
-    dataset: SpatialDataset, view: SpatialViewState, ctx: PlanContext,
-  ): Promise<void> {
-    const hiddenGenes = new Set(view.transcriptHiddenGenes);
-    const genes = view.transcriptAllGenes
-      ? [ALL_GENES]
-      : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
-    if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
-      this.groups.drop('density');
-      this.densityStats = null;
-      return;
-    }
-    const lut = lutFor(view.densityColormap ?? INFERNO_SCALE);
-    const key = [dataset.id, genes.join(','), view.densityBin, view.densityOpacity,
-      JSON.stringify(view.densityRange), JSON.stringify(view.densityColormap)].join('|');
-    if (key === this.groups.key('density') && this.groups.has('density')) return;
-    const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
-    if (ctx.stale()) return;
-
-    // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
-    const meta = raster.meta;
-    const area = meta.gridSize[0] * meta.gridSize[1];
-    const perArea = raster.values.map((v) => v / area);
-    const [lo, hi] = view.densityRange ?? densityAutoRange(perArea);
-    this.densityStats = { lo, hi, max: perArea.reduce((m, v) => (v > m ? v : m), 0) };
-    const rgba = colorDensityWindow(perArea, lut, view.densityOpacity, lo, hi);
-    const ref = dataset.imageRef;
-    const sx = ref?.scale?.[0] ?? 1;
-    const sy = ref?.scale?.[1] ?? 1;
-    const layer: ImageLayer = this.viewer!.addImage(
-      { kind: 'typed', width: meta.cols, height: meta.rows, channels: 4, dtype: 'uint8', data: rgba },
-      {
-        name: `density · ${view.transcriptAllGenes ? 'all genes' : genes.join(', ')}`,
-        scale: [meta.gridSize[0] * sx, meta.gridSize[1] * sy],
-        translate: [
-          meta.origin[0] * sx + (ref?.translate?.[0] ?? 0),
-          meta.origin[1] * sy + (ref?.translate?.[1] ?? 0),
-        ],
-        blending: 'translucent',
-        interpolation: 'nearest',
-      },
-    );
-    this.groups.setKey('density', key);
-    this.groups.replace('density', layer);
-    this.host.densityChanged?.(this.densityStats);
-  }
-
-  /**
-   * Transcripts in view for the visible genes: each gene's dataset total times the share
-   * of the tissue on screen. An estimate — expression is not uniform — which is also what
-   * Xenium Explorer shows; it tells the user whether the budget will force grouping.
-   */
-  private async planEstimate(
-    dataset: SpatialDataset, view: SpatialViewState, viewer: Viewer, w: number, h: number,
-    ctx: PlanContext,
-  ): Promise<void> {
-    const tiles = dataset.transcriptTiles;
-    if (!tiles || !this.port.getTranscriptCounts || view.transcriptMode === 'off') {
-      this.host.estimateChanged?.(null);
-      return;
-    }
-    const hiddenGenes = new Set(view.transcriptHiddenGenes);
-    const genes = view.transcriptAllGenes ? [] : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
-    const key = `${dataset.id}|${genes.join(',')}`;
-    if (this.countsCache?.key !== key) {
-      this.countsCache = { key, counts: this.port.getTranscriptCounts(genes) };
-    }
-    let counts: SpatialTranscriptCounts;
-    try {
-      counts = await this.countsCache.counts;
-    } catch {
-      this.countsCache = null;
-      return;
-    }
-    if (ctx.stale()) return;
-    const inView = visibleDataRect(viewer.camera.center, viewer.camera.zoom, w, h, dataset.imageRef, 0);
-    if (!inView) return;
-    const b = counts.bounds;
-    const share = Math.min(1, visibleArea(inView, b) / Math.max(1, (b[2] - b[0]) * (b[3] - b[1])));
-    const selected = view.transcriptAllGenes
-      ? counts.total
-      : genes.reduce((sum, g) => sum + (counts.counts[g] ?? 0), 0);
-    this.host.estimateChanged?.({ points: Math.round(selected * share), max: view.transcriptBudget });
   }
 
   private dropCells(): void {
