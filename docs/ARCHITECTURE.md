@@ -8,6 +8,11 @@ records for individual features are in [`design/`](./design/).
 The only public entry point is [`src/index.ts`](../src/index.ts). Everything
 else under `src/lib/` is internal, even when it is exported from its own file.
 
+Two Mermaid diagrams draw the same picture:
+[`diagrams/siv-architecture.mmd`](./diagrams/siv-architecture.mmd) (host, contracts,
+router, backends, data) and [`diagrams/siv-regions.mmd`](./diagrams/siv-regions.mmd)
+(region interfaces, overlays and tools).
+
 ## Layers
 
 ```
@@ -31,7 +36,11 @@ stores (providedIn: 'root')   VisualizerStore · RegionStore · SpatialSelection
 The rule the layers follow: **components and hosts depend on contracts, never
 on a backend.** `contracts/` is the backend-neutral layer; an eslint rule
 (`no-restricted-imports`, see `.eslintrc.json`) keeps it from importing
-implementations, stores, toolbar or components.
+implementations, `spatial/`, stores, toolbar or components, and fails `npm run lint`
+when it does. The one exemption is `cell-segmenter.contract.ts`, whose token factory
+defaults to `CellposeSegmenterService`. Pure data types live in the contracts for
+that reason: `SpatialSelectionMask` is in `spatial-dataset.contract.ts`, not
+`spatial/`.
 
 ## `src/lib` layout
 
@@ -47,15 +56,19 @@ implementations, stores, toolbar or components.
 | `implementations/base-store-visualizer.ts` | Abstract base that forwards the region/display API to the stores; OSD and napari extend it |
 | `implementations/simple-slice-access.service.ts` | Per-slice URL loading for non-tiled stacks (OSD and napari) |
 | `store/` | `VisualizerStore`, `RegionStore`, `SpatialSelectionStore`, class-colour helpers |
-| `models/` | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts` |
+| `models/` | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts`, and `polygon-factory.ts` (the one place `Polygon`/`Region` are built and cloned) |
+| `geometry/` | Pure, worker-safe geometry: `ring.ts` (bounds, containment with holes, vertex dropping, simplification), `raster.ts` (polygon rasterization, `BBoxMask` set operations), `contour.ts` (mask or label map → polygons with holes) |
+| `util/` | Framework-free helpers shared across areas: `supersede.ts` (`Supersede`, latest-wins with an `AbortSignal` per task) |
 | `visualizer.component.ts` | `<visualizer>`: render pipeline, plot-type selector, dialogs, toast outlets |
 | `render-orchestrator.ts` | Two-pass render (small tier first, then the large tier, one retry) and the slice scrubber |
-| `toolbar/` | `<plotting-toolbar>` (internal) and the tool services: `brush/`, `wand/`, `vertex-eraser/`, `zoom-to-box/`, `crop/`, `segmentation/` (SAM box/point, cellpose, ONNX session + worker, model registry, ORT config) |
+| `toolbar/` | `<plotting-toolbar>` (internal) and the tool services: `brush/`, `wand/`, `vertex-eraser/`, `zoom-to-box/`, `crop/`, `segmentation/` (SAM box/point over one `SamSessionService`, cellpose, ONNX session + worker, model registry with per-model cache revisions, ORT config) |
+| `toolbar/tool-kit/` | What the on-canvas tools share: `ToolOverlayCanvas` (pointer overlay lifecycle), `MaskStrokeEditor` (the wand/brush stroke accumulator), `MatrixFrame` (data ↔ readback-matrix coordinates), `UndoGesture` (one drag = one undo step), `AsyncToolStatus` |
 | `plot-mode/` | `PlotModeController`: lifecycle of contributed plot modes |
 | `region-editor/` | `<region-editor>` and mask export (`mask-raster.ts`, `mask.worker.ts`) |
 | `region-ops.service.ts` | Merge / inverse / ungroup through the wand mask pipeline |
 | `channel-histogram/` | `<channel-histogram>`, the Channels & Histogram dialog |
-| `spatial/` | Pure spatial-omics logic: encoding, selection, tiles/LOD planning, density, expression, hover, sections, t-SNE |
+| `spatial/` | Pure spatial-omics logic: encoding, selection, tiles/LOD planning, density, expression, heatmap, hover, sections, `stats.ts` (quantiles, percentile windows), t-SNE |
+| `workers/` | `spatial-math.worker.ts` and its client `spatial-math.ts`: async, off-main-thread versions of the spatial field and density math |
 | `spatial-controls/` | `<spatial-controls>` and `<spatial-charts>` (UI only) |
 | `hex-color-picker/` | `<hex-color-picker>` |
 | `processing/` | `ProcessingImage`, `cropImage`, `ImageConverterService` (public utilities) |
@@ -64,6 +77,7 @@ implementations, stores, toolbar or components.
 | `provide-visualization.ts` | `provideVisualization()` for an isolated viewer |
 | `testing/` | Jest-only: the napari-js stub and port stubs |
 | `assets/` | Toolbar SVGs, colormap PNGs (`icons/`), `colormap-luts.json` |
+| `styles/` | `viz-icons.scss`: the global toolbar/context-menu icon rules, shipped for hosts (the component emits the same rules from `_viz-icons-rules.scss`) |
 
 ## How a host connects
 
@@ -71,8 +85,15 @@ implementations, stores, toolbar or components.
 tokens to `RoutingVisualizerService` with `useExisting`. The backends and
 stores are `providedIn: 'root'`, so one app shares one viewer by default.
 `provideVisualization()` re-provides the chain at component scope for a second,
-isolated viewer (a modal over the main view, for example). It does not yet
-cover every stateful service (CORE-6 in the 0.8.3 review).
+isolated viewer (a modal over the main view, for example). It lists every
+stateful service of the chain (router, backends, stores, the tool services) and
+binds the three tokens at that scope; `provide-visualization.spec.ts` fails when a
+new stateful `@Injectable` is neither listed nor allow-listed as deliberately shared.
+
+The mounted `<visualizer>` hands the host a small typed `VisualizerHandle`
+through `ImageStatePort.setDiagram()` (the chain's `IVisualizer`, `hasRegions()`,
+`getRegionPolygons()`), and clears it with `setDiagram(null)` on destroy. Hosts
+that can inject the tokens need not use it.
 
 | Token | Required | Notes |
 |---|---|---|
@@ -87,7 +108,8 @@ cover every stateful service (CORE-6 in the 0.8.3 review).
 
 The host also supplies `HttpClient`, animations, PrimeNG's `MessageService` and
 `ConfirmationService`, the PrimeNG/primeicons/primeflex CSS, and serves
-`src/lib/assets` at `assets/plotting/`. See
+`src/lib/assets` at `assets/plotting/`. It may also include the shipped
+`src/lib/styles/viz-icons.scss` to define the icon classes globally up front. See
 [guides/host-integration.md](./guides/host-integration.md).
 
 ## Routing
@@ -157,13 +179,19 @@ Each backend implements `IRegionOverlay` (`contracts/region-overlay.contract.ts`
   filled exterior.
 
 `region-ops.service.ts` implements merge, inverse and ungroup by rasterizing
-through the wand's mask pipeline.
+through the wand's mask pipeline. All rasterizing and contour tracing goes
+through `geometry/` (`raster.ts`, `contour.ts`, `ring.ts`), which the mask-export
+worker imports too.
 
 ## Toolbar tools and contributions
 
 Built-in tools are root services under `toolbar/`: wand, brush, vertex eraser,
 zoom-to-box, SAM box prompt, SAM point prompt and the cellpose tool. They reach
-the canvas through `ICoordinateTransform` / `IViewportHost`. The intensity line
+the canvas through `ICoordinateTransform` / `IViewportHost`, and share the
+`toolbar/tool-kit/` pieces: one pointer overlay for the canvas tools, one stroke
+accumulator for wand and brush, one data ↔ matrix frame, and `UndoGesture`, which
+wraps a drag in `RegionStore.beginGesture()`/`endGesture()` so it is one undo step.
+The two SAM tools share one model session (`SamSessionService`). The intensity line
 profile is part of `PlotlyService` (`kind: 'profile'` regions).
 
 Other packages add tools on `TOOLBAR_TOOLS`. A tool is either a parameter
@@ -180,6 +208,7 @@ and a plain-DOM body. Plot modes are added on `PLOT_TYPE_CONTRIBUTIONS`, run by
 | `region-editor/mask.worker.ts` | `region-editor/mask-worker.ts` |
 | `toolbar/segmentation/onnx-sam.worker.ts` | `toolbar/segmentation/onnx-sam-session.ts` |
 | `spatial/tsne.worker.ts` | `spatial/tsne-worker.ts` |
+| `workers/spatial-math.worker.ts` | `workers/spatial-math-worker.ts`, through `workers/spatial-math.ts` |
 
 Each is created with `new Worker(new URL('./x.worker', import.meta.url), { type: 'module' })`
 from a small factory module, which jest mocks so ts-jest never compiles
@@ -191,6 +220,14 @@ npm dependencies stay as bare imports for the consumer's bundler, except
 force code-splitting, which Vite's IIFE worker builds reject. The script fails
 the build if a dynamic `import()` survives.
 
+`workers/spatial-math.ts` is the async API over the spatial worker
+(`computeExpressionFieldAsync`, `computeExpressionVolumeAsync`,
+`rasterizeDensityAsync`, `computeHeatmapMatrixAsync`). A call runs in the worker
+above `SPATIAL_MATH_WORKER_MIN_OBSERVATIONS` and on the main thread below it, where
+`Worker` does not exist (jsdom) or when the worker fails; the answer is the same
+either way. It takes an `AbortSignal`. The napari service and the charts still call
+the synchronous functions; they switch over with the service split.
+
 ## Spatial omics
 
 - **Data:** `SPATIAL_DATA_PORT` (`contracts/ports/spatial-data.port.ts`) is lazy:
@@ -198,7 +235,8 @@ the build if a dynamic `import()` survives.
   `SpatialDataHttpService` is an optional adapter for the example server; a
   host with its own backend implements the port directly.
 - **Logic:** `spatial/` is framework-free: encodings, selection, LOD planning,
-  density, t-SNE.
+  density, expression, heatmap, t-SNE. The heavy field and density math also has
+  an async, worker-backed form in `workers/spatial-math.ts`.
 - **UI:** `spatial-controls/` holds the controls dialog and the linked charts.
 - **Rendering:** napari draws the observations in 2D and 3D.
   `napari-spatial-tiles.ts` runs the camera-driven tile loop for cell outlines,
@@ -215,6 +253,23 @@ colormap helpers and the projection/picking helpers. Rendering concerns that
 are generic, such as tile pyramids, picking and per-point colour, belong in
 napari-js. SIV keeps a workaround only until napari-js provides the feature.
 
+## Shared modules in progress
+
+The 0.8.3 review (§4.4) lists cross-backend duplicates to fold into shared
+modules. Done so far: `geometry/`, `models/polygon-factory.ts`, `toolbar/tool-kit/`,
+`SamSessionService`, `spatial/stats.ts`, `util/supersede.ts`, the auto-window in
+`contracts/intensity.ts` (`autoWindowFromHistogram`, used by the router and the
+channel histogram) and the spatial-math worker. Being added alongside this
+revision, and described here once they land:
+
+- `implementations/tile-server/`: one client for the tile protocol (descriptor
+  poll, tile URL, native histogram, TIFF export, authenticated fetch) for the OSD
+  and napari backends.
+- `overlays/scale-bar-core.ts`: the scale-bar math and DOM shared by the OSD and
+  napari scale bars.
+- `contracts/color.ts`: one CSS/hex colour parser for spatial, contracts, OSD,
+  the picker, the controls and the class colours.
+
 ## Testing
 
 - Jest with `jest-preset-angular`. The setup file is `src/test-setup.ts`
@@ -229,10 +284,17 @@ napari-js. SIV keeps a workaround only until napari-js provides the feature.
 ## Conventions
 
 - **Supersession:** async work (loads, scrubs, tile fetches, spatial rebuilds)
-  is guarded by monotonic tokens. Work whose token is no longer current must
-  not touch state.
+  is latest-wins: work that is no longer current must not touch state. New code
+  uses `util/supersede.ts`: one `Supersede` per async concern, `next()` before the
+  first await, `task.isCurrent()` after each one, and `task.signal` passed to
+  whatever is awaited (`fetch`, a worker call, `IDataRenderer.load(info, z, signal)`)
+  so superseded work stops at the source; `cancel()` on teardown or a dataset switch.
+  The spatial controls, charts and the spatial HTTP adapter use it; the napari
+  service and the component still carry hand-written generation counters, which
+  move to it with the god-class splits.
 - **Assets:** code references `assets/plotting/…`, and the host serves
-  `src/lib/assets` there. onnxruntime-web sidecars default to `/assets/ort/`
+  `src/lib/assets` there. Component styles inline their own `url()`s at build
+  time; `styles/viz-icons.scss` resolves its icons relative to itself. onnxruntime-web sidecars default to `/assets/ort/`
   (`setOrtWasmBase()` overrides that).
 - **Toasts:** the library owns its toast keys and `<visualizer>` renders their
   outlets, so a host must not render outlets with the same keys.
