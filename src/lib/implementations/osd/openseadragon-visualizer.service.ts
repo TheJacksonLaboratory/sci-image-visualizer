@@ -11,7 +11,10 @@ import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { VizConfig, VIZ_CONFIG } from '../../contracts/viz-config';
 import { PlotType, PLOT_TYPE_DESCRIPTORS, PlotTypeDescriptor } from '../../contracts/plot-type';
-import { IViewerBackend, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls } from '../../contracts/visualizer.contract';
+import {
+  IViewerBackend, PixelData, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
+  IOsdViewOptions, IIntensityViewportSource,
+} from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { OsdRegionOverlay } from './osd-region-overlay';
 import { OsdScaleBar } from './osd-scale-bar';
@@ -629,21 +632,25 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** Visible image region (full-image pixel coords), emitted when the view
    *  settles. The intensity inset re-samples this region at the zoom resolution. */
-  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
-    return this.viewport.viewportChange$.asObservable();
+  getIntensitySampling(): IIntensityViewportSource {
+    return this.viewportSource;
   }
+  private readonly viewportSource: IIntensityViewportSource = {
+    getViewportChange$: () => this.viewport.viewportChange$.asObservable(),
+  };
 
-  /** {@link IIntensitySampling} stub — intensity sampling lives in the Plotly
-   *  backend (it owns pixel readback). OSD feeds it only via getViewportChange$;
-   *  the sampling-cache priming itself is a no-op here. */
-  async ensureIntensitySampling(_imageInfo: IImageInfo, _zIndex: number): Promise<void> {
-    /* no-op: Plotly owns intensity sampling (see IIntensitySampling) */
+  /** The navigator and image smoothing (see {@link setNavigatorVisible}). */
+  getOsdViewOptions(): IOsdViewOptions {
+    return this.viewOptions;
   }
+  private readonly viewOptions: IOsdViewOptions = {
+    setNavigatorVisible: (visible) => this.setNavigatorVisible(visible),
+    setImageSmoothingEnabled: (enabled) => this.setImageSmoothingEnabled(enabled),
+  };
 
-  /** {@link IIntensitySampling} stub — see {@link ensureIntensitySampling}. */
-  refreshIntensitySamplingForRoi(_x: number, _y: number, _width: number, _height: number,
-                                 _zIndex: number): void {
-    /* no-op: Plotly owns intensity sampling (see IIntensitySampling) */
+  /** OSD renders no volumes. */
+  getVolumeResolution(): null {
+    return null;
   }
 
   /** The viewport a contributed plot mode draws over: one stable object that
@@ -657,15 +664,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return [PLOT_TYPE_DESCRIPTORS[PlotType.HEATMAP]!];
   }
 
-  /** The intensity profiles live in Plotly (see IIntensitySampling); the
-   *  router reads them from there. */
-  getIntensityProfile$(): Observable<IntensityProfile[]> {
-    return EMPTY;
-  }
-  /** OSD only renders the image type; the LINE intensity inset is Plotly-only. */
-  renderIntensityInset(_divId: string, _profiles: IntensityProfile[]): void {
-    /* no LINE mode on OSD */
-  }
 
   // ── IRegionStore + classification colours ────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared

@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
-import { Observable, combineLatest, merge } from 'rxjs';
+import { EMPTY, Observable, combineLatest, merge } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -9,7 +9,10 @@ import { ClassPreset, PresetSet } from './models/class-preset';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { PlotType, PlotTypeDescriptor, isNapari3d, isNapariScatter, isSpatialOmics, isSpatialOmics3d } from './contracts/plot-type';
-import { IViewerBackend, IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls, ISpatialControls } from './contracts/visualizer.contract';
+import {
+  IViewerBackend, IVisualizer, LoadedImage, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls,
+  ISurface3dControls, ISpatialControls, IIntensitySampling, IOsdViewOptions, IVolumeResolution,
+} from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
@@ -222,20 +225,30 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   zoomIn(): void { this.renderer().zoomIn(); }
   zoomOut(): void { this.renderer().zoomOut(); }
   setDragMode(mode: string | false): void { this.renderer().setDragMode(mode); }
-  // Set on both backends (not just the active renderer): consumers call this
-  // before the first render, when `renderer()` is still the Plotly default, so
-  // OSD must receive the flag to honour it at viewer creation.
-  setNavigatorVisible(visible: boolean): void {
-    this.osd.setNavigatorVisible(visible);
-    this.plotly.setNavigatorVisible(visible);
-    this.napari.setNavigatorVisible(visible);
+  /** Every backend, on screen or not. */
+  private backends(): IViewerBackend[] {
+    return [this.plotly, this.osd, this.napari];
   }
-  // Set on both backends (see setNavigatorVisible): consumers may set it before
-  // the first render, when the active renderer is still Plotly.
-  setImageSmoothingEnabled(enabled: boolean): void {
-    this.osd.setImageSmoothingEnabled(enabled);
-    this.plotly.setImageSmoothingEnabled(enabled);
-  }
+
+  /**
+   * The navigator / smoothing options, applied to EVERY backend that has them (not
+   * just the active renderer): consumers set them before the first render, when
+   * `renderer()` is still the Plotly default, and OSD/napari-js must receive them
+   * to honour them at viewer creation.
+   */
+  getOsdViewOptions(): IOsdViewOptions { return this.viewOptions; }
+  private readonly viewOptions: IOsdViewOptions = {
+    setNavigatorVisible: (visible) => {
+      for (const b of this.backends()) b.getOsdViewOptions()?.setNavigatorVisible(visible);
+    },
+    setImageSmoothingEnabled: (enabled) => {
+      for (const b of this.backends()) b.getOsdViewOptions()?.setImageSmoothingEnabled(enabled);
+    },
+  };
+  /** @deprecated Use `getOsdViewOptions().setNavigatorVisible()`. */
+  setNavigatorVisible(visible: boolean): void { this.viewOptions.setNavigatorVisible(visible); }
+  /** @deprecated Use `getOsdViewOptions().setImageSmoothingEnabled()`. */
+  setImageSmoothingEnabled(enabled: boolean): void { this.viewOptions.setImageSmoothingEnabled(enabled); }
   setShowStack(showstack: boolean): void { this.renderer().setShowStack(showstack); }
   setZIndex(zIndex: number): void {
     this.currentZIndex = zIndex;
@@ -258,8 +271,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setSurfaceDragMode(mode: string): void { this.getSurface3dControls()?.setSurfaceDragMode(mode); }
   /** @deprecated Use `getSurface3dControls()`. */
   resetSurfaceCamera(): void { this.getSurface3dControls()?.resetSurfaceCamera(); }
-  setResolutionScale(scale: number): void { this.renderer().setResolutionScale?.(scale); }
-  getResolutionScale(): number { return this.renderer().getResolutionScale?.() ?? 1; }
+  /** The 3D decimate factor of the backend on screen (napari-js), else null. */
+  getVolumeResolution(): IVolumeResolution | null { return this.renderer().getVolumeResolution(); }
+  /** @deprecated Use `getVolumeResolution()?.set()`. */
+  setResolutionScale(scale: number): void { this.getVolumeResolution()?.set(scale); }
+  /** @deprecated Use `getVolumeResolution()?.get()`. */
+  getResolutionScale(): number { return this.getVolumeResolution()?.get() ?? 1; }
   /** The viewport of the backend on screen, for a contributed plot mode. Null
    *  when that backend cannot provide one (e.g. OSD fell back to Plotly). */
   getPlotModeViewport(): PlotModeViewport | null {
@@ -588,12 +605,32 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialFacade = null;
   }
 
-  /** Load the displayed slice's pixels for intensity sampling, for a backend that
-   *  has no frames of its own (OpenSeadragon, napari-js; Plotly feeds its frames
-   *  to the IntensityProfileService when it plots). */
+  /**
+   * Intensity-profile sampling, whichever backend is on screen: the sampling is the
+   * backend-neutral IntensityProfileService's; the viewport changes come from every
+   * backend that reports them (OpenSeadragon, napari-js), merged into one stable
+   * stream the inset subscribes to once.
+   */
+  getIntensitySampling(): IIntensitySampling { return this.intensitySampling; }
+  private readonly intensitySampling: IIntensitySampling = {
+    // Load the displayed slice's pixels for a backend that has no frames of its own
+    // (OpenSeadragon, napari-js; Plotly feeds its frames to the service when it plots).
+    ensureIntensitySampling: (imageInfo, zIndex) => {
+      this.pointSamplingAtPlot();
+      return this.intensity.ensureIntensitySampling(imageInfo, zIndex);
+    },
+    // Re-sample from a fresh crop of the image-pixel ROI at display resolution.
+    refreshIntensitySamplingForRoi: (x, y, width, height, zIndex) => {
+      this.pointSamplingAtPlot();
+      this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
+    },
+    getViewportChange$: () => merge(
+      ...this.backends().map((b) => b.getIntensitySampling()?.getViewportChange$() ?? EMPTY),
+    ),
+  };
+  /** @deprecated Use `getIntensitySampling().ensureIntensitySampling()`. */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void> {
-    this.pointSamplingAtPlot();
-    return this.intensity.ensureIntensitySampling(imageInfo, zIndex);
+    return this.intensitySampling.ensureIntensitySampling(imageInfo, zIndex);
   }
 
   /** Crops for sampling are sized from the plot div (whichever backend renders into it). */
@@ -601,18 +638,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (this.plotDiv) this.intensity.setSamplingElement(this.plotDiv);
   }
 
-  /** Visible-region changes from the OpenSeadragon viewer (image-pixel coords),
-   *  so the intensity inset can re-sample at the current zoom level. Plotly's own
-   *  high-def zoom updates the sampling cache inline, so only OSD feeds this. */
+  /** @deprecated Use `getIntensitySampling().getViewportChange$()`. */
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
-    return this.osd.getViewportChange$();
+    return this.intensitySampling.getViewportChange$();
   }
 
-  /** Re-sample the intensity profiles from a fresh crop of the given image-pixel
-   *  ROI at display resolution (IntensityProfileService). */
+  /** @deprecated Use `getIntensitySampling().refreshIntensitySamplingForRoi()`. */
   refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void {
-    this.pointSamplingAtPlot();
-    this.intensity.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
+    this.intensitySampling.refreshIntensitySamplingForRoi(x, y, width, height, zIndex);
   }
 
   /** The visualizer view is going away: detach every backend — dropping their view-bound

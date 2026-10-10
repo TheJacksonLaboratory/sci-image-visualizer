@@ -96,14 +96,9 @@ export interface IDataRenderer {
   zoomIn(): void;
   zoomOut(): void;
   setDragMode(mode: string | false): void;
-  /** Show/hide the overview navigator (the minimap). OpenSeadragon only — Plotly
-   *  no-ops it (it has no navigator). Applied when the viewer is (re)created, and
-   *  toggled live when one is already mounted. */
+  /** @deprecated Use `getOsdViewOptions().setNavigatorVisible()` on `IVisualizer`. */
   setNavigatorVisible(visible: boolean): void;
-  /** Image smoothing (bilinear interpolation). `false` = nearest-neighbour, so
-   *  zooming past 1:1 shows crisp pixel blocks (pixel-level inspection).
-   *  OpenSeadragon only — Plotly no-ops it. Applied at viewer creation and live
-   *  (with a redraw) when one is mounted. */
+  /** @deprecated Use `getOsdViewOptions().setImageSmoothingEnabled()` on `IVisualizer`. */
   setImageSmoothingEnabled(enabled: boolean): void;
 
   setShowStack(showstack: boolean): void;
@@ -136,10 +131,9 @@ export interface IDataRenderer {
   downloadImage(): void;
 
   setPlotType(plotType: PlotType): void;
-  /** Set the napari 3D decimate factor (1 = full … 8 = ⅛). Optional — only the napari-js WebGPU
-   *  backend honors it; changing it re-loads the current 3D plot at the coarser/finer sampling. */
+  /** @deprecated Use `getVolumeResolution()?.set()` on `IVisualizer`. */
   setResolutionScale?(scale: number): void;
-  /** The current napari 3D decimate factor (to initialize the Resolution control). Optional. */
+  /** @deprecated Use `getVolumeResolution()?.get()` on `IVisualizer` (this returns 1 without one). */
   getResolutionScale?(): number;
   /** @deprecated Use `getSurface3dControls()?.setSurfaceDragMode()` — 3D scene controls
    *  only exist on a backend that renders 3D plot types; this silently no-ops on OSD. */
@@ -458,25 +452,58 @@ export interface IDisplayOptions {
 }
 
 /**
- * Intensity-profile sampling (PlotType.LINE). The sampling *source* lives in the
- * Plotly backend (it owns pixel readback); OpenSeadragon contributes only the
- * viewport-change signal that drives re-sampling at the current zoom. Each
- * backend implements the part it owns and no-ops the rest — mirroring the
- * deprecated no-op pattern on {@link IDataRenderer} — so the contract is uniform
- * and a consumer can depend on `IVisualizer` alone (no concrete-type reach-in).
+ * The part of intensity sampling a rendering backend owns: where its view settled.
+ * What `IViewerBackend.getIntensitySampling()` returns.
  */
-export interface IIntensitySampling {
-  /** Populate the intensity-sampling cache for the current image/slice so the
-   *  line-ROI profiles have pixel data. Real on Plotly; no-op on OSD. */
+export interface IIntensityViewportSource {
+  /** Visible-region changes (image-pixel coords), emitted when the view settles,
+   *  so the inset can re-sample at the current zoom. */
+  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
+}
+
+/**
+ * Intensity-profile sampling (the line ROIs' inset), from `IVisualizer.getIntensitySampling()`.
+ * The sampling itself is backend-neutral (the library's IntensityProfileService
+ * samples whatever image is on screen); the viewport-change signal comes from the
+ * backend that draws the image (OpenSeadragon and napari-js report it; Plotly
+ * re-samples its high-def zoom crops inline instead).
+ */
+export interface IIntensitySampling extends IIntensityViewportSource {
+  /** Load the current image/slice's pixels so the line-ROI profiles have data
+   *  (a backend with no frames of its own: OpenSeadragon, napari-js). */
   ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
   /** Re-sample the profiles from a fresh crop of the given image-pixel ROI at
-   *  display resolution. Real on Plotly; no-op on OSD. */
+   *  display resolution. */
   refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
                                  zIndex: number): void;
-  /** Visible-region changes (image-pixel coords), emitted when the view settles,
-   *  so the inset can re-sample at the current zoom. Real on OSD; empty on Plotly
-   *  (its high-def zoom updates the sampling cache inline instead). */
-  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
+}
+
+/**
+ * The 2D view options of a tiled image viewer: the overview navigator and image
+ * smoothing. OpenSeadragon's, mirrored by napari-js's 2D views; Plotly has neither.
+ * Capability-gated: `IViewerBackend.getOsdViewOptions()` is null on a backend
+ * without them.
+ */
+export interface IOsdViewOptions {
+  /** Show/hide the overview navigator (the minimap). Applied when the viewer is
+   *  (re)created, and toggled live when one is already mounted. */
+  setNavigatorVisible(visible: boolean): void;
+  /** Image smoothing (bilinear interpolation). `false` = nearest-neighbour, so
+   *  zooming past 1:1 shows crisp pixel blocks (pixel-level inspection). Applied
+   *  at viewer creation and live (with a redraw) when one is mounted. */
+  setImageSmoothingEnabled(enabled: boolean): void;
+}
+
+/**
+ * The 3D decimate factor of a volume renderer (napari-js WebGPU): 1 = full
+ * resolution … 8 = ⅛ per axis. Capability-gated: null on a backend without one.
+ */
+export interface IVolumeResolution {
+  /** The current factor (to initialize the Resolution control). */
+  get(): number;
+  /** Set the factor (rounded, at least 1). Takes effect on the next (re)load —
+   *  the host re-plots after calling it, since it changes the fetched data. */
+  set(scale: number): void;
 }
 
 /**
@@ -499,6 +526,22 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  the capability-gated replacement for the deprecated top-level
    *  `setSurfaceDragMode`/`resetSurfaceCamera`. */
   getSurface3dControls(): ISurface3dControls | null;
+  /** The navigator / image-smoothing options. Never null on the router: a setting
+   *  applies to every backend that has them (OpenSeadragon, napari-js), so it can
+   *  be set before the first render and survives a backend switch. */
+  getOsdViewOptions(): IOsdViewOptions;
+  /** The 3D decimate factor of the backend on screen, or null when it has none
+   *  (only napari-js renders volumes). */
+  getVolumeResolution(): IVolumeResolution | null;
+  /** Intensity-profile sampling, whichever backend is on screen. */
+  getIntensitySampling(): IIntensitySampling;
+  /** @deprecated Use `getIntensitySampling().ensureIntensitySampling()`. */
+  ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
+  /** @deprecated Use `getIntensitySampling().refreshIntensitySamplingForRoi()`. */
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
+                                 zIndex: number): void;
+  /** @deprecated Use `getIntensitySampling().getViewportChange$()`. */
+  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
   /** Spatial-omics controls when a `SPATIAL_DATA_PORT` is bound, else null.
    *  Optional: only the routing service implements it, since the state is shared
    *  rather than owned by any one backend. */
@@ -587,9 +630,14 @@ export interface IViewerBackend extends IToolController {
   getSurface3dControls(): ISurface3dControls | null;
   getIntensityControls(): IIntensityControls | null;
   getPlotModeViewport?(): PlotModeViewport | null;
-  /** napari-js 3D decimate factor. */
-  setResolutionScale?(scale: number): void;
-  getResolutionScale?(): number;
+  /** Navigator / image smoothing, or null when the backend has neither (Plotly). */
+  getOsdViewOptions(): IOsdViewOptions | null;
+  /** The 3D decimate factor, or null when the backend renders no volumes. */
+  getVolumeResolution(): IVolumeResolution | null;
+  /** Where the view settled, for the intensity inset's re-sampling; null when the
+   *  backend re-samples on its own (Plotly's high-def zoom). The sampling itself is
+   *  the router's (IntensityProfileService). */
+  getIntensitySampling(): IIntensityViewportSource | null;
 }
 
 /**

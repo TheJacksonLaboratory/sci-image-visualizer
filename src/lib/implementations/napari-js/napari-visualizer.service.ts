@@ -19,7 +19,8 @@ import {
   isNapariIsosurface, isNapariScatter, isNapariScatter3d, isNapariSurface, isSpatialOmics, isSpatialOmics3d,
 } from '../../contracts/plot-type';
 import {
-  IViewerBackend, PixelData, IntensityProfile, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
+  IViewerBackend, PixelData, IIsosurfaceControls, IIntensityControls, ISurface3dControls,
+  IOsdViewOptions, IVolumeResolution, IIntensityViewportSource,
 } from '../../contracts/visualizer.contract';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -148,7 +149,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
   private readonly autoscaleEvent$ = new Subject<unknown>();
-  private readonly intensityProfile$ = new Subject<IntensityProfile[]>();
   private readonly viewportChange$ = new Subject<{
     x: number;
     y: number;
@@ -563,13 +563,31 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.settings.resolutionScale = Math.max(1, Math.round(scale));
   }
 
-  getIntensityProfile$(): Observable<IntensityProfile[]> {
-    return this.intensityProfile$.asObservable();
+  /** napari-js has the navigator and image smoothing too (its 2D views). */
+  getOsdViewOptions(): IOsdViewOptions {
+    return this.viewOptions;
   }
+  private readonly viewOptions: IOsdViewOptions = {
+    setNavigatorVisible: (visible) => this.setNavigatorVisible(visible),
+    setImageSmoothingEnabled: (enabled) => this.setImageSmoothingEnabled(enabled),
+  };
 
-  renderIntensityInset(_divId: string, _profiles: IntensityProfile[]): void {
-    /* Plotly owns the intensity inset */
+  /** The 3D decimate factor (the 3D types' Resolution control). */
+  getVolumeResolution(): IVolumeResolution {
+    return this.volumeResolution;
   }
+  private readonly volumeResolution: IVolumeResolution = {
+    get: () => this.getResolutionScale(),
+    set: (scale) => this.setResolutionScale(scale),
+  };
+
+  /** Where the camera settled, for the intensity inset's re-sampling. */
+  getIntensitySampling(): IIntensityViewportSource {
+    return this.viewportSource;
+  }
+  private readonly viewportSource: IIntensityViewportSource = {
+    getViewportChange$: () => this.viewportChange$.asObservable(),
+  };
 
   // ── IRegionStore + classification colours ──────────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
@@ -596,23 +614,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   // ── IDisplayOptions ───────────────────────────────────────────────────────
   // Inherited from BaseStoreVisualizer — pure delegations to the shared
   // VisualizerStore (identical to the OSD backend).
-
-  // ── IIntensitySampling: Plotly owns sampling; emit viewport changes ───────
-  ensureIntensitySampling(_imageInfo: IImageInfo, _zIndex: number): Promise<void> {
-    return Promise.resolve();
-  }
-  refreshIntensitySamplingForRoi(
-    _x: number,
-    _y: number,
-    _width: number,
-    _height: number,
-    _zIndex: number,
-  ): void {
-    /* Plotly owns intensity sampling */
-  }
-  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
-    return this.viewportChange$.asObservable();
-  }
 
   // ── IVisualizer composite members ─────────────────────────────────────────
   getRegionOverlay(): IRegionOverlay | null {

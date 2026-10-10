@@ -8,7 +8,7 @@ import { Region } from '../../models/region';
 import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { MessageService } from 'primeng/api';
 import { CONFIG, CONFIG_SURFACE, PlotUtilities } from '../../plot.utilities';
 import { WandService } from '../../toolbar/wand/wand.service';
@@ -492,14 +492,19 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.intensity.setFrames({ frames, ratios: this.cachedImageRatios, origin });
   }
 
-  /**
-   * {@link IIntensitySampling} stub — the viewport-change signal is OpenSeadragon's
-   * (it re-samples on OSD zoom/pan). Plotly's own high-def zoom updates the
-   * sampling frames inline, so it never emits here; returns EMPTY so a uniform
-   * `IVisualizer` consumer can subscribe regardless of the active backend.
-   */
-  public getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
-    return EMPTY;
+  /** No viewport signal: Plotly's own high-def zoom re-samples the profiles inline. */
+  public getIntensitySampling(): null {
+    return null;
+  }
+
+  /** No navigator and no smoothing toggle (OpenSeadragon/napari-js view options). */
+  public getOsdViewOptions(): null {
+    return null;
+  }
+
+  /** Plotly renders no decimated volumes (napari-js's Resolution control). */
+  public getVolumeResolution(): null {
+    return null;
   }
 
   /** Autoscale the plot (see PlotlyZoomController). */
@@ -806,18 +811,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     const gd = document.getElementById(this.plotDiv) as unknown as { _fullLayout?: unknown } | null;
     if (!gd?._fullLayout) return;
     Plotly.relayout(this.plotDiv, { dragmode: mode } as any);
-  }
-
-  /** {@link IDataRenderer} stub — Plotly has no overview navigator (it's an
-   *  OpenSeadragon feature), so toggling it is a no-op here. */
-  public setNavigatorVisible(_visible: boolean): void {
-    /* no-op: navigator is OpenSeadragon-only */
-  }
-
-  /** {@link IDataRenderer} stub — image smoothing is an OpenSeadragon canvas-drawer
-   *  setting; the Plotly image/heatmap traces don't expose it, so it's a no-op. */
-  public setImageSmoothingEnabled(_enabled: boolean): void {
-    /* no-op: smoothing toggle is OpenSeadragon-only */
   }
 
   public zoomIn() {

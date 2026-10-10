@@ -552,7 +552,7 @@ describe('NapariVisualizerService', () => {
     await settle();
     const readback = jest.spyOn(Viewer.prototype, 'readDisplayedPixels');
     const viewports: unknown[] = [];
-    const sub = service.getViewportChange$().subscribe((r) => viewports.push(r));
+    const sub = service.getIntensitySampling().getViewportChange$().subscribe((r) => viewports.push(r));
 
     pan();
     await settle();
@@ -623,7 +623,7 @@ describe('NapariVisualizerService', () => {
     };
     internals.tools.install2dInteraction(internals.viewer, div);
     const emittedInZone: boolean[] = [];
-    const sub = service.getViewportChange$().subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
+    const sub = service.getIntensitySampling().getViewportChange$().subscribe(() => emittedInZone.push(NgZone.isInAngularZone()));
     listeners.forEach((l) => l());
     await new Promise((r) => setTimeout(r, 300));
     expect(emittedInZone).toEqual([true]);

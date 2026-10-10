@@ -545,19 +545,10 @@ describe('PlotlyService viewport + stack-state methods', () => {
     expect(service.getAutoscaleEvent()).toBeDefined();
   });
 
-  it('navigator + smoothing toggles are safe no-ops on the Plotly backend', () => {
-    expect(() => {
-      service.setNavigatorVisible(false);
-      service.setImageSmoothingEnabled(false);
-    }).not.toThrow();
-  });
-
-  it('getViewportChange$ is an empty stream (OSD-only signal)', () => {
-    let completed = false;
-    let emitted = false;
-    service.getViewportChange$().subscribe({ next: () => (emitted = true), complete: () => (completed = true) });
-    expect(emitted).toBe(false);
-    expect(completed).toBe(true);
+  it('has no OSD view options, volume resolution or viewport signal (capability-gated)', () => {
+    expect(service.getOsdViewOptions()).toBeNull();
+    expect(service.getVolumeResolution()).toBeNull();
+    expect(service.getIntensitySampling()).toBeNull();
   });
 });
 

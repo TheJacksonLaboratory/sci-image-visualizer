@@ -113,9 +113,10 @@ function mockBackend(): any {
     getIntensityControls: jest.fn().mockReturnValue(null),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
     refreshIntensitySamplingForRoi: jest.fn(),
-    getViewportChange$: jest.fn().mockReturnValue(of({ x: 0, y: 0, width: 0, height: 0 })),
-    setNavigatorVisible: jest.fn(),
-    setImageSmoothingEnabled: jest.fn(),
+    // capability-gated getters (IVisualizer split (e)): none by default
+    getOsdViewOptions: jest.fn().mockReturnValue(null),
+    getVolumeResolution: jest.fn().mockReturnValue(null),
+    getIntensitySampling: jest.fn().mockReturnValue(null),
   };
 }
 
@@ -555,24 +556,67 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(plotly.setPlotType).toHaveBeenCalledWith(PlotType.HEATMAP);
   });
 
-  it('getViewportChange$ comes from OpenSeadragon (the only backend that emits it)', () => {
-    router.getViewportChange$();
-    expect(osd.getViewportChange$).toHaveBeenCalled();
-    expect(plotly.getViewportChange$).not.toHaveBeenCalled();
+  // ── capability-gated extras (IVisualizer split (e)) ─────────────────────
+  function viewOptions() {
+    return { setNavigatorVisible: jest.fn(), setImageSmoothingEnabled: jest.fn() };
+  }
+
+  it('applies the view options to every backend that has them, before any render', () => {
+    const osdOpts = viewOptions();
+    const napariOpts = viewOptions();
+    osd.getOsdViewOptions.mockReturnValue(osdOpts);
+    napari.getOsdViewOptions.mockReturnValue(napariOpts); // Plotly has none (null)
+    router.getOsdViewOptions().setNavigatorVisible(false);
+    router.getOsdViewOptions().setImageSmoothingEnabled(true);
+    for (const o of [osdOpts, napariOpts]) {
+      expect(o.setNavigatorVisible).toHaveBeenCalledWith(false);
+      expect(o.setImageSmoothingEnabled).toHaveBeenCalledWith(true);
+    }
+    // The deprecated always-on members are the same fan-out.
+    router.setNavigatorVisible(true);
+    router.setImageSmoothingEnabled(false);
+    for (const o of [osdOpts, napariOpts]) {
+      expect(o.setNavigatorVisible).toHaveBeenLastCalledWith(true);
+      expect(o.setImageSmoothingEnabled).toHaveBeenLastCalledWith(false);
+    }
   });
 
-  it.each<[string, any[]]>([
-    ['setNavigatorVisible', [false]],
-    ['setImageSmoothingEnabled', [false]],
-  ])('%s is applied to BOTH backends (set before the first render)', (method, args) => {
-    (router as any)[method](...args);
-    expect(osd[method]).toHaveBeenCalledWith(...args);
-    expect(plotly[method]).toHaveBeenCalledWith(...args);
+  it('serves the volume resolution of the backend on screen; the old members go through it', async () => {
+    expect(router.getVolumeResolution()).toBeNull(); // Plotly before any plot
+    expect(router.getResolutionScale()).toBe(1);
+    expect(() => router.setResolutionScale(4)).not.toThrow();
+
+    const resolution = { get: jest.fn().mockReturnValue(2), set: jest.fn() };
+    napari.getVolumeResolution.mockReturnValue(resolution);
+    router.setPlotType(PlotType.NAPARI_VOLUME);
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
+    expect(router.getVolumeResolution()).toBe(resolution);
+    expect(router.getResolutionScale()).toBe(2);
+    router.setResolutionScale(8);
+    expect(resolution.set).toHaveBeenCalledWith(8);
   });
 
-  it('setNavigatorVisible also reaches napari-js, which now has a navigator too', () => {
-    router.setNavigatorVisible(false);
-    expect(napari.setNavigatorVisible).toHaveBeenCalledWith(false);
+  it('merges the viewport changes of every backend that reports them (OSD, napari-js)', () => {
+    const osd$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+    const napari$ = new Subject<{ x: number; y: number; width: number; height: number }>();
+    osd.getIntensitySampling.mockReturnValue({ getViewportChange$: () => osd$ });
+    napari.getIntensitySampling.mockReturnValue({ getViewportChange$: () => napari$ });
+    const seen: number[] = [];
+    router.getIntensitySampling().getViewportChange$().subscribe((r) => seen.push(r.x));
+    router.getViewportChange$().subscribe((r) => seen.push(r.x * 10)); // deprecated alias
+    osd$.next({ x: 1, y: 0, width: 1, height: 1 });
+    napari$.next({ x: 2, y: 0, width: 1, height: 1 });
+    expect(seen).toEqual([1, 10, 2, 20]);
+  });
+
+  it('the deprecated sampling members go through getIntensitySampling()', async () => {
+    await router.plot('viz-plot-2', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    const sampling = router.getIntensitySampling();
+    await sampling.ensureIntensitySampling(IMAGE_INFO, 1);
+    sampling.refreshIntensitySamplingForRoi(0, 0, 5, 5, 1);
+    expect(intensity['ensureIntensitySampling']).toHaveBeenCalledWith(IMAGE_INFO, 1);
+    expect(intensity['refreshIntensitySamplingForRoi']).toHaveBeenCalledWith(0, 0, 5, 5, 1);
+    expect(intensity['setSamplingElement']).toHaveBeenCalledWith('viz-plot-2');
   });
 
   it('detach detaches every backend; unsubscribe is its deprecated alias (CORE-1)', () => {
