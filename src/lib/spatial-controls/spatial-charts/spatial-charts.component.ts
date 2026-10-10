@@ -13,7 +13,7 @@ import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
 import { computeHeatmapMatrixAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import {
-  BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator,
+  BROWSER_TSNE_MAX_OBSERVATIONS, EmbeddingComputeCoordinator, EmbeddingComputeState,
 } from '../../spatial/embedding-compute-coordinator';
 import { ChartDataModel } from './chart-data-model';
 import { EMBEDDING_CONFIG, PlotlyChartHost } from './plotly-chart-host';
@@ -151,6 +151,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
   get computeError(): string | null {
     return this.compute.state.error;
+  }
+  /** Where a computation stands, for the embedding controls. */
+  get computeState(): EmbeddingComputeState {
+    return this.compute.state;
   }
   /** True when a t-SNE is missing but the dataset is too big to embed here. */
   get tsneTooLarge(): boolean {

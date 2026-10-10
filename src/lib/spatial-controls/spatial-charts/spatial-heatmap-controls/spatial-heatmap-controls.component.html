@@ -1,0 +1,18 @@
+<!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
+     kinds chart whatever single source the map is coloured by. -->
+<div class="sx-controls">
+  <p-multiSelect [options]="geneOptions" optionLabel="label" optionValue="value"
+                 [ngModel]="genes" (ngModelChange)="genesChange.emit($event)"
+                 [filter]="true" filterBy="label" (onFilter)="filterChange.emit($event.filter)"
+                 [virtualScroll]="true" [virtualScrollItemSize]="30" appendTo="body"
+                 [showToggleAll]="false" [maxSelectedLabels]="3"
+                 selectedItemsLabel="{0} genes"
+                 placeholder="Pick genes for the rows"
+                 pTooltip="One row per gene, averaged within each group"
+                 tooltipPosition="top" styleClass="sx-genes"></p-multiSelect>
+  <p-checkbox [binary]="true" [ngModel]="zScore"
+              (onChange)="zScoreChange.emit($event.checked)"
+              label="z-score"
+              pTooltip="Scale each gene across the groups. Without it one highly-expressed gene saturates the colour scale and the rest reads as blank"
+              tooltipPosition="top"></p-checkbox>
+</div>
