@@ -10,11 +10,29 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { Supersede } from '../../util/supersede';
 import { ContrastWindowCache } from './napari-spatial-encoding';
 import { SpatialHover } from './napari-spatial-hover';
-import { NapariSpatialTileLayers } from './napari-spatial-tiles';
+import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
+import { Rgb } from '../../contracts/colormap-lut';
 import type { SceneContext } from './napari-scene';
 
 /** What the spatial subscription last saw: the dataset, the view state and the selection. */
 export type SpatialLatest = [SpatialDataset | null, SpatialViewState, SpatialSelectionMask];
+
+/** Where the spatial tile layers' panel outputs go (the service's subjects and badge). */
+export interface SpatialTileSinks {
+  /** The continuous LUT the view is using (so cells coloured by a gene match the markers). */
+  continuousLut(view: SpatialViewState): Rgb[];
+  estimateChanged(estimate: TranscriptEstimate | null): void;
+  geneCountsChanged(counts: Record<string, number> | null): void;
+  densityChanged(stats: { lo: number; hi: number; max: number }): void;
+  loadingChanged(layers: string[]): void;
+}
+
+/** The 2D scene the tile layers currently draw into. */
+export interface SpatialTileOwner {
+  canvasSize(): [number, number];
+  /** Outlines appeared or disappeared: the markers' visibility follows. */
+  polygonsShownChanged(): void;
+}
 
 /** An estimated field and the inputs it was estimated for. */
 export interface FieldCache<T> {
@@ -40,11 +58,51 @@ export class SpatialSession {
   readonly geneMapVolume: FieldCache<ExpressionVolumeField> = { key: null, field: null };
   private lastSelectionSeen: SpatialSelectionMask | null = null;
   private selectionRevision = 0;
+  /** Level-of-detail cell outlines, transcripts and density over the 2D view — created on first
+   *  use, only when a spatial port is bound, and kept across scenes (its tile caches with it). */
+  private tileLayers: NapariSpatialTileLayers | null = null;
+  private tileOwner: SpatialTileOwner | null = null;
 
   constructor(
     readonly port: SpatialDataPort | null,
     readonly selection: SpatialSelectionStore | null,
+    private readonly sinks: SpatialTileSinks,
   ) {}
+
+  /** The tile layers, if they were ever built. */
+  get tiles(): NapariSpatialTileLayers | null {
+    return this.tileLayers;
+  }
+
+  /**
+   * The tile layers, built on first use (null without a spatial port), now drawing for `owner`.
+   * Their host callbacks read the session's live state and the owner's canvas, so they never hold
+   * a stale dataset or colormap.
+   */
+  claimTiles(owner: SpatialTileOwner): NapariSpatialTileLayers | null {
+    const port = this.port;
+    if (!port) return null;
+    this.tileOwner = owner;
+    const sinks = this.sinks;
+    this.tileLayers ??= new NapariSpatialTileLayers(port, {
+      latest: () => this.latest,
+      canvasSize: () => this.tileOwner?.canvasSize() ?? [0, 0],
+      continuousLut: (view) => sinks.continuousLut(view),
+      estimateChanged: (e) => sinks.estimateChanged(e),
+      geneCountsChanged: (c) => sinks.geneCountsChanged(c),
+      loadingChanged: (layers) => sinks.loadingChanged(layers),
+      densityChanged: (d) => sinks.densityChanged(d),
+      polygonsShownChanged: () => this.tileOwner?.polygonsShownChanged(),
+    });
+    return this.tileLayers;
+  }
+
+  /** `owner`'s scene is going away: take the tile layers off its viewer. */
+  releaseTiles(owner: SpatialTileOwner): void {
+    if (this.tileOwner !== owner) return;
+    this.tileOwner = null;
+    this.tileLayers?.detach();
+  }
 
   /**
    * A revision number for a selection object.

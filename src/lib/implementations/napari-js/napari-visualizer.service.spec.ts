@@ -11,7 +11,11 @@ import { NapariVisualizerService } from './napari-visualizer.service';
 import { bitmapToLuminance } from './napari-tile-client';
 import { Image2dScene } from './napari-image-2d-scene';
 import type { SceneContext } from './napari-scene';
-import { ContrastWindowCache, encodeSpatial3dContinuous } from './napari-spatial-encoding';
+import {
+  ContrastWindowCache, encodeSpatial3dContinuous, encodeSpatialContinuous,
+} from './napari-spatial-encoding';
+import { Spatial2dScene } from './napari-spatial-2d-scene';
+import type { SpatialSession } from './napari-spatial-scene';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
@@ -447,14 +451,16 @@ describe('NapariVisualizerService', () => {
 
   it('computes a spatial contrast window once per (vector, lo, hi, log) (SPATIAL-12)', () => {
     const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
-    type Internals = {
-      encodeSpatialContinuous(v: Float32Array, view: SpatialViewState): Float32Array;
-      spatial: { contrastWindows: ContrastWindowCache };
+    // The 2D markers' and the 3D cloud's encoders share the spatial session's window cache.
+    const windows = (service as unknown as { spatial: { contrastWindows: ContrastWindowCache } })
+      .spatial.contrastWindows;
+    const lut: [number, number, number][] = [[0, 0, 0], [255, 255, 255]];
+    const s = {
+      encodeSpatialContinuous: (v: Float32Array, view: SpatialViewState) =>
+        encodeSpatialContinuous(v, view, lut, windows),
     };
-    const s = service as unknown as Internals;
-    // The 3D cloud's encoder shares the session's window cache with the 2D markers'.
     const encode3d = (v: Float32Array, view: SpatialViewState) =>
-      encodeSpatial3dContinuous(v, view, [[0, 0, 0], [255, 255, 255]], s.spatial.contrastWindows);
+      encodeSpatial3dContinuous(v, view, lut, windows);
     const vector = new Float32Array([1, 5, 2, 8, 3]);
     const view = { opacity: 1 } as SpatialViewState;
     s.encodeSpatialContinuous(vector, view);
@@ -3016,10 +3022,14 @@ describe('NapariVisualizerService', () => {
           viewer: { layers: { items: layers }, requestRender: jest.fn() },
         };
       };
+      /** The spatial scene, unmounted: hiding reads only its session and its own gene map. */
+      let spatialScene: Spatial2dScene;
+      const session = () => (service as unknown as { spatial: SpatialSession }).spatial;
+      beforeEach(() => {
+        spatialScene = new Spatial2dScene({} as SceneContext, session());
+      });
       const hide = (viewer: unknown, hasPixels: boolean) =>
-        (service as unknown as {
-          hideForeignImage(v: unknown, p: boolean): void;
-        }).hideForeignImage(viewer, hasPixels);
+        spatialScene.hideForeignImage(viewer as never, hasPixels);
 
       it('hides every image layer for a dataset that brings none', () => {
         // The host's viewer keeps whatever was last loaded, and for a dataset that
@@ -3045,11 +3055,11 @@ describe('NapariVisualizerService', () => {
         const { layers, viewer } = scene();
         const density = layers[2];
         const owned = { owns: (l: unknown) => l === density };
-        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = owned;
+        (session() as unknown as { tileLayers: unknown }).tileLayers = owned;
         hide(viewer, false);
         expect(layers[0].visible).toBe(false);
         expect(density.visible).toBe(true);
-        (service as unknown as { spatialTilesMgr: unknown }).spatialTilesMgr = null;
+        (session() as unknown as { tileLayers: unknown }).tileLayers = null;
       });
 
       it('leaves the gene map alone when the tissue is hidden', () => {
@@ -3057,11 +3067,11 @@ describe('NapariVisualizerService', () => {
         // took it down with the slide — though, like the density raster, it is data.
         const { layers, viewer } = scene();
         const geneMap = layers[2];
-        (service as unknown as { geneMapLayer: unknown }).geneMapLayer = geneMap;
+        spatialScene.geneMapLayer = geneMap as never;
         hide(viewer, false);
         expect(layers[0].visible).toBe(false);
         expect(geneMap.visible).toBe(true);
-        (service as unknown as { geneMapLayer: unknown }).geneMapLayer = null;
+
       });
 
       it('shows the image for a dataset that owns one', () => {
@@ -3079,10 +3089,7 @@ describe('NapariVisualizerService', () => {
         // The tests above exercise the method directly, because this suite's image
         // fixture has no urls and so builds no image layer to assert over. That leaves
         // the WIRING uncovered — deleting the call kept them all green — so pin it.
-        const spy = jest.spyOn(
-          service as unknown as { hideForeignImage(v: unknown, p: boolean): void },
-          'hideForeignImage',
-        );
+        const spy = jest.spyOn(Spatial2dScene.prototype, 'hideForeignImage');
         await mount();
         expect(spy).toHaveBeenCalled();
         // …and told that this dataset brings no pixels of its own.
@@ -3180,15 +3187,15 @@ describe('NapariVisualizerService', () => {
         // The stitched branch, which is what a volume-backed dataset takes: its
         // slices are blob images, not a server pyramid. (The tiled branch only
         // moves `dims.z` — no render, so nothing clears the markers there.)
-        const image = (service as unknown as { scene: Image2dScene }).scene;
+        const scene = (service as unknown as { scene: Spatial2dScene }).scene;
+        const image = scene.image;
         image.tiled = false;
         const order: string[] = [];
         jest
           .spyOn(image, 'render')
           .mockImplementation(async () => { order.push('image'); });
         jest
-          .spyOn(service as unknown as { rebuildSpatialPoints: (...a: unknown[]) => Promise<void> },
-            'rebuildSpatialPoints')
+          .spyOn(scene as unknown as { rebuild: (...a: unknown[]) => Promise<void> }, 'rebuild')
           .mockImplementation(async () => { order.push('markers'); });
 
         service.setZIndex(2);

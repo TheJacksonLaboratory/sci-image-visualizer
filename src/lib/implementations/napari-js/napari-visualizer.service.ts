@@ -1,54 +1,36 @@
 import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
-import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
 import { Viewer } from 'napari-js';
-import type { ImageLayer, PointsLayer } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
-import {
-  SpatialColumn, SpatialDataset, SpatialImageRef, isCategoricalColumn,
-} from '../../contracts/spatial-dataset.contract';
-import { SpatialViewState } from '../../contracts/display-types';
-import {
-  encodeCategorical, markerDiameters, resolveCategoryColors, toRgbaTuples, type RGBA,
-} from '../../spatial/spatial-encoding';
-import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
-import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
-import {
-  SpatialSelectionMask, emptySelection, maskToIndices, mutedFromSelection,
-} from '../../spatial/spatial-selection';
-import { framePositions } from '../../spatial/spatial-framing';
-import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
-import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 
-import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
+import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
+
+import { TranscriptEstimate } from './napari-spatial-tiles';
 
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
-import { SpatialHover } from './napari-spatial-hover';
+
 import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
 import { SpatialSession } from './napari-spatial-scene';
 import { Spatial3dScene } from './napari-spatial-3d-scene';
+import { Spatial2dScene } from './napari-spatial-2d-scene';
 import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
 import { SurfaceScene } from './napari-surface-scene';
 import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { cameraDragMode } from './napari-axes-gizmo';
 import { NapariDisplayState } from './napari-display-state';
 import { NapariTileClient } from './napari-tile-client';
-import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+
 import { NAPARI_WHEEL_ZOOM_SPEED } from './napari-zoom';
 import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
-import { colorExpressionField, expressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
-import { SceneKind, sceneKindOf } from './napari-helpers';
-import {
-  GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
-  SPATIAL_NEUTRAL_HEX, SPATIAL_SLICE_MIN_DIAMETER_PX, encodeSpatialContinuous, gatherColors,
-} from './napari-spatial-encoding';
+
 import {
   PlotType,
   PlotTypeDescriptor,
@@ -77,7 +59,7 @@ import {
 } from '../../contracts/capabilities.contract';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-import { ColormapNode } from '../../contracts/display-types';
+
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
@@ -150,35 +132,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private host: HTMLElement | null = null;
   private loaded: NapariLoaded | null = null;
   private currentPlotType: PlotType = PlotType.NAPARI_IMAGE;
-  /** The kind of scene {@link plot} mounted — fixed per plot, unlike {@link currentPlotType},
-   *  which {@link setPlotType} can change under it. Drives {@link setZIndex}. */
-  private mounted: SceneKind | null = null;
-  /** Spatial-omics observation markers + the dataset/view subscription driving them. */
-  private spatialPoints: PointsLayer | null = null;
-  /** The gene map: its layer, the field it was estimated from, and the inputs each
-   *  was built for — the field is the expensive half and survives a recolour. */
-  private geneMapLayer: ImageLayer | null = null;
-  private geneMapKey: string | null = null;
-  /** Cursor tooltip and click-to-select for the spatial views. */
-  private hover: SpatialHover | null = null;
-  /** Whose 2D observations the camera has been framed on — see {@link frameSpatialPointsOnce}. */
-  private spatial2dFramed: { viewer: Viewer; datasetId: string } | null = null;
-  private spatialSub: Subscription | null = null;
-  /** Level-of-detail cell outlines, transcripts and density over the 2D view — created on
-   *  first use, and only when a spatial port is bound. */
-  private spatialTilesMgr: NapariSpatialTileLayers | null = null;
   /** For the panel: the transcripts-in-view estimate and the density window in use. */
   readonly transcriptEstimate$ = new BehaviorSubject<TranscriptEstimate | null>(null);
   /** Transcripts of each selected gene in view (see NapariSpatialTileLayers.geneCountsIn). */
   readonly geneCountsInView$ = new BehaviorSubject<Record<string, number> | null>(null);
   readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
-  /** Which dataset the current marker layer was built for, so a display-only
-   *  change (size, colour, opacity, selection) can update it in place. */
-  private spatialLayerKey: string | null = null;
-  /** Monotonic guard for the async colour rebuild: fetching a gene vector is a
-   *  round-trip, so a fast sequence of colour-by changes can resolve out of
-   *  order. Only the newest rebuild is allowed to touch the layer. */
-  private spatialRebuildToken = 0;
   /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
   private readonly badge = new LoadingBadgeState();
   /** The store's display state (colormap, reverse, invert) and the colormaps derived from it. */
@@ -192,8 +150,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private lifetime = new AbortController();
   /** What {@link plot} mounted, while it is mounted. */
   private scene: NapariScene | null = null;
-  /** The 2D spatial view's image (until the spatial 2D scene owns it). */
-  private spatialImage: Image2dScene | null = null;
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -254,7 +210,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.tileClient = new NapariTileClient(tiles, simpleStack, this.api);
     this.tileClient.startScene(this.lifetime.signal);
     this.display = new NapariDisplayState(store);
-    this.spatial = new SpatialSession(spatialData, selectionStore);
+    this.spatial = new SpatialSession(spatialData, selectionStore, {
+      continuousLut: (view) => this.display.spatialLut(view),
+      // These follow the camera, which moves outside the zone; the panel reads them.
+      estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
+      geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
+      densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
+      loadingChanged: (layers) => this.badge.setTileLayers(layers),
+    });
     this.tools = new NapariToolBridge({
       viewer: () => this.viewer,
       host: () => this.host,
@@ -358,7 +321,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.host = host;
     this.badge.attach(host);
     this.currentPlotType = plotType;
-    this.mounted = sceneKindOf(plotType);
 
     const canvas = document.createElement('canvas');
     canvas.style.display = 'block';
@@ -410,7 +372,9 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       } else if (isSpatialOmics(plotType)) {
         // No loaded image: an image-less dataset opened before any image (the visualizer's
         // plotSpatialWithoutImage) — the observations alone.
-        await this.mountSpatialOmics(this.sceneContext(viewer, host, canvas), imageLoaded == null);
+        const ctx = this.sceneContext(viewer, host, canvas);
+        this.scene = new Spatial2dScene(ctx, this.spatial, imageLoaded == null);
+        await this.scene.mount();
       } else if (isNapariScatter(plotType)) {
         this.scene = new ScatterRegionsScene(this.sceneContext(viewer, host, canvas));
         await this.scene.mount();
@@ -444,612 +408,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.scene?.setNavigatorVisible?.(visible);
   }
 
-  // ── Spatial omics ────────────────────────────────────────────────────────────────────────
-
-  /**
-   * Mount the SPATIAL_OMICS view: the tissue image with one marker per observation, coloured by
-   * an annotation column or a gene. The markers rebuild whenever the dataset or the view state
-   * changes, so switching the colour-by column does not remount the scene.
-   *
-   * Sets up the full 2D interaction stack — region overlay, pixel-tool hosts, readback currency —
-   * exactly as the plain image view does. That is NOT optional here: this mode's selection is
-   * driven by drawn ROIs, so without the overlay there is no way to make a selection at all.
-   */
-  private async mountSpatialOmics(ctx: SceneContext, noImage = false): Promise<void> {
-    const { viewer, host } = ctx;
-    // With no image loaded there is nothing to render under the observations; they are
-    // framed on their own extent, as for any dataset that brings no image.
-    const image = new Image2dScene(ctx, {
-      image: !noImage,
-      // Only fit to the image when this dataset actually has one. Otherwise there is
-      // nothing to fit, `imageW`/`imageH` still hold the LAST image's dimensions, and
-      // this fits to those — and because it defers to a frame, it lands AFTER the points
-      // are added and overwrites the framing they set. That is what left an image-less
-      // dataset as a ten-pixel speck off to one side.
-      fit: () => !!this.spatial.latest?.[0]?.imageRef,
-      onSlice: () => this.redrawSpatialMarkers(),
-      onNavigatorInteract: () => this.hover?.hide(),
-    });
-    this.scene = image;
-    this.spatialImage = image;
-    await image.mount();
-    this.installSpatialHover(host);
-    this.spatialTiles()?.attach(viewer);
-    this.subscribeSpatial();
-    this.tools.scheduleReadback();
-  }
-
-  /**
-   * Whether the 2D observation markers are drawn: when the user wants them, and not while
-   * cell outlines are on screen — then a cell IS its outline, and a circle on top of it is
-   * noise. Zoomed out past the outline threshold, the circles stand in for the cells.
-   */
-  private spatialPointsVisible(): boolean {
-    const view = this.spatial.latest?.[1];
-    return (view?.showPoints ?? true) && !this.spatialTilesMgr?.outlinesShown;
-  }
-
-  /**
-   * The tiled-geometry manager, built on first use. Its host callbacks read this
-   * service's live state, so it never holds a stale dataset or colormap.
-   */
-  private spatialTiles(): NapariSpatialTileLayers | null {
-    const port = this.spatialData;
-    if (!port) return null;
-    this.spatialTilesMgr ??= new NapariSpatialTileLayers(port, {
-      latest: () => this.spatial.latest,
-      canvasSize: () => [this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0],
-      continuousLut: (view) => {
-        return this.display.spatialLut(view);
-      },
-      // These follow the camera, which moves outside the zone; the panel reads them.
-      estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
-      geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
-      loadingChanged: (layers) => {
-        this.badge.setTileLayers(layers);
-      },
-      densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
-      polygonsShownChanged: () => {
-        if (this.spatialPoints) this.spatialPoints.visible = this.spatialPointsVisible();
-        this.viewer?.requestRender();
-      },
-    });
-    return this.spatialTilesMgr;
-  }
-
-  /** The spatial views' tooltip and click-to-select, over the scene just mounted. */
-  private installSpatialHover(host: HTMLElement): void {
-    this.hover?.dispose();
-    this.hover = new SpatialHover({
-      is3d: false,
-      viewer: this.viewer!,
-      canvas: this.canvas!,
-      port: this.spatialData,
-      selection: this.selectionStore,
-      dataset: () => this.spatial.latest?.[0] ?? null,
-      positions: (obs) => this.hoverWorldPositions(obs),
-      depths: () => null,
-      tiles: () => this.spatialTilesMgr,
-      toolActive: () => !!this.tools.regionOverlay?.toolActive,
-      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
-      inZone: (fn) => this.inZone(fn),
-    });
-    this.hover.install(host);
-  }
-
-  /**
-   * The 2D markers' WORLD positions, indexed by observation, NaN for any not on
-   * the displayed plane — the same affine and the same subset the marker layer was
-   * built from, so the tooltip cannot point at a cell that is not drawn.
-   */
-  private hoverWorldPositions(obs: SpatialObservations): Float32Array | null {
-    const dataset = this.spatial.latest?.[0];
-    if (!dataset || obs.count === 0) return null;
-    const slab = this.spatialSlab(dataset);
-    const ref = slab?.ref ?? dataset.imageRef;
-    const [sx, sy] = ref?.scale ?? [1, 1];
-    const [tx, ty] = ref?.translate ?? [0, 0];
-    const drawn = slab?.indices ?? null;
-    const out = new Float32Array(obs.count * 2).fill(NaN);
-    const n = drawn ? drawn.length : obs.count;
-    for (let k = 0; k < n; k++) {
-      const i = drawn ? drawn[k] : k;
-      out[i * 2] = obs.x[i] * sx + tx;
-      out[i * 2 + 1] = obs.y[i] * sy + ty;
-    }
-    return out;
-  }
-
   /** Observations projected to canvas pixels under the 3D camera (the spatial 3D cloud), indexed
    *  by observation with NaN for any not drawn; null when no cloud is mounted. */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null {
     return this.scene?.screenProjection?.(obs) ?? null;
-  }
-
-  /** Rebuild the markers on any dataset or view-state change. */
-  private subscribeSpatial(): void {
-    this.spatialSub?.unsubscribe();
-    const port = this.spatialData;
-    if (!port) return;
-    const selection$ = this.selectionStore?.getSelection$() ?? of(emptySelection());
-    // The display colormap is an input here, not just something read at build
-    // time: `continuousColormap: null` means "follow the image's colormap", and a
-    // setting that only takes effect at the next unrelated rebuild is not one.
-    this.spatialSub = combineLatest([
-      port.getDataset$(), this.store.getSpatialView$(), selection$,
-      this.store.getColormap(), this.store.getReverseScale(),
-    ]).subscribe(([dataset, view, selection, colormap, reverse]) => {
-      this.display.record((colormap as ColormapNode) ?? null, !!reverse);
-      // Kept so a slice change can redraw the markers for the new plane, which
-      // arrives through setZIndex rather than through any of these streams.
-      this.spatial.latest = [dataset, view, selection];
-      // The markers are about to move or change meaning, so both halves of the
-      // tooltip — where the points are, and what they are — are stale.
-      this.hover?.invalidate();
-      void this.hover?.resolveSource(dataset, view);
-      void this.rebuildSpatialPoints(dataset, view, selection);
-      this.spatialTilesMgr?.refresh();
-    });
-  }
-
-  /** (Re)build the observation marker layer for the current dataset + view state. */
-  private async rebuildSpatialPoints(
-    dataset: SpatialDataset | null, view: SpatialViewState,
-    selection: SpatialSelectionMask = emptySelection(),
-  ): Promise<void> {
-    const viewer = this.viewer;
-    if (!viewer) return;
-    const token = ++this.spatialRebuildToken;
-
-    // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
-    // superseded, and dropping the existing layer first would blank the view.
-    let faceColor: RGBA[] | RGBA;
-    const endLoading = this.badge.begin('Observations');
-    try {
-      faceColor = dataset
-        ? await this.spatialFaceColors(dataset, view, selection)
-        : SPATIAL_NEUTRAL_COLOR;
-    } catch (err) {
-      console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
-      faceColor = SPATIAL_NEUTRAL_COLOR;
-    } finally {
-      endLoading();
-    }
-    // A newer rebuild (or a teardown) started while the vector was in flight.
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-
-    if (!dataset || dataset.observations.count === 0) {
-      if (this.spatialPoints) {
-        viewer.layers.remove(this.spatialPoints);
-        this.spatialPoints = null;
-        this.spatialLayerKey = null;
-      }
-      if (this.geneMapLayer) {
-        viewer.layers.remove(this.geneMapLayer);
-        this.geneMapLayer = null;
-        this.geneMapKey = null;
-      }
-      return;
-    }
-
-    const obs = dataset.observations;
-    // A dataset whose image IS its volume shows ONE PLANE at a time, so the
-    // markers are the observations in the displayed plane, drawn in that plane's
-    // pixel grid. Without the filter the specimen's whole depth piles onto one
-    // section and reads as a smear; without the affine the coordinates are read
-    // as pixels and land off the slice entirely.
-    const slab = this.spatialSlab(dataset);
-    // The gene map goes UNDER the cells, so it is settled before they are added.
-    await this.ensureGeneMap(viewer, dataset, view, selection, slab);
-    if (token !== this.spatialRebuildToken || this.viewer !== viewer) return;
-    const ref = slab?.ref ?? dataset.imageRef;
-    const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
-    const scale = view.pointScale > 0 ? view.pointScale : 1;
-    const floor = slab?.minDiameter ?? 0;
-    const sizeOf = (i: number) =>
-      Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
-    const size: number | Float32Array =
-      typeof base === 'number' && !slab
-        ? Math.max(base, floor) * scale
-        : Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) =>
-            sizeOf(slab ? slab.indices[i] : i));
-
-    // napari's image view CLEARS the whole layer list on every render, so the
-    // markers go with it whenever the image is re-rendered — a scrub, a contrast
-    // change. The cached handle is then detached, and mutating it draws nothing:
-    // treat a layer that is no longer in the scene as absent so it gets re-added.
-    if (this.spatialPoints && !viewer.layers.items.includes(this.spatialPoints)) {
-      this.spatialPoints = null;
-      this.spatialLayerKey = null;
-    }
-
-    // A size/colour/opacity/selection change is DISPLAY-only: mutate the layer
-    // rather than dropping and re-adding it. Both setters bump the layer's
-    // dataVersion, which is what makes napari-js rebuild the instance buffer and
-    // redraw — and it avoids rebuilding 84k positions to change one number.
-    // The slice is part of the key: a scrub changes WHICH observations are drawn,
-    // which is geometry, not display.
-    const key = `${dataset.id}:${obs.count}:${slab?.slice ?? ''}`;
-    if (this.spatialPoints && key === this.spatialLayerKey) {
-      this.spatialPoints.size = size;
-      this.spatialPoints.visible = this.spatialPointsVisible();
-      this.spatialPoints.faceColor = gatherColors(faceColor, slab?.indices);
-      this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
-    this.tools.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
-      viewer.requestRender();
-      return;
-    }
-
-    if (this.spatialPoints) {
-      viewer.layers.remove(this.spatialPoints);
-      this.spatialPoints = null;
-    }
-
-    const drawn = slab?.indices;
-    const count = drawn ? drawn.length : obs.count;
-    const positions = new Float32Array(count * 2);
-    for (let i = 0; i < count; i++) {
-      const o = drawn ? drawn[i] : i;
-      positions[i * 2] = obs.x[o];
-      positions[i * 2 + 1] = obs.y[o];
-    }
-    this.spatialLayerKey = key;
-    this.spatialPoints = viewer.addPoints(positions, {
-      name: 'observations',
-      size,
-      faceColor: gatherColors(faceColor, drawn),
-      // No border: at Visium spot density an outline per marker reads as noise,
-      // and it costs a second colour array.
-      borderWidth: 0,
-      // The dataset's data->world affine. SpatialData records one per coordinate
-      // system (Visium spot coords are in the FULL-resolution frame while the
-      // served image may be the hires downscale), so without this the markers
-      // land in the right shape at the wrong scale. Defaults to identity when
-      // the coordinates are already in the image's pixel space.
-      scale: ref?.scale ?? [1, 1],
-      translate: ref?.translate ?? [0, 0],
-      visible: this.spatialPointsVisible(),
-    });
-    // Outlines, density and transcripts go back over the markers just added.
-    this.spatialTilesMgr?.afterObservations();
-    this.frameSpatialPointsOnce(viewer, dataset.id, positions, !!ref);
-    this.hideForeignImage(viewer, (!!ref || !!dataset.volume) && view.showImage !== false);
-    this.tools.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
-    this.setRegionGridFor(dataset, positions);
-  }
-
-  /**
-   * Tell the region overlay how finely a drawn vertex may be placed.
-   *
-   * Region geometry is stored in whole world units, which is right when the world IS
-   * pixels — a region should align to them. It is wrong for a dataset that registers onto
-   * no image: seqFISH's observations span about 5 x 7 units in total, so whole-unit
-   * vertices leave roughly six by eight placeable positions across the entire sample and
-   * an ROI cannot be drawn at any zoom. Nothing errors; the tool just cannot express the
-   * shape.
-   *
-   * Keyed on whether the dataset brings PIXELS rather than on the extent, because the
-   * extent cannot tell the two apart — 2,000 units is a small slide or a large section
-   * depending only on what the units are, and only the dataset knows.
-   */
-  private setRegionGridFor(dataset: SpatialDataset, positions: Float32Array): void {
-    const overlay = this.tools.regionOverlay;
-    if (!overlay?.setWorldQuantum) return;
-    if (dataset.imageRef || dataset.volume) {
-      overlay.setWorldQuantum(PIXEL_WORLD_QUANTUM);
-      return;
-    }
-    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
-    for (let i = 0; i < positions.length; i += 2) {
-      const x = positions[i];
-      const y = positions[i + 1];
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    overlay.setWorldQuantum(worldQuantumForExtent(maxX - minX, maxY - minY));
-  }
-
-  /**
-   * Hide the image layer for a dataset that brings no image of its own.
-   *
-   * The host's viewer keeps whatever image was last loaded, and for a dataset that
-   * registers onto none that picture belongs to something else entirely — the example's
-   * default slide, say. It is not merely irrelevant: the two live in different coordinate
-   * spaces (image pixels against the embedding's own units), so the leftover is magnified
-   * roughly a hundredfold. At the fitted zoom the camera sits inside its corner, where it
-   * reads as blank background, and it appears only once you zoom out far enough to find
-   * it — which is exactly how it gets noticed.
-   *
-   * Hidden rather than removed, and hidden HERE rather than by clearing the host's image
-   * state: that state drives the whole render pipeline, including a Plotly backend whose
-   * fields are declared with definite-assignment assertions, so emptying it throws from
-   * whichever field the next path happens to read. This touches one layer's visibility
-   * and nothing else.
-   */
-  private hideForeignImage(viewer: Viewer, datasetHasPixels: boolean): void {
-    // No image of its own → nothing for an overview to show either.
-    this.spatialImage?.showNavigatorFor(datasetHasPixels);
-    for (const layer of viewer.layers.items) {
-      if (layer.kind !== 'image') continue;
-      // The transcript-density raster and the gene map are image layers too, but they are
-      // data, not the tissue: the Images toggle must not take them down with the slide.
-      if (this.spatialTilesMgr?.owns(layer) || layer === this.geneMapLayer) continue;
-      // Re-shown when a dataset that owns an image comes back, so switching between
-      // datasets does not leave the tissue permanently hidden.
-      layer.visible = datasetHasPixels;
-    }
-    viewer.requestRender();
-  }
-
-  /**
-   * Frame the 2D camera on the observations, for a dataset that brings no image.
-   *
-   * The 2D camera is normally fitted to the IMAGE, because the observations are in that
-   * image's pixel space and framing the image frames them too. A dataset with no
-   * reference image has coordinates in its own units instead — seqFISH's span about
-   * 5x7 — so the image framing left over from whatever was on screen before puts the
-   * whole cloud offscreen: measured at 9.7 x 13.4 PIXELS, centred 256px from where the
-   * camera was looking. The points are all there and drawn; they are a speck. Which
-   * looks exactly like the dataset having failed to load.
-   *
-   * Once per dataset, as napari-js's `fit3d: 'once'` does for the cloud: re-colouring,
-   * slicing or picking a gene re-adds this layer, and re-framing on those would move
-   * the camera under the user — the camera tools and the canvas drag are meant to be
-   * the only things that do.
-   */
-  private frameSpatialPointsOnce(
-    viewer: Viewer, datasetId: string, positions: Float32Array, registered: boolean,
-  ): void {
-    // Gated on whether THIS dataset registers onto an image, not on `imageW`/`imageH`:
-    // those keep the last plotted image's dimensions after the host clears it, so a
-    // stale 512x383 read as "there is an image" and skipped the framing entirely.
-    if (registered) return;
-    // Once per dataset (see above).
-    if (this.spatial2dFramed?.viewer === viewer
-      && this.spatial2dFramed.datasetId === datasetId) return;
-
-    const fit = framePositions(
-      positions, this.canvas?.clientWidth ?? 0, this.canvas?.clientHeight ?? 0,
-    );
-    // Null means there is nothing to frame on; leave the camera where it is rather
-    // than moving the view for a dataset we cannot fit.
-    if (!fit) return;
-    viewer.camera.set(fit.center, fit.zoom ?? viewer.camera.zoom);
-    this.spatial2dFramed = { viewer, datasetId };
-  }
-
-  /**
-   * The **gene map**: the active gene's expression as a continuous field drawn under
-   * the cells.
-   *
-   * A scatter coloured by a gene says which cells express it; it cannot say where,
-   * because the eye will not integrate thousands of dots into a territory. The field
-   * is a kernel-weighted MEAN per cell (see `spatial-expression.ts`), so a dense
-   * region does not glow merely for being dense, and it is transparent wherever no
-   * cell was measured — an unsampled gap must not read as "not expressed".
-   *
-   * It shares the points' LUT, percentile window and log flag, so the layer under
-   * the cells and the cells themselves cannot disagree about what a colour means.
-   *
-   * Estimated on the DISPLAYED image's pixel grid, coarsened so the long side is at
-   * most {@link GENE_MAP_MAX_SIDE}: a smooth field gains nothing from a slide's full
-   * resolution. For a volume-backed dataset that grid is the current slice, and only
-   * that plane's observations are included — the same rule the markers follow.
-   */
-  private async ensureGeneMap(
-    viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState,
-    selection: SpatialSelectionMask,
-    slab: { ref: SpatialImageRef; indices: Uint32Array; slice: number } | null,
-  ): Promise<void> {
-    const gene = view.geneMap && view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
-    const port = this.spatialData;
-    const smoothing = view.geneMapSmoothing > 0 ? view.geneMapSmoothing : 1;
-    const clip = view.percentileClip ?? [0.01, 0.99];
-
-    // Two clocks: the FIELD depends on the gene, the plane and the bandwidth, while
-    // the colours depend on the window, the log flag and the opacity. Recolouring a
-    // cached field is a fraction of estimating one.
-    const fieldKey = gene
-      ? [dataset.id, gene, slab?.slice ?? '', smoothing, this.spatial.selectionRev(selection)].join('|')
-      : null;
-    const key = fieldKey
-      ? [
-        fieldKey, clip.join(','), view.logScale ? 'log' : 'lin', view.geneMapOpacity,
-        this.display.continuousColormapKey(view),
-      ].join('|')
-      : null;
-    if (key === this.geneMapKey) return;
-
-    if (this.geneMapLayer) {
-      viewer.layers.remove(this.geneMapLayer);
-      this.geneMapLayer = null;
-    }
-    // ANY change here changes the order the cells have to sit above — including the
-    // first one, where there is no previous layer to remove — and the layer list is
-    // append-only. So drop the markers unconditionally and let the rebuild below put
-    // them back on top; otherwise the field is appended over the measurement.
-    if (this.spatialPoints) {
-      viewer.layers.remove(this.spatialPoints);
-      this.spatialPoints = null;
-      this.spatialLayerKey = null;
-    }
-    this.geneMapKey = key;
-    if (!key || !gene || !port) {
-      this.spatial.geneMap.field = null;
-      this.spatial.geneMap.key = null;
-      return;
-    }
-
-    // The raster covers the displayed image; without one there is nothing to
-    // overlay and the cloud is the 3D mode's business, not this one's. Gated on the
-    // DATASET bringing pixels, not on imageW/H: those keep the last plotted image's
-    // size after the host clears it, which would size the map over the wrong extent.
-    if (!slab && !dataset.imageRef) return;
-    const imageW = slab ? dataset.volume!.width : this.imageW;
-    const imageH = slab ? dataset.volume!.height : this.imageH;
-    if (!imageW || !imageH) return;
-    const step = Math.max(
-      1,
-      Math.ceil(Math.max(imageW, imageH) / GENE_MAP_MAX_SIDE),
-    );
-
-    if (fieldKey !== this.spatial.geneMap.key) {
-      let values: Float32Array;
-      try {
-        values = await port.getFeatureVector(gene);
-      } catch (err) {
-        console.warn(`[napari-js] gene map: "${gene}" unavailable`, err);
-        this.geneMapKey = null;
-        return;
-      }
-      if (this.viewer !== viewer || this.geneMapKey !== key) return;
-      const inSelection = selection.count > 0 ? maskToIndices(selection.mask) : undefined;
-      this.spatial.geneMap.field = expressionField(dataset.observations, {
-        ref: slab?.ref ?? dataset.imageRef,
-        width: Math.ceil(imageW / step),
-        height: Math.ceil(imageH / step),
-        step,
-        sigma: GENE_MAP_SIGMA * smoothing,
-        values,
-        // A plane wins over a selection: the 2D view is showing one section, so a
-        // field spanning the specimen's depth would not be the thing on screen.
-        indices: slab?.indices ?? inSelection,
-      });
-      this.spatial.geneMap.key = fieldKey;
-    }
-    const field = this.spatial.geneMap.field;
-    if (!field) return;
-
-    const lut = this.display.spatialLut(view);
-    // Over the measured pixels only: unmeasured ones are 0 and would drag the low end down.
-    const [lo, hi] = fieldContrastWindow(field, clip[0], clip[1]);
-    const rgba = colorExpressionField(field, lut, [lo, hi], {
-      log: view.logScale,
-      // The MAP's own opacity: reading a field under the cells means turning the
-      // cells down, which must not take the field with them.
-      opacity: view.geneMapOpacity,
-    });
-    this.geneMapLayer = viewer.addImage(
-      { kind: 'typed', width: field.width, height: field.height, channels: 4, dtype: 'uint8', data: rgba },
-      {
-        name: `gene map · ${gene}`,
-        scale: [step, step],
-        translate: [0, 0],
-        blending: 'translucent',
-      },
-    );
-    viewer.requestRender();
-  }
-
-  /**
-   * The plane a volume-backed dataset is currently showing: its pixel affine, the
-   * observations that fall in it, and the marker floor that grid needs.
-   *
-   * Null for a dataset with a real `imageRef` (its coordinates are already the
-   * image's pixels and every observation belongs to the one section) and for one
-   * with no volume at all — both of which draw exactly as before.
-   */
-  private spatialSlab(dataset: SpatialDataset): {
-    ref: SpatialImageRef; indices: Uint32Array; slice: number; minDiameter: number;
-  } | null {
-    const volume = dataset.volume;
-    if (dataset.imageRef || !volume) return null;
-    const slice = this.loaded?.z ?? 0;
-    return {
-      ref: volumeImageRef(volume, dataset.micronsPerUnit),
-      indices: observationsInSlice(dataset.observations, volume, slice),
-      slice,
-      minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
-    };
-  }
-
-  /**
-   * Redraw the observation markers over a freshly rendered image.
-   *
-   * Two reasons, both invisible from the spatial store — which is why a scrub or a
-   * re-render never reached the markers on its own:
-   *  - the image render CLEARS the layer list, taking the markers with it;
-   *  - over a volume-backed dataset the displayed plane decides which
-   *    observations belong on screen at all, so the cells have to move with the
-   *    section rather than hang over a different one.
-   *
-   * Uses the latest values the marker subscription saw; a no-op until it has seen
-   * any, in the 3D cloud (no image, no plane), and with no dataset to draw.
-   */
-  private redrawSpatialMarkers(): void {
-    const latest = this.spatial.latest;
-    if (!latest?.[0] || isSpatialOmics3d(this.currentPlotType)) return;
-    void this.rebuildSpatialPoints(...latest);
-  }
-
-  /**
-   * Per-observation colours for the current view state, or a single flat colour when nothing is
-   * selected to colour by. Categorical columns use the column's own palette; continuous columns
-   * and gene vectors go through the active colormap with a percentile-clipped window.
-   */
-  private async spatialFaceColors(
-    dataset: SpatialDataset, view: SpatialViewState, selection: SpatialSelectionMask,
-  ): Promise<RGBA[] | RGBA> {
-    const port = this.spatialData;
-    const colorBy = view.colorBy;
-    // Everything NOT selected is muted; with nothing selected, nothing is muted
-    // and the whole tissue reads normally (the CosMx highlight-vs-mute rule).
-    const muted = mutedFromSelection(selection);
-
-    if (!port || !colorBy) {
-      // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
-      // does not allocate 84k of them.
-      if (!muted && view.opacity >= 1) return SPATIAL_NEUTRAL_COLOR;
-      // Not uniform — the opacity control or a selection varies the alpha, so it
-      // has to be per-point. Returning the constant tuple here is what made the
-      // Opacity slider do nothing in the default state, which is the state anyone
-      // lands in before picking a colour source.
-      return toRgbaTuples(encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [SPATIAL_NEUTRAL_HEX],
-        opacity: view.opacity,
-        muted,
-      }));
-    }
-
-    if (colorBy.kind === 'column') {
-      const column: SpatialColumn = await port.getColumn(colorBy.name);
-      if (isCategoricalColumn(column)) {
-        const rgba = encodeCategorical(column.codes, {
-          colors: resolveCategoryColors(column.meta),
-          opacity: view.opacity,
-          muted,
-        });
-        // Groups switched off in the Cells panel hide their dots too, when the dots are
-        // coloured by that same grouping.
-        const groupColumn = cellTypeColumnFor(dataset, view);
-        if (view.hiddenGroups?.length && groupColumn === colorBy.name) {
-          const off = new Set(view.hiddenGroups);
-          const hide = column.meta.categories.map((c) => off.has(c));
-          for (let i = 0; i < column.codes.length; i++) {
-            const c = column.codes[i];
-            if (c !== NO_CATEGORY && hide[c]) rgba[4 * i + 3] = 0;
-          }
-        }
-        return toRgbaTuples(rgba);
-      }
-      // A continuous column may carry its own log hint (counts); the view's
-      // toggle wins once the user has set it.
-      return toRgbaTuples(this.encodeSpatialContinuous(column.values, view, muted));
-    }
-
-    const values = await port.getFeatureVector(colorBy.name);
-    return toRgbaTuples(this.encodeSpatialContinuous(values, view, muted));
-  }
-
-  /** Continuous values → RGBA through the active colormap and a clipped window (2D markers). */
-  private encodeSpatialContinuous(
-    values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null,
-  ): Float32Array {
-    const lut = this.display.spatialLut(view);
-    return encodeSpatialContinuous(values, view, lut, this.spatial.contrastWindows, muted);
   }
 
   private fitCameraSoon(): void {
@@ -1072,38 +434,25 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     /* no-op */
   }
 
+  /**
+   * End the mounted scene: abort its lifetime (its descriptor poll, tile counts, frame loading and
+   * awaits) and dispose it — its layers, keys, subscriptions and listeners go with it, so the next
+   * plot can never inherit an "already built" key (NAPARI-SVC-1) — then tear the viewer down.
+   */
   reset(): void {
-    this.mounted = null;
-    this.scene?.dispose();
-    this.scene = null;
-    // End the previous scene: its frame loading, descriptor poll, tile counts and awaits.
     this.loading.abort();
     this.loading = new AbortController();
     this.lifetime.abort();
     this.lifetime = new AbortController();
-    this.spatialImage = null;
+    this.scene?.dispose();
+    this.scene = null;
     this.badge.reset();
     this.tools.teardown();
     this.tileClient.startScene(this.lifetime.signal);
-    this.spatialTilesMgr?.detach();
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
-    this.spatialSub?.unsubscribe();
-    this.spatialSub = null;
-    this.hover?.dispose();
-    this.hover = null;
-    this.spatialPoints = null;
-    this.spatialLayerKey = null;
-    // The gene maps' and density volumes' layers belonged to the disposed viewer, so their keys
-    // must go with it: kept, the next viewer would see "already built" and never add them back.
-    // The estimated FIELDS (geneMapField*, geneMapVolumeField*) are viewer-independent and stay
-    // cached, so a re-plot recolours instead of re-estimating.
-    this.geneMapLayer = null;
-    this.geneMapKey = null;
-    // Invalidate any colour fetch still in flight so it can't attach to the next scene.
-    this.spatialRebuildToken++;
   }
 
   relayout(_trueImageSize?: number[]): void {

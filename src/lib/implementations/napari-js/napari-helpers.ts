@@ -3,16 +3,7 @@ import type { ChannelView } from 'napari-js';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { bt601Luminance } from '../../contracts/intensity';
-import {
-  PlotType,
-  NAPARI_DEFAULT_DECIMATE,
-  isNapari3d,
-  isNapariScatter,
-  isNapariScatter3d,
-  isNapariSurface,
-  isSpatialOmics,
-  isSpatialOmics3d,
-} from '../../contracts/plot-type';
+import { NAPARI_DEFAULT_DECIMATE } from '../../contracts/plot-type';
 
 /**
  * Pure helpers and constants of the napari-js backend: no viewer, no store, no network. Shared by
@@ -40,19 +31,6 @@ export function colormapId(value: unknown): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return `#${(hash >>> 0).toString(36)}`;
-}
-
-/** What a plot mounts, as far as a slice change is concerned. */
-export type SceneKind = 'image2d' | 'volume' | 'surface' | 'scatter3d' | 'spatial3d';
-
-/** The scene kind `NapariVisualizerService.plot` mounts for a plot type (same dispatch). */
-export function sceneKindOf(plotType: PlotType): SceneKind {
-  if (isSpatialOmics3d(plotType)) return 'spatial3d';
-  if (isSpatialOmics(plotType) || isNapariScatter(plotType)) return 'image2d';
-  if (isNapariScatter3d(plotType)) return 'scatter3d';
-  if (isNapariSurface(plotType)) return 'surface';
-  if (isNapari3d(plotType)) return 'volume';
-  return 'image2d';
 }
 
 export const VOLUME_MAX_SLICE = 1024; // "Full" in-plane cap; the default ¼ load uses 256
