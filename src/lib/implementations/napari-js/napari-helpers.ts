@@ -121,9 +121,8 @@ export function rgbaToLuminance(rgba: ArrayLike<number>, out: Uint8Array, offset
  * (`osd/display-pipeline.ts`: output = t^(1/γ), so γ > 1 BRIGHTENS the midtones), while
  * napari-js's shaders apply `pow(t, gamma)` (napari's convention: γ > 1 darkens). Every gamma
  * handed to napari-js goes through here, so one slider in the Channels & Histogram dialog moves
- * both backends the same way. (Invert is still applied in a different order — napari-js does
- * window → invert → gamma, OSD window → gamma → invert — which only matters with γ ≠ 1 and
- * invert on; aligning that is the OSD pipeline's change, NAPARI-BOUNDARY-2.)
+ * both backends the same way. Both backends apply window → invert → gamma, per channel before
+ * an additive merge (NAPARI-BOUNDARY-2; pinned by `osd/display-pipeline.cross-backend.spec.ts`).
  */
 export function toNapariGamma(gamma: number | undefined): number {
   return gamma != null && gamma > 0 ? 1 / gamma : 1;

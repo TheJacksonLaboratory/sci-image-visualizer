@@ -60,8 +60,9 @@ export class OsdTileRecolorer {
    *  read synchronously by recolorTile. Channel 0 drives grayscale windowing;
    *  R/G/B (indices 0-2) drive RGB per-channel windowing. */
   channelStates: IChannelState[] = [];
-  /** Inverted background (white = zero): inverts the display value before the
-   *  LUT (grayscale) / per channel (RGB). */
+  /** Inverted background (white = zero): inverts the windowed value before the
+   *  gamma and the LUT (grayscale) / per channel before the additive merge (RGB
+   *  and multichannel), as napari-js does. */
   invertBg = false;
   /** Bumped by every display invalidation. A recolor round captures it and, after
    *  each `await`, abandons the tile once a newer round has started. Writing a

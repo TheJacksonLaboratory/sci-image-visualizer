@@ -124,6 +124,31 @@ describe('DisplayPipeline', () => {
     expect([d[0], d[1], d[2]]).toEqual([255, 255, 255]);
   });
 
+  it('invert flips each channel before the merge, not the merged colour (NAPARI-BOUNDARY-2)', () => {
+    // Two white-tinted channels: per channel (255-200) + (255-100) = 210 on R, G and B.
+    // Inverting the merged (saturated) colour instead would give 255 - 255 = 0.
+    const { pipe } = makePipeline({
+      gray: false,
+      invert: true,
+      channels: [ch({ color: '#ffffff' }), ch({ index: 1, color: '#ffffff' }), ch({ index: 2, visible: false })],
+    });
+    const d = rgba([200, 100, 0]);
+    pipe.applyToRgba(d);
+    expect([d[0], d[1], d[2]]).toEqual([210, 210, 210]);
+  });
+
+  it('invert comes before gamma for each RGB channel', () => {
+    const { pipe } = makePipeline({
+      gray: false,
+      invert: true,
+      channels: [ch({ color: '#ff0000', gamma: 2 }), RGB_DEFAULTS[1], RGB_DEFAULTS[2]],
+    });
+    const d = rgba([64, 0, 255]);
+    pipe.applyToRgba(d);
+    // R: (1 - 64/255)^(1/2) ≈ 0.8655 → 221 (gamma-then-invert would give 255 - 128 = 127).
+    expect([d[0], d[1], d[2]]).toEqual([221, 255, 0]);
+  });
+
   // ── rgbNeedsRecolor gate ──────────────────────────────────────────────
   it('rgbNeedsRecolor is false at the R/G/B defaults (tile passthrough)', () => {
     const { pipe } = makePipeline({ gray: false, channels: RGB_DEFAULTS });
@@ -149,6 +174,24 @@ describe('DisplayPipeline', () => {
     expect(g[255]).toBe(255);
     expect(b[255]).toBe(255);
     expect(g[128]).toBe(128); // linear mid
+  });
+
+  it('channelRgbLut applies invert (window → invert → gamma) per channel', () => {
+    const { pipe } = makePipeline({ invert: true });
+    const { r, g, b } = pipe.channelRgbLut(ch({ min: 0, max: 255, gamma: 2, color: '#00ffff' }));
+    expect(r[0]).toBe(0);     // no red in cyan, inverted or not
+    expect(g[0]).toBe(255);   // inverted: 0 → full tint
+    expect(b[255]).toBe(0);   // inverted: 255 → black
+    expect(g[64]).toBe(221);  // (1 - 64/255)^(1/2) ≈ 0.8655
+  });
+
+  it('compositeChannels inverts each channel before summing', () => {
+    const { pipe } = makePipeline({ gray: false, invert: true });
+    const out = pipe.compositeChannels(
+      [rgba([100, 100, 100]), rgba([200, 200, 200]), rgba([50, 50, 50])],
+      [ch({ color: '#ff0000' }), ch({ color: '#00ff00', visible: false }), ch({ color: '#0000ff' })],
+    );
+    expect(Array.from(out)).toEqual([155, 0, 205, 255]);
   });
 
   it('channelIntensity returns 0 for an empty window span', () => {

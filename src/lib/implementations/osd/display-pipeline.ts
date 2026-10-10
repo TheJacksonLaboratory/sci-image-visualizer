@@ -28,8 +28,11 @@ export class DisplayPipeline {
    * whether any opaque pixel was written.
    *  - Grayscale: intensity → window → invert → gamma → colormap LUT.
    *  - RGB/multichannel: additive pseudo-colour merge — each visible channel's
-   *    windowed intensity is tinted by its assigned colour and summed (Fiji
-   *    "Merge Channels"). Defaults (R=red, G=green, B=blue) are the identity.
+   *    intensity (window → invert → gamma, see {@link channelIntensity}) is
+   *    tinted by its assigned colour and summed (Fiji "Merge Channels"), then
+   *    clamped. Invert is per channel, before the merge, as napari-js inverts
+   *    each additive layer (NAPARI-BOUNDARY-2) — not the composite. Defaults
+   *    (R=red, G=green, B=blue) are the identity.
    */
   applyToRgba(d: Uint8ClampedArray): boolean {
     let changed = false;
@@ -82,7 +85,7 @@ export class DisplayPipeline {
         for (let k = 0; k < 3; k++) {
           const c = chans[k];
           if (c && !c.visible) continue;
-          const v = this.channelIntensity(d[i + k], c);
+          const v = this.channelIntensity(d[i + k], c, invertBg);
           const tint = tints[k];
           oR += v * tint[0];
           oG += v * tint[1];
@@ -91,7 +94,6 @@ export class DisplayPipeline {
         if (oR > 255) oR = 255;
         if (oG > 255) oG = 255;
         if (oB > 255) oB = 255;
-        if (invertBg) { oR = 255 - oR; oG = 255 - oG; oB = 255 - oB; }
         d[i] = oR;
         d[i + 1] = oG;
         d[i + 2] = oB;
@@ -101,16 +103,17 @@ export class DisplayPipeline {
     return changed;
   }
 
-  /** Precomputed lum(0..255) → tinted-RGB lookup for a channel's window/gamma/
-   *  colour. Building it costs 256 channelIntensity() calls; using it makes a
+  /** Precomputed lum(0..255) → tinted-RGB lookup for a channel's window/invert/
+   *  gamma/colour. Building it costs 256 channelIntensity() calls; using it makes a
    *  full-tile recolor ~262k array lookups instead of ~262k Math.pow() calls. */
   channelRgbLut(st?: IChannelState): { r: Uint8ClampedArray; g: Uint8ClampedArray; b: Uint8ClampedArray } {
     const r = new Uint8ClampedArray(256);
     const g = new Uint8ClampedArray(256);
     const b = new Uint8ClampedArray(256);
     const [tr, tg, tb] = this.tint01(st);
+    const invert = this.host.invertBg();
     for (let lum = 0; lum < 256; lum++) {
-      const v = this.channelIntensity(lum, st);
+      const v = this.channelIntensity(lum, st, invert);
       r[lum] = v * tr;
       g[lum] = v * tg;
       b[lum] = v * tb;
@@ -154,14 +157,24 @@ export class DisplayPipeline {
     }
   }
 
-  /** Windowed + gamma intensity (0..255) for a channel, ignoring tint/invert. */
-  channelIntensity(val: number, c?: IChannelState): number {
-    if (!c) return val;
-    const span = c.max > c.min ? c.max - c.min : 0;
-    if (!span) return 0;
-    let t = (val - c.min) / span;
-    t = t < 0 ? 0 : t > 1 ? 1 : t;
-    if (c.gamma > 0 && c.gamma !== 1) t = Math.pow(t, 1 / c.gamma);
+  /**
+   * A channel's display intensity (0..255, before its tint): window → invert →
+   * gamma, the order of napari-js's `windowGamma`, which every additive napari
+   * layer applies on its own before the layers are summed (NAPARI-BOUNDARY-2).
+   * The gamma exponent is the ImageJ one (t^(1/γ)). An empty window span maps to
+   * 0 before the invert; with no channel state the value passes through.
+   */
+  channelIntensity(val: number, c?: IChannelState, invert = false): number {
+    let t: number;
+    if (!c) {
+      t = val / 255;
+    } else {
+      const span = c.max > c.min ? c.max - c.min : 0;
+      t = span ? (val - c.min) / span : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+    }
+    if (invert) t = 1 - t;
+    if (c && c.gamma > 0 && c.gamma !== 1) t = Math.pow(t, 1 / c.gamma);
     return t * 255;
   }
 
