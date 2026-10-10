@@ -54,6 +54,10 @@ export const VISUALIZER_TOKEN_BINDINGS: Provider[] = [
  * embedded viewer gets its own router/Plotly/OSD/stores/tools while the rest of the
  * app keeps the default root instance.
  *
+ * In an application's own providers (`bootstrapApplication(App, { providers: [
+ * provideVisualization(), …] })`) it binds the one app-wide chain instead — the
+ * standalone counterpart of importing the deprecated `VisualizationModule`.
+ *
  * Lists EVERY stateful service in the chain. Stateless collaborators (HttpClient,
  * MessageService, WandService) deliberately resolve to root — they hold no
  * per-viewer state, so sharing them is correct and keeps this list minimal. The

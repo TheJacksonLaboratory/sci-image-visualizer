@@ -28,5 +28,6 @@ export class SpatialChartWindowComponent {
   @Output() readonly closed = new EventEmitter<void>();
   /** The window is up and its div exists: the chart can be drawn into it. */
   @Output() readonly shown = new EventEmitter<void>();
+  /** The window was resized: re-fit the chart. */
   @Output() readonly resizeEnd = new EventEmitter<void>();
 }

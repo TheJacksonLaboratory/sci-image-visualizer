@@ -48,8 +48,11 @@ interface GeneRowView {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialGeneTreeComponent implements OnChanges {
+  /** The spatial controls this panel reads and writes through; null without a `SPATIAL_DATA_PORT`. */
   @Input() controls: ISpatialControls | null = null;
+  /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** Transcripts of each selected gene in the current view, from the renderer. */
   @Input() geneCounts: Record<string, number> | null = null;

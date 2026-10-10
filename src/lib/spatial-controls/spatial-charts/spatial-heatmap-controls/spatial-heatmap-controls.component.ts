@@ -24,9 +24,12 @@ export class SpatialHeatmapControlsComponent {
   @Input() geneOptions: { label: string; value: string }[] = [];
   /** The genes the rows are. */
   @Input() genes: string[] = [];
+  /** Each gene is z-scored across the groups. */
   @Input() zScore = true;
+  /** The genes picked for the rows. */
   @Output() readonly genesChange = new EventEmitter<string[]>();
   /** What is typed in the picker's filter box. */
   @Output() readonly filterChange = new EventEmitter<string>();
+  /** The z-score toggle changed. */
   @Output() readonly zScoreChange = new EventEmitter<boolean>();
 }

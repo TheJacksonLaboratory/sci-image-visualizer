@@ -42,21 +42,29 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialObservationsPanelComponent implements OnChanges {
+  /** The spatial controls this panel reads and writes through; null without a `SPATIAL_DATA_PORT`. */
   @Input() controls: ISpatialControls | null = null;
+  /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** The gene list "Colour by gene" picks from, shared with the other gene dropdowns. */
   @Input() genes: GenePickerModel | null = null;
   /** The key's categorical legend, or null — which also decides the continuous knobs. */
   @Input() legend: SpatialLegendEntry[] | null = null;
+  /** The key's continuous colour bar (a CSS gradient), or null when categorical. */
   @Input() colorBarCss: string | null = null;
+  /** The current selection (its count, and what is muted). */
   @Input() selection: SpatialSelectionMask = emptySelection();
+  /** The legend row whose category is selected, for highlighting. */
   @Input() selectedCategory: number | null = null;
+  /** Colormap tree for the continuous colour scale. */
   @Input() colormapOptions: ColormapNode[] = [];
   /** Set while the 3D cloud is the active mode. */
   @Input() is3d = false;
   /** Whether the Observations section is expanded. */
   @Input() open = false;
+  /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
   /** A legend row was clicked (see the key). */
   @Output() readonly categoryClicked = new EventEmitter<number>();

@@ -33,11 +33,15 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialMarkerGenesFormComponent implements OnChanges {
+  /** The spatial controls this panel reads and writes through; null without a `SPATIAL_DATA_PORT`. */
   @Input() controls: ISpatialControls | null = null;
+  /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** Whether the form is shown. Opening it picks the cells' grouping and every cluster. */
   @Input() open = false;
+  /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
 
   protected markerColumn: string | null = null;

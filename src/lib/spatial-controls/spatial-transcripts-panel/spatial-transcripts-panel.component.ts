@@ -61,8 +61,11 @@ export interface GeneMenuItem {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialTranscriptsPanelComponent implements OnChanges {
+  /** The spatial controls this panel reads and writes through; null without a `SPATIAL_DATA_PORT`. */
   @Input() controls: ISpatialControls | null = null;
+  /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** The gene list the transcript genes are picked from, shared with the other gene dropdowns. */
   @Input() genes: GenePickerModel | null = null;
@@ -76,6 +79,7 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   @Input() colormapOptions: ColormapNode[] = [];
   /** Whether the section is expanded. */
   @Input() open = false;
+  /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
 
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */

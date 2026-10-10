@@ -36,8 +36,11 @@ import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-gro
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialCellsPanelComponent implements OnChanges {
+  /** The spatial controls this panel reads and writes through; null without a `SPATIAL_DATA_PORT`. */
   @Input() controls: ISpatialControls | null = null;
+  /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** The gene list the "Gene Expression" colouring picks from, shared with the other
    *  gene dropdowns. */
@@ -46,6 +49,7 @@ export class SpatialCellsPanelComponent implements OnChanges {
   @Input() colorBarCss: string | null = null;
   /** Whether the section is expanded. */
   @Input() open = true;
+  /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
 
   /** Virtual-scrolled only past this many options: the scroller earns its complexity for

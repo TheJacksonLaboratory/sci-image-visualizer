@@ -85,6 +85,8 @@ export * from './lib/models/class-preset';
 export { ShapeSelection } from './lib/models/shape';
 
 // ── Angular module + providers ───────────────────────────────────────────
+// DEPRECATED, kept for one minor release: a shim re-exporting the standalone components
+// below and binding the host-facing tokens at root.
 export { VisualizationModule } from './lib/visualization.module';
 // DEPRECATED as public API, kept for one release: hosts should inject the tokens
 // (VISUALIZER / REGION_EDITOR_API / CHANNEL_HISTOGRAM_API), which the library binds
@@ -98,10 +100,10 @@ export { provideVisualization } from './lib/provide-visualization';
 // A host that renders its own <p-toast> with one of these keys shows each notice twice.
 export { VIZ_TOAST_KEY, VIZ_ALERT_TOAST_KEY } from './lib/toast-outlets';
 
-// ── Public components (exported by VisualizationModule) ───────────────────
-// ng-packagr requires module-exported components to be reachable from the
-// entry point so consumers get their types; these are the embeddable elements
-// (`<visualizer>`, `<region-editor>`, `<hex-color-picker>`).
+// ── Public components (standalone; also re-exported by VisualizationModule) ──
+// The embeddable elements (`<visualizer>`, `<region-editor>`, `<hex-color-picker>`,
+// `<channel-histogram>`, `<spatial-controls>`, `<spatial-charts>`). Each is standalone:
+// a host imports it directly and binds the backend chain with `provideVisualization()`.
 export { VisualizerComponent } from './lib/visualizer.component';
 export { RegionEditorComponent } from './lib/region-editor/region-editor.component';
 export { HexColorPickerComponent } from './lib/hex-color-picker/hex-color-picker.component';

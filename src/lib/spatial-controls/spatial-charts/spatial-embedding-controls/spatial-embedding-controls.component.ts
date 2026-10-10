@@ -29,7 +29,9 @@ const IDLE: EmbeddingComputeState = { running: false, fraction: null, backend: n
 export class SpatialEmbeddingControlsComponent {
   /** Whether the Embedding tab is the one on screen. */
   @Input() isEmbedding = false;
+  /** The embeddings the dataset offers (plus one to compute, when offered). */
   @Input() embeddings: SpatialEmbeddingMeta[] = [];
+  /** The embedding drawn, or null. */
   @Input() embedding: SpatialEmbeddingMeta | null = null;
   /** The selected embedding is one this browser would have to compute… */
   @Input() computable = false;
@@ -45,8 +47,12 @@ export class SpatialEmbeddingControlsComponent {
   @Input() tooLargeNote: string | null = null;
   /** Whether the chart is in its own window. */
   @Input() detached = false;
+  /** Another embedding was picked (its name). */
   @Output() readonly embeddingChange = new EventEmitter<string>();
+  /** Compute the selected embedding in this browser. */
   @Output() readonly compute = new EventEmitter<void>();
+  /** Stop the running computation. */
   @Output() readonly cancel = new EventEmitter<void>();
+  /** Move the chart into its own window, or back into the panel. */
   @Output() readonly detachedToggle = new EventEmitter<void>();
 }
