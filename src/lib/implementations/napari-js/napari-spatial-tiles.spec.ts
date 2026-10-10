@@ -17,6 +17,13 @@ function drawnOf<T = { kind: string; bin?: { size: number }; merged: SpatialTran
   return (tiles as unknown as { hover: { drawn: T } }).hover.drawn;
 }
 
+/** The transcript job planner (private; its density-grid cache is poked by the specs). */
+function jobsOf(tiles: NapariSpatialTileLayers) {
+  return (tiles as unknown as {
+    jobs: { port: unknown; densityFor(d: string, g: string[], b: number): Promise<unknown> };
+  }).jobs;
+}
+
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
     count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
@@ -373,9 +380,8 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
   it('keeps each dataset\'s density grids apart, though their genes and bins match', async () => {
     const { tiles } = setup(4, 100_000);
     const getDensity = jest.fn(async () => ({}));
-    (tiles as unknown as { port: unknown }).port = { getDensity };
-    const densityFor = (id: string) =>
-      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> }).densityFor(id, ['A'], 8);
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = (id: string) => jobsOf(tiles).densityFor(id, ['A'], 8);
     await densityFor('one');
     await densityFor('two');
     await densityFor('one');
@@ -386,10 +392,8 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
   it('keeps a density grid that is still in use when the cache is full (LRU, not FIFO)', async () => {
     const { tiles } = setup(4, 100_000);
     const getDensity = jest.fn(async () => ({}));
-    (tiles as unknown as { port: unknown }).port = { getDensity };
-    const densityFor = (gene: string) =>
-      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> })
-        .densityFor('d', [gene], 8);
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = (gene: string) => jobsOf(tiles).densityFor('d', [gene], 8);
     await densityFor('first');
     for (let i = 0; i < 300; i++) {
       await densityFor(`g${i}`);
@@ -402,10 +406,8 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
   it('asks again for a density grid whose request failed', async () => {
     const { tiles } = setup(4, 100_000);
     const getDensity = jest.fn().mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValue({});
-    (tiles as unknown as { port: unknown }).port = { getDensity };
-    const densityFor = () =>
-      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> })
-        .densityFor('d', ['A'], 8);
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = () => jobsOf(tiles).densityFor('d', ['A'], 8);
     await expect(densityFor()).rejects.toThrow('HTTP 503');
     await densityFor();
     expect(getDensity).toHaveBeenCalledTimes(2);
