@@ -1,7 +1,7 @@
 import { Component, Inject, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { OverlayPanel } from 'primeng/overlaypanel';
 import { saveAs } from 'file-saver';
-import { Subscription } from 'rxjs';
+import { Subject, Subscription } from 'rxjs';
 
 import { Rectangle, Region } from '../models/region';
 import { withRegionPatch } from '../models/region-clone';
@@ -72,6 +72,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** The running GeoJSON save; unsubscribing cancels it (Cancel / destroy). */
   private _saveAsSub?: Subscription;
   private _saveAsCheckSub = new Subscription();
+  /** Save-as file names to check for an existing file (debounced). */
+  private readonly saveAsCheck$ = new Subject<string>();
 
   showExportDialog = false;
   exportFilename = '';
@@ -158,7 +160,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.recomputeClassCounts();
     });
 
-    this._saveAsCheckSub = this.persistence.fileExists$.subscribe((exists) => {
+    this._saveAsCheckSub = this.persistence.fileExists(this.saveAsCheck$).subscribe((exists) => {
       this.saveAsFileExists = exists;
     });
 
@@ -809,7 +811,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.saveAsFilename = filename;
     this.saveAsFileExists = false;
     this.showSaveAsDialog = true;
-    this.persistence.checkExists(this.saveAsFilename);
+    this.saveAsCheck$.next(this.saveAsFilename);
   }
 
   /** Save a folder stack's regions as one geojson per slice-file (jit-ui#93). */
@@ -830,7 +832,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   checkSaveAsFileExists() {
-    this.persistence.checkExists(this.saveAsFilename);
+    this.saveAsCheck$.next(this.saveAsFilename);
   }
 
   confirmSaveAs() {

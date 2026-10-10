@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@angular/core';
 import { saveAs } from 'file-saver';
-import { Observable, Subject, Subscription, of } from 'rxjs';
+import { Observable, Subscription, of } from 'rxjs';
 import { catchError, debounceTime, switchMap } from 'rxjs/operators';
 
 import { Region } from '../models/region';
@@ -19,13 +19,11 @@ export interface SliceGeoJson {
  * Region file I/O for the Region Editor: default file names, GeoJSON download
  * (export), save to the host through {@link RegionIoPort} (with a debounced
  * "file exists" check), per-slice saves for folder stacks, and reading an
- * imported file. Provided by the editor, one per editor instance; it holds no
- * dialog state — the editor shows the dialogs and toasts.
+ * imported file. Provided by the editor; it holds no state — the editor owns
+ * the dialogs, the toasts and the running jobs.
  */
 @Injectable()
 export class RegionPersistenceService {
-  private readonly existsCheck$ = new Subject<string>();
-
   constructor(
     @Inject(REGION_EDITOR_API) private readonly api: IRegionEditorApi,
     @Inject(REGION_IO_PORT) private readonly io: RegionIoPort,
@@ -72,18 +70,15 @@ export class RegionPersistenceService {
   }
 
   /**
-   * Result of the latest {@link checkExists} name, debounced 400 ms; a newer
-   * name supersedes an in-flight check. A failed check reads as "does not
-   * exist" and later checks keep working. Checks only run while subscribed.
+   * Whether each file name in `names` already exists on the host, debounced
+   * 400 ms; a newer name supersedes an in-flight check. A failed check reads as
+   * "does not exist" and later checks keep working.
    */
-  readonly fileExists$: Observable<boolean> = this.existsCheck$.pipe(
-    debounceTime(400),
-    switchMap((name) => this.io.roiFileExists(name).pipe(catchError(() => of(false)))),
-  );
-
-  /** Queue an existence check for `name` (see {@link fileExists$}). */
-  checkExists(name: string): void {
-    this.existsCheck$.next(name);
+  fileExists(names: Observable<string>): Observable<boolean> {
+    return names.pipe(
+      debounceTime(400),
+      switchMap((name) => this.io.roiFileExists(name).pipe(catchError(() => of(false)))),
+    );
   }
 
   /** Download `regions` as a GeoJSON file named `filename`. */

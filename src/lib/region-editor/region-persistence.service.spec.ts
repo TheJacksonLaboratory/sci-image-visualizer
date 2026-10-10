@@ -1,5 +1,5 @@
 import { fakeAsync, tick } from '@angular/core/testing';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { Region } from '../models/region';
 import { IRegionEditorApi } from '../contracts/region-editor-api.contract';
@@ -55,10 +55,11 @@ describe('RegionPersistenceService', () => {
 
   it('debounces the exists check to the latest name', fakeAsync(() => {
     const seen: boolean[] = [];
-    const sub = svc.fileExists$.subscribe((e) => seen.push(e));
-    svc.checkExists('a');
+    const names = new Subject<string>();
+    const sub = svc.fileExists(names).subscribe((e) => seen.push(e));
+    names.next('a');
     tick(100);
-    svc.checkExists('b');
+    names.next('b');
     tick(400);
     expect(io.roiFileExists).toHaveBeenCalledTimes(1);
     expect(io.roiFileExists).toHaveBeenCalledWith('b');
