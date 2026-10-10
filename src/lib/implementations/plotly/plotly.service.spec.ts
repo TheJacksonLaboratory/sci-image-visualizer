@@ -73,7 +73,7 @@ describe('PlotlyService load and plot image', () => {
     });
     service = TestBed.inject(PlotlyService);
     // Bypass HttpClient for local file paths in tests — auth headers not needed here
-    jest.spyOn(service as any, 'loadImage').mockImplementation((url: unknown) => Image.load(url as string));
+    jest.spyOn((service as any).loader, 'loadImage').mockImplementation((url: unknown) => Image.load(url as string));
     // canvas size
     screenHeight = 811;
     // create DOM element
@@ -470,7 +470,7 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
       providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
     });
     service = TestBed.inject(PlotlyService);
-    jest.spyOn(service as unknown as { loadImage(u: string): Promise<Image> }, 'loadImage')
+    jest.spyOn((service as unknown as { loader: { loadImage(u: string): Promise<Image> } }).loader, 'loadImage')
       .mockImplementation((url: string) => Image.load(url));
     imageInfo = {
       urls: [path.join(__dirname, 'test_grayscale.png')],
@@ -613,7 +613,7 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
   });
 
   it('loads a stack\'s slices in parallel, keeping slice order (OSD-PLOTLY-31)', async () => {
-    const s = service as any;
+    const s = (service as any).loader;
     s.stackLoading$.next(true);
     const pending: Array<{ url: string; resolve: (img: unknown) => void }> = [];
     const img = (v: number) => ({ width: 1, height: 1, grey: () => ({ data: [v] }) });
@@ -657,10 +657,10 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
   });
 
   it('stops a stack load when aborted: no further slices are requested', async () => {
-    const s = service as unknown as {
+    const s = (service as unknown as { loader: {
       stackLoading$: Subject<boolean>; stackLoadingProgress$: { value: number };
       loadImage(url: string, signal?: AbortSignal): Promise<unknown>;
-    };
+    } }).loader;
     s.stackLoading$.next(true);
     const img = { width: 1, height: 1, grey: () => ({ data: [0] }) };
     const requested: string[] = [];

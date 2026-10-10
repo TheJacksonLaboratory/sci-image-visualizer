@@ -5,7 +5,6 @@ import { Image } from 'image-js';
 import { HttpClient } from '@angular/common/http';
 
 import { Region } from '../../models/region';
-import { Buffer } from 'buffer';
 import { IImageInfo } from '../../contracts/image.contract';
 import { TileAccessPort, TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { ImageStatePort, IMAGE_STATE_PORT } from '../../contracts/ports/image-state.port';
@@ -40,6 +39,7 @@ import { PlotlyRegionOverlay } from './plotly-region-overlay';
 import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
 import { PlotlyShapeProjection } from './plotly-shape-projection';
 import { PlotlyZoomController } from './plotly-zoom-controller';
+import { PlotlyImageLoader, PlotlyLoaded } from './plotly-image-loader';
 import { axesSourceRect, channelDisplayRestyle, frameHistogram, tracePixels } from './plotly-readback';
 import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
@@ -49,7 +49,7 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
 import { ColormapNode } from '../../contracts/display-types';
-import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transport';
+import { throwIfAborted } from '../tile-server/transport';
 
 // Re-exported so existing consumers can keep importing PlotType from this
 // module while it physically lives in the backend-neutral contracts/ dir.
@@ -57,8 +57,6 @@ import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transpor
 // './contracts/plot-type' directly, drop this re-export.
 export { PlotType } from '../../contracts/plot-type';
 
-/** Parallel slice fetches when loading a stack (cf. napari's volume fetch pool). */
-const PLOTLY_STACK_FETCH_CONCURRENCY = 4;
 
 @Injectable({
   providedIn: 'root'
@@ -130,8 +128,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    *  purge, reset). A high-def zoom drops its crop if another render (or the
    *  hand-over of the div to another backend) happened while it was fetching. */
   private renderGen = 0;
-  private stackLoading$ = new BehaviorSubject<boolean>(false);
-  private stackLoadingProgress$ = new BehaviorSubject<number>(0);
+  /** Slice fetch + decode, the stack pool and its loading flag/progress. */
+  private readonly loader: PlotlyImageLoader;
   // current index of image in stack (if stack), 0 if single image
   private zIndex = new BehaviorSubject<number>(0);
   private autoscaleEvent = new Subject<any>();
@@ -174,6 +172,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
               regionStore: RegionStore,
               private intensity: IntensityProfileService) {
     super(regionStore, store);
+    this.loader = new PlotlyImageLoader(http);
     this.zoom = new PlotlyZoomController({
       plotDiv: () => this.plotDiv,
       trueImgSize: () => this.trueImgSize,
@@ -258,90 +257,19 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /**
-   * Load image
-   * @param imageInfo
-   * @param zIndex index of the image to load
-   * @param signal aborts the image (and stack-slice) requests: the load then
-   *   rejects with an `AbortError`
-   * @return an object with data and ratio keys
+   * Load slice `zIndex`, or the whole shown stack (see PlotlyImageLoader).
+   * `signal` aborts the requests: the load then rejects with an `AbortError`.
    */
-  public async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal) {
+  public async load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<PlotlyLoaded> {
     throwIfAborted(signal);
     // Re-establish the store subscriptions if a prior component teardown
     // (unsubscribe()) tore them down — see ensureSubscriptions().
     this.ensureSubscriptions();
-    const urls = imageInfo.urls;
-    // use zIndex provided if any, 0 otherwise
-    let imageUrl;
-    if (zIndex) {
-      imageUrl = urls[zIndex];
-    } else {
-      imageUrl = urls[0];
-    }
-    const isGrayscale = imageInfo.isGrayscale;
-    const image = await this.loadImage(imageUrl, signal);
-    const xRatio = imageInfo.trueImageSize[0] / image.width;
-    const yRatio = imageInfo.trueImageSize[1] / image.height;
-
-    const trueImageSize = [];
-    // [x0, x1, y0, y1]
-    trueImageSize[0] = 0;
-    trueImageSize[1] = imageInfo.trueImageSize[0];
-    trueImageSize[2] = 0;
-    trueImageSize[3] = imageInfo.trueImageSize[1];
-    this.trueImgSize = trueImageSize;
-    this.fileName = imageInfo.fileName;
-    if (imageInfo.isStack && imageInfo.showStack) {
-      const toMatrix = (img: any) => isGrayscale
-        ? this.plotUtilities.arrayToMatrix(Array.from(img.grey().data), img.width)
-        : this.plotUtilities.arrayToMatrix(img.getPixelsArray(), img.width);
-      // Stop loading once a new file is selected, stack loading is switched off,
-      // or the host aborts the load.
-      const wanted = () =>
-        this.fileName === imageInfo.fileName && this.stackLoading$.value && !signal?.aborted;
-      const images: any[] = new Array(urls.length);
-      let next = 0;
-      let loaded = 0;
-      this.stackLoadingProgress$.next(0);
-      // One URL per slice, fetched by a small pool of workers; each slice keeps
-      // its index.
-      const worker = async () => {
-        while (next < urls.length && wanted()) {
-          const i = next++;
-          images[i] = toMatrix(await this.loadImage(urls[i], signal));
-          this.stackLoadingProgress$.next(Math.round((++loaded * 100) / urls.length));
-        }
-      };
-      const poolSize = Math.min(PLOTLY_STACK_FETCH_CONCURRENCY, urls.length);
-      try {
-        await Promise.all(Array.from({ length: poolSize }, () => worker()));
-      } catch (err) {
-        this.stackLoadingProgress$.next(0);
-        throw err;
-      }
-      throwIfAborted(signal);
-      // A cancelled load keeps the contiguous run of slices from the start.
-      const firstGap = images.findIndex((m) => m === undefined);
-      if (firstGap >= 0) images.length = firstGap;
-      // reset stackLoading progress to 0
-      this.stackLoadingProgress$.next(0);
-      return { data: images, ratios: [xRatio, yRatio],
-               sizes: [image.width, image.height],
-               filename: imageInfo.fileName };
-    } else {
-      let imageData;
-      if (isGrayscale) {
-        const grey = image.grey();
-        imageData = this.plotUtilities.arrayToMatrix(Array.from(grey.data), image.width);
-      } else {
-        const rgbData = image.getPixelsArray();
-        imageData = this.plotUtilities.arrayToMatrix(rgbData, image.width);
-      }
-      return { data: [imageData],
-        ratios: [xRatio, yRatio],
-        sizes: [image.width, image.height],
-        filename: imageInfo.fileName };
-    }
+    return this.loader.load(imageInfo, zIndex, signal, () => {
+      // [x0, x1, y0, y1]
+      this.trueImgSize = [0, imageInfo.trueImageSize[0], 0, imageInfo.trueImageSize[1]];
+      this.fileName = imageInfo.fileName;
+    }, () => this.fileName === imageInfo.fileName);
   }
 
   /**
@@ -858,18 +786,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   /**
-   * Fetch an image via Angular HttpClient so that auth interceptors (Bearer token)
-   * are applied, then decode it with image-js. This avoids raw browser fetch()
-   * calls that bypass the interceptor chain and fail behind an OAuth2 proxy.
-   */
-  private async loadImage(url: string, signal?: AbortSignal): Promise<Image> {
-    const buffer = await firstValueFromAbortable(
-      this.http.get(url, { responseType: 'arraybuffer' }), signal,
-    );
-    return Image.load(Buffer.from(buffer));
-  }
-
-  /**
    * Get the currently displayed image as an image-js Image instance.
    * Used by the processing pipeline to obtain the input image.
    */
@@ -879,7 +795,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     }
     const zIdx = this.zIndex.value || 0;
     const url = this.imageInfo.urls[zIdx] || this.imageInfo.urls[0];
-    return this.loadImage(url);
+    return this.loader.loadImage(url);
   }
 
   /**
@@ -982,13 +898,13 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public isStackLoading$(): Observable<boolean> {
-    return this.stackLoading$.asObservable();
+    return this.loader.stackLoading$.asObservable();
   }
   public setStackLoading(stackLoading: boolean) {
-    this.stackLoading$.next(stackLoading);
+    this.loader.stackLoading$.next(stackLoading);
   }
   public getStackLoadingProgress$(): Observable<number> {
-    return this.stackLoadingProgress$.asObservable();
+    return this.loader.stackLoadingProgress$.asObservable();
   }
 
   // Colormap / reverse-scale state lives in the shared VisualizerStore (the
@@ -1012,7 +928,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       this.zIndex.next(0);
     }
     if (this.imageInfo) this.imageInfo.showStack = showstack;
-    this.stackLoading$.next(showstack);
+    this.loader.stackLoading$.next(showstack);
     Plotly.relayout(this.plotDiv, { 'showstack': showstack } as any);
   }
 
