@@ -23,10 +23,11 @@ import { OsdViewportAdapter } from './osd-viewport';
 import { OsdNavigatorChrome } from './osd-navigator-chrome';
 import { PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
 import { elementToImage } from './osd-coords';
-import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
+import { buildTileUrl, fetchTileBitmap } from './tile-client';
 import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { SliceCache } from './slice-cache';
 import { OsdTileRecolorer } from './tile-recolor';
+import { OsdLoaded, OsdSimpleSource } from './simple-source';
 import { HistogramSampler } from './histogram-sampler';
 import {
   TileDescriptor, exportTiffFilename, exportTiffUrl, httpFetchJson, pollDescriptor, throwIfAborted,
@@ -55,30 +56,6 @@ const OSD_TILES_INFO_POLL_INTERVAL_MS = 1500;
 const OVERLAY_MODES = new Set<RegionToolMode>([
   'drawrect', 'drawclosedpath', 'drawopenpath', 'drawpolygon', 'addpoint', 'deletepoint', 'move', 'select',
 ]);
-
-/** One decoded single-band channel plane (serverless multichannel). */
-interface SimplePlane { data: Uint8ClampedArray; width: number; height: number; }
-
-/** What `load()` hands to `plot()`. `load()` only computes it: the image on
- *  screen keeps its own state until `plot()` commits this payload. */
-interface OsdLoaded {
-  descriptor: TileDescriptor | null;
-  infoB64: string;
-  z: number;
-  /** Mirrors the loaded image's filename — the diagram's render pipeline
-   *  guards on `loaded.filename === phaseInfo.fileName` before calling plot(). */
-  filename: string | undefined;
-  /** Simple (non-tiled) image: `plot()` opens {@link url} directly via OSD's
-   *  single-image source — no tile pyramid, no server. Set when the image
-   *  carries `tiled === false` (see {@link IImageInfo.tiled}). */
-  simple?: boolean;
-  /** The directly-loadable image URL (`blob:`/`data:`/`http`) for simple mode. */
-  url?: string;
-  /** Serverless multichannel only: every slice's per-channel plane URLs, and
-   *  the loaded slice's decoded planes ({@link url} is their composite). */
-  channelUrls?: string[][];
-  channelPlanes?: SimplePlane[];
-}
 
 /**
  * OpenSeadragon visualization backend.
@@ -110,30 +87,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
    *  tile source and swap slices live (stack navigation). */
   private infoB64 = '';
   private currentZ = 0;
-  /** True while the current image is "simple" (tiled:false — self-contained
-   *  per-slice URLs, no tile server; e.g. a numbered image series assembled
-   *  client-side into a stack). setZIndex swaps the single-image source for
-   *  the new slice's URL instead of updating a tiled z-param. */
-  private simpleMode = false;
-  /** urls[] for the current simple-mode image, so setZIndex can look up the
-   *  slice being scrubbed to (via {@link SimpleSliceAccessService.urlFor}).
-   *  Unused (and left stale, harmlessly) in tiled mode. */
-  private simpleUrls: string[] = [];
-  /** preview blob URL → full-res upscaled blob URL (see toFullResUrl), so
-   *  re-visiting a simple-mode slice doesn't re-upscale. Revoked on file change. */
-  private readonly simpleFullResUrls = new Map<string, string>();
-  /** SERVERLESS multichannel (tiled:false + channelCount>1): the stack's
-   *  per-slice per-channel plane URLs, the current slice's decoded planes, and
-   *  the last composite blob URL. Composited client-side via display.channelRgbLut
-   *  (no tile server); kept OFF the tiled isMultiChannel path. */
-  private simpleMultichannel = false;
-  private simpleChannelUrls: string[][] = [];
-  private simpleChannelPlanes: SimplePlane[] = [];
-  private simpleCompositeUrl: string | null = null;
-  /** Skip the full-res upscale above this longest-side dimension — a folder
-   *  stack is per-file previews (well under this); this only guards against an
-   *  accidental enormous canvas allocation. */
-  private readonly SIMPLE_UPSCALE_MAX_DIM = 8192;
   private coordTransform: OsdCoordinateTransform | null = null;
   /** What this backend's canvas tools read and write (one host for every tool). */
   private readonly toolHost: CanvasToolHost;
@@ -183,12 +136,30 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     viewer: () => this.viewer,
     isGrayscale: () => this.isGrayscaleImage,
     isMultiChannel: () => this.isMultiChannel,
-    isSimpleMultichannel: () => this.simpleMultichannel,
+    isSimpleMultichannel: () => this.simple.multichannel,
     currentZ: () => this.currentZ,
     revealChannelSlice: (z) => this.cache.revealChannelSlice(z),
     invalidateChannelDisplay: (z) => this.cache.invalidateChannelDisplay(z),
-    recomposite: (token) => void this.recompositeAndOpen(token),
+    recomposite: (token) => void this.simple.recompositeAndOpen(token),
   }, this.store);
+
+  /** The serverless (`tiled: false`) image source and all its state (see
+   *  OsdSimpleSource). */
+  private readonly simple: OsdSimpleSource = new OsdSimpleSource({
+    viewer: () => this.viewer,
+    descriptor: () => this.descriptor,
+    isGrayscale: () => this.isGrayscaleImage,
+    currentZ: () => this.currentZ,
+    setCurrentZ: (z) => {
+      this.currentZ = z;
+      this.viewportPixels = null; // the readback is slice-specific
+    },
+    sampler: () => this.sampler,
+    display: () => this.recolor.display,
+    channelStates: () => this.store.currentChannelStates(),
+    isCurrentDisplay: (token) => this.recolor.isCurrent(token),
+    scheduleInvalidate: () => this.recolor.scheduleInvalidate(),
+  }, this.simpleStack);
 
   /** Histogram + auto-window sampling (see HistogramSampler). Constructed in
    *  the ctor body because it captures the resolved API base URL. */
@@ -292,14 +263,15 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // loading immediately rather than letting it finish behind the new image.
     if (filename && this.currentFileName && filename !== this.currentFileName) {
       this.cache.cancelBackgroundLoad();
-      this.revokeSimpleFullResUrls();
+      this.simple.revokeUrls();
     }
     this.simpleStack.noteActiveFile(filename);
     // Simple (in-memory / non-tiled) image: skip the tile server entirely — no
     // getSelectedInfoB64, no /tiles/info poll. `urls[zIndex]` is a complete image
     // OSD opens via its single-image source (see plot()).
     if (this.simpleStack.isSimple(imageInfo)) {
-      return this.loadSimple(imageInfo, zIndex, signal);
+      this.authHeaders = {};
+      return this.simple.load(imageInfo, zIndex, signal);
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) return { descriptor: null, infoB64: '', z: zIndex || 0, filename };
@@ -333,258 +305,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return { descriptor, infoB64, z: zIndex || 0, filename };
   }
 
-  /** Forget the simple (tiled:false) image's state: mode, slice URLs and the
-   *  serverless-multichannel flag, URLs and decoded planes. Called when a tiled
-   *  image is mounted and on teardown; plot() commits a simple image's state
-   *  from its {@link OsdLoaded} payload. */
-  private resetSimpleState(): void {
-    this.simpleMode = false;
-    this.simpleUrls = [];
-    this.simpleMultichannel = false;
-    this.simpleChannelUrls = [];
-    this.simpleChannelPlanes = [];
-  }
-
-  /** Build the `plot()` payload for a simple (tiled:false) image: a single-level
-   *  descriptor sized from `trueImageSize`, plus the directly-loadable URL —
-   *  resolved and fetched via {@link SimpleSliceAccessService} (shared with
-   *  napari-js; see its docs for why this can't be a raw `fetch()`/`<img>`).
-   *  Those fetches take no signal, so an abort is honoured once they settle. */
-  private async loadSimple(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<OsdLoaded> {
-    const z = zIndex || 0;
-    const filename = imageInfo?.fileName;
-    this.authHeaders = {};
-    const [width, height] = imageInfo.trueImageSize ?? [0, 0];
-    const meta = imageInfo.imageMeta?.[0];
-    // SERVERLESS MULTICHANNEL: composite the slice's per-channel planes
-    // client-side (no tile server), driven by the channel pane. Kept OFF the
-    // tiled isMultiChannel path (see compositeSimpleMultichannel).
-    // Everything is computed into locals and returned: the image on screen keeps
-    // its state until plot() commits this payload.
-    const chUrls = imageInfo.channelUrls;
-    const multichannel = !!chUrls?.length && (meta?.channelCount ?? 1) > 1;
-    let url: string | undefined;
-    let channelPlanes: SimplePlane[] | undefined;
-    if (multichannel) {
-      try {
-        channelPlanes = await this.loadSimpleChannelPlanes(chUrls![z] ?? chUrls![0]);
-        url = await this.compositeSimpleMultichannel(channelPlanes);
-        // NB: histograms are binned in plot(), AFTER destroyViewer clears the
-        // sampler — computing them here would be wiped by that clear.
-      } catch (err) {
-        console.warn('[OSD] simple multichannel composite failed', err);
-      }
-    } else {
-      const rawUrl = this.simpleStack.urlFor(imageInfo, z);
-      if (rawUrl) {
-        try {
-          const previewUrl = await this.simpleStack.fetchAsBlobUrl(rawUrl);
-          // Upscale the (downscaled) preview to full resolution so OSD's world
-          // matches the full-res ROI coordinate space — see toFullResUrl.
-          url = await this.toFullResUrl(previewUrl, width, height);
-        } catch (err) {
-          console.warn('[OSD] simple-mode slice fetch failed', err);
-        }
-      }
-    }
-    throwIfAborted(signal);
-    // No loadable URL (empty urls[] or the fetch failed): signal "couldn't
-    // load" with a null descriptor — same as the tiled path when there's no
-    // selected-file info — so plot() returns false (its `if (!d)` guard) and
-    // the router can fall back, instead of mounting an <img> with an undefined
-    // src that throws at runtime.
-    if (!url) {
-      console.warn('[OSD] simple-mode slice has no loadable URL; skipping OSD render', filename);
-      return { descriptor: null, infoB64: '', z, filename };
-    }
-    const descriptor: TileDescriptor = {
-      width,
-      height,
-      tileSize: 0,            // unused: simple mode never calls buildTileSource
-      z: 1,                   // single frame
-      channels: meta?.rgbChannels ?? (imageInfo.isGrayscale ? 1 : 3),
-      multichannel: false,
-      realLevels: 1,
-      levels: [{ res: 0, width, height }],
-      mppX: meta?.mppX ?? 0,
-      mppY: meta?.mppY ?? 0,
-    };
-    return {
-      descriptor,
-      infoB64: '',
-      z,
-      filename,
-      simple: true,
-      url,
-      ...(multichannel ? { channelUrls: chUrls as string[][], channelPlanes: channelPlanes ?? [] } : {}),
-    };
-  }
-
-  /**
-   * OSD's `{type:'image'}` source sizes its coordinate world to the image's
-   * NATURAL pixels. A folder-stack slice is a server `/preview` whose pixel size
-   * needn't match the full-resolution image — it may be downscaled (large
-   * images) OR larger than the dimensions `/metadata` reports. Either way OSD's
-   * world would differ from the full-res ROI coordinate space (QuPath geojson,
-   * in level-0 pixels): a smaller preview renders ROIs oversized, a larger one
-   * renders them undersized/offset. Resample the preview to EXACTLY the
-   * full-resolution dimensions (blurry but positionally exact — scaling up or
-   * down as needed) so OSD's world matches the ROI coordinate space, while still
-   * using OSD's reliable single-image renderer. Cached per preview URL (revoked
-   * on file change); a no-op when the preview is already exactly full-res (small
-   * images, in-memory pipeline blobs), when the dims are unknown, or when
-   * they're implausibly large (guards against an enormous canvas). (jit-ui#93)
-   */
-  private async toFullResUrl(previewUrl: string, width: number, height: number): Promise<string> {
-    if (!width || !height || Math.max(width, height) > this.SIMPLE_UPSCALE_MAX_DIM) return previewUrl;
-    const cached = this.simpleFullResUrls.get(previewUrl);
-    if (cached) return cached;
-    let img: HTMLImageElement;
-    try {
-      img = await this.loadImageEl(previewUrl);
-    } catch {
-      return previewUrl; // couldn't decode — let OSD try the URL as-is
-    }
-    // Already the exact full-res world — no resample needed. (A preview that is
-    // larger OR smaller than full-res must still be resized so OSD's world ==
-    // the ROI coordinate space; only an exact match is skippable.)
-    if (img.naturalWidth === width && img.naturalHeight === height) return previewUrl;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return previewUrl;
-    ctx.drawImage(img, 0, 0, width, height); // scale preview (up or down) to full-res
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve));
-    if (!blob) return previewUrl;
-    const fullResUrl = URL.createObjectURL(blob);
-    this.simpleFullResUrls.set(previewUrl, fullResUrl);
-    return fullResUrl;
-  }
-
-  /** Sample a SIMPLE-mode slice's own decoded pixels into the histogram — the
-   *  serverless analog of the tiled samplers (no tile server). Fire-and-forget;
-   *  a decode failure just leaves the pane empty rather than throwing. */
-  private async sampleSimpleHistogram(url: string | undefined, z: number): Promise<void> {
-    if (!url) return;
-    try {
-      const px = await this.decodeUrlToRgba(url);
-      if (px) this.sampler.computeSimpleHistogram(z, px.data, this.isGrayscaleImage);
-    } catch (err) {
-      console.warn('[OSD] simple-mode histogram sample failed', err);
-    }
-  }
-
-  /** Fetch + decode a slice's per-channel planes (single-band grayscale) into
-   *  pixel buffers, for the SERVERLESS multichannel compositor. Auth-safe: goes
-   *  through SimpleSliceAccessService (blob:/data: as-is; http via HttpClient).
-   *  The channels are fetched in parallel; plane c stays at index c, and a
-   *  plane that fails to load is empty (the compositor skips it). */
-  private async loadSimpleChannelPlanes(urls: string[] | undefined): Promise<SimplePlane[]> {
-    const empty = (): SimplePlane => ({ data: new Uint8ClampedArray(0), width: 0, height: 0 });
-    return Promise.all((urls ?? []).map(async (u) => {
-      try {
-        const px = await this.decodeUrlToRgba(await this.simpleStack.fetchAsBlobUrl(u));
-        return px ? { data: px.data, width: px.width, height: px.height } : empty();
-      } catch (err) {
-        console.warn('[OSD] channel plane decode failed', err);
-        return empty();
-      }
-    }));
-  }
-
-  /** Composite per-channel planes into ONE RGBA image using the
-   *  current channel states (colour/window/gamma/visibility) — the client-side,
-   *  serverless analog of the tiled per-channel 'lighter' compositor
-   *  (same display.channelRgbLut math as recolorChannelTile, applied per-plane).
-   *  Returns a new blob: URL of the composite PNG, owned by the caller (see
-   *  {@link openSimpleComposite}). */
-  private async compositeSimpleMultichannel(planes: SimplePlane[]): Promise<string | undefined> {
-    if (!planes.length) return undefined;
-    const w = planes[0].width, h = planes[0].height;
-    if (!w || !h) return undefined;
-    const out = this.recolor.display.compositeChannels(
-      planes.map((p) => (p.width === w && p.height === h ? p.data : null)),
-      this.store.currentChannelStates(),
-    );
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return undefined;
-    ctx.putImageData(new ImageData(out, w, h), 0, 0);
-    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-    if (!blob) return undefined;
-    return URL.createObjectURL(blob);
-  }
-
-  /** Re-composite the current slice from its cached planes (new channel states)
-   *  and re-open — the serverless analog of the tiled invalidate-on-channel-change.
-   *  Runs from {@link invalidateDisplay}, so it is coalesced per frame, and drops
-   *  its composite once a newer display round (`token`) has started. */
-  private async recompositeAndOpen(token: number): Promise<void> {
-    const url = await this.compositeSimpleMultichannel(this.simpleChannelPlanes);
-    if (!url) return;
-    if (!this.recolor.isCurrent(token) || !this.viewer) {
-      URL.revokeObjectURL(url); // superseded — never displayed
-      return;
-    }
-    this.openSimpleComposite(url);
-  }
-
-  /** Open a serverless-multichannel composite and take ownership of its URL. The
-   *  previously displayed composite is revoked only once this open settles: an
-   *  `open()` still decoding a revoked blob: URL fails. */
-  private openSimpleComposite(url: string): void {
-    const viewer = this.viewer;
-    if (!viewer) return;
-    const prev = this.simpleCompositeUrl;
-    this.simpleCompositeUrl = url;
-    if (prev && prev !== url) {
-      const revokePrev = () => {
-        viewer.removeHandler('open', revokePrev);
-        viewer.removeHandler('open-failed', revokePrev);
-        URL.revokeObjectURL(prev);
-      };
-      viewer.addHandler('open', revokePrev);
-      viewer.addHandler('open-failed', revokePrev);
-    }
-    viewer.open({ type: 'image', url } as any);
-  }
-
-  /** Decode an image URL to RGBA pixels (null for an empty image or no 2d
-   *  context). Throws when the URL can't be decoded. */
-  private async decodeUrlToRgba(url: string): Promise<ImageData | null> {
-    const img = await this.loadImageEl(url);
-    const w = img.naturalWidth, h = img.naturalHeight;
-    return w && h ? readRgba(img, w, h) : null;
-  }
-
-  /** Load a URL into an HTMLImageElement (resolves once decoded). Uses
-   *  document.createElement rather than `new Image()` because this file's
-   *  `Image` import is image-js's decoder, not the DOM element. */
-  private loadImageEl(url: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const img = document.createElement('img');
-      img.onload = () => resolve(img);
-      img.onerror = (e) => reject(e);
-      img.src = url;
-    });
-  }
-
-  /** Commit a simple image's serverless-multichannel state from its
-   *  {@link OsdLoaded} payload (cleared for any other image). */
-  private commitSimpleMultichannel(loaded: OsdLoaded): void {
-    this.simpleMultichannel = !!loaded.channelPlanes;
-    this.simpleChannelUrls = loaded.channelUrls ?? [];
-    this.simpleChannelPlanes = loaded.channelPlanes ?? [];
-  }
-
-  private revokeSimpleFullResUrls(): void {
-    for (const u of this.simpleFullResUrls.values()) URL.revokeObjectURL(u);
-    this.simpleFullResUrls.clear();
-    if (this.simpleCompositeUrl) { URL.revokeObjectURL(this.simpleCompositeUrl); this.simpleCompositeUrl = null; }
-  }
-
   /** Mount the viewer with a custom tile source pointing at `GET /tile`. */
   plot(
     plotDiv: string,
@@ -610,21 +330,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // without this swap the small tier's 128px placeholder would stay on
     // screen forever (pixelated, never "sharpening" like the tiled path).
     if (inPlace && this.viewer) {
-      if (loaded.simple && loaded.url) {
-        // Also refresh simpleUrls to THIS phase's (large-tier) urls[] — it was
-        // set from the small tier's 128px urls on the initial mount below,
-        // which never runs again for the in-place pass. Without this,
-        // setZIndex's later slider scrubs would keep reading the small
-        // tier's low-res URLs forever, even though the initial slice was
-        // correctly swapped to full resolution here.
-        this.simpleUrls = imageInfo?.urls ?? this.simpleUrls;
-        if (loaded.channelPlanes) {
-          this.commitSimpleMultichannel(loaded);
-          this.openSimpleComposite(loaded.url);
-        } else {
-          this.viewer.open({ type: 'image', url: loaded.url } as any);
-        }
-      }
+      this.simple.refreshInPlace(loaded, imageInfo);
       return Promise.resolve(true);
     }
     this.plotDiv = plotDiv;
@@ -633,9 +339,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.descriptor = d;
     this.infoB64 = loaded.infoB64;
     this.currentZ = loaded.z;
-    this.simpleMode = !!loaded.simple;
-    this.simpleUrls = loaded.simple ? (imageInfo?.urls ?? []) : [];
-    this.commitSimpleMultichannel(loaded);
+    this.simple.commit(loaded, imageInfo);
     // The descriptor's physical pixel size (server Bio-Formats `/tiles/info`) is
     // authoritative — push it into the shared meta so the Region Editor reports
     // areas in µm²/mm², matching the scale bar built from `d.mppX` below.
@@ -654,24 +358,13 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.isMultiChannel = false;
       this.cache.clearChannelGroups();
       this.destroyViewer();
-      // The new viewer opens this image's composite (serverless multichannel):
-      // the old viewer is gone, so its composite can go now.
-      if (this.simpleCompositeUrl && this.simpleCompositeUrl !== loaded.url) {
-        URL.revokeObjectURL(this.simpleCompositeUrl);
-      }
-      this.simpleCompositeUrl = this.simpleMultichannel ? (loaded.url ?? null) : null;
-      // Serverless histogram — AFTER destroyViewer (its last act is sampler.clear()).
-      // Multichannel bins each cached channel plane; single-band / RGB bins the
-      // decoded frame's own pixels.
-      if (this.simpleMultichannel) {
-        this.sampler.computeSimpleMultichannelHistograms(loaded.z, this.simpleChannelPlanes);
-      } else {
-        void this.sampleSimpleHistogram(loaded.url, loaded.z);
-      }
+      // Take over the composite URL and bin the histograms — AFTER destroyViewer
+      // (its last act is sampler.clear()).
+      this.simple.mount(loaded);
     } else {
       // A tiled image is going on screen: no simple-mode state may survive it
       // (load() normally cleared it already; plot() is what mounts the image).
-      this.resetSimpleState();
+      this.simple.reset();
       const plan = planTiledMount(d);
       this.realLevels = plan.realLevels;
       this.isMultiChannel = plan.multiChannel;
@@ -849,7 +542,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
   reset(): void {
     this.destroyViewer();
-    this.resetSimpleState();
+    this.simple.reset();
   }
   relayout(_trueImageSize?: number[]): void {
     this.viewport.keepViewAcrossResize();
@@ -905,43 +598,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     const z = zIndex || 0;
     if (z === this.currentZ) return;
     if (!this.viewer) return;
-    if (this.simpleMode) {
-      if (this.simpleMultichannel) {
-        const urls = this.simpleChannelUrls[z] ?? this.simpleChannelUrls[0];
-        if (!urls) return;
-        this.currentZ = z;
-        this.viewportPixels = null;
-        // A different image commits a new channelUrls array (see plot()).
-        const image = this.simpleChannelUrls;
-        void (async () => {
-          const planes = await this.loadSimpleChannelPlanes(urls);
-          // Scrubs can resolve out of order: only the current slice's planes
-          // may land, or a later recomposite would show the wrong slice.
-          if (this.currentZ !== z || this.simpleChannelUrls !== image || !this.viewer) return;
-          this.simpleChannelPlanes = planes;
-          this.sampler.computeSimpleMultichannelHistograms(z, planes);
-          this.recolor.scheduleInvalidate(); // recomposite + open, coalesced with slider changes
-        })();
-        return;
-      }
-      const rawUrl = this.simpleUrls[z] ?? this.simpleUrls[0];
-      if (!rawUrl) return;
-      this.currentZ = z;
-      this.viewportPixels = null;
-      // Fetched via SimpleSliceAccessService (auth interceptor applies) then
-      // upscaled to full-res (same as the initial load — see toFullResUrl) so
-      // the world stays full-res across slices and ROIs keep aligning. Guard
-      // against a newer scrub landing first.
-      this.simpleStack.fetchAsBlobUrl(rawUrl)
-        .then((previewUrl) =>
-          this.toFullResUrl(previewUrl, this.descriptor?.width ?? 0, this.descriptor?.height ?? 0),
-        )
-        .then((url) => {
-          if (this.currentZ !== z || !this.viewer) return;
-          this.viewer.open({ type: 'image', url } as any);
-          void this.sampleSimpleHistogram(url, z); // re-bin the scrubbed slice
-        })
-        .catch((err) => console.warn('[OSD] slice fetch failed', err));
+    if (this.simple.active) {
+      this.simple.setZIndex(z);
       return;
     }
     if (!this.descriptor || !this.infoB64) return;
@@ -1307,6 +965,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // against a torn-down viewer.
     this.recolor.unsubscribe();
     this.destroyViewer();
-    this.resetSimpleState();
+    this.simple.reset();
   }
 }

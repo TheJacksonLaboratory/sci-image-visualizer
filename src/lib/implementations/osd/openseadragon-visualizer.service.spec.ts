@@ -39,7 +39,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     // toFullResUrl is a no-op (its catch returns the preview URL unchanged)
     // unless a test overrides it — decoupling the load() tests from the resample
     // (which now resizes to EXACTLY trueImageSize, up or down; jit-ui#93).
-    (service as unknown as { loadImageEl: (u: string) => Promise<unknown> }).loadImageEl =
+    (service as unknown as { simple: { loadImageEl: (u: string) => Promise<unknown> } }).simple.loadImageEl =
       jest.fn().mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
@@ -200,8 +200,8 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   it('load() simple detects MULTICHANNEL from channelUrls + channelCount>1', async () => {
     const loadPlanes = jest.spyOn(
-      service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
-      'loadSimpleChannelPlanes',
+      (service as unknown as { simple: { loadChannelPlanes(u: string[]): Promise<unknown[]> } }).simple,
+      'loadChannelPlanes',
     );
     const loaded = await service.load({
       fileName: 'hyper.tif',
@@ -218,13 +218,13 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     expect(loadPlanes).toHaveBeenCalledWith(['blob:z0c0', 'blob:z0c1', 'blob:z0c2', 'blob:z0c3']);
     expect(loaded.descriptor).toBeNull();
     // load() only computes: the service state changes when plot() mounts it.
-    expect((service as unknown as { simpleMultichannel: boolean }).simpleMultichannel).toBe(false);
+    expect((service as unknown as { simple: { multichannel: boolean } }).simple.multichannel).toBe(false);
   });
 
   it('load() simple stays single-image (NOT multichannel) for a plain grayscale image', async () => {
     const loadPlanes = jest.spyOn(
-      service as unknown as { loadSimpleChannelPlanes(u: string[]): Promise<unknown[]> },
-      'loadSimpleChannelPlanes',
+      (service as unknown as { simple: { loadChannelPlanes(u: string[]): Promise<unknown[]> } }).simple,
+      'loadChannelPlanes',
     );
     const loaded = await service.load({
       fileName: 'g.png', tiled: false, isGrayscale: true,
@@ -241,9 +241,9 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
     jest.spyOn(simpleStack, 'fetchAsBlobUrl').mockImplementation(
       (u: unknown) => new Promise<string>((resolve) => { pending[u as string] = resolve; }),
     );
-    const decode = jest.spyOn(service as any, 'decodeUrlToRgba').mockImplementation(async (u: unknown) =>
+    const decode = jest.spyOn((service as any).simple, 'decodeUrlToRgba').mockImplementation(async (u: unknown) =>
       ({ data: new Uint8ClampedArray([Number((u as string).slice(-1)), 0, 0, 255]), width: 1, height: 1 }));
-    const run = (service as any).loadSimpleChannelPlanes(['c0', 'c1', 'c2']);
+    const run = (service as any).simple.loadChannelPlanes(['c0', 'c1', 'c2']);
     await Promise.resolve();
     expect(Object.keys(pending)).toEqual(['c0', 'c1', 'c2']); // all requested up front
     pending['c2']('blob:2'); pending['c0']('blob:0'); pending['c1']('blob:1');
@@ -330,8 +330,8 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
   describe('toFullResUrl (upscale preview so OSD world = full-res)', () => {
     const call = (u: string, w: number, h: number): Promise<string> =>
       (service as unknown as {
-        toFullResUrl: (u: string, w: number, h: number) => Promise<string>;
-      }).toFullResUrl(u, w, h);
+        simple: { toFullResUrl: (u: string, w: number, h: number) => Promise<string> };
+      }).simple.toFullResUrl(u, w, h);
 
     let createObjectURL: jest.SpyInstance;
     let toBlobSpy: jest.SpyInstance;
@@ -344,7 +344,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       return img;
     };
     const stubDecode = (w: number, h: number) => {
-      (service as unknown as { loadImageEl: (u: string) => Promise<unknown> }).loadImageEl =
+      (service as unknown as { simple: { loadImageEl: (u: string) => Promise<unknown> } }).simple.loadImageEl =
         jest.fn().mockResolvedValue(fakeImg(w, h));
     };
 
@@ -502,7 +502,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       const world = { requestInvalidate: jest.fn() };
       const navWorld = { requestInvalidate: jest.fn() };
       svc.viewer = { world, navigator: { world: navWorld }, destroy: () => undefined };
-      const recomposite = jest.spyOn(svc, 'recompositeAndOpen').mockResolvedValue(undefined);
+      const recomposite = jest.spyOn(svc.simple, 'recompositeAndOpen').mockResolvedValue(undefined);
       const channelInvalidate = jest.spyOn(svc.cache, 'invalidateChannelDisplay').mockImplementation(() => undefined);
       svc.currentZ = 4;
 
@@ -517,7 +517,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
       expect(channelInvalidate).toHaveBeenCalledWith(4);
       expect(world.requestInvalidate).toHaveBeenCalledTimes(1);
 
-      svc.simpleMultichannel = true; // serverless: re-composite the cached planes
+      svc.simple.multichannel = true; // serverless: re-composite the cached planes
       svc.recolor.invalidateDisplay();
       expect(recomposite).toHaveBeenCalledWith(svc.recolor.displayToken);
       expect(channelInvalidate).toHaveBeenCalledTimes(1);

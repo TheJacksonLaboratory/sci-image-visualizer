@@ -74,15 +74,17 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     imageMeta: [{ rgbChannels: 1, channelCount: 1, x: 64, y: 64, z: 1 }],
   } as unknown as IImageInfo;
 
-  type Internals = {
-    loadSimpleChannelPlanes(urls: string[]): Promise<unknown[]>;
-    compositeSimpleMultichannel(): Promise<string | undefined>;
-    simpleMultichannel: boolean;
-    simpleChannelUrls: string[][];
-    recolor: { scheduleInvalidate(): void };
-    simpleChannelPlanes: unknown[];
+  type SimpleSource = {
+    loadChannelPlanes(urls: string[]): Promise<unknown[]>;
+    composite(): Promise<string | undefined>;
+    loadImageEl(u: string): Promise<unknown>;
+    multichannel: boolean;
+    channelUrls: string[][];
+    channelPlanes: unknown[];
   };
+  type Internals = { simple: SimpleSource; recolor: { scheduleInvalidate(): void } };
   const internals = () => service as unknown as Internals;
+  const simple = () => internals().simple;
 
   beforeEach(() => {
     viewers.length = 0;
@@ -107,13 +109,13 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     store = TestBed.inject(VisualizerStore);
     document.body.innerHTML = '<div id="plotdiv"></div>';
     // jsdom can't decode <img>: stand in two decoded channel planes and a composite.
-    jest.spyOn(internals(), 'loadSimpleChannelPlanes').mockImplementation(async () => [
+    jest.spyOn(simple(), 'loadChannelPlanes').mockImplementation(async () => [
       { data: new Uint8ClampedArray(4), width: 1, height: 1 },
       { data: new Uint8ClampedArray(4), width: 1, height: 1 },
     ]);
-    jest.spyOn(internals(), 'compositeSimpleMultichannel').mockResolvedValue('blob:composite');
+    jest.spyOn(simple(), 'composite').mockResolvedValue('blob:composite');
     // ...and can't decode a single-image slice either (toFullResUrl then keeps the URL).
-    jest.spyOn(service as unknown as { loadImageEl(u: string): Promise<unknown> }, 'loadImageEl')
+    jest.spyOn(simple(), 'loadImageEl')
       .mockRejectedValue(new Error('no <img> decode in jsdom'));
   });
 
@@ -151,7 +153,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
 
     expect(tiledViewer.open).not.toHaveBeenCalled();
     expect(invalidate).toHaveBeenCalled();
-    expect(internals().simpleChannelPlanes).toEqual([]);
+    expect(simple().channelPlanes).toEqual([]);
   });
   it('plot() starts the tiled histogram sampling after clearing the sampler (OSD-PLOTLY-4)', async () => {
     // sampler.clear() supersedes every run in flight, so a run started before it
@@ -185,16 +187,16 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   it('loading another image leaves the mounted serverless multichannel image\'s state alone', async () => {
     const simpleLoaded = await service.load(simpleInfo, 0);
     void service.plot('plotdiv', simpleLoaded, simpleInfo, 500, PlotType.IMAGE);
-    expect(internals().simpleMultichannel).toBe(true);
-    expect(internals().simpleChannelUrls).toEqual(simpleInfo.channelUrls);
+    expect(simple().multichannel).toBe(true);
+    expect(simple().channelUrls).toEqual(simpleInfo.channelUrls);
 
     await loadTiled(); // not plotted (yet)
-    expect(internals().simpleMultichannel).toBe(true);
-    expect(internals().simpleChannelUrls).toEqual(simpleInfo.channelUrls);
+    expect(simple().multichannel).toBe(true);
+    expect(simple().channelUrls).toEqual(simpleInfo.channelUrls);
 
     await service.load({ ...simpleInfo, fileName: 'single.png', channelUrls: undefined } as IImageInfo, 0);
-    expect(internals().simpleMultichannel).toBe(true);
-    expect(internals().simpleChannelPlanes).toHaveLength(2);
+    expect(simple().multichannel).toBe(true);
+    expect(simple().channelPlanes).toHaveLength(2);
   });
   // ── serverless-multichannel scrub / recomposite races (OSD-PLOTLY-6) ──
 
@@ -214,7 +216,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   it('a slow scrub that resolves after a newer one does not overwrite its planes', async () => {
     await mountStack();
     const releases: Record<string, () => void> = {};
-    (internals().loadSimpleChannelPlanes as unknown as jest.Mock).mockImplementation(
+    (simple().loadChannelPlanes as unknown as jest.Mock).mockImplementation(
       (urls: string[]) => new Promise((resolve) => {
         const z = Number(urls[0][1]);
         releases[urls[0]] = () => resolve([plane(z), plane(z)]);
@@ -226,12 +228,12 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
     await nextFrame();
     releases['z1c0'](); // z=1 lands last
     await nextFrame();
-    expect((internals().simpleChannelPlanes as Array<{ data: Uint8ClampedArray }>)[0].data[0]).toBe(2);
+    expect((simple().channelPlanes as Array<{ data: Uint8ClampedArray }>)[0].data[0]).toBe(2);
   });
 
   it('coalesces a burst of channel changes into one recomposite', async () => {
     await mountStack();
-    const composite = internals().compositeSimpleMultichannel as unknown as jest.Mock;
+    const composite = simple().composite as unknown as jest.Mock;
     composite.mockClear();
     for (let i = 0; i < 10; i++) {
       store.setChannelState(0, { min: i, max: 200 });
@@ -242,7 +244,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
 
   it('revokes the displayed composite only once the next one has opened', async () => {
     // Distinct URLs: earlier tests' torn-down services may still revoke theirs.
-    const composite = internals().compositeSimpleMultichannel as unknown as jest.Mock;
+    const composite = simple().composite as unknown as jest.Mock;
     composite.mockResolvedValue('blob:mounted');
     const viewer = await mountStack();
     await nextFrame(); // let the mount's own (histogram-nudge) recomposite settle
