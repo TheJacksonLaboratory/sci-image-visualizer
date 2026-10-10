@@ -1,14 +1,11 @@
 import { Injectable, Inject, Optional } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, EMPTY, Observable, Subject, Subscription, combineLatest, defer, firstValueFrom, of } from 'rxjs';
-import { startWith, timeout } from 'rxjs/operators';
+import { BehaviorSubject, EMPTY, Observable, Subscription, combineLatest, firstValueFrom, of } from 'rxjs';
+import { timeout } from 'rxjs/operators';
 import { Image } from 'image-js';
 import * as OpenSeadragon from 'openseadragon';
 import { OSD, quiet } from './osd-lib';
-import { ZOOM_BUTTON_STEP } from './osd-zoom';
 import { buildViewerOptions, silenceOsdMultiImageAdvisory } from './openseadragon-viewer-options';
-
-
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { IImageInfo } from '../../contracts/image.contract';
@@ -22,8 +19,9 @@ import { OsdScaleBar } from './osd-scale-bar';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
 import { OsdCoordinateTransform } from './osd-coordinate-transform';
-import { PlotModeRect, PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
-import { elementToImage, imageRectToViewport, viewportRectToImage } from './osd-coords';
+import { OsdViewportAdapter } from './osd-viewport';
+import { PlotModeViewport } from '../../contracts/plot-type-contribution.contract';
+import { elementToImage } from './osd-coords';
 import { buildTileUrl, fetchTileBitmap, readRgba } from './tile-client';
 import { buildOsdTileSource, planTiledMount } from './osd-tile-source';
 import { SliceCache } from './slice-cache';
@@ -266,7 +264,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       getShapeColor: () => this.regionStore.getShapeColor(),
       // Zoom-to-box: overlay pixels -> image coords, and fit the viewport to the box.
       pixelToData: (px, py) => elementToImage(this.viewer, px, py),
-      applyZoomToBox: (coords) => this.applyZoomToBox(coords),
+      applyZoomToBox: (coords) => this.viewport.applyZoomToBox(coords),
     };
     this.canvasTools = createCanvasToolManager(this.toolHost, {
       wandService, regionStore, samPoint: samPointTool,
@@ -289,14 +287,14 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   }
 
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
-  /** Visible image region (full-image pixel coords) emitted when the view
-   *  settles, so the intensity inset can re-sample at the current zoom level. */
-  private readonly viewportChange$ = new Subject<{ x: number; y: number; width: number; height: number }>();
-  /** The visible rect on every redraw, coalesced to one emission per animation
-   *  frame. Feeds {@link PlotModeViewport.frame$}. */
-  private readonly frame$ = new Subject<PlotModeRect>();
-  private frameRaf: number | null = null;
-  private plotModeViewport: PlotModeViewport | null = null;
+  /** The viewport as the library sees it: visible rects, the plot-mode
+   *  viewport, zoom/fit (see OsdViewportAdapter). */
+  private readonly viewport = new OsdViewportAdapter({
+    viewer: () => this.viewer,
+    descriptor: () => this.descriptor,
+    coordTransform: () => this.coordTransform,
+    overlayContainer: () => this.getOverlayContainer(),
+  });
   // Region state (regions, selection, the update event) lives in the shared
   // RegionStore; image metadata and classification colours in the shared
   // VisualizerStore — the inherited IRegionStore/display methods delegate there.
@@ -859,10 +857,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
         if (!simple) this.viewer!.addHandler('animation-finish', () => this.cache.schedulePrefetch());
         // Tell listeners (the intensity inset) the visible image region whenever
         // the view settles, so they can re-sample at the current zoom resolution.
-        this.viewer!.addHandler('animation-finish', () => this.emitViewportChange());
+        this.viewer!.addHandler('animation-finish', () => this.viewport.emitViewportChange());
         // Every redraw (pan/zoom animation frames, resize) — for a contributed
         // plot mode's overlay, which has to move with the image, not after it.
-        this.viewer!.addHandler('update-viewport', () => this.scheduleFrame());
+        this.viewer!.addHandler('update-viewport', () => this.viewport.scheduleFrame());
         // Chrome compositor bug: after an OSD zoom the docked toolbar (a sibling of
         // #plot in the <visualizer> host) is left laid-out-but-unpainted and
         // vanishes — confirmed via DevTools (DOM intact, region simply not painted).
@@ -941,7 +939,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   /** The `GET /tile` source for slice `z` (one channel's, when given) — see
    *  {@link buildOsdTileSource}. Multichannel draws off the real levels only. */
-  private buildTileSource(d: TileDescriptor, infoB64: string, z: number, channel?: number): Record<string, unknown> {
+  private buildTileSource(d: TileDescriptor, infoB64: string, z: number,
+                          channel?: number): Record<string, unknown> {
     return buildOsdTileSource(d, {
       api: this.api, infoB64, z, channel,
       realLevelsOnly: this.isMultiChannel ? this.realLevels : undefined,
@@ -998,10 +997,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
 
   private destroyViewer(): void {
     this.cache.cancelBackgroundLoad();
-    if (this.frameRaf !== null) {
-      cancelAnimationFrame(this.frameRaf);
-      this.frameRaf = null;
-    }
+    this.viewport.cancelFrame();
     // Tear down an armed pixel tool's overlay (zoom-to-box stays armed, as before).
     if (this.canvasTools.activeId !== 'zoomToBox') this.canvasTools.deactivate();
     if (this.overlay) {
@@ -1054,36 +1050,19 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.resetSimpleState();
   }
   relayout(_trueImageSize?: number[]): void {
-    const vp = this.viewer?.viewport;
-    if (!vp) return;
-    // Keep the user's current view across a container/split resize instead of
-    // snapping home. Viewport bounds are image-relative (image width = 1), so
-    // they're independent of the container's pixel size — capture the visible
-    // region now and re-fit it once the new size has settled. OSD's autoResize
-    // fires asynchronously and the angular-split transition animates the width
-    // over a few hundred ms, so restore on the next frame and again after the
-    // transition completes.
-    const bounds = vp.getBounds(true);
-    const restore = () => quiet(() => {
-      this.viewer?.viewport.fitBounds(bounds, true);
-      this.viewer?.viewport.applyConstraints(true);
-    });
-    requestAnimationFrame(restore);
-    setTimeout(restore, 350);
+    this.viewport.keepViewAcrossResize();
   }
   resetAxes(): void {
-    this.viewer?.viewport.goHome();
+    this.viewport.goHome();
   }
   autoscale(): void {
-    this.viewer?.viewport.goHome();
+    this.viewport.goHome();
   }
   zoomIn(): void {
-    this.viewer?.viewport.zoomBy(ZOOM_BUTTON_STEP);
-    this.viewer?.viewport.applyConstraints();
+    this.viewport.zoomBy(1);
   }
   zoomOut(): void {
-    this.viewer?.viewport.zoomBy(1 / ZOOM_BUTTON_STEP);
-    this.viewer?.viewport.applyConstraints();
+    this.viewport.zoomBy(-1);
   }
   setDragMode(mode: string | false): void {
     // Rectangle/polygon drawing run on the SVG overlay; wand/eraser/zoom-box
@@ -1215,23 +1194,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     return { width, height, channels: 4, data: img.data };
   }
 
-  /**
-   * Image-pixel rectangle the drawer canvas (what {@link getDisplayedPixelData}
-   * reads) currently covers. Unlike {@link emitViewportChange}, this is NOT
-   * clamped to the image bounds: the canvas maps 1:1 to the viewport rectangle,
-   * so leaving it unclamped keeps `canvasPx -> imagePx` an exact affine map
-   * (clamping would skew coordinates near the image edges). Routed through world
-   * item 0 (see {@link viewportRectToImage}) for multi-layer accuracy.
-   */
+  /** Image-pixel rectangle the drawer canvas (what {@link getDisplayedPixelData}
+   *  reads) currently covers — unclamped, see OsdViewportAdapter.displayedSourceRect. */
   getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
-    const vp = this.viewer?.viewport;
-    if (!vp || !this.descriptor) return null;
-    try {
-      const r = viewportRectToImage(this.viewer, vp.getBounds(true));
-      return { x: r.x, y: r.y, width: r.width, height: r.height };
-    } catch {
-      return null;
-    }
+    return this.viewport.displayedSourceRect();
   }
 
   downloadImage(): void {
@@ -1268,7 +1234,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   /** Visible image region (full-image pixel coords), emitted when the view
    *  settles. The intensity inset re-samples this region at the zoom resolution. */
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }> {
-    return this.viewportChange$.asObservable();
+    return this.viewport.viewportChange$.asObservable();
   }
 
   /** {@link IIntensitySampling} stub — intensity sampling lives in the Plotly
@@ -1284,82 +1250,10 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     /* no-op: Plotly owns intensity sampling (see IIntensitySampling) */
   }
 
-  /** Compute the current viewport's image-pixel rectangle (clamped to the image)
-   *  and broadcast it. */
-  private emitViewportChange(): void {
-    const rect = this.visibleImageRect();
-    if (rect) this.viewportChange$.next(rect);
-  }
-
-  /** The current viewport's image-pixel rectangle, clamped to the image, or
-   *  null when there is no laid-out viewport. */
-  private visibleImageRect(): PlotModeRect | null {
-    const vp = this.viewer?.viewport;
-    if (!vp || !this.descriptor) return null;
-    try {
-      // Route through world item 0 (osd-coords): vp.viewportToImageRectangle is
-      // inaccurate and warns when the world holds multiple images (per-channel
-      // multichannel layers), which fed the intensity inset a wrong ROI.
-      const r = viewportRectToImage(this.viewer, vp.getBounds(true));
-      const iw = this.descriptor.width, ih = this.descriptor.height;
-      const x = Math.max(0, Math.min(iw, r.x));
-      const y = Math.max(0, Math.min(ih, r.y));
-      const width = Math.max(1, Math.min(iw - x, r.width));
-      const height = Math.max(1, Math.min(ih - y, r.height));
-      return { x, y, width, height };
-    } catch {
-      return null; /* viewport not ready */
-    }
-  }
-
-  /** Coalesce redraws into one {@link frame$} emission per animation frame.
-   *  Skipped entirely while nothing listens. */
-  private scheduleFrame(): void {
-    if (this.frameRaf !== null || !this.frame$.observed) return;
-    this.frameRaf = requestAnimationFrame(() => {
-      this.frameRaf = null;
-      const rect = this.visibleImageRect();
-      if (rect) this.frame$.next(rect);
-    });
-  }
-
-  /**
-   * The viewport a contributed plot mode draws over. One stable object per
-   * service: every method reads the CURRENT viewer, so it stays valid across a
-   * viewer rebuild and reports `isReady() === false` while none is mounted
-   * (conversions then return NaN rather than throwing).
-   */
+  /** The viewport a contributed plot mode draws over: one stable object that
+   *  always reads the current viewer (see OsdViewportAdapter.plotModeViewportFor). */
   getPlotModeViewport(): PlotModeViewport {
-    if (this.plotModeViewport) return this.plotModeViewport;
-    const nan = { x: NaN, y: NaN };
-    const ready = () => !!this.coordTransform?.isReady();
-    this.plotModeViewport = {
-      getOverlayContainer: () => this.getOverlayContainer(),
-      dataToClient: (x, y) => (ready() ? this.coordTransform!.dataToClient(x, y) : nan),
-      clientToData: (cx, cy) => (ready() ? this.coordTransform!.clientToData(cx, cy) : nan),
-      dataLengthToScreen: (len) => (ready() ? this.coordTransform!.dataLengthToScreen(len) : NaN),
-      isReady: ready,
-      // Both start with the current visible rect when the viewport is ready: a mode
-      // activates after the base render has gone idle, so without it an overlay
-      // following `frame$.subscribe(redraw)` would stay blank until the next pan/zoom.
-      frame$: this.withCurrentRect(this.frame$, ready),
-      settled$: this.withCurrentRect(this.viewportChange$, ready),
-      fitBounds: (rect, options) => {
-        const viewer = this.viewer;
-        if (!viewer || !ready() || !(rect.width > 0) || !(rect.height > 0)) return;
-        const vpRect = imageRectToViewport(viewer, rect.x, rect.y, rect.width, rect.height);
-        viewer.viewport.fitBoundsWithConstraints(vpRect, !!options?.immediately);
-      },
-    };
-    return this.plotModeViewport;
-  }
-
-  /** `source`, preceded by the current visible rect for each subscriber (when ready). */
-  private withCurrentRect(source: Subject<PlotModeRect>, ready: () => boolean): Observable<PlotModeRect> {
-    return defer(() => {
-      const rect = ready() ? this.visibleImageRect() : null;
-      return rect ? source.pipe(startWith(rect)) : source.asObservable();
-    });
+    return this.viewport.plotModeViewportFor();
   }
 
   /** OSD targets the image display; the scalar/3D plot types belong to Plotly. */
@@ -1494,20 +1388,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     dock.style.display = 'none';
     void dock.offsetHeight; // reflow so the toggle re-rasters on the next paint
     dock.style.display = prev;
-  }
-
-  /** Fit the OSD viewport to an image-space rectangle (coords ordered
-   *  [xMin, xMax, yMax, yMin]). */
-  private applyZoomToBox(coordinates: number[]): void {
-    if (!this.viewer || coordinates.length < 4) return;
-    const [a, b, c, d] = coordinates;
-    const x = Math.min(a, b);
-    const w = Math.abs(b - a);
-    const y = Math.min(c, d);
-    const h = Math.abs(c - d);
-    if (w <= 0 || h <= 0) return;
-    const rect = imageRectToViewport(this.viewer, x, y, w, h);
-    this.viewer.viewport.fitBounds(rect, false);
   }
 
   /**

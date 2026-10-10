@@ -908,13 +908,13 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
     const s = service as any;
     const rect = { x: 100, y: 50, width: 400, height: 300 };
     expect(seen).toEqual([rect]); // the current rect, on subscribe
-    s.scheduleFrame();
-    s.scheduleFrame();
-    s.scheduleFrame();
+    s.viewport.scheduleFrame();
+    s.viewport.scheduleFrame();
+    s.viewport.scheduleFrame();
     expect(seen).toHaveLength(1);
     jest.advanceTimersByTime(20);
     expect(seen).toEqual([rect, rect]);
-    s.scheduleFrame();
+    s.viewport.scheduleFrame();
     jest.advanceTimersByTime(20);
     expect(seen).toHaveLength(3);
     sub.unsubscribe();
@@ -923,7 +923,7 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
   it('frame$ does no work while nothing listens', () => {
     mountFake(fakeViewer());
     const raf = jest.spyOn(window, 'requestAnimationFrame');
-    (service as any).scheduleFrame();
+    (service as any).viewport.scheduleFrame();
     expect(raf).not.toHaveBeenCalled();
     raf.mockRestore();
   });
@@ -935,9 +935,9 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
     const settled: any[] = [];
     vp.frame$.subscribe((r) => frames.push(r));
     vp.settled$.subscribe((r) => settled.push(r));
-    (service as any).scheduleFrame();
+    (service as any).viewport.scheduleFrame();
     jest.advanceTimersByTime(20);
-    (service as any).emitViewportChange();
+    (service as any).viewport.emitViewportChange();
     const clamped = { x: 0, y: 700, width: 1000, height: 100 };
     expect(frames).toEqual([clamped, clamped]); // initial + one frame
     expect(settled).toEqual([clamped, clamped]); // initial + one settle

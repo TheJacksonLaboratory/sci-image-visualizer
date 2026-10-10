@@ -4,7 +4,9 @@ import { TileDescriptor } from '../tile-server';
 const desc = (over: Partial<TileDescriptor> = {}): TileDescriptor => ({
   width: 1000, height: 700, tileSize: 256, z: 1, channels: 1, realLevels: 2,
   // Two real Bio-Formats levels, then one synthetic overview.
-  levels: [{ res: 0, width: 1000, height: 700 }, { res: 1, width: 500, height: 351 }, { res: 2, width: 125, height: 88 }],
+  levels: [
+    { res: 0, width: 1000, height: 700 }, { res: 1, width: 500, height: 351 }, { res: 2, width: 125, height: 88 },
+  ],
   ...over,
 } as TileDescriptor);
 
