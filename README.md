@@ -361,19 +361,21 @@ no Angular compiler required:
   [region boolean ops](docs/design/region-boolean-ops-design.md) ·
   [MCP control bridge](docs/design/mcp-control-design.md) ·
   [omics preprocessing in JIT](docs/design/omics-preprocessing-jit.md).
-- **Architecture diagrams** (they predate the napari-js and spatial-omics work)
-  - [docs/jit-ui-visualization-architecture.mmd](docs/jit-ui-visualization-architecture.mmd)
-    ([PNG](docs/img/jit-ui-visualization-architecture.png) ·
-    [SVG](docs/img/jit-ui-visualization-architecture.svg)) — host ⇄ library ⇄
-    rendering backends, ports, and the jit-service request flow.
-  - [docs/jit-ui-region-architecture.mmd](docs/jit-ui-region-architecture.mmd)
-    ([PNG](docs/img/jit-ui-region-architecture.png) ·
-    [SVG](docs/img/jit-ui-region-architecture.svg)) — the region interfaces +
-    region tools and how OSD and Plotly each implement the overlay.
+- **Architecture diagrams** (Mermaid sources, ELK layout) in [docs/diagrams/](docs/diagrams/):
+  - [siv-architecture.mmd](docs/diagrams/siv-architecture.mmd) — host ⇄ contracts ⇄
+    router ⇄ OSD / Plotly / napari-js backends, the stores, spatial omics, the
+    workers, and the servers the library talks to.
+  - [siv-regions.mmd](docs/diagrams/siv-regions.mmd) — the region interfaces, the
+    three region overlays, the on-canvas tools with their tool kit and geometry,
+    and the `RegionStore`.
+
+  The PNG/SVG renders in `docs/img/` are of the earlier, pre-napari diagrams that
+  the SOW documents embed.
 - **[docs/JIT_UI_visualization_library_SOW.docx](docs/JIT_UI_visualization_library_SOW.docx)** —
   statement of work for extracting/publishing this library.
 - **History** ([docs/history/](docs/history/)) — the 2026-06 refactoring plan, the
-  shared-backend refactor, past bug write-ups and review records. Kept for
+  shared-backend refactor, the OpenSeadragon backend investigation, past bug
+  write-ups and review records. Kept for
   context; not current.
 
 Related (host side, in jit-ui):

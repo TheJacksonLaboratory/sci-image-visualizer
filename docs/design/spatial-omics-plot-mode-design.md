@@ -148,11 +148,13 @@ export interface SpatialDataset {
 export interface SpatialDataPort {
   getDataset$(): Observable<SpatialDataset | null>;
   getFeatureVector(name: string): Promise<Float32Array>;
-  /** Optional server-side ROI query for datasets too large to hold client-side. */
-  queryRoi?(polygon: { x: number[]; y: number[] }): Promise<Uint32Array>;
 }
 export const SPATIAL_DATA_PORT = new InjectionToken<SpatialDataPort>('SPATIAL_DATA_PORT');
 ```
+
+ROI selection runs in the library, point-in-polygon over the loaded coordinates
+(`spatial/spatial-selection.ts`). An optional server-side `queryRoi` was sketched here
+at first; nothing implemented or called it, and it has been removed from the port.
 
 Plus `PlotDataSource` gains `'spatial'` — free, since nothing consumes it yet.
 

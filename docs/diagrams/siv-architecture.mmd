@@ -1,0 +1,131 @@
+---
+title: sci-image-visualizer — architecture (host, contracts, router, backends, data)
+config:
+  layout: elk
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+  themeVariables:
+    edgeLabelBackground: transparent
+  elk:
+    nodePlacementStrategy: SIMPLE
+---
+%% Companion to siv-regions.mmd. Describes the library as built; docs/ARCHITECTURE.md
+%% is the prose version. ELK layout for orthogonal edges; needs a mermaid build with ELK.
+flowchart TB
+
+subgraph HOST["Host app (jit-ui, examples/browser-image, any Angular app)"]
+hostui["Host components<br/>embed &lt;visualizer&gt; · &lt;region-editor&gt;<br/>&lt;channel-histogram&gt; · &lt;spatial-controls&gt;"]
+adapters["Host adapters for the ports<br/>image state · tile access · region I/O<br/>VizConfig · preferences · spatial data (optional)"]
+isolated["Second, isolated viewer (optional)<br/>providers: provideVisualization()"]
+contrib["Contributions (optional)<br/>TOOLBAR_TOOLS · PLOT_TYPE_CONTRIBUTIONS<br/>CELL_SEGMENTER"]
+end
+
+subgraph LIB["@jax-data-science/sci-image-visualizer — Angular library"]
+
+subgraph UI["Components"]
+vis["&lt;visualizer&gt;<br/>toolbar · plot-type selector · dialogs<br/>RenderOrchestrator · PlotModeController"]
+chist["&lt;channel-histogram&gt;"]
+redit["&lt;region-editor&gt;"]
+spc["&lt;spatial-controls&gt; · &lt;spatial-charts&gt;"]
+end
+
+subgraph API["contracts/ — backend-neutral (lint-enforced)"]
+tokens["API tokens<br/>VISUALIZER · REGION_EDITOR_API<br/>CHANNEL_HISTOGRAM_API"]
+ports["Ports (host provides)<br/>IMAGE_STATE_PORT · TILE_ACCESS_PORT · REGION_IO_PORT<br/>VIZ_CONFIG · PREFERENCES_PORT? · SPATIAL_DATA_PORT?"]
+handle["VisualizerHandle<br/>handed to the host via ImageStatePort.setDiagram()"]
+end
+
+rvs["RoutingVisualizerService<br/>serves the three tokens · routes by PlotType with fallback<br/>spatial controls + selection"]
+
+subgraph BE["Backends"]
+osd["OpenSeadragon<br/>tiled image · z-stacks · serverless 'simple' mode"]
+plot["Plotly<br/>heatmap · contour · scatter · surface · 3D · isosurface<br/>intensity profile · omics charts"]
+napari["napari-js (WebGPU)<br/>image · volume · surface · points<br/>spatial omics 2D/3D"]
+end
+
+subgraph STATE["Shared stores (root, or per provideVisualization() scope)"]
+vstore["VisualizerStore<br/>colormap · channels · presets · spatial view"]
+rstore["RegionStore<br/>regions · selection · undo · per-slice"]
+sstore["SpatialSelectionStore<br/>selected observations"]
+end
+
+subgraph SHARED["Shared building blocks"]
+tools["Region overlays (one per backend)<br/>toolbar tools + tool-kit · geometry/<br/>(see siv-regions.mmd)"]
+spatial["spatial/ — pure spatial-omics math<br/>encoding · selection · tiles/LOD · density<br/>expression · heatmap · t-SNE"]
+util["util/supersede · contracts/intensity<br/>latest-wins + AbortSignal · auto-window"]
+workers["Web Workers<br/>mask · onnx-sam · tsne · spatial-math"]
+httpadapter["SpatialDataHttpService (optional)<br/>reference SPATIAL_DATA_PORT adapter"]
+end
+
+end
+
+subgraph SRV["Servers"]
+tilesrv["Tile server (jit-service, or examples/tile-server)<br/>/tiles/info · /tile · /preview · /zoom/region<br/>/histogram · /export/tiff"]
+spatialsrv["Spatial data server<br/>/spatial/{id}/manifest · coords · column · feature<br/>polygon/transcript tiles · density · …"]
+models["Model hosting (Hugging Face by default)<br/>SAM ONNX pairs · cellpose-js"]
+end
+
+%% ---- host <-> library ----
+hostui -- embeds --> UI
+isolated -- "own router, backends, stores" --> rvs
+adapters -. provide .-> ports
+contrib -. "multi-provide" .-> vis
+vis -- "setDiagram(handle)" --> handle
+vis -- inject --> tokens
+chist -- inject --> tokens
+redit -- inject --> tokens
+spc -- inject --> tokens
+
+%% ---- contracts -> router ----
+tokens -- useExisting --> rvs
+ports -- injected --> rvs
+
+%% ---- router -> backends, stores ----
+rvs -- "IMAGE (default)" --> osd
+rvs -- "scientific plots, fallback" --> plot
+rvs -- "napari & spatial types" --> napari
+rvs --> STATE
+osd --> STATE
+plot --> STATE
+napari --> STATE
+
+%% ---- backends -> shared blocks ----
+osd --> tools
+plot --> tools
+napari --> tools
+napari --> spatial
+rvs --> spatial
+spc --> spatial
+spatial -. "off the main thread" .-> workers
+tools -. "mask export · SAM" .-> workers
+httpadapter -. implements .-> ports
+
+%% ---- library -> servers ----
+osd -- "tiles via TILE_ACCESS_PORT + VIZ_CONFIG" --> tilesrv
+napari -- "tiles · histogram · export" --> tilesrv
+plot -- "preview · /zoom/region crop" --> tilesrv
+httpadapter -- "HttpClient (host interceptors apply)" --> spatialsrv
+workers -- "model download (Cache API)" --> models
+
+classDef host fill:#dcebff,stroke:#345,color:#111;
+classDef ui fill:#dff5e0,stroke:#2c7,color:#111;
+classDef api fill:#fff0cf,stroke:#9a7b2b,color:#111;
+classDef router fill:#ffe2bd,stroke:#9a6b2b,color:#111;
+classDef backend fill:#ece0ff,stroke:#65459a,color:#111;
+classDef store fill:#ffe2e2,stroke:#b05,color:#111;
+classDef internal fill:#ededed,stroke:#555,color:#111;
+classDef server fill:#fff,stroke:#b05,color:#111;
+
+class hostui,adapters,isolated,contrib host;
+class vis,chist,redit,spc ui;
+class tokens,ports,handle api;
+class rvs router;
+class osd,plot,napari backend;
+class vstore,rstore,sstore store;
+class tools,spatial,util,workers,httpadapter internal;
+class tilesrv,spatialsrv,models server;
+
+style LIB fill:#eafaf4,stroke:#1a9e6f,stroke-width:3px,color:#127a4f;
+style HOST fill:#eaf2ff,stroke:#7fb3ff,stroke-width:1.5px;
+style SRV fill:#ffeaea,stroke:#ff9a9a,stroke-width:1.5px;
