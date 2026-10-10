@@ -34,7 +34,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  "edit colour of selected regions" dialog. Unclassified regions (no label)
    *  are grouped under a single entry with an empty `label`. */
   classColorEdits: { label: string; color: string }[] = [];
-  labelColors: Map<string, string> = new Map();
   /** "Edit class on selected rows" popup: chosen existing class, and a new-class name. */
   bulkClass = '';
   newBulkClass = '';
@@ -218,49 +217,36 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Apply classification colours and refresh the label→colour map for regions
-   * coming from the visualizer. The visualizer hands back neutral `Region`
-   * objects with bounds, colour and label already populated, so the editor no
-   * longer parses any backend-specific shape format — it only fills in a
-   * fallback colour and rebuilds its local label→colour lookup.
+   * Rows for regions coming from the visualizer: neutral `Region`s with bounds,
+   * colour and label already populated. A region without a colour is shown with
+   * its classification colour (or the default shape colour) — as a copy: the
+   * store's instances are shared with its undo history and must not be changed
+   * in place (RT-1).
    */
   private applyRegionColors(regions: Region[]): Region[] {
-    // A region without a colour gets a coloured copy: the store's instances are
-    // shared with its undo history and must not be changed in place (RT-1).
     const classColors = this.regionApi.getClassificationColors();
-    regions = regions.map((region) => region.color
+    return regions.map((region) => region.color
       ? region
       : withRegionPatch(region, { color: classColors.get(region.label ?? '') || this.shapeColor }));
-    // Rebuild labelColors: seed from persisted map, then overlay actual region colors
-    this.labelColors.clear();
-    for (const [label, color] of this.regionApi.getClassificationColors()) {
-      this.labelColors.set(label, color);
-    }
-    for (const region of regions) {
-      if (region.label && region.color) {
-        this.labelColors.set(region.label, region.color);
-      }
-    }
-    return regions;
   }
 
   /**
-   * Push edits from the editor to the diagram in live-edit mode (no save /
-   * cancel buttons). The `_updatingFromEditor` guard is still used so the
-   * resulting regionUpdateEvent doesn't bounce back as an external change.
+   * The editor's one write path (RT-1): make `next` the table's rows and commit
+   * them to the store — live, as one undoable step (isRegionSaveOn=true; the
+   * router keeps the intensity-profile lines). Rows are the store's instances,
+   * so an edit passes copies ({@link patchRegions}), never changed rows. The
+   * resulting region-update event is ignored (`_updatingFromEditor`), so the
+   * class list and counts are refreshed here (a typed class is added; jit-ui#70).
    */
-  private setRegionsFromEditor(fillColor?: string) {
+  private commit(next: Region[] = this.regions): void {
+    this.regions = next;
     this._updatingFromEditor = true;
-    // isRegionSaveOn=true so changes commit to the region store (and the per-image
-    // cache) immediately. setAnnotationRegions preserves the intensity-profile
-    // lines internally, so editor edits never disturb them.
-    this.regionApi.setAnnotationRegions(this.regions, this.showShapeLabel, true, fillColor ?? this.fillColor);
-    this._updatingFromEditor = false;
-    // The editor's own commit is ignored by the region-update subscription (the
-    // _updatingFromEditor guard), so refresh here: a class label typed in the
-    // Class column gets added to the list, and the panel counts/order stay in
-    // sync after any edit. (jit-ui#70)
-    this.syncClassesFromRegions(this.regions);
+    try {
+      this.regionApi.setAnnotationRegions(next, this.showShapeLabel, true, this.fillColor);
+    } finally {
+      this._updatingFromEditor = false;
+    }
+    this.syncClassesFromRegions(next);
     this.recomputeClassCounts();
   }
 
@@ -277,7 +263,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.regions = this.regions.map((r) => {
       const patch = patchFor(r);
       if (!patch) return r;
-      const copy = Object.assign(new Region(), r, patch);
+      const copy = withRegionPatch(r, patch);
       copies.set(r, copy);
       return copy;
     });
@@ -293,46 +279,29 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     return copies;
   }
 
-  /** Set one region's outline colour from the per-row picker and commit live.
-   *  Remembers it as the label's colour so same-class regions added later match
-   *  (jit-ui#85 — the Region Editor's per-region Color column). */
+  /** Set one region's outline colour (an explicit override) and commit live. */
   changeRegionColor(region: Region, color: string): void {
     if (!color || region.color === color) return;
     // colorOverridden: explicit per-region colour — preserve it against preset (re)apply (jit-ui#70)
     this.patchRegions((r) => (r === region ? { color, colorOverridden: true } : null));
-    if (region.label) this.labelColors.set(region.label, color);
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   /**
-   * Update the label of the region on enter key pressed (when editing a label cell in the table)
-   * @param region
-   * @param setRegion
+   * After a label edit on `region`: give every labelled row without a colour its
+   * class colour (preset or fallback, as the store will), and commit when
+   * `commit` is set.
    */
-  labelRegionUpdate(region: Region, setRegion = false) {
-    if (region.label) {
-      // if label doesn't exist
-      if (!this.labelColors.has(region.label)) {
-        this.labelColors.set(region.label, this.shapeColor);
-      }
-    }
-    // update colors of the regions
-    this.patchRegions((reg) =>
-      !reg.color && reg.label && this.labelColors.has(reg.label)
-        ? { color: this.labelColors.get(reg.label) }
-        : null,
-    );
-    // update labels map
-    this.labelColors.clear();
-    for (const reg of this.regions) {
-      if (reg.label && reg.color) {
-        this.labelColors.set(reg.label, reg.color);
-      }
-    }
-    if (setRegion) {
-      this.setRegionsFromEditor();
-    }
+  labelRegionUpdate(region: Region, commit = false) {
+    this.fillClassColors();
+    if (commit) this.commit();
   }
+
+  /** Labelled rows without a colour get their class colour (copies). */
+  private fillClassColors(): void {
+    this.patchRegions((r) => (!r.color && r.label ? { color: this.colorForName(r.label) } : null));
+  }
+
   /** The current page of the table. Memoized on (regions, first, rows), so
    *  change detection doesn't hand p-table a new array every tick (RT-20). */
   get pagedRegions(): Region[] {
@@ -362,10 +331,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       // Filter by id — object identity isn't reliable across re-parses,
       // and name is a user-editable label that may collide.
       const removed = new Set(this.selectedRegions.map((r) => r.id));
-      this.regions = this.regions.filter((r) => !removed.has(r.id));
       this.selectedRegions = [];
+      this.commit(this.regions.filter((r) => !removed.has(r.id)));
       this.clampPaginatorFirst();
-      this.setRegionsFromEditor();
       // Sync the cleared selection with the plot's highlight state.
       this.onSelectionChanged();
     }
@@ -376,10 +344,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       key: 'positionDialog',
       message: 'Are you sure you want to delete all regions?',
       accept: () => {
-        this.regions = [];
         this.selectedRegions = [];
         this.paginatorFirst = 0;
-        this.setRegionsFromEditor();
+        this.commit([]);
         this.onSelectionChanged();
       },
     });
@@ -387,12 +354,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   deleteRegion(shapeIdx: number) {
     const removed = this.regions[shapeIdx];
-    this.regions = this.regions.filter((_, i) => i !== shapeIdx);
     if (removed) {
       this.selectedRegions = this.selectedRegions.filter((r) => r.id !== removed.id);
     }
+    this.commit(this.regions.filter((_, i) => i !== shapeIdx));
     this.clampPaginatorFirst();
-    this.setRegionsFromEditor();
     // Re-emit the (possibly trimmed) selection so the plot's highlight stays
     // in sync with what's still in the table.
     this.onSelectionChanged();
@@ -408,7 +374,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
   changeShowShapeLabel(showLabel: boolean) {
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   isEditingLabel(region: Region): boolean {
@@ -454,7 +420,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         }),
       };
     });
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   showHelp() {
@@ -463,26 +429,21 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Open the colour dialog for the currently-selected region(s), building one
    *  colour picker per unique class in the selection. Each picker is seeded with
-   *  the class's current colour (the label→colour map, falling back to the first
-   *  selected region of that class). */
+   *  the first selected region of that class's colour (else the class colour). */
   openColorDialog() {
     if (!this.selectedRegions?.length) return;
     const seedByLabel = new Map<string, string>();
     for (const region of this.selectedRegions) {
       const label = region.label?.trim() ?? '';
       if (seedByLabel.has(label)) continue;
-      seedByLabel.set(
-        label,
-        (label ? this.labelColors.get(label) : undefined) ?? region.color ?? this.shapeColor,
-      );
+      seedByLabel.set(label, region.color ?? (label ? this.colorForName(label) : this.shapeColor));
     }
     this.classColorEdits = [...seedByLabel].map(([label, color]) => ({ label, color }));
     this.showColorDialog = true;
   }
 
-  /** Apply each class's chosen colour to the selected regions of that class and
-   *  commit live. Remembers the colour per class so same-class regions added
-   *  later match. */
+  /** Apply each class's chosen colour to the selected regions of that class (an
+   *  explicit override) and commit live. */
   applyColorToSelected() {
     const colorByLabel = new Map(this.classColorEdits.map((e) => [e.label, e.color]));
     const selected = new Set(this.selectedRegions ?? []);
@@ -491,11 +452,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       const label = region.label?.trim() ?? '';
       const color = colorByLabel.get(label);
       if (!color) return null;
-      if (label) this.labelColors.set(label, color);
       // explicit colour — preserve against preset (re)apply (jit-ui#70)
       return { color, colorOverridden: true };
     });
-    this.setRegionsFromEditor();
+    this.commit();
     this.showColorDialog = false;
   }
 
@@ -566,7 +526,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   setClassColor(name: string, color: string): void {
     if (!color) return;
     this.regionApi.setClassificationColor(name, color);
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   /** Tooltip for a class's delete button in the panel. */
@@ -583,7 +543,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.reassignRegionsToDefaultClass([name]);
     this.regionApi.removeClass(name);
     if (this.activeClass === name) this.activeClass = null;
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   /** Regions labelled with any of `removedNames` revert to the default
@@ -609,7 +569,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const patch: Partial<Region> = { label: name, colorOverridden: false };
     if (name) patch.color = colorForLabel(name, this.presetSet);
     this.patchRegions((r) => (r === region ? patch : null));
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   /** Make a class active (used for new regions) and, if rows are selected, apply
@@ -625,7 +585,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (!selected.size) return;
     const color = colorForLabel(name, this.presetSet);
     this.patchRegions((r) => (selected.has(r) ? { label: name, colorOverridden: false, color } : null));
-    this.setRegionsFromEditor();
+    this.commit();
   }
 
   /** "Edit class on selected rows" popup — apply the chosen existing class. */
@@ -701,13 +661,13 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       .filter((n) => !kept.has(keyOf(n)));
     this.reassignRegionsToDefaultClass(removed);
     this.regionApi.setPresetSet(this.presetDraft);
-    this.setRegionsFromEditor(); // recolour existing (non-overridden) regions from the new presets
+    this.commit(); // recolour existing (non-overridden) regions from the new presets
     if (close) this.showManageDialog = false;
   }
   resetPresetsToDefaults(): void {
     this.regionApi.resetPresets();
     this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
-    this.setRegionsFromEditor();
+    this.commit();
   }
   exportPresets(): void {
     const json = JSON.stringify(this.regionApi.getPresetSet(), null, 2);
@@ -724,7 +684,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       if (!set) throw new Error('The file is not an annotation-class list (no valid classes).');
       this.regionApi.setPresetSet(set);
       this.presetDraft = this.clonePresetSet(this.regionApi.getPresetSet());
-      this.setRegionsFromEditor();
+      this.commit();
       this.messageService.add({ key: VIZ_TOAST_KEY, severity: 'success',
         summary: 'Classes imported', detail: 'Annotation classes loaded.' });
     } catch (err) {
@@ -741,12 +701,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private applyImportedRois(text: string): void {
     try {
       this.regions = this.regionApi.importRegions(text);
-      // set label colors
-      for (const region of this.regions) {
-        this.labelRegionUpdate(region, false);
-      }
-      this.syncClassesFromRegions(this.regions);
-      this.setRegionsFromEditor();
+      this.fillClassColors();
+      this.commit();
     } catch (err) {
       this.messageService.add({
         key: VIZ_TOAST_KEY,

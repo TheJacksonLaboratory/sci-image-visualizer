@@ -39,7 +39,7 @@ function addRect(component: RegionEditorComponent): void {
   region.bounds = Object.assign(new Rectangle(), { width: 512, height: 512 });
   region.label = 'Region';
   component.regions = [...component.regions, region];
-  (component as any).setRegionsFromEditor();
+  (component as any).commit();
 }
 
 /** Seed a triangle row and commit it. */
@@ -51,7 +51,7 @@ function addPoly(component: RegionEditorComponent): void {
   region.bounds = p;
   region.label = 'Region';
   component.regions = [...component.regions, region];
-  (component as any).setRegionsFromEditor();
+  (component as any).commit();
 }
 
 describe('RegionEditorComponent', () => {
@@ -231,7 +231,8 @@ describe('RegionEditorComponent', () => {
     addRect(component);
     component.regions[0].label = 'tissue';
     component.labelRegionUpdate(component.regions[0]);
-    expect(component.labelColors.has('tissue')).toBe(true);
+    // A colourless row takes its class colour (preset or fallback).
+    expect(component.regions[0].color).toBe(component.colorForName('tissue'));
   });
 
   it('save/export propose <name>.geojson for an extension-less file name (RT-19)', () => {
@@ -464,9 +465,9 @@ describe('RegionEditorComponent with shapes', () => {
     expect(component.regions[1].label).toBe('normal');
   });
 
-  it('should populate labelColors map from labeled regions', () => {
-    expect(component.labelColors.get('tumor')).toBe('#FF0000');
-    expect(component.labelColors.get('normal')).toBe('#00FF00');
+  it('keeps each labelled region\'s own colour (class colours are derived, not cached)', () => {
+    expect(component.regions.map((r) => [r.label, r.color]).slice(0, 2))
+      .toEqual([['tumor', '#FF0000'], ['normal', '#00FF00']]);
   });
 });
 
@@ -1242,8 +1243,6 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     component.applyColorToSelected();
     expect(component.regions.map((r) => r.color)).toEqual(['#abcdef', '#abcdef', '#123456']);
     expect(component.selectedRegions).toEqual(component.regions); // the selection follows the copies
-    expect(component.labelColors.get('Tumor')).toBe('#abcdef');
-    expect(component.labelColors.get('Stroma')).toBe('#123456');
     expect(spy).toHaveBeenCalled();
     expect(component.showColorDialog).toBe(false);
   });
@@ -1263,12 +1262,11 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
     expect(component.showColorDialog).toBe(true);
   });
 
-  it('openColorDialog seeds a class picker from the persisted label colour', () => {
-    const a = poly(); a.label = 'Tumor'; a.color = '#112233';
-    component.labelColors.set('Tumor', '#abcdef');
+  it('openColorDialog seeds a class picker with its class colour when the region has none', () => {
+    const a = poly(); a.label = 'Tumor';
     component.selectedRegions = [a];
     component.openColorDialog();
-    expect(component.classColorEdits).toEqual([{ label: 'Tumor', color: '#abcdef' }]);
+    expect(component.classColorEdits).toEqual([{ label: 'Tumor', color: component.colorForName('Tumor') }]);
   });
 
   it('selectAllRegions selects every row and syncs the plot', () => {
@@ -1581,7 +1579,7 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 
   it('committing a region with a new class label adds that class', () => {
     (component as any).regions = [Object.assign(new Region(), { id: 1, label: 'BrandNewClass' })];
-    (component as any).setRegionsFromEditor();
+    (component as any).commit();
     expect(api.upsertClass).toHaveBeenCalledWith(expect.objectContaining({ name: 'BrandNewClass' }));
   });
 
