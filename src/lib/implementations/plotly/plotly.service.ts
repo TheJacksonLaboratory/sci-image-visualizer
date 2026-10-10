@@ -1841,7 +1841,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
 
   public downloadImage() {
     if (this.plotDiv) {
-      (Plotly as any).downloadImage(this.plotDiv, { format: 'png', filename: this.fileName || 'image' });
+      void Plotly.downloadImage(this.plotDiv, { format: 'png', filename: this.fileName || 'image' });
     }
   }
 
@@ -1931,7 +1931,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
     live._fullLayout._activeShapeIndex = -1;
     const dictArray = this.shapes.map(s => ({ ...s }));
     Plotly.relayout(live, { shapes: dictArray } as any).then(
-      () => { if (live._fullLayout) (Plotly as any).redraw(live); },
+      () => { if (live._fullLayout) void Plotly.redraw(live); },
       (err: unknown) => console.warn('[viz:plotly] shape relayout after delete failed', err),
     );
   }
@@ -2015,7 +2015,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
       const gd: any = document.getElementById(this.plotDiv);
       if (gd?._fullLayout) {
         gd._fullLayout._activeShapeIndex = cleaned.length > 0 ? cleaned[cleaned.length - 1] : -1;
-        try { (Plotly as any).redraw(gd); } catch { /* noop in tests */ }
+        try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
       }
     }
     this.regionStore.setSelectedShapeIndices(cleaned);
@@ -2033,7 +2033,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IVisualizer {
       const gd: any = document.getElementById(this.plotDiv);
       if (gd?._fullLayout && idx >= 0) {
         gd._fullLayout._activeShapeIndex = idx;
-        try { (Plotly as any).redraw(gd); } catch { /* noop in tests */ }
+        try { void Plotly.redraw(gd); } catch { /* noop in tests */ }
       }
     }
   }
