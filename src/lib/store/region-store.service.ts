@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../models/region';
@@ -12,6 +12,7 @@ import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } f
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
 import { RegionHistory } from './region-history';
+import { RegionSelection } from './region-selection';
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -96,10 +97,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  saving removes its previously-saved geojson (writes an empty one). */
   private stackInitialNonEmpty = new Set<number>();
 
-  /** Selection is tracked by region *id* internally (stable across edits) and
-   *  projected to array indices on the IRegionStore boundary. */
-  private selectedIds: number[] = [];
-  private readonly selectedIndices$ = new BehaviorSubject<number[]>([]);
+  /** Selection by region *id* (stable across edits), projected to array
+   *  indices on the IRegionStore boundary. */
+  private readonly selection = new RegionSelection();
   private readonly regionUpdate$ = new Subject<Region[]>();
   /** Non-coalesced sibling of regionUpdate$: fires on every change even during a
    *  batched drag, so live consumers (intensity inset) update per frame. */
@@ -197,7 +197,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       if (normalized.length) this.stackInitialNonEmpty.add(z);
     }
     this.regions = (this.regionsBySlice.get(this.currentSliceZ) ?? []).slice();
-    this.selectedIds = [];
+    this.selection.replace([]);
     this.syncCache();
     this.resetUndoHistory();
     this.emitSelection();
@@ -228,7 +228,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regionsBySlice.set(this.currentSliceZ, this.regions.slice());
     this.currentSliceZ = next;
     this.regions = (this.regionsBySlice.get(next) ?? []).slice();
-    this.selectedIds = [];
+    this.selection.replace([]);
     this.syncCache();
     this.resetUndoHistory();
     this.emitSelection();
@@ -331,15 +331,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   /** Select regions by array index (or [] to clear). Stored internally by id
    *  so the selection survives subsequent edits/reorders. */
   setSelectedShapeIndices(indices: number[]): void {
-    const ids: number[] = [];
-    const seen = new Set<number>();
-    for (const i of indices || []) {
-      if (!Number.isFinite(i) || i < 0 || i >= this.regions.length) continue;
-      const id = this.regions[i].id;
-      if (!seen.has(id)) { seen.add(id); ids.push(id); }
-    }
-    this.selectedIds = ids;
-    this.emitSelection();
+    this.selection.selectIndices(indices, this.regions);
   }
 
   /** Select a single region by identity (id). Backends call this from their
@@ -347,27 +339,27 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  resulting selection emit. No-op if the region isn't in the store. */
   selectRegion(region: Region): void {
     if (region?.id == null || this.indexOfId(region.id) < 0) return;
-    this.selectedIds = [region.id];
+    this.selection.replace([region.id]);
     this.emitSelection();
   }
 
   getSelectedShapeIndices$(): Observable<number[]> {
-    return this.selectedIndices$.asObservable();
+    return this.selection.indices$;
   }
 
   /** Synchronous current selection (array indices) — for callers that need to
    *  read the selection without subscribing. */
   getSelectedShapeIndices(): number[] {
-    return this.selectedIndices$.value;
+    return this.selection.indices;
   }
 
   /** Delete the currently selected regions and clear the selection. */
   deleteActiveShape(): void {
-    if (this.selectedIds.length === 0) return;
+    if (this.selection.ids.length === 0) return;
     this.recordUndoSnapshot();
-    const ids = new Set(this.selectedIds);
+    const ids = new Set(this.selection.ids);
     this.regions = this.regions.filter(r => !ids.has(r.id));
-    this.selectedIds = [];
+    this.selection.replace([]);
     this.syncCache();
     this.emitSelection();
     this.emit();
@@ -446,9 +438,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private restoreSnapshot(snapshot: Region[]): void {
     this.history.restore(() => {
       this.regions = snapshot.slice();
-      // Drop any selected ids the restored set no longer contains.
-      this.selectedIds = this.selectedIds.filter(id => this.indexOfId(id) >= 0);
       this.syncCache();
+      // Drops any selected ids the restored set no longer contains.
       this.emitSelection();
     });
     // Notify the live + coalesced streams so whichever backend is on screen
@@ -495,7 +486,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     // The caller's instance becomes the stored one (completed in place).
     const [stored] = this.withClassificationColors([region], () => true);
     this.regions = [...this.regions, stored];
-    this.selectedIds = [stored.id];
+    this.selection.replace([stored.id]);
     this.syncCache();
     this.emitSelection();
     this.emit();
@@ -516,7 +507,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     if (!this.regions.some((r) => drop.has(r.id))) return;
     if (opts.recordUndo !== false) this.recordUndoSnapshot();
     this.regions = this.regions.filter((r) => !drop.has(r.id));
-    this.selectedIds = this.selectedIds.filter((s) => !drop.has(s));
+    this.selection.retain((s) => !drop.has(s));
     this.syncCache();
     this.emitSelection();
     this.emit();
@@ -671,7 +662,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regions = (newKey && this.regionsByImageKey.get(newKey))
       ? (this.regionsByImageKey.get(newKey) as Region[]).slice()
       : [];
-    this.selectedIds = [];
+    this.selection.replace([]);
     // Undo never crosses an image switch.
     this.resetUndoHistory();
     this.emitSelection();
@@ -713,25 +704,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regionUpdate$.next(this.getRegions());
   }
 
-  /** Project selected ids to current array indices, pruning ids that no longer
-   *  exist, and emit if the index set changed. */
+  /** Project the selected ids onto the current regions (pruning gone ones);
+   *  emits only if the index set changed. */
   private emitSelection(): void {
-    const indices: number[] = [];
-    const liveIds: number[] = [];
-    for (const id of this.selectedIds) {
-      const idx = this.indexOfId(id);
-      if (idx >= 0) { indices.push(idx); liveIds.push(id); }
-    }
-    this.selectedIds = liveIds;
-    if (!this.indicesEqual(this.selectedIndices$.value, indices)) {
-      this.selectedIndices$.next(indices);
-    }
-  }
-
-  private indicesEqual(a: number[], b: number[]): boolean {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
+    this.selection.sync(this.regions);
   }
 
   private findById(id: number): Region | undefined {
