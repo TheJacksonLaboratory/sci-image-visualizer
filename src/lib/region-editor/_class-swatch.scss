@@ -1,0 +1,23 @@
+/* Shared by the editor's bulk-class overlay and the table's Class dropdown. */
+
+/* Small round colour swatch used in the Class dropdown. */
+.chip-swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  flex: 0 0 auto;
+}
+
+.dd-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.dd-value .class-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

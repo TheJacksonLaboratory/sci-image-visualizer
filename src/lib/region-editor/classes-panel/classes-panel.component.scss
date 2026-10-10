@@ -1,3 +1,9 @@
+/* A fixed-height item of the editor's flex column (above the table). */
+:host {
+  display: block;
+  flex: 0 0 auto;
+}
+
 /* Docked "Classes" panel above the regions table: a header (title + add + manage)
  * over a scrollable, height-capped list of class rows. */
 .classes-panel {

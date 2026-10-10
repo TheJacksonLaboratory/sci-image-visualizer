@@ -1,0 +1,87 @@
+<div class="region-editor-content">
+    <p-table [value]="page"
+             [tableStyle]="{'width': '100%'}"
+             [selection]="selection" (selectionChange)="selectionChange.emit($event)"
+             selectionMode="multiple" [metaKeySelection]="metaKey"
+             (onRowSelect)="rowSelect.emit()" (onRowUnselect)="rowSelect.emit()"
+             [resizableColumns]="true"
+             [rowHover]="true" dataKey="id" styleClass="p-datatable-sm region-editor-table"
+             [scrollable]="true" scrollHeight="100%">
+      <ng-template pTemplate="header">
+        <!-- Hide the column header when there are no regions to show. -->
+        <tr *ngIf="total > 0">
+          <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
+          <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
+          <th class="surface-col-header" pResizableColumn>Surface</th>
+          <!-- Trash column: just enough for the icon. -->
+          <th style="width:2rem"></th>
+        </tr>
+      </ng-template>
+      <ng-template pTemplate="body" let-region let-rowIdx="rowIndex">
+        <tr [pSelectableRow]="region" [pSelectableRowIndex]="rowIdx">
+          <td class="class-cell">
+            <ng-container *ngIf="!labelDrafts.has(region); else editLabelTpl">
+              <span class="class-cell-display">
+                <!-- Quick-pick a preset class (its colour follows); the pencil is for
+                     a free-form name / rename (jit-ui#70). -->
+                <p-dropdown class="class-dropdown" appendTo="body"
+                            [options]="presetSet.classes" optionLabel="name" optionValue="name"
+                            [ngModel]="region.label" [autoDisplayFirst]="false"
+                            ariaLabel="Class"
+                            (onChange)="classPick.emit({ region: region, name: $event.value })">
+                  <ng-template pTemplate="selectedItem">
+                    <span class="dd-value">
+                      <span class="chip-swatch" [style.background]="classColor(region.label)"></span>
+                      <span class="class-name" [pTooltip]="region.label"
+                            tooltipPosition="bottom">{{ region.label || '—' }}</span>
+                    </span>
+                  </ng-template>
+                  <ng-template let-c pTemplate="item">
+                    <span class="dd-value">
+                      <span class="chip-swatch" [style.background]="c.color"></span>
+                      <span>{{ c.name }}</span>
+                    </span>
+                  </ng-template>
+                </p-dropdown>
+                <i class="pi pi-pencil icon-hover ml-2"
+                   pTooltip="Rename / free-form label" tooltipPosition="bottom"
+                   role="button" aria-label="Rename"
+                   (click)="startEdit(region, $event)"></i>
+              </span>
+            </ng-container>
+            <ng-template #editLabelTpl>
+              <span class="p-input-icon-right class-cell-edit">
+                <i class="pi pi-times icon-hover"
+                   pTooltip="Close" tooltipPosition="bottom"
+                   role="button" aria-label="Cancel rename"
+                   (click)="stopEdit(region, false, $event)"></i>
+                <input type="text" pInputText class="p-inputtext-sm w-full" aria-label="Class label"
+                       [ngModel]="labelDrafts.get(region)"
+                       (ngModelChange)="labelDraftChange.emit({ region: region, value: $event })"
+                       (click)="$event.stopPropagation()"
+                       (keydown.enter)="stopEdit(region, true, $event)"
+                       (keydown.escape)="stopEdit(region, false, $event)"/>
+              </span>
+            </ng-template>
+          </td>
+          <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
+          <td class="surface-cell">{{ area(region) || '—' }}</td>
+          <td>
+            <button pButton pRipple icon="pi pi-trash" aria-label="Delete region"
+                    class="p-button-sm p-button-rounded p-button-text p-button-warning"
+                    (click)="deleteRow.emit(first + rowIdx)"></button>
+          </td>
+        </tr>
+      </ng-template>
+    </p-table>
+</div>
+
+<p-paginator *ngIf="total > 0"
+             [rows]="rows" [totalRecords]="total"
+             [first]="first"
+             [rowsPerPageOptions]="rowsPerPageOptions"
+             [showCurrentPageReport]="true"
+             currentPageReportTemplate="{first} to {last} of {totalRecords}"
+             (onPageChange)="onPage($event)"
+             styleClass="region-editor-paginator">
+</p-paginator>

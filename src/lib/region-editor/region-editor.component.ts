@@ -266,11 +266,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     });
     if (copies.size) {
       this.selectedRegions = (this.selectedRegions ?? []).map((r) => copies.get(r) ?? r);
-      for (const [r, copy] of copies) {
-        const draft = this.editingLabelRegions.get(r);
-        if (draft === undefined) continue;
-        this.editingLabelRegions.delete(r);
-        this.editingLabelRegions.set(copy, draft);
+      if ([...copies.keys()].some((r) => this.editingLabelRegions.has(r))) {
+        this.editingLabelRegions = new Map(
+          [...this.editingLabelRegions].map(([r, d]) => [copies.get(r) ?? r, d]));
       }
     }
     return copies;
@@ -380,13 +378,23 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   startEditLabel(region: Region, event?: Event): void {
     event?.stopPropagation(); // don't toggle row selection
-    this.editingLabelRegions.set(region, region.label ?? '');
+    // A new map per start/stop, so the OnPush table sees the change.
+    this.editingLabelRegions = new Map(this.editingLabelRegions).set(region, region.label ?? '');
+  }
+
+  /** The label typed so far for a row in edit mode (no re-render needed). */
+  setLabelDraft(region: Region, value: string): void {
+    if (this.editingLabelRegions.has(region)) this.editingLabelRegions.set(region, value);
   }
 
   stopEditLabel(region: Region, commit: boolean, event?: Event): void {
     event?.stopPropagation();
     const draft = this.editingLabelRegions.get(region);
-    this.editingLabelRegions.delete(region);
+    if (this.editingLabelRegions.has(region)) {
+      const next = new Map(this.editingLabelRegions);
+      next.delete(region);
+      this.editingLabelRegions = next;
+    }
     if (commit) {
       // A changed label commits as a replacement region, so it is undoable (RT-1).
       const edited =

@@ -13,6 +13,7 @@ import { SelectButtonModule } from 'primeng/selectbutton';
 import { CheckboxModule } from 'primeng/checkbox';
 
 import { RegionEditorComponent } from './region-editor.component';
+import { RegionTableComponent } from './region-table/region-table.component';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
 import { RegionStore } from '../store/region-store.service';
@@ -102,7 +103,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
         store.setRegions(regions, show, save, fill),
     };
     await TestBed.configureTestingModule({
-      declarations: [RegionEditorComponent],
+      declarations: [RegionEditorComponent, RegionTableComponent],
       imports: [CommonModule, FormsModule, NoopAnimationsModule, TableModule, DropdownModule, InputTextModule,
         RadioButtonModule, SelectButtonModule, CheckboxModule],
       providers: [
