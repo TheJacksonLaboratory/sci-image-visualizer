@@ -29,14 +29,13 @@ import {
   NAPARI_DEFAULT_DECIMATE,
 } from './contracts/plot-type';
 import {
-  PLOT_TYPE_CONTRIBUTIONS, PlotModeBrushClass, PlotModeTools, PlotTypeContribution, PlotTypeOption,
+  PLOT_TYPE_CONTRIBUTIONS, PlotTypeContribution, PlotTypeOption,
 } from './contracts/plot-type-contribution.contract';
 import { PlotModeController } from './plot-mode/plot-mode-controller';
 import { computePlotTypeMenu, reconcilePlotType } from './plot-mode/plot-type-menu';
 import { ToolParamsModel } from './plot-mode/tool-params-model';
 import { ContributionHost, PlotModePanelView, ToolDialogView } from './plot-mode/contribution-host';
 import { IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualizer.contract';
-import { CanvasToolOptions } from './contracts/display-types';
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
@@ -46,7 +45,6 @@ import {
   TOOLBAR_TOOLS, ToolbarContribution, ToolbarDialogToolContribution, ToolbarToolContribution,
   visibleToolContributions,
 } from './contracts/toolbar-tool.contract';
-import { RegionToolMode } from './contracts/region-overlay.contract';
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from './contracts/toolbar-config';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
@@ -55,6 +53,7 @@ import {
   ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
 } from './visualizer/visualizer-context-menu';
 import { RegionActions } from './visualizer/region-actions';
+import { ToolModes } from './visualizer/tool-modes';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
 import { FloatingPos } from './visualizer/floating-drag.directive';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
@@ -163,7 +162,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   @ViewChild('cm') contextMenu!: ContextMenu;
   contextMenuItems: MenuItem[] = [];
 
-  activeDragMode: string | null = null;
+  /** The armed tool mode and the toolbar's tool settings. */
+  readonly tools = new ToolModes(this.plotService, this.session, this.ngZone,
+    (mode) => { if (mode !== 'samPoint') this.segmentation.hide(); }, // leaving point mode drops its toast
+    () => this.cdr.markForCheck());
+  get activeDragMode(): string | null { return this.tools.active; }
+  set activeDragMode(mode: string | null) { this.tools.active = mode; }
+  get wandSensitivity(): number { return this.tools.wandSensitivity; }
+  set wandSensitivity(v: number) { this.tools.wandSensitivity = v; }
+  get brushSize(): number { return this.tools.brushSize; }
+  get vertexEraserRadius(): number { return this.tools.vertexEraserRadius; }
+  set vertexEraserRadius(v: number) { this.tools.vertexEraserRadius = v; }
 
   /** Region set-operations on the selection, and the store mirrors they read (jit-ui#85). */
   readonly regionActions = new RegionActions(
@@ -174,12 +183,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   get displaySimplifyDialog(): boolean { return this.regionActions.displaySimplifyDialog; }
   set displaySimplifyDialog(v: boolean) { this.regionActions.displaySimplifyDialog = v; }
 
-  /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
-  wandSensitivity = 2.0;
-  /** Brush diameter in image-pixel coordinates (drives the painted disc size). */
-  brushSize = 40;
-  /** Class the brush paints while a plot mode armed it (PlotModeTools.armBrush); null = plain brush. */
-  private brushClass: PlotModeBrushClass | null = null;
   /** SAM model picker options + current selection (jit-ui#90 P1). Only models
    *  with a hosted ONNX pair (configured via setSamModelUrls at app init) are
    *  offered, so the picker can't select a model that can't run. */
@@ -226,8 +229,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Segmentation runs and their sticky progress toast. */
   readonly segmentation = new SegmentationRunner(
     this.messageService, this.samToastKey, this.resultToastKey, () => this.cdr.detectChanges());
-  /** Vertex eraser radius in image-pixel coordinates. */
-  vertexEraserRadius = 20;
 
   /** Channels & Histogram dialog visibility (opened from the toolbar). */
   showChannelHistogram = false;
@@ -408,7 +409,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.contributions = new ContributionHost(plotTypeContributions, toolContributions, {
       visualizer: this.plotService,
       zone: this.ngZone,
-      tools: this.plotModeTools,
+      tools: this.tools.plotModeTools,
       injector: this.injector,
       imageInfo$: () => this.state.getImageInfo$(),
       selectedId: () => this.selectedPlotTypeId,
@@ -521,9 +522,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.watchSpatialDataset();
     // OSD and napari-js emit this from their own "fit to view": disarm the tool on
     // the backend too, not only the toolbar's highlight.
-    this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => {
-      this.applyDragMode(null);
-    });
+    this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => this.tools.apply(null));
     this.state.isImageLoading$().pipe(takeUntil(this.unsub)).subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;
     });
@@ -860,63 +859,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   toggleDragMode(mode: string) {
-    // A tool picked by the user is always the plain tool, never a plot mode's
-    // brush class.
-    this.brushClass = null;
-    // Toggle off if the same mode is re-selected.
-    this.applyDragMode(this.activeDragMode === mode ? null : mode);
-  }
-
-  /** Arm `mode` (or nothing) across every tool, keeping the toolbar in step. */
-  private applyDragMode(mode: string | null) {
-    this.activeDragMode = mode;
-    const active = this.activeDragMode;
-    // Record the armed tool in the shared session store.
-    this.session.setActiveTool(active);
-
-    // Region draw/select run through the renderer's region overlay.
-    this.plotService
-      .getRegionOverlay()
-      ?.setMode(this.isRegionMode(active) ? (active as RegionToolMode) : 'none');
-
-    // Viewport drag modes (pan/box-zoom). Region modes own the drag mode via
-    // the overlay, so don't also set one here.
-    if (!this.isRegionMode(active)) {
-      const viewportDrag = active === 'pan' || active === 'zoom';
-      this.plotService.setDragMode(viewportDrag ? active : false);
-    }
-
-    // On-canvas tool overlays: arm the one this mode names (none for a region or
-    // viewport mode), disarming whichever was armed.
-    this.plotService.setActiveTool(active, this.canvasToolOptions(active));
-    // Leaving point mode dismisses any lingering status toast.
-    if (active !== 'samPoint') this.segmentation.hide();
-  }
-
-  /** The options a canvas tool is armed with, from the toolbar's settings. */
-  private canvasToolOptions(mode: string | null): CanvasToolOptions | undefined {
-    switch (mode) {
-      case 'wand': return { sensitivity: this.wandSensitivity };
-      case 'brush': return { size: this.brushSize, ...this.brushClass };
-      case 'eraseVertex': return { radius: this.vertexEraserRadius };
-      default: return undefined;
-    }
-  }
-
-  /** Region draw/select/edit modes routed through the region overlay. The
-   *  The vertex tools (drawpolygon/addpoint/deletepoint/move) are
-   *  handled by the OpenSeadragon overlay; Plotly's overlay maps them to no-op. */
-  private isRegionMode(mode: string | null): boolean {
-    return (
-      mode === 'drawrect' ||
-      mode === 'drawclosedpath' ||
-      mode === 'drawopenpath' ||
-      mode === 'select' ||
-      mode === 'drawpolygon' ||
-      mode === 'addpoint' ||
-      mode === 'deletepoint' ||
-      mode === 'move'
-    );
+    this.tools.toggle(mode);
   }
 
   /** Live-update the isosurface as the range slider moves. The control is only
@@ -927,23 +870,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.getIsosurfaceControls()?.setIsoRange(values[0], values[1]);
   }
 
-  onWandSensitivityChange(value: number | undefined) {
-    if (value === undefined || !Number.isFinite(value)) return;
-    this.wandSensitivity = value;
-    this.plotService.setWandOptions({ sensitivity: value });
-  }
-
-  onBrushSizeChange(value: number | undefined) {
-    if (value === undefined || !Number.isFinite(value)) return;
-    this.brushSize = value;
-    this.plotService.setBrushOptions({ size: value });
-  }
-
-  onVertexEraserRadiusChange(value: number | undefined) {
-    if (value === undefined || !Number.isFinite(value)) return;
-    this.vertexEraserRadius = value;
-    this.plotService.setVertexEraserRadius(value);
-  }
+  onWandSensitivityChange(value: number | undefined) { this.tools.setWandSensitivity(value); }
+  onBrushSizeChange(value: number | undefined) { this.tools.setBrushSize(value); }
+  onVertexEraserRadiusChange(value: number | undefined) { this.tools.setVertexEraserRadius(value); }
 
   zoomIn() {
     this.plotService.zoomIn();
@@ -1134,7 +1063,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Switching plot type cancels the active tool — not every type supports the
     // same tools (line/scatter charts and 3D scenes have no box zoom or region
     // drawing), so leaving a tool armed would misbehave on the new plot.
-    this.deactivateActiveTool();
+    this.tools.deactivate();
     if (is3d) {
       this.activeSurface3dMode = 'turntable';
     }
@@ -1175,34 +1104,4 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   set toolDialogSlot(ref: ElementRef<HTMLElement> | undefined) {
     this.contributions.attachToolDialogSlot(ref?.nativeElement);
   }
-
-  /** Toolbar tools for contributed modes. Calls can come from outside Angular, hence the zone. */
-  private readonly plotModeTools: PlotModeTools = {
-    armBrush: (brushClass?: PlotModeBrushClass) => this.ngZone.run(() => {
-      this.brushClass = { label: brushClass?.label, color: brushClass?.color };
-      if (this.activeDragMode === 'brush') {
-        this.plotService.setBrushOptions({ size: this.brushSize, ...this.brushClass });
-      } else {
-        this.applyDragMode('brush');
-      }
-      this.cdr.markForCheck();
-    }),
-    disarm: () => this.ngZone.run(() => {
-      this.brushClass = null;
-      if (this.activeDragMode !== null) this.applyDragMode(null);
-      this.cdr.markForCheck();
-    }),
-    activeTool$: this.session.getActiveTool$(),
-  };
-
-  /** Deactivate whatever tool is armed and clear every tool mode. */
-  private deactivateActiveTool() {
-    this.brushClass = null;
-    this.activeDragMode = null;
-    this.session.setActiveTool(null);
-    this.plotService.getRegionOverlay()?.setMode('none');
-    this.plotService.setDragMode(false);
-    this.plotService.setActiveTool(null);
-  }
 }
-
