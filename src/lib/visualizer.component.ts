@@ -3,7 +3,7 @@ import {
   OnChanges, OnDestroy, OnInit, Optional, Output, SimpleChanges, ViewChild,
 } from '@angular/core';
 
-import { Subject } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 import { MenuItem, MessageService } from 'primeng/api';
@@ -208,22 +208,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   get toolDialog(): ToolDialogView | null { return this.contributions.toolDialog; }
   readonly samToastKey = `sam-${VisualizerComponent.nextToastId++}`;
   /**
-   * Outlet for the library's own result/error notices.
-   *
-   * PrimeNG routes a message to a `<p-toast>` only when the keys match — a
-   * keyless message reaches a keyless toast and nothing else. These notices used
-   * to be emitted with no key, so they rendered only in hosts that happen to
-   * mount a bare `<p-toast>` (jit-ui does, in its file-tree component). Every
-   * other host — including this repo's own browser example — dropped them
-   * silently, which made a failed or no-op segmentation look like a dead button:
-   * the sticky progress toast is cleared in the same tick by its teardown, and
-   * the message explaining why never appeared anywhere.
-   *
-   * Keyed to this component instance so the library renders its own outlet and
-   * is not dependent on host markup. Deliberately NOT the sticky toast's key:
-   * `SegmentationRunner.hide` clears that key in the `finally`, which would wipe the
-   * result the moment it was posted, and the sticky toast's custom template is
-   * built for the live status + progress bar.
+   * Outlet for the library's own result/error notices, keyed to this instance so they
+   * do not depend on the host mounting a keyless `<p-toast>` (most hosts don't, and a
+   * failed segmentation then looked like a dead button). Deliberately NOT the sticky
+   * toast's key: that is cleared when a run settles, which would wipe the result.
    */
   readonly resultToastKey = `${this.samToastKey}-result`;
   /** Segmentation runs and their sticky progress toast. */
@@ -523,38 +511,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // OSD and napari-js emit this from their own "fit to view": disarm the tool on
     // the backend too, not only the toolbar's highlight.
     this.plotService.getAutoscaleEvent().pipe(takeUntil(this.unsub)).subscribe(() => this.tools.apply(null));
-    this.state.isImageLoading$().pipe(takeUntil(this.unsub)).subscribe((isImageLoading) => {
-      this.imgLoading = isImageLoading;
-    });
+    // Loading/overlay UI mirrors.
+    this.mirror(this.state.isImageLoading$(), (v) => (this.imgLoading = v));
+    this.mirror(this.plotService.getStackLoadingProgress(), (v) => (this.loadingPercentage = v));
+    this.mirror(this.plotService.isStackLoading(), (v) => (this.stackLoading = v));
+    this.mirror(this.state.getImageLoadingMessage$(), (v) => (this.loadingMessage = v));
+    this.mirror(this.state.getCacheProgress$(), (v) => (this.cacheProgress = v));
+    this.mirror(this.state.isZoom$(), (v) => (this.zoom = v));
+    this.mirror(this.state.getFilename$(), (v) => { if (v) this.fileName = v; });
     this.regionActions.bind(this.unsub, () => this.cdr.detectChanges());
     this.segmentation.bindPointTool(this.samPointTool, this.unsub);
-    this.plotService.getStackLoadingProgress().pipe(takeUntil(this.unsub)).subscribe((loadingProgress) => {
-      this.loadingPercentage = loadingProgress;
-    });
-    this.plotService.isStackLoading().pipe(takeUntil(this.unsub)).subscribe((stackLoading) => {
-      this.stackLoading = stackLoading;
-    });
-    this.state.getPanelWidth$().pipe(takeUntil(this.unsub)).subscribe(() => {
+    this.mirror(this.state.getPanelWidth$(), () => {
       this.plotService.relayout();
       // The intensity inset is a separate chart in a floating panel; reflow it too.
       this.inset?.reflow();
-    });
-    this.state.getImageLoadingMessage$().pipe(takeUntil(this.unsub)).subscribe((message) => {
-      this.loadingMessage = message;
-    });
-    this.state
-      .getCacheProgress$()
-      .pipe(takeUntil(this.unsub))
-      .subscribe((progress) => {
-        this.cacheProgress = progress;
-      });
-    this.state.isZoom$().pipe(takeUntil(this.unsub)).subscribe((zoom) => {
-      this.zoom = zoom;
-    });
-    this.state.getFilename$().pipe(takeUntil(this.unsub)).subscribe((filename) => {
-      if (filename) {
-        this.fileName = filename;
-      }
     });
     this.state.getImageInfo$().pipe(takeUntil(this.unsub)).subscribe({
       next: (imgInfo) => {
@@ -610,6 +580,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
         this.plotService.reset();
       },
     });
+  }
+
+  /** Follow `source` until destroy. */
+  private mirror<T>(source: Observable<T>, apply: (value: T) => void): void {
+    source.pipe(takeUntil(this.unsub)).subscribe(apply);
   }
 
   /**
