@@ -23,6 +23,8 @@ import {
   CategoricalColumn, ContinuousColumn, SpatialDataset,
 } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
+import * as spatialEncoding from '../../spatial/spatial-encoding';
+import { SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
@@ -393,6 +395,27 @@ describe('NapariVisualizerService', () => {
       service.reset();
       expect(await settled(poll)).toBeNull();
     });
+  });
+
+  it('computes a spatial contrast window once per (vector, lo, hi, log) (SPATIAL-12)', () => {
+    const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
+    type Internals = {
+      encodeSpatialContinuous(v: Float32Array, view: SpatialViewState): Float32Array;
+      encodeSpatial3dContinuous(v: Float32Array, view: SpatialViewState): unknown;
+    };
+    const s = service as unknown as Internals;
+    const vector = new Float32Array([1, 5, 2, 8, 3]);
+    const view = { opacity: 1 } as SpatialViewState;
+    s.encodeSpatialContinuous(vector, view);
+    s.encodeSpatialContinuous(vector, { ...view, opacity: 0.5 }); // an opacity change: same window
+    expect(sort).toHaveBeenCalledTimes(1);
+    s.encodeSpatialContinuous(vector, { ...view, percentileClip: [0.05, 0.95] }); // a new clip
+    s.encodeSpatialContinuous(new Float32Array(vector), view); // a new vector
+    expect(sort).toHaveBeenCalledTimes(3);
+    s.encodeSpatial3dContinuous(vector, { ...view, logScale: true }); // log: a window of its own
+    s.encodeSpatial3dContinuous(vector, { ...view, logScale: true });
+    expect(sort).toHaveBeenCalledTimes(4);
+    sort.mockRestore();
   });
 
   it('rejects an aborted load with an AbortError and keeps the recorded image (CORE-11)', async () => {

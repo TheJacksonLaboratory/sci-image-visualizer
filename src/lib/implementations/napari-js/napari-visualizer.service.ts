@@ -380,6 +380,37 @@ function tintFor(channel: number): string {
 }
 
 /**
+ * Contrast windows memoised per (values array, lo, hi, log). `contrastWindow` sorts every value,
+ * and the spatial colouring re-runs it on each opacity, selection or colormap change while the
+ * coloured vector itself is unchanged (review SPATIAL-12). Keyed by the vector's identity, so a
+ * new column or gene vector is a miss and an old one is collected with its windows.
+ */
+class ContrastWindowCache {
+  private readonly byVector = new WeakMap<Float32Array, Map<string, [number, number]>>();
+
+  get(
+    values: Float32Array,
+    lo: number,
+    hi: number,
+    log: boolean,
+    compute: () => [number, number],
+  ): [number, number] {
+    let windows = this.byVector.get(values);
+    if (!windows) {
+      windows = new Map();
+      this.byVector.set(values, windows);
+    }
+    const key = `${lo}|${hi}|${log ? 1 : 0}`;
+    let w = windows.get(key);
+    if (!w) {
+      w = compute();
+      windows.set(key, w);
+    }
+    return w;
+  }
+}
+
+/**
  * What the 3D points layer needs to colour a cloud: one scalar per point, a colormap, and the
  * window that maps scalars onto it. Categorical and continuous colourings both reduce to this,
  * because the layer offers no per-point colour channel.
@@ -686,6 +717,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private readonly histSamples = new Map<number, Uint8Array>();
   /** Latest-wins token for {@link refreshHistogramSamples}. */
   private histGen = 0;
+  /** Spatial colouring's percentile windows, memoised per coloured vector (SPATIAL-12). */
+  private readonly contrastWindows = new ContrastWindowCache();
   /** Native-bit-depth histograms from `/histogram`, keyed `${z}|${channel}` (>8-bit images). */
   private readonly nativeHistograms = new Map<string, IHistogram>();
 
@@ -3697,12 +3730,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   private encodeSpatial3dContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
     const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
+    const log = !!view.logScale;
     let values = source;
-    if (view.logScale) {
+    if (log) {
       values = new Float32Array(source.length);
       for (let i = 0; i < source.length; i++) values[i] = Math.log1p(Math.max(0, source[i]));
     }
-    const [min, max] = contrastWindow(values, lo, hi);
+    // Keyed by the SOURCE vector: the log copy above is new on every call.
+    const [min, max] = this.contrastWindows.get(source, lo, hi, log, () => contrastWindow(values, lo, hi));
     return {
       values,
       colormap: colormapFromLut('spatial-continuous', lut),
@@ -3777,7 +3812,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVis
   ): Float32Array {
     const lut = this.spatialLut(view);
     const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
-    const [min, max] = contrastWindow(values, lo, hi);
+    // The window is taken on the raw values (encodeContinuous applies the log itself).
+    const [min, max] = this.contrastWindows.get(values, lo, hi, false, () => contrastWindow(values, lo, hi));
     return encodeContinuous(values, {
       lut, min, max, log: view.logScale, opacity: view.opacity, muted,
     });
