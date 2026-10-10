@@ -15,6 +15,7 @@ import { RegionStore } from '../../store/region-store.service';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { Subject } from 'rxjs';
+import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -722,10 +723,7 @@ describe('PlotlyService layouts and isosurface band (characterization)', () => {
   type Internals = {
     screenHeight: number; scaleratio: boolean; dragMode: string; imageLength: number; plotType: PlotType;
     getHeatmapLayout(x: number[], y: number[]): Record<string, unknown>;
-    getOverlayLayout(x: number[], y: number[]): Record<string, unknown>;
-    getChartLayout(): Record<string, unknown>;
-    getVolumeLayout(): Record<string, unknown>;
-    getSurfaceLayout(z: number): Record<string, unknown>;
+    layoutContext(): ImageLayoutContext;
     buildTraceInput(info: IImageInfo, loaded: unknown, size: number[]): { isoMin: number; isoMax: number };
   };
   const internals = () => service as unknown as Internals;
@@ -776,18 +774,18 @@ describe('PlotlyService layouts and isosurface band (characterization)', () => {
   });
 
   it('builds the overlay, chart, volume and surface layouts', () => {
-    expect(internals().getOverlayLayout([0, 10], [10, 0])).toMatchObject({
+    expect(overlayLayout(internals().layoutContext(), [0, 10], [10, 0])).toMatchObject({
       xaxis: { range: [0, 10], side: 'top' }, yaxis: { range: [10, 0], scaleanchor: 'x', autorange: false },
       height: 600, shapes: [], dragmode: 'pan',
     });
-    expect(internals().getChartLayout()).toEqual({
+    expect(chartLayout(600)).toEqual({
       margin: { t: 30, b: 45, l: 60, r: 20 }, height: 600, autosize: true,
       xaxis: { title: 'Position (px)' }, yaxis: { title: 'Intensity' }, dragmode: false,
     });
-    expect(internals().getVolumeLayout()).toMatchObject({
+    expect(volumeLayout(600)).toMatchObject({
       height: 600, scene: { zaxis: { title: 'Z-plane' }, aspectmode: 'cube' },
     });
-    expect(internals().getSurfaceLayout(0.4)).toMatchObject({
+    expect(surfaceLayout(0.4)).toMatchObject({
       scene: { aspectratio: { x: 1, y: 1, z: 0.4 }, aspectmode: 'manual' },
     });
   });

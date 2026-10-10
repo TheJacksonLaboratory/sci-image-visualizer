@@ -26,7 +26,13 @@ import {
   PLOTLY_PLOT_TYPE_IMPLS,
   PlotlyPlotTypeImpl,
   TraceBuildInput,
+  buildHeatmapTraces,
+  buildRgbImageTraces,
+  buildSurfaceTraces,
 } from './plotly-trace-builders';
+import {
+  ImageLayoutContext, chartLayout, heatmapLayout, overlayLayout, surfaceLayout, volumeLayout,
+} from './plotly-layouts';
 import { IViewerBackend, IntensityProfile, IIsosurfaceControls, IIntensityControls } from '../../contracts/visualizer.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { bt601Luminance, histogram256 } from '../../contracts/intensity';
@@ -437,138 +443,53 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       imageLoaded.ratios, imageLoaded.sizes[0], imageLoaded.sizes[1], screenHeight, inPlace);
   }
 
-  /**
-   * Function used to plot a grayscale heatmap
-   * @param plotDiv
-   * @param urls
-   * @param images
-   * @param trueImgSize array containing the following : [x0, x1, y0, y1]
-   * @param ratios
-   * @param screenHeight
-   * @return Promise true when plotting is finished
-   */
+  /** Grayscale heatmap, one trace per z-plane (`trueImgSize` is [x0, x1, y0, y1]). */
   private plotHeatmap(plotDiv: string, urls: string[], images: any[], trueImgSize: number[],
-                     ratios: number[], screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    if (!inPlace) Plotly.purge(plotDiv);
-    this.plotDiv = plotDiv;
-    this.imageLength = images.length;
-    this.urls = urls;
-    this.screenHeight = screenHeight;
-    // plot
-    const traces: { z: any; type: string; name: string; visible: boolean; }[] = [];
-    images.forEach((dataset, index) => {
-      const trace = {
-        x0: trueImgSize[0],
-        dx: ratios[0],
-        y0: trueImgSize[2],
-        dy: ratios[0],
-        z: dataset,
-        type: 'heatmap',
-        // No per-cell hover text: building it for every pixel is too slow.
-        hoverinfo: 'none',
-        colorscale: this.store.currentColormap().data.value,
-        reversescale: this.store.currentReverseScale(),
-        name: `Slice ${index + 1}`,
-        visible: index === 0
-      };
-      traces.push(trace);
-    });
-    const render = inPlace ? Plotly.react : Plotly.newPlot;
-    return (render as any)(plotDiv, traces as any,
-      this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3],
-        trueImgSize[2]]), CONFIG as any).then(() => {
-      // handle the relayout event for zoom / rois and the click event
-      this.setEvents(plotDiv, true, screenHeight);
-      return true;
-    });
-  }
-
-  /**
-   * Function used to plot a grayscale surface
-   * @param plotDiv
-   * @param urls
-   * @param images
-   * @param trueImgSize array containing the following : [x0, x1, y0, y1]
-   * @param ratios
-   * @param screenHeight
-   * @return Promise true when plotting is finished
-   */
-  private plotSurface(plotDiv: string, urls: string[], images: any[], trueImgSize: number[],
                       ratios: number[], screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    if (!inPlace) Plotly.purge(plotDiv);
-    this.plotDiv = plotDiv;
-    this.imageLength = images.length;
-    this.urls = urls;
-    this.screenHeight = screenHeight;
-    // plot
-    const traces: { z: any; type: string;  }[] = [];
-    images.forEach((dataset, index) => {
-      const trace = {
-        z: dataset,
-        type: 'surface',
-        colorscale: this.store.currentColormap().data.value,
-        reversescale: this.store.currentReverseScale(),
-      };
-      traces.push(trace);
-    });
-    const render = inPlace ? Plotly.react : Plotly.newPlot;
-    return (render as any)(plotDiv, traces as any,
-      this.getSurfaceLayout(0.4), CONFIG_SURFACE as any).then(() => {
-      // handle the relayout event for zoom / rois and the click event
-      this.setEvents(plotDiv, true, screenHeight);
-      return true;
-    });
+    const traces = buildHeatmapTraces(images, trueImgSize, ratios,
+      this.store.currentColormap().data.value, this.store.currentReverseScale());
+    const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
+    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, true);
   }
 
-  /**
-   * Function used to plot an RGB heatmap
-   * @param plotDiv
-   * @param urls
-   * @param images
-   * @param trueImgSize
-   * @param width
-   * @param height
-   * @param ratios
-   * @param screenHeight
-   * @return Promise
-   */
+  /** Grayscale surface. */
+  private plotSurface(plotDiv: string, urls: string[], images: any[], _trueImgSize: number[],
+                      _ratios: number[], screenHeight: number, inPlace: boolean = false): Promise<boolean> {
+    const traces = buildSurfaceTraces(images, this.store.currentColormap().data.value,
+      this.store.currentReverseScale());
+    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces,
+      () => surfaceLayout(0.4), CONFIG_SURFACE, true);
+  }
+
+  /** RGB image, one trace per z-plane. */
   private plotRGBHeatmap(plotDiv: string, urls: string[], images: any[], trueImgSize: number[],
                          ratios: number[], width: number, height: number,
                          screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    // Plotly.react updates in place; Plotly.purge + Plotly.newPlot blanks
-    // the canvas for ~100ms which makes the multi-tier small→large swap
-    // look like a regression to "loading" before the sharper version
-    // appears.
+    // As autorange is off and the axis not reversed, the y range is set here.
+    const traces = buildRgbImageTraces(images, trueImgSize, ratios, width, height);
+    const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
+    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, false);
+  }
+
+  /**
+   * Render `traces` into the plot div and wire the relayout/click events. In
+   * place (`Plotly.react`) for the multi-tier small → large swap — `Plotly.purge`
+   * + `Plotly.newPlot` blanks the canvas for ~100ms, which looks like a
+   * regression to "loading" before the sharper version appears. The layout is
+   * built after the per-plot state (screen height, slice count) is set.
+   */
+  private renderPlot(plotDiv: string, urls: string[], sliceCount: number, screenHeight: number,
+                     inPlace: boolean, traces: any[], layout: () => any, config: unknown,
+                     isGrayscale: boolean): Promise<boolean> {
     if (!inPlace) Plotly.purge(plotDiv);
     this.plotDiv = plotDiv;
-    this.imageLength = images.length;
+    this.imageLength = sliceCount;
     this.urls = urls;
     this.screenHeight = screenHeight;
-
-    // as autorange is set to false, and not reversed we need to set the yrange correcly here
-    const layout = this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]],
-      [trueImgSize[3], trueImgSize[2]]);
-    const traces: { z: any; type: string; name: string; visible: boolean; }[] = [];
-    images.forEach((dataset, index) => {
-      const trace = {
-        x0: trueImgSize[0],
-        dx: ratios[0],
-        y0: trueImgSize[2],
-        dy: ratios[0],
-        x: Array.from(Array(width).keys()),
-        y: Array.from(Array(height).keys()),
-        z: dataset,
-        hoverinfo: 'none', // no per-cell hover text: too slow for every pixel
-        type: 'image',
-        name: `Slice ${index + 1}`,
-        visible: index === 0
-      };
-      traces.push(trace);
-    });
     const render = inPlace ? Plotly.react : Plotly.newPlot;
-    return (render as any)(plotDiv, traces as any, layout, CONFIG as any).then(() => {
-      // handle the relayout event
-      this.setEvents(plotDiv, false, screenHeight);
+    return (render as any)(plotDiv, traces as any, layout(), config as any).then(() => {
+      // handle the relayout event for zoom / rois and the click event
+      this.setEvents(plotDiv, isGrayscale, screenHeight);
       return true;
     });
   }
@@ -668,81 +589,17 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    */
   private plotViaRegistry(plotDiv: string, impl: PlotlyPlotTypeImpl, input: TraceBuildInput,
                           screenHeight: number, inPlace: boolean = false): Promise<boolean> {
-    if (!inPlace) Plotly.purge(plotDiv);
-    this.plotDiv = plotDiv;
-    this.imageLength = input.frames.length;
-    this.urls = this.imageInfo?.urls ?? this.urls;
-    this.screenHeight = screenHeight;
-
-    const traces = impl.buildTraces(input);
     const [x0, x1, y0, y1] = input.trueImageSize;
-    let layout: any;
-    switch (impl.layoutKind) {
-      case '3d-volume':
-        layout = this.getVolumeLayout();
-        break;
-      case '2d-chart':
-        layout = this.getChartLayout();
-        break;
-      case '2d-overlay':
-        layout = this.getOverlayLayout([x0, x1], [y1, y0]); // reversed y like the image
-        break;
-      default: // '2d-image'
-        layout = this.getHeatmapLayout([x0, x1], [y1, y0]);
-    }
-    const config = impl.threeD ? CONFIG_SURFACE : CONFIG;
-    const render = inPlace ? Plotly.react : Plotly.newPlot;
-    return (render as any)(plotDiv, traces as any, layout, config as any).then(() => {
-      this.setEvents(plotDiv, input.isGrayscale, screenHeight);
-      return true;
-    });
-  }
-
-  /** Plain 2D chart axes (intensity profile / line plots). */
-  private getChartLayout(): any {
-    return {
-      margin: { t: 30, b: 45, l: 60, r: 20 },
-      height: this.screenHeight,
-      autosize: true,
-      xaxis: { title: 'Position (px)' },
-      yaxis: { title: 'Intensity' },
-      dragmode: false,
+    const layout = (): any => {
+      switch (impl.layoutKind) {
+        case '3d-volume': return volumeLayout(this.screenHeight);
+        case '2d-chart': return chartLayout(this.screenHeight);
+        case '2d-overlay': return overlayLayout(this.layoutContext(), [x0, x1], [y1, y0]); // reversed y
+        default: return this.getHeatmapLayout([x0, x1], [y1, y0]); // '2d-image'
+      }
     };
-  }
-
-  /** Image-aligned 2D axes without the z-plane slider (region scatter). */
-  private getOverlayLayout(xRange: number[], yRange: number[]): any {
-    return {
-      xaxis: { constrain: 'range', constraintoward: 'center', side: 'top', ticks: '', range: xRange },
-      yaxis: {
-        constrain: 'range', constraintoward: 'center', range: yRange, ticks: '',
-        ticksuffix: '  ', autorange: false, scaleanchor: this.scaleratio ? 'x' : false,
-      },
-      margin: { t: 30, b: 5, l: 55, r: 5 },
-      height: this.screenHeight,
-      autosize: true,
-      shapes: this.currentRenderShapes(this.regionStore.getShowShapeLabel()),
-      dragmode: this.dragMode ? this.dragMode : false,
-    };
-  }
-
-  /** 3D scene for volumetric plot types (scatter3d, isosurface). */
-  private getVolumeLayout(): any {
-    return {
-      margin: { t: 0, b: 0, l: 0, r: 0 },
-      height: this.screenHeight,
-      autosize: true,
-      scene: {
-        xaxis: { title: 'X' },
-        yaxis: { title: 'Y' },
-        zaxis: { title: 'Z-plane' },
-        // 'cube' (not 'data'): a z-stack has far fewer planes than X/Y pixels,
-        // so 'data' squashes the volume into a near-flat slab that reads as
-        // empty edge-on. A cube gives the z dimension real height so the
-        // isosurface/voxels are actually visible.
-        aspectmode: 'cube',
-      },
-    };
+    return this.renderPlot(plotDiv, this.imageInfo?.urls ?? this.urls, input.frames.length, screenHeight,
+      inPlace, impl.buildTraces(input), layout, impl.threeD ? CONFIG_SURFACE : CONFIG, input.isGrayscale);
   }
 
   /** Plot types this backend advertises (drives the UI selector). */
@@ -1542,42 +1399,20 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     return gd?._fullLayout ? gd : null;
   }
 
-  private getHeatmapLayout(xRange: number[], yRange: number[]): any {
+  /** The live state an image-aligned layout is built from. */
+  private layoutContext(): ImageLayoutContext {
     return {
-      xaxis: {
-        constrain: 'range',
-        constraintoward: 'center',
-        side: 'top',
-        ticks: '',
-        range: xRange
-      },
-      yaxis: {
-        constrain: 'range',
-        constraintoward: 'center',
-        range: yRange,
-        ticks: '',
-        ticksuffix: '  ',
-				// set autorange to false so that plotly does not overwrite the range for the y axis
-				autorange: false,
-        scaleanchor: this.scaleratio ? 'x' : false
-     },
-      margin: { t: 30, b: 5, l: 55, r: 5 },
-      height: this.screenHeight,
-      sliders: [{
-        pad: { t: 50 },
-        currentvalue: {
-          visible: true,
-          prefix: 'Z-plane:',
-          xanchor: 'right',
-        },
-        steps: this.getSteps()
-      }],
-      autosize: true,
+      screenHeight: this.screenHeight,
+      scaleratio: this.scaleratio,
+      dragMode: this.dragMode,
       shapes: this.currentRenderShapes(this.regionStore.getShowShapeLabel()),
-      activeshape: { fillcolor: this.regionStore.getFillColor() },
-      dragmode: this.dragMode ? this.dragMode : false,
-      newshape: { line: { color: this.regionStore.getShapeColor(), width: 3 } }
+      fillColor: this.regionStore.getFillColor(),
+      shapeColor: this.regionStore.getShapeColor(),
     };
+  }
+
+  private getHeatmapLayout(xRange: number[], yRange: number[]): any {
+    return heatmapLayout(this.layoutContext(), xRange, yRange, this.imageLength);
   }
 
   private shapesToRedraw(showLabel: boolean) {
@@ -1601,50 +1436,6 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // convert to dict so that plotly recognises the shapes
     return shapesToRedraw.map(s => ({ ...s }));
   }
-  /**
-   * Scene layout for the surface plot (plotSurface): light-grey axis planes and
-   * a manual aspect ratio whose z extent is `zRatio` of the x/y extent.
-   */
-  private getSurfaceLayout(zRatio: number): any {
-    return {
-      margin: { t: 0, b: 0, l: 0, r: 0 },
-      scene: {
-        xaxis: {
-          gridcolor: 'rgb(255, 255, 255)',
-          zerolinecolor: 'rgb(255, 255, 255)',
-          showbackground: true,
-          backgroundcolor: 'rgb(230, 230,230)',
-        },
-        yaxis: {
-          gridcolor: 'rgb(255, 255, 255)',
-          zerolinecolor: 'rgb(255, 255, 255)',
-          showbackground: true,
-          backgroundcolor: 'rgb(230, 230, 230)',
-        },
-        zaxis: {
-          gridcolor: 'rgb(255, 255, 255)',
-          zerolinecolor: 'rgb(255, 255, 255)',
-          showbackground: true,
-          backgroundcolor: 'rgb(230, 230,230)'
-        },
-        aspectratio: { x: 1, y: 1, z: zRatio },
-        aspectmode: 'manual',
-      }
-    };
-  }
-
-  private getSteps() {
-    const steps = [];
-    for (let i = 0; i < this.imageLength; i++) {
-      steps.push({
-        label: i + 1,
-        method: 'restyle',
-        args: ['visible', Array(this.imageLength).fill(false).fill(true, i, i + 1)],
-      });
-    }
-    return steps;
-  }
-
   /**
    * Fetch an image via Angular HttpClient so that auth interceptors (Bearer token)
    * are applied, then decode it with image-js. This avoids raw browser fetch()

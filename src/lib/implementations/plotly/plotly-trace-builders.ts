@@ -12,14 +12,16 @@ import { polygonCentroid } from '../region-centroids';
  * Plotly trace dicts. There is no Angular, no RxJS and no service state, so
  * the builders are unit-testable on plain fixtures.
  *
- * Layout building stays in `PlotlyService` (it needs live service state such
- * as screen height, scale ratio and the current shapes); only TRACE building
- * is pluggable here. To add a new plot type: write a builder, register it in
- * `PLOTLY_PLOT_TYPE_IMPLS`, and add a descriptor in `contracts/plot-type.ts`.
+ * Layouts are built in `plotly-layouts.ts` (from a context of live service
+ * state); only TRACE building is pluggable here. To add a new plot type: write
+ * a builder, register it in `PLOTLY_PLOT_TYPE_IMPLS`, and add a descriptor in
+ * `contracts/plot-type.ts`.
  *
- * The original HEATMAP/SURFACE/RGB types intentionally keep their dedicated
- * renderers in `PlotlyService` (they are also reused by the high-def zoom
- * re-fetch path), so they are NOT registered here.
+ * The original HEATMAP/SURFACE/RGB types have their own builders at the end of
+ * this file ({@link buildHeatmapTraces}, {@link buildSurfaceTraces},
+ * {@link buildRgbImageTraces}) — used by the initial render and the high-def
+ * zoom re-render alike — but are NOT registered: they take the raw frames and
+ * the active colormap, not a {@link TraceBuildInput}.
  */
 
 /** Normalised input for a trace builder. Frames are per-z-plane matrices:
@@ -239,3 +241,50 @@ export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl
   [PlotType.SCATTER3D]:  { buildTraces: buildScatter3dTraces,  layoutKind: '3d-volume',  threeD: true },
   [PlotType.ISOSURFACE]: { buildTraces: buildIsosurfaceTraces, layoutKind: '3d-volume',  threeD: true },
 };
+
+// ── HEATMAP / SURFACE / RGB image (the original renderers) ─────────────────
+
+/**
+ * One grayscale heatmap trace per z-plane, only the first visible (the layout's
+ * slider switches them). `trueImgSize` is [x0, x1, y0, y1]; `ratios` the data
+ * units per pixel. No per-cell hover text: building it for every pixel is too slow.
+ */
+export function buildHeatmapTraces(frames: any[], trueImgSize: number[], ratios: number[],
+                                   colorscale: unknown, reversescale: boolean): any[] {
+  return frames.map((z, index) => ({
+    x0: trueImgSize[0],
+    dx: ratios[0],
+    y0: trueImgSize[2],
+    dy: ratios[0],
+    z,
+    type: 'heatmap',
+    hoverinfo: 'none',
+    colorscale,
+    reversescale,
+    name: `Slice ${index + 1}`,
+    visible: index === 0,
+  }));
+}
+
+/** One grayscale surface trace per frame, coloured by the active colormap. */
+export function buildSurfaceTraces(frames: any[], colorscale: unknown, reversescale: boolean): any[] {
+  return frames.map((z) => ({ z, type: 'surface', colorscale, reversescale }));
+}
+
+/** One RGB `image` trace per z-plane (width × height pixels), only the first visible. */
+export function buildRgbImageTraces(frames: any[], trueImgSize: number[], ratios: number[],
+                                    width: number, height: number): any[] {
+  return frames.map((z, index) => ({
+    x0: trueImgSize[0],
+    dx: ratios[0],
+    y0: trueImgSize[2],
+    dy: ratios[0],
+    x: Array.from(Array(width).keys()),
+    y: Array.from(Array(height).keys()),
+    z,
+    hoverinfo: 'none', // no per-cell hover text: too slow for every pixel
+    type: 'image',
+    name: `Slice ${index + 1}`,
+    visible: index === 0,
+  }));
+}
