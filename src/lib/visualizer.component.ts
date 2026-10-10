@@ -7,7 +7,7 @@ import { MenuItem, MessageService } from 'primeng/api';
 import { ContextMenu } from 'primeng/contextmenu';
 import { IImageInfo } from './contracts/image.contract';
 import { ImageStatePort, IMAGE_STATE_PORT } from './contracts/ports/image-state.port';
-import { Polygon, Rectangle, MultiPolygon, Region } from './models/region';
+import { Polygon } from './models/region';
 import { RegionOpsService } from './region-ops.service';
 import { VIZ_TOAST_KEY, VIZ_ALERT_TOAST_KEY } from './toast-outlets';
 import { VisualizerStore } from './store/visualizer-store.service';
@@ -62,8 +62,9 @@ import { SpatialDataset } from './contracts/spatial-dataset.contract';
 import { buildVolumeStackImage } from './spatial/spatial-volume-image';
 import { applyImageRois } from './visualizer/region-load';
 import {
-  ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems, opEligible, regionsAt,
+  ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
 } from './visualizer/visualizer-context-menu';
+import { RegionActions } from './visualizer/region-actions';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -197,18 +198,14 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   activeDragMode: string | null = null;
 
-  /** Whether a region action is available to undo (jit-ui#85). Mirrors the
-   *  shared RegionStore's history depth; drives the toolbar Undo button. */
-  canUndoRegion = false;
-  /** Whether an undone region action is available to redo (jit-ui#85). */
-  canRedoRegion = false;
-
-  /** Custom-threshold Simplify dialog (jit-ui#85). */
-  displaySimplifyDialog = false;
-  simplifyThreshold = 3;
-  /** Current region selection (array indices) — mirrored from the store so the
-   *  context-menu region actions can read it synchronously (jit-ui#85). */
-  private selectedIndices: number[] = [];
+  /** Region set-operations on the selection, and the store mirrors they read (jit-ui#85). */
+  readonly regionActions = new RegionActions(
+    this.plotService, this.regionOps, () => this.imageInfo?.trueImageSize,
+    (m) => this.messageService.add({ key: this.resultToastKey, ...m }),
+  );
+  /** Custom-threshold Simplify dialog visibility (see {@link RegionActions}). */
+  get displaySimplifyDialog(): boolean { return this.regionActions.displaySimplifyDialog; }
+  set displaySimplifyDialog(v: boolean) { this.regionActions.displaySimplifyDialog = v; }
 
   /** Wand sensitivity — higher = stricter (smaller selection). Matches QuPath default. */
   wandSensitivity = 2.0;
@@ -738,30 +735,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.state.isImageLoading$().pipe(takeUntil(this.unsub)).subscribe((isImageLoading) => {
       this.imgLoading = isImageLoading;
     });
-    // Undo availability (jit-ui#85): the shared RegionStore emits whenever its
-    // history depth changes; greys out the toolbar Undo button accordingly.
-    this.plotService
-      .getCanUndo$()
-      .pipe(takeUntil(this.unsub))
-      .subscribe((canUndo) => {
-        this.canUndoRegion = canUndo;
-        this.cdr.detectChanges();
-      });
-    this.plotService
-      .getCanRedo$()
-      .pipe(takeUntil(this.unsub))
-      .subscribe((canRedo) => {
-        this.canRedoRegion = canRedo;
-        this.cdr.detectChanges();
-      });
-    // Mirror the region selection so the right-click action group (jit-ui#85)
-    // can read it synchronously when the menu is built.
-    this.plotService
-      .getSelectedShapeIndices$()
-      .pipe(takeUntil(this.unsub))
-      .subscribe((indices) => {
-        this.selectedIndices = indices || [];
-      });
+    this.regionActions.bind(this.unsub, () => this.cdr.detectChanges());
     // Interactive point-prompt segmentation runs inside the renderer on each
     // click; surface its live status + download progress in the shared `sam`
     // toast so the user sees it working (the first click pulls the encoder).
@@ -1640,102 +1614,12 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   // ── Region set-operations on the current selection (jit-ui#85) ──────────
-
-  /** The currently-selected regions (live store instances). */
-  private get selectedRegions(): Region[] {
-    return regionsAt(this.plotService.getRegions(), this.selectedIndices);
-  }
-
-  /** Image pixel dimensions for the raster ops; falls back to the selection's
-   *  extent when the image size isn't known (keeps clamping sane). */
-  private opImageDims(regions: Region[]): { w: number; h: number } {
-    let [w, h] = this.imageInfo?.trueImageSize ?? [0, 0];
-    if (!(w > 0) || !(h > 0)) {
-      let maxX = 0, maxY = 0;
-      const scan = (xs: number[], ys: number[]) => {
-        for (const x of xs) maxX = Math.max(maxX, x);
-        for (const y of ys) maxY = Math.max(maxY, y);
-      };
-      for (const r of regions) {
-        const b = r.bounds;
-        if (b instanceof Rectangle) scan([b.x + b.width], [b.y + b.height]);
-        else if (b instanceof Polygon) scan(b.xpoints, b.ypoints);
-        else if (b instanceof MultiPolygon) for (const p of b.polygons) scan(p.xpoints, p.ypoints);
-      }
-      w = Math.max(w, Math.ceil(maxX) + 2);
-      h = Math.max(h, Math.ceil(maxY) + 2);
-    }
-    return { w, h };
-  }
-
-  /** Select every region on the image (excludes intensity-profile lines). */
-  selectAllRegions(): void {
-    const all = this.plotService.getRegions();
-    const indices: number[] = [];
-    all.forEach((r, i) => { if (r.kind !== 'profile') indices.push(i); });
-    this.plotService.setSelectedShapeIndices(indices);
-  }
-
-  /** Merge the selected regions into a single (possibly multi-part) region. */
-  mergeRegions(): void {
-    const sel = opEligible(this.selectedRegions);
-    if (sel.length < 2) return;
-    const { w, h } = this.opImageDims(sel);
-    const merged = this.regionOps.merge(sel, w, h);
-    if (merged) this.replaceRegions(sel, [merged]);
-  }
-
-  /** Split each selected multi-part region into one region per part. */
-  ungroupRegions(): void {
-    const sel = this.selectedRegions.filter((r) => this.regionOps.canUngroup(r));
-    if (sel.length === 0) return;
-    const results: Region[] = [];
-    for (const r of sel) results.push(...this.regionOps.ungroup(r));
-    this.replaceRegions(sel, results);
-  }
-
-  /** Replace the selection with its inverse inside the image rectangle. */
-  inverseRegions(): void {
-    const sel = opEligible(this.selectedRegions);
-    if (sel.length === 0) return;
-    const { w, h } = this.opImageDims(sel);
-    const inv = this.regionOps.inverse(sel, w, h);
-    if (!inv) {
-      this.messageService.add({
-        key: this.resultToastKey,
-        severity: 'warn', summary: 'Inverse',
-        detail: 'Nothing to invert — select one or more closed regions first.',
-      });
-      return;
-    }
-    this.replaceRegions(sel, [inv]);
-  }
-
-  /** Douglas–Peucker simplify each selected region by `thresholdPx`. */
-  simplifyRegions(thresholdPx: number): void {
-    const sel = opEligible(this.selectedRegions);
-    if (sel.length === 0) return;
-    this.replaceRegions(sel, sel.map((r) => this.regionOps.simplify(r, thresholdPx)));
-    this.displaySimplifyDialog = false;
-  }
-
-  /** Open the custom-threshold simplify dialog. */
-  openSimplifyDialog(): void { this.displaySimplifyDialog = true; }
-
-  /**
-   * Commit a set-op: drop the `remove` regions, append `add`, and select the
-   * results. Goes through setRegions so it's undo-tracked and re-rendered;
-   * profile lines and unselected regions are preserved.
-   */
-  private replaceRegions(remove: Region[], add: Region[]): void {
-    if (add.length === 0) return;
-    const removeSet = new Set(remove);
-    const kept = this.plotService.getRegions().filter((r) => !removeSet.has(r));
-    this.plotService.setRegions([...kept, ...add]); // mints ids on `add`, records undo
-    const stored = this.plotService.getRegions();
-    const sel = add.map((r) => stored.indexOf(r)).filter((i) => i >= 0);
-    this.plotService.setSelectedShapeIndices(sel);
-  }
+  selectAllRegions(): void { this.regionActions.selectAll(); }
+  mergeRegions(): void { this.regionActions.merge(); }
+  ungroupRegions(): void { this.regionActions.ungroup(); }
+  inverseRegions(): void { this.regionActions.inverse(); }
+  simplifyRegions(thresholdPx: number): void { this.regionActions.simplify(thresholdPx); }
+  openSimplifyDialog(): void { this.regionActions.openSimplifyDialog(); }
 
   /** Box-prompted SAM segmentation of the drawn rectangles (jit-ui#90). A sticky
    *  `sam` toast shows live status + a download progress bar (first run pulls the
@@ -1945,7 +1829,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       activeDragMode: this.activeDragMode,
       activeSurface3dMode: this.activeSurface3dMode,
       regions: this.plotService.getRegions(),
-      selectedIndices: this.selectedIndices,
+      selectedIndices: this.regionActions.selectedIndices,
       canUngroup: (r) => this.regionOps.canUngroup(r),
     };
   }

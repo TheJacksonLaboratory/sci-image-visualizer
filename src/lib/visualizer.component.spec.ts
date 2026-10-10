@@ -883,12 +883,12 @@ describe('VisualizerComponent (UI shell)', () => {
       statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
       const labels = () => ((component as any).buildRegionActionItems() as { label?: string }[])
         .map((i) => i.label);
-      (component as any).selectedIndices = [0, 1];
+      (component as any).regionActions.selectedIndices = [0, 1];
       expect(labels()).toContain('Merge / group');
       expect(labels()).toContain('Inverse');
       expect(labels()).not.toContain('Ungroup');
 
-      (component as any).selectedIndices = [0];
+      (component as any).regionActions.selectedIndices = [0];
       expect(labels()).not.toContain('Merge / group'); // needs ≥2
       expect(labels()).toContain('Inverse');
     });
@@ -902,7 +902,7 @@ describe('VisualizerComponent (UI shell)', () => {
 
     it('mergeRegions commits one merged region and selects it', () => {
       const read = statefulRegions([rectRegion(0, 0, 20, 20), rectRegion(10, 10, 20, 20)]);
-      (component as any).selectedIndices = [0, 1];
+      (component as any).regionActions.selectedIndices = [0, 1];
       component.mergeRegions();
       expect(plotService.setRegions).toHaveBeenCalled();
       expect(read().length).toBe(1);                       // two → one
@@ -912,16 +912,16 @@ describe('VisualizerComponent (UI shell)', () => {
 
     it('mergeRegions of disjoint rectangles yields a MultiPolygon', () => {
       const read = statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
-      (component as any).selectedIndices = [0, 1];
+      (component as any).regionActions.selectedIndices = [0, 1];
       component.mergeRegions();
       expect(read()[0].bounds).toBeInstanceOf(MultiPolygon);
     });
 
     it('ungroupRegions splits a multi-part region back into parts', () => {
       const read = statefulRegions([rectRegion(0, 0, 10, 10), rectRegion(50, 50, 10, 10)]);
-      (component as any).selectedIndices = [0, 1];
+      (component as any).regionActions.selectedIndices = [0, 1];
       component.mergeRegions();          // → one MultiPolygon
-      (component as any).selectedIndices = [0];
+      (component as any).regionActions.selectedIndices = [0];
       component.ungroupRegions();
       expect(read().length).toBe(2);     // split back into two regions
     });
@@ -933,7 +933,7 @@ describe('VisualizerComponent (UI shell)', () => {
           p.npoints = 5; p.coordinates = p.xpoints.map((x, i) => [x, p.ypoints[i]]); p.closed = true;
           r.bounds = p; return r; })(),
       ]);
-      (component as any).selectedIndices = [0];
+      (component as any).regionActions.selectedIndices = [0];
       component.displaySimplifyDialog = true;
       component.simplifyRegions(2);
       expect((read()[0].bounds as Polygon).xpoints.length).toBe(4); // bump removed
@@ -1694,7 +1694,7 @@ describe('VisualizerComponent — context menu (characterization)', () => {
   }
   function select(regions: Region[], indices: number[]) {
     plot.getRegions.mockReturnValue(regions);
-    (component as unknown as { selectedIndices: number[] }).selectedIndices = indices;
+    component.regionActions.selectedIndices = indices;
   }
 
   beforeEach(() => {
