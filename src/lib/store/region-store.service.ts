@@ -10,6 +10,7 @@ import { IRegionEditApi } from '../contracts/region-store.contract';
 import { colorForLabel, presetKey } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
 import * as edit from '../models/polygon-edit';
+import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
 import { RegionHistory } from './region-history';
 
 /**
@@ -135,7 +136,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
         // Reject by id collision (already tracked) or geometry equality (same
         // coordinates) — the find button can push the same region repeatedly.
         const added = regions.filter(r =>
-          !this.regions.some(existing => existing.id === r.id || this.regionsEqual(existing, r)));
+          !this.regions.some(existing => existing.id === r.id || regionsEqual(existing, r)));
         this.regions = this.regions.concat(added);
       } else {
         this.regions = regions.slice();
@@ -245,7 +246,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     const out: Region[] = [];
     const zs = Array.from(this.regionsBySlice.keys()).sort((a, b) => a - b);
     for (const z of zs) {
-      for (const r of this.regionsBySlice.get(z) as Region[]) out.push(withZ(r, z));
+      for (const r of this.regionsBySlice.get(z) as Region[]) out.push(withRegionZ(r, z));
     }
     return out;
   }
@@ -264,7 +265,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     const zs = new Set<number>(this.stackInitialNonEmpty);
     for (const [z, regs] of this.regionsBySlice) if (regs.length) zs.add(z);
     for (const z of Array.from(zs).sort((a, b) => a - b)) {
-      const regs = (this.regionsBySlice.get(z) ?? []).map((r) => withZ(r, z));
+      const regs = (this.regionsBySlice.get(z) ?? []).map((r) => withRegionZ(r, z));
       out.set(z, regs);
     }
     return out;
@@ -274,7 +275,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  {@link setRegions} does, for regions entering the per-slice store. */
   private normalizeSlice(regions: Region[], z: number): Region[] {
     // A fresh (imported) region is tagged in place; a stored one is copied.
-    return this.admit(regions.map((r) => (r.id == null ? Object.assign(r, { z }) : withZ(r, z))));
+    return this.admit(regions.map((r) => (r.id == null ? Object.assign(r, { z }) : withRegionZ(r, z))));
   }
 
   /**
@@ -298,7 +299,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
       }
       const bounds = hydrateBounds(region.bounds);
       return region.name == null || bounds !== region.bounds
-        ? Object.assign(new Region(), region, { name: region.name ?? `shape${region.id}`, bounds })
+        ? withRegionPatch(region, { name: region.name ?? `shape${region.id}`, bounds })
         : region;
     });
     return this.withClassificationColors(admitted, (r) => fresh.has(r));
@@ -711,7 +712,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
         this.store.upsertClass({ name, color, source: 'auto' });
       }
       if (region.color === color) return region;
-      if (!inPlace(region)) return Object.assign(new Region(), region, { color });
+      if (!inPlace(region)) return withRegionPatch(region, { color });
       region.color = color;
       return region;
     });
@@ -761,50 +762,5 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private indexOfId(id: number): number {
     return this.regions.findIndex(r => r.id === id);
   }
-
-  private regionsEqual(a: Region, b: Region): boolean {
-    const ba = a.bounds, bb = b.bounds;
-    if (ba instanceof Rectangle && bb instanceof Rectangle) {
-      return ba.x === bb.x && ba.y === bb.y && ba.width === bb.width && ba.height === bb.height;
-    }
-    if (ba instanceof MultiPolygon && bb instanceof MultiPolygon) {
-      if (ba.polygons.length !== bb.polygons.length) return false;
-      for (let i = 0; i < ba.polygons.length; i++) {
-        if (!this.polygonsEqual(ba.polygons[i], bb.polygons[i])) return false;
-      }
-      return true;
-    }
-    if (ba instanceof Polygon && bb instanceof Polygon) {
-      return this.polygonsEqual(ba, bb);
-    }
-    return false;
-  }
-
-  private polygonsEqual(pa: Polygon, pb: Polygon): boolean {
-    if ((pa.closed !== false) !== (pb.closed !== false)) return false;
-    if (pa.xpoints.length !== pb.xpoints.length) return false;
-    for (let i = 0; i < pa.xpoints.length; i++) {
-      if (pa.xpoints[i] !== pb.xpoints[i] || pa.ypoints[i] !== pb.ypoints[i]) return false;
-    }
-    return this.holesEqual(pa.holes, pb.holes);
-  }
-
-  /** Compare two polygons' interior-ring (hole) sets for the dedupe path. */
-  private holesEqual(a: number[][][] | undefined, b: number[][][] | undefined): boolean {
-    const na = a?.length ?? 0, nb = b?.length ?? 0;
-    if (na !== nb) return false;
-    for (let h = 0; h < na; h++) {
-      const ra = (a as number[][][])[h], rb = (b as number[][][])[h];
-      if (ra.length !== rb.length) return false;
-      for (let i = 0; i < ra.length; i++) {
-        if (ra[i][0] !== rb[i][0] || ra[i][1] !== rb[i][1]) return false;
-      }
-    }
-    return true;
-  }
 }
 
-/** `r` tagged with slice `z`: itself when it already is, else a copy (stored instances are never changed). */
-function withZ(r: Region, z: number): Region {
-  return r.z === z ? r : Object.assign(new Region(), r, { z });
-}
