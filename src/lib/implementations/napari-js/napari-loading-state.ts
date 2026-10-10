@@ -8,14 +8,17 @@ export type LoadingSource = 'Image' | 'Observations';
  * scene: image tiles (the tile client), observation colourings (the spatial scenes) and the
  * spatial tile layers' own loads (which report a list of layer names).
  *
- * Each load is a {@link begin} that hands back its own `end`. {@link reset} starts a new scene
- * and drops the counts.
+ * Each load is a {@link begin} that hands back its own `end`. {@link reset} starts a new scene:
+ * the counts are dropped, and an `end` from a load that began before it is a no-op, so a load
+ * that settles after a re-plot can neither un-count the new scene's work nor drive a count below
+ * zero (which hid the next scene's "Observations reloading…" until a second load overlapped it).
  */
 export class LoadingBadgeState {
   private host: HTMLElement | null = null;
   private badge: NapariLoadingBadge | null = null;
   private readonly counts = new Map<LoadingSource, number>();
   private tileLayers: readonly string[] = [];
+  private generation = 0;
 
   /** The element the badge is drawn into (the plot host); set per plot. */
   attach(host: HTMLElement): void {
@@ -24,11 +27,12 @@ export class LoadingBadgeState {
 
   /** One load of `source` started; call the returned function once it settles. */
   begin(source: LoadingSource): () => void {
+    const generation = this.generation;
     this.counts.set(source, (this.counts.get(source) ?? 0) + 1);
     this.show();
     let ended = false;
     return () => {
-      if (ended) return;
+      if (ended || generation !== this.generation) return;
       ended = true;
       this.counts.set(source, (this.counts.get(source) ?? 0) - 1);
       this.show();
@@ -48,6 +52,7 @@ export class LoadingBadgeState {
 
   /** A new scene: forget every count and remove the badge. */
   reset(): void {
+    this.generation++;
     this.counts.clear();
     this.tileLayers = [];
     this.badge?.destroy();
