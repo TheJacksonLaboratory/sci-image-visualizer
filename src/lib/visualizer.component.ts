@@ -845,6 +845,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Leave the live set so the next-oldest visualizer picks up the outlets.
     VisualizerComponent.liveInstances.delete(this);
     this.state.setDiagram(null);
+    this.renderToken++;
     this.renderAbort?.abort();
     this.spatial.dispose();
     this.scrubber.cancel();
@@ -1033,6 +1034,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Stop any in-flight frame streaming (napari-js volume/surface preload) so the fetch loops
     // actually abort — clearing the flag alone only routed to Plotly and left napari fetching.
     this.plotService.cancelLoading?.();
+    // The cancelled render is superseded, not just aborted: its aborted load must not
+    // come back as "Could not draw the image", nor apply ROIs for an image left unshown.
+    this.renderToken++;
     this.renderAbort?.abort();
     this.stackLoading = false;
     this.imgLoading = false;

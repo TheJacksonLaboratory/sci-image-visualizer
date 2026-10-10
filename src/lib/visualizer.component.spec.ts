@@ -1485,6 +1485,27 @@ describe('VisualizerComponent — failed and superseded renders (CORE-11)', () =
   });
 });
 
+describe('VisualizerComponent — a cancelled render is superseded', () => {
+  beforeEach(() => { orchestratorHosts.length = 0; });
+
+  it('reports no failure and applies no ROIs once the user cancelled it', () => {
+    const { component, plot, imageInfo$, messages } = harness();
+    imageInfo$.next({
+      fileName: 'A.tif', urls: ['/a'], isStack: false, showStack: false, isGrayscale: true,
+      trueImageSize: [1, 1], imageMeta: [], scaleRatio: true, roiJsonStr: '{}',
+    });
+    const [host] = orchestratorHosts;
+    component.cancelLoading();
+    // The aborted load rejects, and the orchestrator reports it as it would any failure.
+    host.finished(false);
+    host.renderFailed(new DOMException('The operation was aborted.', 'AbortError'));
+    expect(messages.add).not.toHaveBeenCalled();
+    expect(plot.setRegions).not.toHaveBeenCalled();
+    expect(plot.resetUndoHistory).not.toHaveBeenCalled();
+    component.ngOnDestroy();
+  });
+});
+
 describe('VisualizerComponent — host-owned image info is never mutated (CORE-13)', () => {
   const stack = (extra: Partial<IImageInfo> = {}): IImageInfo => Object.freeze({
     fileName: 'series.tif', urls: ['/0', '/1', '/2', '/3'], isStack: true, showStack: false,
