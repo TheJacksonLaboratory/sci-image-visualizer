@@ -697,19 +697,6 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.regionUpdate$.next(this.getRegions());
   }
 
-  /**
-   * Drop the entire per-image cache (logout / project switch).
-   * @deprecated Nothing in the library calls it; kept until the backends stop
-   * reaching for it, then removed.
-   */
-  clearRegionsByImageKey(): void {
-    this.regionsByImageKey.clear();
-    this.currentImageKey = undefined;
-    this.regions = [];
-    this.selectedIds = [];
-    this.resetUndoHistory();
-  }
-
   // ── internals ──────────────────────────────────────────────────────────
 
   private deriveImageKey(imageInfo: IImageInfo | undefined): string | undefined {

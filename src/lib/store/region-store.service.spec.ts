@@ -694,13 +694,6 @@ describe('RegionStore', () => {
       expect(store.getRegions().length).toBe(1);
     });
 
-    it('clearRegionsByImageKey wipes the cache', () => {
-      store.setActiveImage(imageInfo('a.tif'));
-      store.addRegion(rectRegion(0, 0, 1, 1));
-      store.clearRegionsByImageKey();
-      store.setActiveImage(imageInfo('a.tif'));
-      expect(store.getRegions().length).toBe(0);
-    });
   });
 
   describe('holes (jit-ui#85)', () => {
