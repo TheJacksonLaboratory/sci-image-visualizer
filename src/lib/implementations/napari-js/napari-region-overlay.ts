@@ -10,6 +10,7 @@ import {
 
 import { DragBox, NapariRegionSvgRenderer } from './region-overlay/region-svg-renderer';
 import { OverlayProjection } from './region-overlay/overlay-projection';
+import { RegionEdit, applyRegionEdit } from './region-overlay/region-edit';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /**
@@ -110,15 +111,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /** In-progress manipulation (select/move modes): dragging a body, a polygon vertex, or a
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
-  private edit: {
-    kind: 'body' | 'vertex' | 'corner' | 'bezier' | 'holevertex' | 'holebezier';
-    id: number;
-    vertexIndex?: number;
-    holeIndex?: number;
-    side?: 'in' | 'out';
-    anchor?: [number, number];
-    last: [number, number];
-  } | null = null;
+  private edit: RegionEdit | null = null;
 
   constructor(
     private readonly host: HTMLElement,
@@ -252,7 +245,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return;
     }
     if (this.edit) {
-      this.applyManipulation(ix, iy);
+      applyRegionEdit(this.store, this.edit, ix, iy);
       this.redraw();
       return;
     }
@@ -389,7 +382,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private beginManipulation(ix: number, iy: number, e: PointerEvent): void {
     const sel = this.selectedRegion();
     if (sel?.bounds) {
-      const grab = this.hitHandle(sel, e.clientX, e.clientY);
+      const [lx, ly] = this.projection.clientToLocal(e.clientX, e.clientY);
+      const grab = hitHandle(sel, lx, ly, this.projection.toScreen, HANDLE_HIT_PX);
       if (grab) {
         this.store.beginBatch();
         this.edit = { ...grab, id: sel.id, last: [ix, iy] };
@@ -430,77 +424,6 @@ export class NapariRegionOverlay implements IRegionOverlay {
       this.projection.toLocal(Math.max(x0, x1), Math.max(y0, y1)),
     ]);
     this.renderer.showMarquee(lx, ly, rx, ry);
-  }
-
-  /**
-   * The handle of `region` under a client point: a rectangle corner, or a polygon's bezier
-   * control point (any ring) or vertex (any ring) — see the shared `hitHandle`.
-   */
-  private hitHandle(
-    region: Region,
-    clientX: number,
-    clientY: number,
-  ):
-    | { kind: 'corner'; anchor: [number, number] }
-    | { kind: 'vertex'; vertexIndex: number }
-    | { kind: 'bezier'; vertexIndex: number; side: 'in' | 'out' }
-    | { kind: 'holevertex'; holeIndex: number; vertexIndex: number }
-    | { kind: 'holebezier'; holeIndex: number; vertexIndex: number; side: 'in' | 'out' }
-    | null {
-    const [lx, ly] = this.projection.clientToLocal(clientX, clientY);
-    const hit = hitHandle(region, lx, ly, this.projection.toScreen, HANDLE_HIT_PX);
-    if (!hit) return null;
-    if (hit.kind === 'corner') return { kind: 'corner', anchor: hit.anchor };
-    if (hit.kind === 'vertex') {
-      return hit.ring < 0
-        ? { kind: 'vertex', vertexIndex: hit.index }
-        : { kind: 'holevertex', holeIndex: hit.ring, vertexIndex: hit.index };
-    }
-    return hit.ring < 0
-      ? { kind: 'bezier', vertexIndex: hit.index, side: hit.side }
-      : { kind: 'holebezier', holeIndex: hit.ring, vertexIndex: hit.index, side: hit.side };
-  }
-
-  /** Apply the live drag for the active manipulation (image coords `ix,iy`). */
-  private applyManipulation(ix: number, iy: number): void {
-    if (!this.edit) return;
-    if (this.edit.kind === 'body') {
-      const [lx, ly] = this.edit.last;
-      this.store.moveRegion(this.edit.id, ix - lx, iy - ly);
-      this.edit.last = [ix, iy];
-    } else if (this.edit.kind === 'vertex' && this.edit.vertexIndex != null) {
-      this.store.moveVertex(this.edit.id, this.edit.vertexIndex, ix, iy);
-    } else if (this.edit.kind === 'corner' && this.edit.anchor) {
-      const [ax, ay] = this.edit.anchor;
-      const rect = new Rectangle();
-      rect.x = Math.min(ax, ix);
-      rect.y = Math.min(ay, iy);
-      rect.width = Math.abs(ix - ax);
-      rect.height = Math.abs(iy - ay);
-      this.store.updateBounds(this.edit.id, rect);
-    } else if (this.edit.kind === 'bezier' && this.edit.vertexIndex != null && this.edit.side) {
-      this.store.moveBezierHandle(this.edit.id, this.edit.vertexIndex, this.edit.side, ix, iy);
-    } else if (
-      this.edit.kind === 'holevertex' &&
-      this.edit.holeIndex != null &&
-      this.edit.vertexIndex != null
-    ) {
-      this.store.moveHoleVertex(this.edit.id, this.edit.holeIndex, this.edit.vertexIndex, ix, iy);
-    } else if (
-      this.edit.kind === 'holebezier' &&
-      this.edit.holeIndex != null &&
-      this.edit.vertexIndex != null &&
-      this.edit.side
-    ) {
-      this.store.moveHoleBezierHandle(
-        this.edit.id,
-        this.edit.holeIndex,
-        this.edit.vertexIndex,
-        this.edit.side,
-        ix,
-        iy,
-      );
-    }
   }
 
   /** addpoint mode: insert a vertex at the click on the selected polygon's nearest edge
