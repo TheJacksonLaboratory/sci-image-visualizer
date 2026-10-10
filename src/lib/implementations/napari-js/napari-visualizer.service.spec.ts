@@ -9,6 +9,8 @@ import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { bitmapToLuminance } from './napari-tile-client';
+import { Image2dScene } from './napari-image-2d-scene';
+import type { SceneContext } from './napari-scene';
 import { ContrastWindowCache, encodeSpatial3dContinuous } from './napari-spatial-encoding';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
@@ -353,7 +355,7 @@ describe('NapariVisualizerService', () => {
       }
       return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
     });
-    const scaleBar = () => (service as unknown as { scaleBar: unknown }).scaleBar;
+    const scaleBar = () => (service as unknown as { scene: { scaleBar: unknown } | null }).scene?.scaleBar ?? null;
     const div = document.createElement('div');
     div.id = 'stale-desc-host';
     document.body.appendChild(div);
@@ -668,12 +670,18 @@ describe('NapariVisualizerService', () => {
 
   describe('image tiles on the loading badge', () => {
     type Internals = {
-      badge: { attach(host: HTMLElement): void; readonly text: string };
+      badge: { attach(host: HTMLElement): void; readonly text: string; begin(source: 'Image'): () => void };
       lifetime: AbortController;
-      tiledSource(desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal): {
-        fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown>;
+      tileClient: {
+        tiledSource(
+          desc: unknown, channel: number | undefined, channels: 1 | 4, scene: AbortSignal,
+          onTile: () => () => void,
+        ): { fetchTile(key: { level: number; col: number; row: number; z: number }): Promise<unknown> };
       };
     };
+    /** The image layer's source as a render builds it: its tiles count on the badge. */
+    const tiledSource = (scene: AbortSignal) =>
+      internals.tileClient.tiledSource(desc, undefined, 4, scene, () => internals.badge.begin('Image'));
     const desc = { width: 64, height: 48, tileSize: 512, levels: [{ res: 0, width: 64, height: 48 }] };
     const key = { level: 0, col: 0, row: 0, z: 0 };
     let release: () => void;
@@ -691,7 +699,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('says the image is reloading while a tile is in flight, and stops once it lands', async () => {
-      const tile = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
+      const tile = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -700,12 +708,12 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a tile that lands after a reset leaves the new scene\'s count alone', async () => {
-      const stale = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
+      const stale = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       const releaseStale = release;
       service.reset();
       internals.badge.attach(document.createElement('div'));
-      const fresh = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
+      const fresh = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       releaseStale();
       await stale;
@@ -716,7 +724,7 @@ describe('NapariVisualizerService', () => {
     });
 
     it('a disposed source\'s request after a reset never counts toward the new scene', async () => {
-      const disposed = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal);
+      const disposed = tiledSource(internals.lifetime.signal);
       service.reset();
       internals.badge.attach(document.createElement('div'));
       const late = disposed.fetchTile(key);
@@ -724,7 +732,7 @@ describe('NapariVisualizerService', () => {
       expect(internals.badge.text).toBe('');
       release();
       await late;
-      const fresh = internals.tiledSource(desc, undefined, 4, internals.lifetime.signal).fetchTile(key);
+      const fresh = tiledSource(internals.lifetime.signal).fetchTile(key);
       await Promise.resolve();
       expect(internals.badge.text).toBe('Image reloading…');
       release();
@@ -748,7 +756,7 @@ describe('NapariVisualizerService', () => {
         }
         return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
       });
-      const built = jest.spyOn(internals, 'tiledSource');
+      const built = jest.spyOn(internals.tileClient, 'tiledSource');
 
       const loaded = await service.load(imageInfo(), 0);
       const old = service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
@@ -1204,16 +1212,14 @@ describe('NapariVisualizerService', () => {
     // Regression (NAPARI-SVC-10): every tiled slice change fired a sample refresh with no
     // token, so a slower request for an older slice overwrote the newer one's samples.
     type Plane = { data: Uint8Array; width: number; height: number };
-    type Internals = {
-      imageMode: string;
-      histSamples: Map<number, Uint8Array>;
-      refreshHistogramSamples(z: number, desc: unknown): Promise<void>;
+    const tileClient = (service as unknown as {
       tileClient: { fetchChannelData(info: unknown, z: number, ch?: number, budget?: number): Promise<Plane> };
-    };
-    const internals = service as unknown as Internals;
+    }).tileClient;
+    // The image scene reads only the tile client and the image from its context here.
+    const internals = new Image2dScene({ tiles: tileClient, info: () => undefined } as unknown as SceneContext);
     internals.imageMode = 'multichannel';
     const held = new Map<number, Array<(p: Plane) => void>>();
-    jest.spyOn(internals.tileClient, 'fetchChannelData').mockImplementation(
+    jest.spyOn(tileClient, 'fetchChannelData').mockImplementation(
       (_info, z) => new Promise<Plane>((resolve) => {
         held.set(z, [...(held.get(z) ?? []), resolve]);
       }),
@@ -1237,9 +1243,7 @@ describe('NapariVisualizerService', () => {
     // Regression (NAPARI-SVC-9): setZIndex chose its branch by whichever layer handle was
     // non-null, so a 3D scatter, or a surface whose mesh was not built yet, fell through to
     // the 2D render — tiles fetched and 2D layers built into the 3D viewer.
-    const render = jest.spyOn(
-      service as unknown as { renderImage(z: number, t?: number): Promise<void> }, 'renderImage',
-    );
+    const render = jest.spyOn(Image2dScene.prototype, 'render');
     const div = document.createElement('div');
     div.id = 'z-3d-host';
     document.body.appendChild(div);
@@ -3096,8 +3100,8 @@ describe('NapariVisualizerService', () => {
       it('draws the observations with no image loaded at all, never asking for one', async () => {
         // A host's first view can be an image-less dataset (jit-ui opening a Xenium zip): the
         // visualizer then plots with no loaded image, and there is nothing to render under it.
-        const render = jest.spyOn(service as unknown as { renderImage(z: number): Promise<void> }, 'renderImage');
-        const scaleBar = jest.spyOn(service as unknown as { installScaleBar(): void }, 'installScaleBar');
+        const render = jest.spyOn(Image2dScene.prototype, 'render');
+        const scaleBar = jest.spyOn(Image2dScene.prototype, 'installScaleBar');
         document.getElementById('spatial-host')?.remove();
         const div = document.createElement('div');
         div.id = 'spatial-host';
@@ -3176,11 +3180,11 @@ describe('NapariVisualizerService', () => {
         // The stitched branch, which is what a volume-backed dataset takes: its
         // slices are blob images, not a server pyramid. (The tiled branch only
         // moves `dims.z` — no render, so nothing clears the markers there.)
-        (service as unknown as { tiled: boolean }).tiled = false;
+        const image = (service as unknown as { scene: Image2dScene }).scene;
+        image.tiled = false;
         const order: string[] = [];
         jest
-          .spyOn(service as unknown as { renderImage: (z: number, t?: number) => Promise<void> },
-            'renderImage')
+          .spyOn(image, 'render')
           .mockImplementation(async () => { order.push('image'); });
         jest
           .spyOn(service as unknown as { rebuildSpatialPoints: (...a: unknown[]) => Promise<void> },

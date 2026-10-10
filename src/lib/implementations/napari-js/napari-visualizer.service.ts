@@ -2,11 +2,11 @@ import { Inject, Injectable, NgZone, Optional, inject } from '@angular/core';
 import { Observable, BehaviorSubject, Subject, Subscription, combineLatest, of } from 'rxjs';
 import { Image } from 'image-js';
 import { saveAs } from 'file-saver';
-import { Viewer, histogramScalar, MultiChannelImageView } from 'napari-js';
-import type { ImageLayer, PointsLayer, TiledSource, ChannelView } from 'napari-js';
+import { Viewer } from 'napari-js';
+import type { ImageLayer, PointsLayer } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
-import { IChannelState } from '../../contracts/channel-histogram-api.contract';
+
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialColumn, SpatialDataset, SpatialImageRef, isCategoricalColumn,
@@ -25,7 +25,7 @@ import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 
 import { NapariSpatialTileLayers, TranscriptEstimate } from './napari-spatial-tiles';
-import { NapariNavigator } from './napari-navigator';
+
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
 import { SpatialHover } from './napari-spatial-hover';
@@ -34,6 +34,7 @@ import { SpatialSession } from './napari-spatial-scene';
 import { Spatial3dScene } from './napari-spatial-3d-scene';
 import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
 import { SurfaceScene } from './napari-surface-scene';
+import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { cameraDragMode } from './napari-axes-gizmo';
 import { NapariDisplayState } from './napari-display-state';
 import { NapariTileClient } from './napari-tile-client';
@@ -43,9 +44,7 @@ import { ZOOM_BUTTON_STEP } from '../osd/osd-zoom';
 import { colorExpressionField, expressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
-import {
-  SceneKind, sceneKindOf, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane,
-} from './napari-helpers';
+import { SceneKind, sceneKindOf } from './napari-helpers';
 import {
   GENE_MAP_MAX_SIDE, GENE_MAP_SIGMA, SPATIAL_FALLBACK_RADIUS, SPATIAL_NEUTRAL_COLOR,
   SPATIAL_NEUTRAL_HEX, SPATIAL_SLICE_MIN_DIAMETER_PX, encodeSpatialContinuous, gatherColors,
@@ -82,12 +81,11 @@ import { ColormapNode } from '../../contracts/display-types';
 import { VIZ_CONFIG, VizConfig } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { BaseStoreVisualizer } from '../base-store-visualizer';
-import { regionCentroids } from '../region-centroids';
+
 import { TileDescriptor, throwIfAborted } from '../tile-server';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
-import { NapariScaleBar } from './napari-scale-bar';
 
 import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
@@ -155,9 +153,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** The kind of scene {@link plot} mounted — fixed per plot, unlike {@link currentPlotType},
    *  which {@link setPlotType} can change under it. Drives {@link setZIndex}. */
   private mounted: SceneKind | null = null;
-  /** napari-js 2D scatter points (region centroids) + its region-change subscription. */
-  private scatter2dPoints: PointsLayer | null = null;
-  private scatterRegionSub: Subscription | null = null;
   /** Spatial-omics observation markers + the dataset/view subscription driving them. */
   private spatialPoints: PointsLayer | null = null;
   /** The gene map: its layer, the field it was estimated from, and the inputs each
@@ -197,6 +192,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private lifetime = new AbortController();
   /** What {@link plot} mounted, while it is mounted. */
   private scene: NapariScene | null = null;
+  /** The 2D spatial view's image (until the spatial 2D scene owns it). */
+  private spatialImage: Image2dScene | null = null;
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -219,41 +216,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private loading = new AbortController();
   private imageW = 0;
   private imageH = 0;
-  /** Monotonic slice-request id so a slow out-of-order slice fetch can't clobber a newer one. */
-  private sliceReq = 0;
-
-  /** How the current 2D image is composited (drives histogram + state application). */
-  private imageMode: 'grayscale' | 'multichannel' | 'rgb' = 'rgb';
-  /** napari-js high-level view that owns the per-channel layer set (build + live display
-   *  updates) for the current {@link imageMode}. Rebuilt on each (re)render. */
-  private channelView: MultiChannelImageView | null = null;
-  /** Live subscription applying channel-state / colormap changes to the layers. */
-  private displaySub: Subscription | null = null;
-  /** Physical scale bar overlay for the 2D image (null when 3D or the image has no µm/pixel). */
-  private scaleBar: NapariScaleBar | null = null;
-  /** Overview minimap (bottom-right), as OSD's navigator. */
-  private navigator: NapariNavigator | null = null;
-  /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
-  private navigatorToken = 0;
-  /** The current slice's per-channel thumbnail bitmaps (multichannel only), kept so a tint or
-   *  visibility change recolours the thumbnail without re-fetching it. */
-  private navigatorChannels: ImageBitmap[] | null = null;
-  /** The tints/visibility the thumbnail was last composited with — see {@link recolorNavigator}. */
-  private navigatorTintKey = '';
   /** The region overlay, the pixel tools and the displayed-pixel readback they read. */
   private readonly tools: NapariToolBridge;
   /** What this backend's canvas tools read and write (one host for every tool). */
   private readonly toolHost: CanvasToolHost;
   /** This backend's own wand, brush, eraser, zoom-to-box and SAM point tools. */
   protected readonly canvasTools: CanvasToolManager;
-  /** True when the 2D image is rendered via pyramidal TiledSources (descriptor available). */
-  private tiled = false;
-  /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
-   *  where the layers have no full in-memory pixels. Refreshed on plot + slice change. */
-  private readonly histSamples = new Map<number, Uint8Array>();
-  /** Latest-wins token for {@link refreshHistogramSamples}. */
-  private histGen = 0;
-
   private readonly stackLoading$ = new BehaviorSubject<boolean>(false);
   private readonly stackLoadingProgress$ = new BehaviorSubject<number>(0);
   private readonly autoscaleEvent$ = new Subject<unknown>();
@@ -400,7 +368,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.canvas = canvas;
 
     const info = (imageLoaded as NapariLoaded)?.imageInfo ?? imageInfo;
-    const z = (imageLoaded as NapariLoaded)?.z ?? 0;
 
     try {
       // Built OUTSIDE the Angular zone, so its requestAnimationFrame loop, its canvas pointer /
@@ -443,9 +410,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       } else if (isSpatialOmics(plotType)) {
         // No loaded image: an image-less dataset opened before any image (the visualizer's
         // plotSpatialWithoutImage) — the observations alone.
-        await this.mountSpatialOmics(viewer, host, z, imageLoaded == null);
+        await this.mountSpatialOmics(this.sceneContext(viewer, host, canvas), imageLoaded == null);
       } else if (isNapariScatter(plotType)) {
-        await this.mountScatter(viewer, host, z);
+        this.scene = new ScatterRegionsScene(this.sceneContext(viewer, host, canvas));
+        await this.scene.mount();
       } else if (isNapariScatter3d(plotType)) {
         this.scene = new Scatter3dScene(this.sceneContext(viewer, host, canvas), info);
         await this.scene.mount();
@@ -457,12 +425,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
         this.scene = new VolumeScene(this.sceneContext(viewer, host, canvas), info, rendering);
         await this.scene.mount();
       } else {
-        await this.renderImage(z);
-        this.fitCameraSoon();
-        this.subscribeDisplayState();
-        this.installScaleBar();
-        this.installNavigator(z);
-        this.tools.install2dInteraction(viewer, host);
+        this.scene = new Image2dScene(this.sceneContext(viewer, host, canvas));
+        await this.scene.mount();
       }
       this.tools.scheduleReadback();
       return true;
@@ -474,377 +438,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   // ── Channels: per-channel composite, LUT, native histograms (jit-ui#102) ──────────────────
 
-  /**
-   * Render the 2D image for slice `z`. With a server pyramid descriptor we use a pyramidal
-   * {@link TiledSource} per layer so the view refines to higher resolution on zoom (like OSD) and
-   * sits naturally in full-resolution coordinates; without one we fall back to the single-level
-   * stitch. Three display modes either way: multichannel additive tint, grayscale colormap, RGB.
-   */
-  private async renderImage(z: number, token?: number): Promise<void> {
-    const v = this.viewer;
-    if (!v) return;
-    const scene = this.lifetime.signal;
-    const desc = await this.tileClient.ensureDescriptor(this.info());
-    // Reset into a newer scene while the descriptor was in flight: this render is superseded.
-    if (scene.aborted) return;
-    if (desc && desc.levels?.length) {
-      if (token != null && token !== this.sliceReq) return;
-      await this.renderImageTiled(z, desc, scene);
-      return;
-    }
-    return this.renderImageStitched(z, token);
-  }
-
-  /** Single-level stitch fallback (no descriptor): the pre-tiling path. */
-  private async renderImageStitched(z: number, token?: number): Promise<void> {
-    const v = this.viewer;
-    if (!v) return;
-    const desc = await this.tileClient.ensureDescriptor(this.info());
-    const states = this.store.currentChannelStates();
-    const channelCount = desc?.channels ?? (states.length || 1);
-    const multichannel = !!desc?.multichannel && channelCount > 1;
-
-    // 1) Fetch all pixel data BEFORE touching the viewer, so a superseded scrub can bail without
-    //    having torn down the visible layers (avoids flicker / out-of-order layer state).
-    let mode: 'grayscale' | 'multichannel' | 'rgb';
-    let planes: Array<{ data: Uint8Array; width: number; height: number }> = [];
-    let bitmap: ImageBitmap | null = null;
-    if (multichannel) {
-      mode = 'multichannel';
-      planes = await Promise.all(
-        Array.from({ length: channelCount }, (_, c) => this.tileClient.fetchChannelData(this.info(), z, c)),
-      );
-    } else if (channelCount === 1) {
-      mode = 'grayscale';
-      // Composite fetch (no channel) → all overview levels usable, so a large grayscale image
-      // selects a fitting downscaled level instead of the full-res real level (texture limit).
-      planes = [await this.tileClient.fetchChannelData(this.info(), z)];
-    } else {
-      mode = 'rgb';
-      bitmap = await this.tileClient.fetchSlice(this.info(), z);
-    }
-
-    // 2) Commit — unless a newer scrub superseded us or the viewer was torn down.
-    if ((token != null && token !== this.sliceReq) || this.viewer !== v) {
-      bitmap?.close?.();
-      return;
-    }
-
-    // The displayed texture may be a downscaled pyramid level; scale the layer into FULL-RESOLUTION
-    // world coordinates (level-0 pixels) so the camera, readback and — critically — pre-saved
-    // regions (stored in full-res coords, e.g. ndpi) all line up regardless of which level is shown.
-    // This mirrors OSD, whose coordinate system is always level 0.
-    const texW = mode === 'rgb' ? (bitmap as ImageBitmap).width : planes[0]?.width ?? 0;
-    const texH = mode === 'rgb' ? (bitmap as ImageBitmap).height : planes[0]?.height ?? 0;
-    const fullW = desc?.width || texW || 1;
-    const fullH = desc?.height || texH || 1;
-    const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
-
-    this.imageMode = mode;
-    const interpolation: 'linear' | 'nearest' = this.settings.imageSmoothing ? 'linear' : 'nearest';
-    this.channelView = new MultiChannelImageView(v);
-    if (mode === 'multichannel') {
-      const views = planes.map((d, c) => this.tintedChannelView(c, states, desc, typedPlane(d), scale));
-      this.channelView.render('multichannel', views, { interpolation });
-    } else if (mode === 'grayscale') {
-      const view = this.grayscaleChannelView(states[0], typedPlane(planes[0]), scale);
-      this.channelView.render('grayscale', [view], { interpolation });
-    } else {
-      this.channelView.render('rgb', [{ source: bitmap as ImageBitmap, scale }], { interpolation });
-    }
-    this.imageW = fullW;
-    this.imageH = fullH;
-  }
-
-  /**
-   * Render the 2D image with pyramidal {@link TiledSource}s — the view refines to higher resolution
-   * as you zoom in (the visual fetches the level whose texels ≈ screen pixels) and sits in full-res
-   * coordinates so regions align. Same three modes as the stitch path. Per-channel layers use the
-   * REAL pyramid levels (per-channel tiles only exist there); the composite uses all levels.
-   */
-  private async renderImageTiled(z: number, desc: TileDescriptor, scene: AbortSignal): Promise<void> {
-    const v = this.viewer;
-    if (!v) return;
-    const states = this.store.currentChannelStates();
-    const channelCount = desc.channels ?? (states.length || 1);
-    const multichannel = !!desc.multichannel && channelCount > 1;
-    const interpolation: 'linear' | 'nearest' = this.settings.imageSmoothing ? 'linear' : 'nearest';
-
-    this.tiled = true;
-    this.channelView = new MultiChannelImageView(v);
-
-    if (multichannel) {
-      this.imageMode = 'multichannel';
-      const views = Array.from({ length: channelCount }, (_, c) =>
-        this.tintedChannelView(c, states, desc, this.tiledSource(desc, c, 1, scene)));
-      this.channelView.render('multichannel', views, { interpolation });
-    } else if (channelCount === 1) {
-      this.imageMode = 'grayscale';
-      const view = this.grayscaleChannelView(states[0], this.tiledSource(desc, undefined, 1, scene));
-      this.channelView.render('grayscale', [view], { interpolation });
-    } else {
-      this.imageMode = 'rgb';
-      this.channelView.render('rgb', [{ source: this.tiledSource(desc, undefined, 4, scene) }], {
-        interpolation,
-      });
-    }
-    this.imageW = desc.width;
-    this.imageH = desc.height;
-    // Await on the initial render so getHistogram/autoContrast have data immediately; slice changes
-    // refresh fire-and-forget (the histogram pane retries).
-    await this.refreshHistogramSamples(z, desc);
-  }
-
-  /** Channel `c`'s layer in the additive multichannel composite: tinted by its display colour
-   *  (store, else descriptor, else the Fiji palette), with its window, gamma and visibility. */
-  private tintedChannelView(
-    c: number,
-    states: IChannelState[],
-    desc: TileDescriptor | null,
-    source: ChannelView['source'],
-    scale?: [number, number],
-  ): ChannelView {
-    const st = states.find((s) => s.index === c);
-    return {
-      source,
-      tint: st?.color ?? desc?.channelInfo?.[c]?.color ?? tintFor(c),
-      name: st?.name ?? `ch${c}`,
-      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-      visible: st?.visible ?? true,
-      invert: this.display.invert,
-      ...(scale ? { scale } : {}),
-    };
-  }
-
-  /** The single grayscale layer: the selected colormap, with the channel's window and gamma. */
-  private grayscaleChannelView(
-    st: IChannelState | undefined,
-    source: ChannelView['source'],
-    scale?: [number, number],
-  ): ChannelView {
-    return {
-      source,
-      colormap: this.display.grayscaleColormap(),
-      contrastLimits: [st?.min ?? 0, st?.max ?? 255],
-      gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
-      invert: this.display.invert,
-      ...(scale ? { scale } : {}),
-    };
-  }
-
-  /** A pyramidal TiledSource for the image on screen, whose tiles count on the loading badge
-   *  while `scene` (the render that asked for it) is current. */
-  private tiledSource(
-    desc: TileDescriptor, channel: number | undefined, channels: 1 | 4, scene: AbortSignal,
-  ): TiledSource {
-    return this.tileClient.tiledSource(desc, channel, channels, scene, () => this.badge.begin('Image'));
-  }
-
-  /** (Re)fetch a coarse per-channel luminance sample for the histogram (tiled mode has no full
-   *  in-memory pixels). One cheap overview tile per channel, fetched together; cached by channel
-   *  index. Latest wins: a scrub fires one refresh per slice, and an older slice's samples that
-   *  land after a newer one's are dropped rather than shown as the current distribution. */
-  private async refreshHistogramSamples(z: number, desc: TileDescriptor): Promise<void> {
-    const gen = ++this.histGen;
-    this.histSamples.clear();
-    if (this.imageMode === 'rgb') return; // RGB uses the displayed-pixel readback (rgbHistogram)
-    const multichannel = this.imageMode === 'multichannel';
-    const channelCount = multichannel ? desc.channels ?? 1 : 1;
-    const samples = await Promise.all(
-      Array.from({ length: channelCount }, (_, c) =>
-        // budget 1 → coarsest single tile; a failed channel leaves its sample unset.
-        this.tileClient.fetchChannelData(this.info(), z, multichannel ? c : undefined, 1).then(
-          (d) => d.data,
-          () => null,
-        ),
-      ),
-    );
-    if (gen !== this.histGen) return;
-    samples.forEach((data, c) => {
-      if (data) this.histSamples.set(c, data);
-    });
-  }
-
-  /**
-   * The one display-state subscription every image/volume/surface mode uses: channel states,
-   * colormap (+ reverse), invert and the selected channel. Records the colormap/reverse/invert the
-   * builders read, then hands the mode its own layer updates. Replaces any prior subscription
-   * (the spatial modes' marker subscription also records the colormap — see subscribeSpatial).
-   */
-  private watchDisplayState(apply: (channels: IChannelState[], selected: number) => void): void {
-    this.displaySub?.unsubscribe();
-    this.displaySub = this.display.watch(apply);
-  }
-
-  /** Subscribe channel states + grayscale colormap → live-apply to the rendered layers (no
-   *  re-fetch; only z changes re-fetch). Replaces any prior subscription. */
-  private subscribeDisplayState(): void {
-    this.watchDisplayState((channels) => {
-      this.applyDisplayState(channels);
-      this.recolorNavigator();
-    });
-  }
-
-  /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the
-   *  per-channel layer mutations to the {@link MultiChannelImageView}. */
-  private applyDisplayState(channels: IChannelState[]): void {
-    const view = this.channelView;
-    if (!this.viewer || !view) return;
-    if (this.imageMode === 'multichannel') {
-      view.layers.forEach((_, c) => {
-        const st = channels.find((s) => s.index === c);
-        if (!st) return;
-        view.updateChannel(c, {
-          tint: st.color,
-          contrastLimits: [st.min, st.max],
-          gamma: toNapariGamma(st.gamma), // ImageJ γ → napari-js γ
-          visible: st.visible,
-          invert: this.display.invert,
-        });
-      });
-    } else if (this.imageMode === 'grayscale') {
-      const st = channels[0];
-      view.updateChannel(0, {
-        colormap: this.display.grayscaleColormap(),
-        invert: this.display.invert,
-        ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
-      });
-    }
-  }
-
-  /** (Re)install the physical scale bar over the 2D image, sized from the image's µm/pixel
-   *  (`/tiles/info` mppX, falling back to the image metadata). No-op without a physical size. */
-  private installScaleBar(): void {
-    this.scaleBar?.destroy();
-    this.scaleBar = null;
-    const mppX = this.tileClient.mppX(this.info());
-    if (this.viewer && this.host && mppX > 0) {
-      this.scaleBar = new NapariScaleBar(this.host, this.viewer.camera, mppX);
-    }
-  }
-
-  /**
-   * The overview navigator for a 2D view with an image: a coarse thumbnail of the whole
-   * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
-   */
-  private installNavigator(z: number): void {
-    this.navigator?.destroy();
-    this.navigator = null;
-    if (!this.viewer || !this.host || !this.imageW || !this.imageH) return;
-    this.navigator = new NapariNavigator(
-      this.host, this.viewer, this.imageW, this.imageH, () => this.hover?.hide(),
-    );
-    this.navigator.setVisible(this.settings.navigatorVisible);
-    void this.refreshNavigatorImage(z);
-  }
-
-  /**
-   * Draw the navigator's thumbnail from the coarsest pyramid level. A multichannel image
-   * is composited from its channels in their display colours (see {@link recolorNavigator}),
-   * so the overview looks like the view rather than like channel 0 in grey.
-   */
-  private async refreshNavigatorImage(z: number): Promise<void> {
-    const nav = this.navigator;
-    if (!nav) return;
-    const token = ++this.navigatorToken;
-    try {
-      const desc = await this.tileClient.ensureDescriptor(this.info());
-      // Superseded (a newer slice, or the scene was torn down): fetch nothing.
-      if (token !== this.navigatorToken || this.navigator !== nav) return;
-      const channels = desc?.multichannel ? desc.channelInfo ?? [] : [];
-      if (channels.length > 1) {
-        const bitmaps = await Promise.all(
-          channels.map((_c, c) => this.tileClient.fetchSlice(this.info(), z, c, 1)),
-        );
-        if (token !== this.navigatorToken || this.navigator !== nav) return;
-        this.setNavigatorChannels(bitmaps);
-        this.recolorNavigator();
-      } else {
-        const image = await this.tileClient.fetchSlice(this.info(), z, undefined, 1);
-        if (token !== this.navigatorToken || this.navigator !== nav) return;
-        this.setNavigatorChannels(null);
-        nav.setImage(image);
-      }
-    } catch (err) {
-      console.warn('[napari-js] navigator thumbnail unavailable', err);
-    }
-  }
-
-  /** Replace the per-channel thumbnail bitmaps (closing the previous ones). */
-  private setNavigatorChannels(bitmaps: ImageBitmap[] | null): void {
-    for (const bmp of this.navigatorChannels ?? []) bmp.close?.();
-    this.navigatorChannels = bitmaps;
-    this.navigatorTintKey = '';
-  }
-
-  /**
-   * Composite the multichannel thumbnail in the channels' CURRENT display tints, skipping hidden
-   * channels — the store's channel states, as the 2D layers use, not the server's defaults.
-   * Re-run on every display-state change; it only redraws (never re-fetches), and only when a
-   * tint or a visibility actually changed, so a window/gamma drag costs a string compare.
-   */
-  private recolorNavigator(): void {
-    const nav = this.navigator;
-    const bitmaps = this.navigatorChannels;
-    if (!nav || !bitmaps) return;
-    const info = this.currentDescriptor()?.channelInfo;
-    const states = this.store.currentChannelStates();
-    const shown = bitmaps
-      .map((bmp, c) => {
-        const st = states.find((s) => s.index === c);
-        return { bmp, visible: st?.visible ?? true, color: st?.color ?? info?.[c]?.color ?? tintFor(c) };
-      })
-      .filter((ch) => ch.visible);
-    const key = shown.map((ch) => `${bitmaps.indexOf(ch.bmp)}:${ch.color}`).join('|');
-    if (key === this.navigatorTintKey) return;
-    this.navigatorTintKey = key;
-    nav.setImage(tintedComposite(shown.map((ch) => ch.bmp), shown.map((ch) => ch.color)));
-  }
-
   /** Show/hide the overview navigator (same setting as OSD's). */
   setNavigatorVisible(visible: boolean): void {
     this.settings.navigatorVisible = visible;
-    this.navigator?.setVisible(visible);
-  }
-
-  /**
-   * Mount the NAPARI_SCATTER 2D scatter: the slice image with a points layer at each region's
-   * centroid (napari-js analog of Plotly's region-centroid scatter). Rebuilds the points live as
-   * regions change.
-   */
-  private async mountScatter(viewer: Viewer, host: HTMLElement, z: number): Promise<void> {
-    await this.renderImage(z);
-    this.fitCameraSoon();
-    this.subscribeDisplayState();
-    this.installScaleBar();
-    this.installNavigator(z);
-    // This mode plots REGION centroids, so without the region tools there is no
-    // way to produce a point — drawing a region now adds one immediately.
-    this.tools.install2dInteraction(viewer, host);
-    this.rebuildScatterPoints();
-    this.scatterRegionSub = this.regionStore
-      .getRegionUpdateEvent()
-      .subscribe(() => this.rebuildScatterPoints());
-    this.tools.scheduleReadback();
-  }
-
-  /** (Re)build the 2D scatter's point layer at the current region centroids. */
-  private rebuildScatterPoints(): void {
-    const v = this.viewer;
-    if (!v) return;
-    if (this.scatter2dPoints) {
-      v.layers.remove(this.scatter2dPoints);
-      this.scatter2dPoints = null;
-    }
-    const centroids = regionCentroids(this.regionStore.getRegions());
-    if (centroids.length === 0) return;
-    this.scatter2dPoints = v.addPoints(centroids, {
-      size: 12,
-      faceColor: [1, 0.85, 0.2, 1],
-      borderColor: [0, 0, 0, 1],
-      borderWidth: 2,
-    });
+    this.scene?.setNavigatorVisible?.(visible);
   }
 
   // ── Spatial omics ────────────────────────────────────────────────────────────────────────
@@ -858,24 +455,24 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * exactly as the plain image view does. That is NOT optional here: this mode's selection is
    * driven by drawn ROIs, so without the overlay there is no way to make a selection at all.
    */
-  private async mountSpatialOmics(viewer: Viewer, host: HTMLElement, z: number, noImage = false): Promise<void> {
+  private async mountSpatialOmics(ctx: SceneContext, noImage = false): Promise<void> {
+    const { viewer, host } = ctx;
     // With no image loaded there is nothing to render under the observations; they are
     // framed on their own extent, as for any dataset that brings no image.
-    if (!noImage) await this.renderImage(z);
-    // Only fit to the image when this dataset actually has one. Otherwise there is
-    // nothing to fit, `imageW`/`imageH` still hold the LAST image's dimensions, and
-    // this fits to those — and because it defers to a frame, it lands AFTER the points
-    // are added and overwrites the framing they set. That is what left an image-less
-    // dataset as a ten-pixel speck off to one side.
-    if (this.spatial.latest?.[0]?.imageRef) this.fitCameraSoon();
-    this.subscribeDisplayState();
-    // The scale bar and navigator describe an image; with none loaded, whatever they would
-    // read is left over from the last one.
-    if (!noImage) {
-      this.installScaleBar();
-      this.installNavigator(z);
-    }
-    this.tools.install2dInteraction(viewer, host);
+    const image = new Image2dScene(ctx, {
+      image: !noImage,
+      // Only fit to the image when this dataset actually has one. Otherwise there is
+      // nothing to fit, `imageW`/`imageH` still hold the LAST image's dimensions, and
+      // this fits to those — and because it defers to a frame, it lands AFTER the points
+      // are added and overwrites the framing they set. That is what left an image-less
+      // dataset as a ten-pixel speck off to one side.
+      fit: () => !!this.spatial.latest?.[0]?.imageRef,
+      onSlice: () => this.redrawSpatialMarkers(),
+      onNavigatorInteract: () => this.hover?.hide(),
+    });
+    this.scene = image;
+    this.spatialImage = image;
+    await image.mount();
     this.installSpatialHover(host);
     this.spatialTiles()?.attach(viewer);
     this.subscribeSpatial();
@@ -1174,7 +771,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    */
   private hideForeignImage(viewer: Viewer, datasetHasPixels: boolean): void {
     // No image of its own → nothing for an overview to show either.
-    this.navigator?.setVisible(datasetHasPixels && this.settings.navigatorVisible);
+    this.spatialImage?.showNavigatorFor(datasetHasPixels);
     for (const layer of viewer.layers.items) {
       if (layer.kind !== 'image') continue;
       // The transcript-density raster and the gene map are image layers too, but they are
@@ -1484,27 +1081,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.loading = new AbortController();
     this.lifetime.abort();
     this.lifetime = new AbortController();
-    this.displaySub?.unsubscribe();
-    this.displaySub = null;
-    this.scaleBar?.destroy();
-    this.scaleBar = null;
-    this.navigator?.destroy();
-    this.navigator = null;
-    this.setNavigatorChannels(null);
+    this.spatialImage = null;
     this.badge.reset();
     this.tools.teardown();
     this.tileClient.startScene(this.lifetime.signal);
-    this.tiled = false;
-    this.histGen++;
-    this.histSamples.clear();
-    this.channelView = null;
     this.spatialTilesMgr?.detach();
     this.viewer?.dispose();
     this.viewer = null;
     if (this.canvas && this.host?.contains(this.canvas)) this.host.removeChild(this.canvas);
     this.canvas = null;
-    this.scatterRegionSub?.unsubscribe();
-    this.scatterRegionSub = null;
     this.spatialSub?.unsubscribe();
     this.spatialSub = null;
     this.hover?.dispose();
@@ -1519,7 +1104,6 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.geneMapKey = null;
     // Invalidate any colour fetch still in flight so it can't attach to the next scene.
     this.spatialRebuildToken++;
-    this.scatter2dPoints = null;
   }
 
   relayout(_trueImageSize?: number[]): void {
@@ -1563,7 +1147,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   setImageSmoothingEnabled(enabled: boolean): void {
     this.settings.imageSmoothing = enabled;
     // Apply live to the rendered image layers; baked into the next render too.
-    this.channelView?.setInterpolation(enabled ? 'linear' : 'nearest');
+    this.scene?.setImageSmoothing?.(enabled);
   }
 
   setShowStack(_showstack: boolean): void {
@@ -1572,50 +1156,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
 
   setZIndex(zIndex: number): void {
     if (this.loaded) this.loaded.z = zIndex;
-    const v = this.viewer;
-    if (!v) return;
-    if (this.navigator) void this.refreshNavigatorImage(zIndex);
+    if (!this.viewer) return;
     // Dispatch on WHAT IS MOUNTED, not on which layer handle happens to be non-null: a surface
     // still preloading (or whose first build failed) has no layer yet, and a 3D scatter or cloud
-    // has none of them — and both used to fall through to the 2D render below.
-    switch (this.mounted) {
-      case 'surface':
-      case 'volume':
-      case 'scatter3d':
-      case 'spatial3d':
-        this.scene?.setZ(zIndex);
-        return;
-      case null:
-        return;
-      case 'image2d':
-        break;
-    }
-    // Tiled 2D image: just move the dims plane — the tiled visual fetches the new slice's tiles
-    // (cached per z), no layer rebuild. Refresh the coarse histogram sample for the new slice.
-    if (this.tiled) {
-      v.dims.z = zIndex;
-      const desc = this.currentDescriptor();
-      if (desc) void this.refreshHistogramSamples(zIndex, desc);
-      this.redrawSpatialMarkers();
-      this.tools.scheduleReadback();
-      return;
-    }
-    // 2D image (stitch fallback): re-render the slice (re-fetches per-channel / composite).
-    // The token lets renderImage drop a superseded scrub so a slow older slice can't clobber a newer one.
-    const req = ++this.sliceReq;
-    void this.renderImage(zIndex, req)
-      .then(() => {
-        if (req !== this.sliceReq) return;
-        // AFTER the image, never before: the render clears the layer list, so
-        // markers drawn first are wiped by the very image meant to sit under them.
-        // Over a volume-backed dataset the plane also decides which observations
-        // are drawn at all, so this is what moves the cells with the section.
-        this.redrawSpatialMarkers();
-        // The region-centroid scatter went with the same clear.
-        if (this.scatter2dPoints) this.rebuildScatterPoints();
-        this.tools.scheduleReadback();
-      })
-      .catch((err) => console.error('[napari-js] setZIndex slice failed:', err));
+    // has none of them — and both used to fall through to the 2D render (NAPARI-SVC-9).
+    this.scene?.setZ(zIndex);
   }
 
   setStackLoading(stackLoading: boolean): void {
@@ -1789,25 +1334,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.scene?.surface3dControls?.() ?? null;
   }
   getHistogram(channelIndex: number, bins: number): IHistogram | null {
-    const v = this.viewer;
-    if (!v) return null;
-    // Volume / isosurface / surface / 3D scatter: their own assembled data.
-    if (this.scene && this.mounted !== 'spatial3d') return this.scene.histogram(channelIndex, bins);
-    // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
-    if (this.tiled) {
-      if (this.imageMode === 'rgb') return this.tools.rgbHistogram(channelIndex, bins);
-      const sample = this.histSamples.get(this.imageMode === 'grayscale' ? 0 : channelIndex);
-      return sample ? toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
-    }
-    // Grayscale/multichannel (stitch): native per-channel histogram straight from the in-memory
-    // scalar layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
-    const layer = this.channelView?.layers[this.imageMode === 'grayscale' ? 0 : channelIndex];
-    if (layer) {
-      const h = v.layerHistogram(layer, bins);
-      if (h) return toIHistogram(h);
-    }
-    if (this.imageMode === 'rgb') return this.tools.rgbHistogram(channelIndex, bins);
-    return null;
+    if (!this.viewer) return null;
+    return this.scene?.histogram(channelIndex, bins) ?? null;
   }
   getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null> {
     // >8-bit channels: the true native distribution from the server (the displayed pixels are
