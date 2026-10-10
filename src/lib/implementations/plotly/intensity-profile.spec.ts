@@ -6,6 +6,9 @@ import { MessageService } from 'primeng/api';
 import { PlotlyService } from './plotly.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
 import { CachedImageData } from '../../toolbar/wand/wand-tool.service';
+import { RegionStore } from '../../store/region-store.service';
+import { Polygon, Region } from '../../models/region';
+import { IntensityProfile } from '../../contracts/visualizer.contract';
 
 /**
  * Locks the intensity-profile sampling used by the LINE plot type's draggable
@@ -87,5 +90,88 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
     service.setSamplingFrames([[[1, 2], [3, 4]]], [1, 1]);
     const data = (service as unknown as Cache).getCachedImageData();
     expect(data).toEqual(expect.objectContaining({ originX: 0, originY: 0, width: 2, height: 2 }));
+  });
+});
+
+/**
+ * Characterization ahead of the IntensityProfileService extraction (review §6,
+ * proposal B step 4): line placement, physical-unit scaling and crop-origin
+ * sampling.
+ */
+describe('PlotlyService intensity profile lines (characterization)', () => {
+  let service: PlotlyService;
+  let regionStore: RegionStore;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    regionStore = TestBed.inject(RegionStore);
+  });
+
+  const ends = (r: Region | null) => {
+    const b = r!.bounds as Polygon;
+    return { xs: b.xpoints, ys: b.ypoints, closed: b.closed, kind: r!.kind };
+  };
+
+  it('needs an image extent before it can place a line', () => {
+    expect(service.addProfileLine()).toBeNull();
+  });
+
+  it('spans 2/3 of the image width, centred, staggering each new line down the image', () => {
+    (service as any).trueImgSize = [0, 1000, 0, 800];
+    const first = ends(service.addProfileLine());
+    expect(first.xs[0]).toBeCloseTo(1000 / 6);
+    expect(first.xs[1]).toBeCloseTo(5000 / 6);
+    expect(first.ys).toEqual([400, 400]);
+    expect(first).toMatchObject({ closed: false, kind: 'profile' });
+    const second = ends(service.addProfileLine());
+    expect(second.ys).toEqual([400 + 800 * 0.12, 400 + 800 * 0.12]);
+    expect(regionStore.getRegions()).toHaveLength(2);
+  });
+
+  it('places the line inside the last visible region when it overlaps the image', () => {
+    (service as any).trueImgSize = [0, 1000, 0, 800];
+    service.refreshIntensitySamplingForRoi(100, 100, 200, 100, 0);
+    const line = ends(service.addProfileLine());
+    expect(line.xs[0]).toBeCloseTo(200 - 200 / 3);
+    expect(line.xs[1]).toBeCloseTo(200 + 200 / 3);
+    expect(line.ys).toEqual([150, 150]);
+  });
+
+  it('cycles a bright palette, one colour per line', () => {
+    (service as any).trueImgSize = [0, 100, 0, 100];
+    const colors = Array.from({ length: 9 }, () => service.addProfileLine()!.color);
+    expect(new Set(colors.slice(0, 8)).size).toBe(8);
+    expect(colors[8]).toBe(colors[0]);
+  });
+
+  it('measures along the line in microns when the image carries a pixel size', () => {
+    (service as any).cachedImageFrames = [[[10, 20, 30], [40, 50, 60]]];
+    (service as any).cachedImageRatios = [1, 1];
+    (service as any).imageInfo = { imageMeta: [{ mppX: 0.5, mppY: 0.25 }] };
+    const profile = (service as any).computeIntensityProfile({ x0: 0, y0: 0, x1: 2, y1: 0 });
+    expect(profile).toEqual({ positions: [0, 1], values: [10, 30], unit: 'µm' });
+  });
+
+  it('samples a zoom crop at its origin', () => {
+    service.setSamplingFrames([[[1, 2, 3], [4, 5, 6]]], [1, 1], [100, 50]);
+    const profile = (service as any).computeIntensityProfile({ x0: 100, y0: 51, x1: 102, y1: 51 });
+    expect(profile.values).toEqual([4, 6]);
+    expect(profile.unit).toBe('px');
+  });
+
+  it('re-emits every line\'s profile, tagged with its id and colour, when a region changes', () => {
+    (service as any).trueImgSize = [0, 3, 0, 2];
+    service.setSamplingFrames([[[10, 20, 30], [40, 50, 60]]], [1, 1]);
+    const seen: IntensityProfile[][] = [];
+    service.getIntensityProfile$().subscribe((p) => seen.push(p));
+    const line = service.addProfileLine()!;
+    const last = seen[seen.length - 1];
+    expect(last).toHaveLength(1);
+    expect(last[0]).toMatchObject({ id: line.id, color: line.color });
+    expect(last[0].values.length).toBeGreaterThan(1);
   });
 });

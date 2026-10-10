@@ -712,3 +712,110 @@ describe('PlotlyService canvas tools (setActiveTool)', () => {
     expect(overlays()).toBe(0);
   });
 });
+
+/**
+ * Characterization ahead of the PlotlyService split (review §6, proposal B):
+ * the layouts the renderers hand Plotly, and the isosurface band mapping.
+ */
+describe('PlotlyService layouts and isosurface band (characterization)', () => {
+  let service: PlotlyService;
+  type Internals = {
+    screenHeight: number; scaleratio: boolean; dragMode: string; imageLength: number; plotType: PlotType;
+    getHeatmapLayout(x: number[], y: number[]): Record<string, unknown>;
+    getOverlayLayout(x: number[], y: number[]): Record<string, unknown>;
+    getChartLayout(): Record<string, unknown>;
+    getVolumeLayout(): Record<string, unknown>;
+    getSurfaceLayout(z: number): Record<string, unknown>;
+    buildTraceInput(info: IImageInfo, loaded: unknown, size: number[]): { isoMin: number; isoMax: number };
+  };
+  const internals = () => service as unknown as Internals;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    Object.assign(service, { screenHeight: 600, scaleratio: true, dragMode: 'pan', imageLength: 2 });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('builds the heatmap layout: image-aligned axes, the z-plane slider and the region shapes', () => {
+    const layout = internals().getHeatmapLayout([0, 100], [80, 0]);
+    expect(layout).toEqual({
+      xaxis: { constrain: 'range', constraintoward: 'center', side: 'top', ticks: '', range: [0, 100] },
+      yaxis: {
+        constrain: 'range', constraintoward: 'center', range: [80, 0], ticks: '', ticksuffix: '  ',
+        autorange: false, scaleanchor: 'x',
+      },
+      margin: { t: 30, b: 5, l: 55, r: 5 },
+      height: 600,
+      sliders: [{
+        pad: { t: 50 },
+        currentvalue: { visible: true, prefix: 'Z-plane:', xanchor: 'right' },
+        steps: [
+          { label: 1, method: 'restyle', args: ['visible', [true, false]] },
+          { label: 2, method: 'restyle', args: ['visible', [false, true]] },
+        ],
+      }],
+      autosize: true,
+      shapes: [],
+      activeshape: { fillcolor: service.getFillColor() },
+      dragmode: 'pan',
+      newshape: { line: { color: service.getShapeColor(), width: 3 } },
+    });
+  });
+
+  it('drops the aspect lock and the drag mode when they are off', () => {
+    Object.assign(service, { scaleratio: false, dragMode: '' });
+    type Layout = { yaxis: { scaleanchor: unknown }; dragmode: unknown };
+    const layout = internals().getHeatmapLayout([0, 1], [1, 0]) as Layout;
+    expect(layout.yaxis.scaleanchor).toBe(false);
+    expect(layout.dragmode).toBe(false);
+  });
+
+  it('builds the overlay, chart, volume and surface layouts', () => {
+    expect(internals().getOverlayLayout([0, 10], [10, 0])).toMatchObject({
+      xaxis: { range: [0, 10], side: 'top' }, yaxis: { range: [10, 0], scaleanchor: 'x', autorange: false },
+      height: 600, shapes: [], dragmode: 'pan',
+    });
+    expect(internals().getChartLayout()).toEqual({
+      margin: { t: 30, b: 45, l: 60, r: 20 }, height: 600, autosize: true,
+      xaxis: { title: 'Position (px)' }, yaxis: { title: 'Intensity' }, dragmode: false,
+    });
+    expect(internals().getVolumeLayout()).toMatchObject({
+      height: 600, scene: { zaxis: { title: 'Z-plane' }, aspectmode: 'cube' },
+    });
+    expect(internals().getSurfaceLayout(0.4)).toMatchObject({
+      scene: { aspectratio: { x: 1, y: 1, z: 0.4 }, aspectmode: 'manual' },
+    });
+  });
+
+  it('maps the 0–255 iso slider onto the measured volume range, inset 3% from its edges', () => {
+    internals().plotType = PlotType.ISOSURFACE;
+    const info = { isGrayscale: true } as IImageInfo;
+    const loaded = { data: [[[10, 20], [30, 50]]], sizes: [2, 2], ratios: [1, 1] };
+    const input = internals().buildTraceInput(info, loaded, [0, 2, 0, 2]);
+    // range [10, 50]: pad 1.2, usable 37.6
+    expect(input.isoMin).toBeCloseTo(11.2);
+    expect(input.isoMax).toBeCloseTo(48.8);
+
+    // A live isosurface is restyled in place, through the same mapping.
+    document.body.innerHTML = '<div id="plot"></div>';
+    const gd = document.getElementById('plot') as unknown as { _fullLayout: object };
+    gd._fullLayout = {};
+    (service as unknown as { plotDiv: string }).plotDiv = 'plot';
+    const restyle = jest.spyOn(Plotly as unknown as { restyle(): Promise<unknown> }, 'restyle')
+      .mockResolvedValue(undefined);
+    service.getIsosurfaceControls()!.setIsoRange(255, 0); // reversed: normalised
+    expect(restyle).toHaveBeenCalledWith(gd, { isomin: [expect.closeTo(11.2)], isomax: [expect.closeTo(48.8)] });
+  });
+
+  it('uses the slider values as-is before a volume has been measured', () => {
+    internals().plotType = PlotType.HEATMAP;
+    const input = internals().buildTraceInput({ isGrayscale: true } as IImageInfo,
+      { data: [[[1]]], sizes: [1, 1], ratios: [1, 1] }, [0, 1, 0, 1]);
+    expect([input.isoMin, input.isoMax]).toEqual([0, 255]);
+  });
+});
