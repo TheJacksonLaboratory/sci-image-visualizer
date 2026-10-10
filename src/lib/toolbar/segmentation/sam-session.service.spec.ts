@@ -1,4 +1,10 @@
+import { EnvironmentInjector, createEnvironmentInjector } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+
 import { SamSessionService } from './sam-session.service';
+import { SamToolService } from './sam-tool.service';
+import { SamPointToolService } from './sam-point-tool.service';
+import { provideVisualization } from '../../provide-visualization';
 import { setSamModelUrls } from './sam-model-registry';
 import { ISamSession, SamEmbedding, SamModelDef } from '../../contracts/sam.contract';
 import { CachedImageData } from '../wand/wand-tool.service';
@@ -106,5 +112,61 @@ describe('SamSessionService', () => {
   it('rejects with a clear message when the model has no ONNX URLs', async () => {
     setSamModelUrls('microsam-vit-t-lm', '', '');
     await expect(svc.ensureSession()).rejects.toThrow(/not configured/);
+  });
+});
+
+describe('SamSessionService scope (one session per app, disposable per viewer)', () => {
+  it('is shared by the SAM tools of every viewer chain, so a second viewer loads no second model', () => {
+    const root = TestBed.inject(EnvironmentInjector);
+    const chainA = createEnvironmentInjector(provideVisualization(), root);
+    const chainB = createEnvironmentInjector(provideVisualization(), root);
+    const sessionsOf = (i: EnvironmentInjector, t: typeof SamToolService | typeof SamPointToolService) =>
+      (i.get(t) as unknown as { sessions: SamSessionService }).sessions;
+
+    // Each chain has its own tool feeds…
+    expect(chainA.get(SamPointToolService)).not.toBe(chainB.get(SamPointToolService));
+    // …over the one root session.
+    const shared = TestBed.inject(SamSessionService);
+    for (const chain of [chainA, chainB]) {
+      expect(sessionsOf(chain, SamToolService)).toBe(shared);
+      expect(sessionsOf(chain, SamPointToolService)).toBe(shared);
+    }
+    chainA.destroy();
+    chainB.destroy();
+  });
+
+  it('disposes its session when the injector that provides it is destroyed', async () => {
+    setSamModelUrls('microsam-vit-t-lm', 'enc-t', 'dec-t');
+    const viewer = createEnvironmentInjector([SamSessionService], TestBed.inject(EnvironmentInjector));
+    const svc = viewer.get(SamSessionService);
+    svc.setModel('microsam-vit-t-lm');
+    const s = slowSession();
+    svc.useSessionFactory(async () => s.session);
+    const loading = svc.ensureSession();
+    s.finish();
+    await loading;
+
+    viewer.destroy();
+
+    expect(s.session.dispose).toHaveBeenCalledTimes(1);
+    expect(svc.hasSession()).toBe(false);
+    await expect(svc.ensureSession()).rejects.toThrow(/disposed/);
+  });
+
+  it('discards a load still in flight when destroyed', async () => {
+    setSamModelUrls('microsam-vit-t-lm', 'enc-t', 'dec-t');
+    const svc = new SamSessionService();
+    svc.setModel('microsam-vit-t-lm');
+    const s = slowSession();
+    svc.useSessionFactory(async () => s.session);
+    const loading = svc.ensureSession();
+    await flush();
+
+    svc.ngOnDestroy();
+    s.finish();
+
+    await expect(loading).rejects.toThrow(/disposed/);
+    expect(s.session.dispose).toHaveBeenCalledTimes(1);
+    expect(svc.hasSession()).toBe(false);
   });
 });

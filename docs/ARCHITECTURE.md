@@ -201,7 +201,9 @@ pieces: one pointer overlay for the canvas tools, one stroke accumulator for wan
 and brush, one data ↔ matrix frame, one pixel accessor for nested or packed RGBA
 frames (`frame-pixels.ts`), and `UndoGesture`, which wraps a drag in
 `RegionStore.beginGesture()`/`endGesture()` so it is one undo step.
-The two SAM tools share one model session (`SamSessionService`). The intensity line
+The SAM tools share one model session (`SamSessionService`), root-provided so
+every viewer chain, including a component-scoped one, reuses one model download
+and Worker; provided at a viewer component instead, it is disposed with it. The intensity line
 profile is part of `PlotlyService` (`kind: 'profile'` regions).
 
 Other packages add tools on `TOOLBAR_TOOLS`. A tool is either a parameter

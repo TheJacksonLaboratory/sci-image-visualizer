@@ -55,7 +55,11 @@ export const VISUALIZER_TOKEN_BINDINGS: Provider[] = [
  *
  * Lists EVERY stateful service in the chain. Stateless collaborators (HttpClient,
  * MessageService, WandService) deliberately resolve to root — they hold no
- * per-viewer state, so sharing them is correct and keeps this list minimal. When a
+ * per-viewer state, so sharing them is correct and keeps this list minimal. The
+ * SAM model session (`SamSessionService`) is also root on purpose: every viewer's
+ * SAM tools share one model download and Worker/GPU session (see its doc; a host
+ * can provide it at a viewer component to get a per-viewer session that is
+ * disposed with the viewer). When a
  * new stateful service joins the rendering chain, add it here too —
  * `provide-visualization.spec.ts` fails until it is listed (or allow-listed there as
  * deliberately shared).

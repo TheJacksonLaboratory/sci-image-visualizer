@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
 
 import type { CachedImageData } from '../wand/wand-tool.service';
 import { frameToRgba } from './sam-prompt';
@@ -29,9 +29,18 @@ class SupersededLoad extends Error {}
  *   cached; the next call retries (RT-7).
  * - {@link setModel} during a load discards that load's session, and the
  *   waiting callers get the newly picked model instead (RT-9).
+ *
+ * Scope: root, on purpose, and deliberately NOT in `provideVisualization()`. The
+ * chain-scoped SAM tools of a second viewer (jit-ui's pipeline preview) resolve
+ * this root instance, so the model (14–172 MB) is downloaded and its Worker/GPU
+ * session built once per app, not once per viewer, and the embedding cache is
+ * keyed by image + model so viewers don't confuse each other's images. The cost
+ * is that a model picked in one viewer is the model of all of them. A host that
+ * wants a session per viewer can provide this service at the viewer's component:
+ * {@link ngOnDestroy} then disposes that viewer's session (and Worker) with it.
  */
 @Injectable({ providedIn: 'root' })
-export class SamSessionService {
+export class SamSessionService implements OnDestroy {
   private model: SamModelDef = getSamModel();
   private session: ISamSession | null = null;
   private loading: Promise<ISamSession> | null = null;
@@ -39,6 +48,9 @@ export class SamSessionService {
   private generation = 0;
   private readonly progressListeners = new Set<(fraction: number) => void>();
   private createSession: SamSessionFactory = onnxSessionFactory;
+
+  /** Set by {@link ngOnDestroy}: no session is loaded any more. */
+  private destroyed = false;
 
   /** Cached encoder embedding + the key (image identity + model) it was computed for. */
   private embedding: SamEmbedding | null = null;
@@ -87,6 +99,7 @@ export class SamSessionService {
    * `onProgress` receives the download fraction while this call waits.
    */
   async ensureSession(onProgress?: (fraction: number) => void): Promise<ISamSession> {
+    if (this.destroyed) throw new Error('The SAM session was disposed with its viewer.');
     if (this.session) return this.session;
     if (!isSamModelReady(this.model)) {
       throw new Error(
@@ -127,6 +140,21 @@ export class SamSessionService {
       this.embeddingKey = fullKey;
     }
     return embedding;
+  }
+
+  /**
+   * Dispose the session (and its Worker), drop the embedding and discard an
+   * in-flight load. Angular calls this when the injector providing the service
+   * is destroyed: the app for the root instance, or a viewer component that
+   * provides its own.
+   */
+  ngOnDestroy(): void {
+    this.destroyed = true;
+    this.generation++; // an in-flight load disposes its session when it lands
+    this.loading = null;
+    this.invalidateEmbedding();
+    this.session?.dispose();
+    this.session = null;
   }
 
   private load(): Promise<ISamSession> {
