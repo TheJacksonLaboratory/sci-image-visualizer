@@ -11,6 +11,7 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { RegionPersistenceService } from './region-persistence.service';
+import { ClassColorEdit } from './region-color-dialog/region-color-dialog.component';
 import { MaskExportService, MaskMode } from './mask-export.service';
 import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
 
@@ -33,7 +34,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** One colour editor per unique class among the selected regions, shown in the
    *  "edit colour of selected regions" dialog. Unclassified regions (no label)
    *  are grouped under a single entry with an empty `label`. */
-  classColorEdits: { label: string; color: string }[] = [];
+  classColorEdits: ClassColorEdit[] = [];
   /** "Edit class on selected rows" popup: chosen existing class, and a new-class name. */
   bulkClass = '';
   newBulkClass = '';
@@ -444,8 +445,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   /** Apply each class's chosen colour to the selected regions of that class (an
    *  explicit override) and commit live. */
-  applyColorToSelected() {
-    const colorByLabel = new Map(this.classColorEdits.map((e) => [e.label, e.color]));
+  applyColorToSelected(edits: ClassColorEdit[] = this.classColorEdits) {
+    const colorByLabel = new Map(edits.map((e) => [e.label, e.color]));
     const selected = new Set(this.selectedRegions ?? []);
     this.patchRegions((region) => {
       if (!selected.has(region)) return null;

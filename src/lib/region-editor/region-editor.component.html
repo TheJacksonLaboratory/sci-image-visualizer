@@ -252,25 +252,10 @@
                          (confirm)="confirmSaveMask()" (cancelExport)="cancelSaveMask()">
 </region-save-mask-dialog>
 
-<p-dialog header="Region colour" [(visible)]="showColorDialog" [modal]="false" appendTo="body"
-          [style]="{width: '24rem'}" [draggable]="true" [resizable]="false">
-  <div class="flex flex-column gap-3 pt-2">
-    <span>Outline colour per class for the
-      <b>{{ selectedRegions?.length || 0 }}</b> selected region(s):</span>
-    <div *ngFor="let edit of classColorEdits; let i = index"
-         class="flex align-items-center gap-3">
-      <span class="font-medium flex-1">{{ edit.label || 'Unclassified' }}</span>
-      <hex-color-picker [color]="edit.color"
-                        (colorChange)="classColorEdits[i].color = $event"></hex-color-picker>
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="showColorDialog = false">
-    </p-button>
-    <p-button label="Apply" icon="pi pi-check" (onClick)="applyColorToSelected()">
-    </p-button>
-  </ng-template>
-</p-dialog>
+<region-color-dialog [(visible)]="showColorDialog" [edits]="classColorEdits"
+                     [selectedCount]="selectedRegions?.length || 0"
+                     (apply)="applyColorToSelected($event)">
+</region-color-dialog>
 
 <!-- Manage annotation classes (jit-ui#70): CRUD + fallback palette + matching/auto-add
      settings + reset/import/export. Edits a working copy, committed on Apply/Done. -->

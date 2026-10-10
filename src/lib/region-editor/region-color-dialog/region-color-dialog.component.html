@@ -1,0 +1,19 @@
+<p-dialog header="Region colour" [visible]="visible" (visibleChange)="visibleChange.emit($event)"
+          [modal]="false" appendTo="body"
+          [style]="{width: '24rem'}" [draggable]="true" [resizable]="false">
+  <div class="flex flex-column gap-3 pt-2">
+    <span>Outline colour per class for the
+      <b>{{ selectedCount }}</b> selected region(s):</span>
+    <div *ngFor="let edit of draft; let i = index"
+         class="flex align-items-center gap-3">
+      <span class="font-medium flex-1">{{ edit.label || 'Unclassified' }}</span>
+      <hex-color-picker [color]="edit.color" (colorChange)="setColor(i, $event)"></hex-color-picker>
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="close()">
+    </p-button>
+    <p-button label="Apply" icon="pi pi-check" (onClick)="apply.emit(draft)">
+    </p-button>
+  </ng-template>
+</p-dialog>
