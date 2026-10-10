@@ -65,6 +65,7 @@ import {
   ContextMenuActions, ContextMenuState, buildContextMenu, buildRegionActionItems,
 } from './visualizer/visualizer-context-menu';
 import { RegionActions } from './visualizer/region-actions';
+import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
 
 /** Per-instance plot-div id source. The mount element's id must be unique so two
  *  live viewers (e.g. the main diagram + a modal preview) don't collide on the
@@ -427,9 +428,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Blob URLs backing that image — ours to revoke. */
   private volumeImageUrls: string[] = [];
 
-  private plotContextMenuListener?: (e: MouseEvent) => void;
-  private keydownListener?: (e: KeyboardEvent) => void;
-  private wheelListener?: (e: WheelEvent) => void;
+  /** Keyboard, wheel and context-menu handling; created once the view exists. */
+  private shortcuts?: ViewerShortcuts;
 
   /** Debounced z-slice scrubbing (see SliceScrubber — refactoring plan Step 7). */
   private readonly scrubber = new SliceScrubber((z) => {
@@ -1024,106 +1024,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // Window listeners are registered OUTSIDE the Angular zone: zone-patched, every
     // mousemove anywhere in the host app ran app-wide change detection. Each handler
     // re-enters the zone (ngZone.run) only when it actually changes view state.
+    this.shortcuts = new ViewerShortcuts(this.shortcutHost(), this.ngZone);
+    this.shortcuts.attach();
     this.ngZone.runOutsideAngular(() => this.addWindowListeners());
     this.onViewReady();
   }
 
   private addWindowListeners(): void {
-    this.plotContextMenuListener = (event: MouseEvent) => {
-      const plotEl = document.getElementById(this.plotDivName);
-      if (!plotEl?.contains(event.target as Node)) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.ngZone.run(() => {
-        this.contextMenuItems = this.buildContextMenuItems();
-        this.cdr.detectChanges();
-        this.contextMenu.show(event);
-      });
-    };
-    window.addEventListener('contextmenu', this.plotContextMenuListener, true);
-
-    this.keydownListener = (event: KeyboardEvent) => {
-      if (this.isSliceStepKey(event)) {
-        event.preventDefault();
-        this.ngZone.run(() => this.stepSlice(event.key === 'ArrowRight' ? 1 : -1));
-        return;
-      }
-      const target = event.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-      // SAM point mode: Enter commits the object, Esc clears the prompt.
-      if (this.activeDragMode === 'samPoint' && (event.key === 'Enter' || event.key === 'Escape')) {
-        this.ngZone.run(() => {
-          if (event.key === 'Enter') this.plotService.commitSamPoints();
-          else this.plotService.clearSamPoints();
-          this.hideSamToast(); // prompt resolved → dismiss the status toast
-        });
-        return;
-      }
-      // Region history (jit-ui#85): Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or
-      // Ctrl/Cmd+Y redoes.
-      if (event.ctrlKey || event.metaKey) {
-        const k = event.key.toLowerCase();
-        if (k === 'z' && !event.shiftKey) {
-          event.preventDefault();
-          this.ngZone.run(() => this.undoRegion());
-          return;
-        }
-        if ((k === 'z' && event.shiftKey) || k === 'y') {
-          event.preventDefault();
-          this.ngZone.run(() => this.redoRegion());
-          return;
-        }
-      }
-      // The bare-key shortcuts below must not fire on browser/OS shortcuts
-      // (Cmd/Ctrl+D would delete the selected region, Ctrl+S toggle Select, …).
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key === 'Delete' || event.key === 'Backspace' || event.key === 'd' || event.key === 'D') {
-        this.ngZone.run(() => this.deleteRegion());
-      } else if (event.key === '+' || event.key === '=') {
-        this.ngZone.run(() => this.zoomIn());
-      } else if (event.key === '-' || event.key === '_') {
-        this.ngZone.run(() => this.zoomOut());
-      } else if (event.key === 'p') {
-        this.ngZone.run(() => this.toggleDragMode('pan'));
-      } else if (event.key === 'b') {
-        this.ngZone.run(() => this.toggleDragMode('zoomToBox'));
-      } else if (event.key === 'r') {
-        this.ngZone.run(() => this.toggleDragMode('drawrect'));
-      } else if (event.key === 'f') {
-        this.ngZone.run(() => this.toggleDragMode('drawclosedpath'));
-      } else if (event.key === 'w') {
-        this.ngZone.run(() => this.toggleDragMode('wand'));
-      } else if (event.key === 'e') {
-        this.ngZone.run(() => this.toggleDragMode('eraseVertex'));
-      } else if (event.key === 's') {
-        this.ngZone.run(() => this.toggleDragMode('select'));
-      } else if (event.key === 'l') {
-        this.ngZone.run(() => this.toggleDragMode('drawopenpath'));
-      }
-    };
-    window.addEventListener('keydown', this.keydownListener);
-
-    this.wheelListener = (event: WheelEvent) => {
-      const plotEl = document.getElementById(this.plotDivName);
-      if (!plotEl?.contains(event.target as Node)) return;
-      // Intercepting here fires a FIXED zoom step per wheel event, which is far
-      // too sensitive for a renderer that reads the scroll delta — so anything
-      // drawn by such a renderer keeps its own wheel. See `rendererOwnsWheel`.
-      if (rendererOwnsWheel(this.basePlotType)) return;
-      // 3D plot types (surface, scatter3d, isosurface) render in a Plotly scene
-      // that orbits/zooms natively on scroll. The 2D step-zoom doesn't apply and
-      // would throw (no xaxis on a scene), so let Plotly handle the wheel.
-      if (!this.isHeatmap) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (event.deltaY < 0) {
-        this.ngZone.run(() => this.zoomIn());
-      } else if (event.deltaY > 0) {
-        this.ngZone.run(() => this.zoomOut());
-      }
-    };
-    window.addEventListener('wheel', this.wheelListener, { capture: true, passive: false });
-
     // Drag handling for the floating intensity-profile panel.
     this.profileDragMoveListener = (e: MouseEvent) => {
       if (this.profilePanelDragging) {
@@ -1171,6 +1078,33 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (pending && current && current.id === pending.id && !this.imageInfo) {
       void this.plotSpatialWithoutImage(current);
     }
+  }
+
+  /** What the keyboard, wheel and context-menu shortcuts act on. */
+  private shortcutHost(): ShortcutHost {
+    return {
+      plotDivName: this.plotDivName,
+      activeDragMode: () => this.activeDragMode,
+      canStepSlice: () => !!this.imageInfo?.isStack && this.isImageView,
+      wheelZooms: () => !rendererOwnsWheel(this.basePlotType) && this.isHeatmap,
+      stepSlice: (delta) => this.stepSlice(delta),
+      resolveSamPrompt: (commit) => {
+        if (commit) this.plotService.commitSamPoints();
+        else this.plotService.clearSamPoints();
+        this.hideSamToast(); // prompt resolved → dismiss the status toast
+      },
+      undo: () => this.undoRegion(),
+      redo: () => this.redoRegion(),
+      deleteRegion: () => this.deleteRegion(),
+      zoomIn: () => this.zoomIn(),
+      zoomOut: () => this.zoomOut(),
+      toggleDragMode: (mode) => this.toggleDragMode(mode),
+      openContextMenu: (event) => {
+        this.contextMenuItems = this.buildContextMenuItems();
+        this.cdr.detectChanges();
+        this.contextMenu.show(event);
+      },
+    };
   }
 
   onProfilePanelDragStart(e: MouseEvent) {
@@ -1257,15 +1191,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.scrubber.cancel();
     this.unsub.next();
     this.unsub.complete();
-    if (this.plotContextMenuListener) {
-      window.removeEventListener('contextmenu', this.plotContextMenuListener, true);
-    }
-    if (this.keydownListener) {
-      window.removeEventListener('keydown', this.keydownListener);
-    }
-    if (this.wheelListener) {
-      window.removeEventListener('wheel', this.wheelListener, true);
-    }
+    this.shortcuts?.detach();
     if (this.profileDragMoveListener) {
       window.removeEventListener('mousemove', this.profileDragMoveListener);
     }
@@ -1374,23 +1300,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (z === undefined) return;
     this.zIndex = z;
     this.scrubber.scrub(z);
-  }
-
-  /**
-   * Keyboard stack navigation: ←/→ step the z-slice in the Image view, the same
-   * way the slider does. Only active for a loaded stack in Image view, and
-   * ignored while a form field is focused so typing isn't hijacked. Up/Down are
-   * left to OpenSeadragon (panning).
-   */
-  private isSliceStepKey(e: KeyboardEvent): boolean {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
-    if (!this.imageInfo?.isStack || !this.isImageView) return false;
-    const t = e.target as HTMLElement | null;
-    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return false;
-    // The slice slider handles arrows natively when focused (also a +1 step) —
-    // skip here so we don't double-step it.
-    if (t && (t.getAttribute('role') === 'slider' || t.closest('.p-slider'))) return false;
-    return true;
   }
 
   /** Move the displayed slice by `delta`, clamped to the stack bounds. */
