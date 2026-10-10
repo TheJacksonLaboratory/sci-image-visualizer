@@ -7,6 +7,9 @@ import { SpatialControlsComponent } from './spatial-controls.component';
 import { SpatialKeyComponent } from './spatial-key/spatial-key.component';
 import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-panel.component';
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel/spatial-groups-panel.component';
+import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
+import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.component';
+import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
@@ -108,6 +111,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       // The dialog and every panel it is made of.
       declarations: [
         SpatialControlsComponent, SpatialKeyComponent, SpatialCellsPanelComponent, SpatialGroupsPanelComponent,
+        SpatialTranscriptsPanelComponent, SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent,
         StubValueAccessorDirective,
       ],
       imports: [FormsModule],

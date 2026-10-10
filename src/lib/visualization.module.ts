@@ -52,6 +52,13 @@ import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatia
 import { SpatialKeyComponent } from './spatial-controls/spatial-key/spatial-key.component';
 import { SpatialCellsPanelComponent } from './spatial-controls/spatial-cells-panel/spatial-cells-panel.component';
 import { SpatialGroupsPanelComponent } from './spatial-controls/spatial-groups-panel/spatial-groups-panel.component';
+import {
+  SpatialTranscriptsPanelComponent,
+} from './spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component';
+import { SpatialGeneTreeComponent } from './spatial-controls/spatial-gene-tree/spatial-gene-tree.component';
+import {
+  SpatialMarkerGenesFormComponent,
+} from './spatial-controls/spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
 import { FloatingDragDirective } from './visualizer/floating-drag.directive';
@@ -95,6 +102,9 @@ import { FloatingDragDirective } from './visualizer/floating-drag.directive';
     SpatialKeyComponent,
     SpatialCellsPanelComponent,
     SpatialGroupsPanelComponent,
+    SpatialTranscriptsPanelComponent,
+    SpatialGeneTreeComponent,
+    SpatialMarkerGenesFormComponent,
   ],
   imports: [
     CommonModule,

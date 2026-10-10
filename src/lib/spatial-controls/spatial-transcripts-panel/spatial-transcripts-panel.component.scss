@@ -1,0 +1,26 @@
+@use '../spatial-panel';
+
+:host {
+  display: contents;
+}
+
+// Points estimate meter: Explorer's bar.
+.sc-meter {
+  height: 0.45rem;
+  border-radius: 3px;
+  background: var(--surface-200, #e9ecef);
+  overflow: hidden;
+}
+.sc-meter-fill {
+  height: 100%;
+  background: var(--primary-color, #2196f3);
+  &.over { background: var(--orange-500, #f59e0b); }
+}
+.sc-meter-ends,
+.sc-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-color-secondary, #6c757d);
+}

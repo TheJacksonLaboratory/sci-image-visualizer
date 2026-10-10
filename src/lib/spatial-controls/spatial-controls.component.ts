@@ -1,31 +1,20 @@
 import {
-  Component, ElementRef, EventEmitter, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild,
+  Component, EventEmitter, Inject, Input, NgZone, OnDestroy, OnInit, Output, ViewChild,
 } from '@angular/core';
 import { Subscription, combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
+import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import { SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
 import {
-  ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
-} from '../contracts/display-types';
-import { DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
-import {
-  cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor,
-} from '../spatial/spatial-tiles';
-import {
-  CLIP_OPTIONS, GLYPH_OPTIONS, PanelOption, allGenesPreparingNote, buildGeneTree, columnOptions,
-  densityColorBarCss, glyphPoints, importGeneGroupsPatch, markerColumnOptions, markerGeneGroups,
-  markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions, toggleHidden,
+  CLIP_OPTIONS, PanelOption, columnOptions, middleSection, parseGeneGroups, sectionLabel,
 } from '../spatial/spatial-panel-model';
-import {
-  SpatialSelectionMask, emptySelection,
-} from '../spatial/spatial-selection';
-import { parseCssColor, rgbToHex } from '../contracts/color';
-import { Supersede } from '../util/supersede';
+import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import { GenePickerModel } from './spatial-gene-picker';
 import { SpatialKeyModel, SpatialLegendEntry } from './spatial-key/spatial-key.model';
-import { colorByLabel, colormapNodeFor } from './spatial-key/spatial-key.component';
+import { colorByLabel } from './spatial-key/spatial-key.component';
 
 /** @deprecated Moved to `spatial-key/spatial-key.model`; re-exported for one release. */
 export type { SpatialLegendEntry };
@@ -184,38 +173,28 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedGene = null;
       this.genes.setDataset(dataset);
       this.sections = this.controls?.sampledSections() ?? null;
-      this.transcriptModeOptions = tileOptions(dataset).transcriptModeOptions;
-      // Same for the group colours: a same-named grouping of the new dataset is not the old one.
-      this.cellGroupColorsFor = null;
       // A dataset with no cells to outline leads with its observations.
       this.open = { ...this.open, cells: !!(dataset?.polygonTiles || dataset?.polygons),
         observations: !(dataset?.polygonTiles || dataset?.polygons) };
       void this.refreshKey();
-      void this.refreshCellGroupColors();
     }));
 
     this.subs.add(this.controls.getViewState$().subscribe((view) => {
       this.view = view;
       this.selectedColumn = view.colorBy?.kind === 'column' ? view.colorBy.name : null;
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
-      this.selectedDensityColormapNode = colormapNodeFor(this.colormapOptions, view.densityColormap);
-      this.geneTree = buildGeneTree(view.transcriptGenes, view.transcriptGeneGroups);
-      this.geneMenu = this.buildGeneMenu();
-      this.refreshDensityWindow();
       void this.refreshKey();
-      void this.refreshCellGroupColors();
     }));
 
+    // The renderer's own streams may emit outside the zone: re-entered here, once, for
+    // every panel they feed.
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     if (estimate$) this.subs.add(estimate$.subscribe((e) => this.zone.run(() => { this.estimate = e; })));
     const counts$ = this.controls.getGeneCountsInView$?.();
     if (counts$) this.subs.add(counts$.subscribe((c) => this.zone.run(() => { this.geneCounts = c; })));
     const density$ = this.controls.getDensityStats$?.();
     if (density$) {
-      this.subs.add(density$.subscribe((d) => this.zone.run(() => {
-        this.densityStats = d;
-        this.refreshDensityWindow();
-      })));
+      this.subs.add(density$.subscribe((d) => this.zone.run(() => { this.densityStats = d; })));
     }
 
     this.subs.add(this.controls.getSelection$().subscribe((selection) => {
@@ -491,35 +470,16 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onClip(value: [number, number]): void {
     this.controls?.setViewState({ percentileClip: value });
   }
-  // ── cells & transcripts ────────────────────────────────────────────────
-
-  readonly transcriptColorOptions = [
-    { label: 'Cluster', value: 'cluster' }, { label: 'Cell type', value: 'cellType' }, { label: 'Gene', value: 'gene' },
-  ];
-  readonly glyphOptions = GLYPH_OPTIONS;
-  readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000]
-    .map((n) => ({ label: n.toLocaleString(), value: n }));
+  // ── sections ────────────────────────────────────────────────────────────
 
   /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
   get hasCells(): boolean {
     return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
   }
 
+  /** Transcripts on offer: tiles to draw, or a density map. */
   get hasTranscripts(): boolean {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
-  }
-
-  /**
-   * Transcript modes on offer. Built once per dataset rather than in a getter: a getter
-   * returns a fresh array on every change-detection pass, and PrimeNG re-renders its
-   * buttons whenever the array identity changes — which made them impossible to click.
-   */
-  transcriptModeOptions: { label: string; value: SpatialViewState['transcriptMode'] }[] = [];
-
-  // ── groups ──────────────────────────────────────────────────────────────
-
-  get activeCellTypeColumn(): string | null {
-    return this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
   }
 
   onShowImage(on: boolean): void {
@@ -529,8 +489,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   onShowAnnotations(on: boolean): void {
     this.controls?.setViewState({ showAnnotations: on });
   }
-
-  // ── sections ────────────────────────────────────────────────────────────
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
   open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
@@ -546,496 +504,14 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     this.open = { ...this.open, [name]: on };
   }
 
-  // ── transcripts (Xenium Explorer layout) ─────────────────────────────────
-
-  /** The mode the section header's switch turns back on. */
-  private lastTranscriptMode: Exclude<SpatialViewState['transcriptMode'], 'off'> = 'circles';
-
-  onTranscriptsOn(on: boolean): void {
-    if (!on) {
-      if (this.view.transcriptMode !== 'off') this.lastTranscriptMode = this.view.transcriptMode;
-      this.controls?.setViewState({ transcriptMode: 'off' });
-      return;
-    }
-    const mode = this.dataset?.transcriptTiles ? this.lastTranscriptMode : 'density';
-    this.onTranscriptMode(mode);
-    this.open = { ...this.open, transcripts: true };
-  }
+  // ── renderer readouts, for the Transcripts section ────────────────────
 
   /** Estimated transcripts in view, against the budget — Explorer's points bar. */
   estimate: { points: number; max: number } | null = null;
   /** The density window in use and its densest bin, for the threshold control. */
   densityStats: { lo: number; hi: number; max: number } | null = null;
-
-  get estimatePercent(): number {
-    const e = this.estimate;
-    return e && e.max > 0 ? Math.min(100, (100 * e.points) / e.max) : 0;
-  }
-
-  get estimateOverMax(): boolean {
-    return !!this.estimate && this.estimate.points > this.estimate.max;
-  }
-
-  editingMax = false;
-
-  /**
-   * The selected genes as Explorer's tree: named groups, then the ungrouped ones.
-   * Rebuilt when the view changes — never per change-detection pass (see transcriptModeOptions).
-   */
-  geneTree: { name: string | null; genes: string[] }[] = [];
-  geneMenu: { label: string; icon: string; command: () => void; disabled?: boolean }[] = [];
-
-  /** Real genes in the panel — the tree's denominator. */
-  get geneTotal(): number {
-    return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.genes.residentCount;
-  }
-
-  collapsedGeneGroups = new Set<string>();
-  geneTreeOpen = true;
-
-  toggleGeneGroup(name: string): void {
-    const next = new Set(this.collapsedGeneGroups);
-    if (next.has(name)) next.delete(name);
-    else next.add(name);
-    this.collapsedGeneGroups = next;
-  }
-
-  isGeneShown(gene: string): boolean {
-    return !this.view.transcriptHiddenGenes.includes(gene);
-  }
-
-  areGenesShown(genes: string[]): boolean {
-    return genes.some((g) => this.isGeneShown(g));
-  }
-
-  /** The eye toggle: hide or show genes without removing them from the selection. */
-  onGenesShown(genes: string[], on: boolean): void {
-    this.controls?.setViewState({
-      transcriptHiddenGenes: toggleHidden(this.view.transcriptHiddenGenes, genes, on),
-    });
-  }
-
-  onGeneColor(gene: string, hex: string): void {
-    this.controls?.setViewState({ transcriptGeneColors: { ...this.view.transcriptGeneColors, [gene]: hex } });
-  }
-
-  // ── per-gene icon and colour picker ──────────────────────────────────────
-
-  /** Swatches in the picker: the categorical palette genes are coloured from by default. */
-  readonly colorPresets = DEFAULT_CATEGORICAL_PALETTE.slice(0, 10).map((c) => c.toLowerCase());
-  /** The gene the open picker edits. */
-  styleGene: string | null = null;
-
-  openGeneStyle(event: Event, gene: string, panel: { toggle(e: Event): void; hide(): void }): void {
-    if (this.styleGene === gene) {
-      panel.toggle(event);
-      return;
-    }
-    this.styleGene = gene;
-    panel.hide();
-    // Re-open anchored on the row that was clicked, once the panel has closed.
-    setTimeout(() => panel.toggle(event));
-  }
-
-  /** The icon the open picker shows as chosen. */
-  get styleGlyph(): TranscriptGlyphName | null {
-    const gene = this.styleGene;
-    return gene ? this.glyphOf(gene, Math.max(0, this.view.transcriptGenes.indexOf(gene))) : null;
-  }
-
-  glyphPoints(glyph: TranscriptGlyphName): string {
-    return glyphPoints(glyph);
-  }
-
-  /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
-  onGeneHex(gene: string, text: string): void {
-    const t = text.trim();
-    const rgb = /^#?[0-9a-f]{6}$/i.test(t) ? parseCssColor(t) : null;
-    if (rgb) this.onGeneColor(gene, rgbToHex(rgb));
-  }
-
-  /** Back to the gene's default icon and colour (by its position in the list). */
-  resetGeneStyle(gene: string): void {
-    const colors = { ...this.view.transcriptGeneColors };
-    const glyphs = { ...this.view.transcriptGlyphs };
-    delete colors[gene];
-    delete glyphs[gene];
-    this.controls?.setViewState({ transcriptGeneColors: colors, transcriptGlyphs: glyphs });
-  }
-
-  /** '±': every gene, or back to the chosen list. */
-  onToggleAllGenes(): void {
-    if (!this.canShowAllGenes) return;
-    this.onTranscriptAllGenes(!this.view.transcriptAllGenes);
-  }
-
-  /** '⋮' menu. */
-  private buildGeneMenu(): { label: string; icon: string; command: () => void; disabled?: boolean }[] {
-    return [
-      {
-        label: 'Add marker genes of clusters…', icon: 'pi pi-sitemap',
-        disabled: !this.canAddMarkers, command: () => this.openMarkers(),
-      },
-      {
-        label: 'New group from selected genes', icon: 'pi pi-folder-plus',
-        disabled: !this.view.transcriptGenes.length, command: () => this.onNewGeneGroup(),
-      },
-      { label: 'Import gene groups (CSV)…', icon: 'pi pi-upload', command: () => this.geneGroupInput?.click() },
-      {
-        label: 'Remove gene groups', icon: 'pi pi-times',
-        disabled: !this.view.transcriptGeneGroups.length,
-        command: () => this.controls?.setViewState({ transcriptGeneGroups: [] }),
-      },
-      {
-        label: 'Clear selection', icon: 'pi pi-ban', disabled: !this.view.transcriptGenes.length,
-        command: () => this.controls?.setViewState({ transcriptGenes: [], transcriptHiddenGenes: [] }),
-      },
-    ];
-  }
-
-  /** The hidden file input the menu's import opens. */
-  @ViewChild('geneGroupFile') private geneGroupFileRef?: ElementRef<HTMLInputElement>;
-  private get geneGroupInput(): HTMLInputElement | null {
-    return this.geneGroupFileRef?.nativeElement ?? null;
-  }
-
-  trackByLabel = (_i: number, row: { label: string }) => row.label;
-  trackByNode = (_i: number, node: { name: string | null }) => node.name ?? '';
-  trackByLabelString = (_i: number, s: string) => s;
-
-  get densityOpacityPercent(): number {
-    return Math.round(this.view.densityOpacity * 100);
-  }
-  geneGroupError: string | null = null;
-
-  // ── per-gene counts in view ─────────────────────────────────────────────
-
   /** Transcripts of each selected gene in the current view, from the renderer. */
   geneCounts: Record<string, number> | null = null;
-
-  geneCountOf(gene: string): number | null {
-    return this.geneCounts ? (this.geneCounts[gene] ?? 0) : null;
-  }
-
-  // ── marker genes of clusters, as gene groups ────────────────────────────
-
-  markersOpen = false;
-  markerColumn: string | null = null;
-  markerPerGroup = 5;
-  readonly markerPerGroupOptions = [3, 5, 10, 20].map((n) => ({ label: `${n} genes`, value: n }));
-  markerClusters: string[] = [];
-  markerClusterOptions: { label: string; value: string }[] = [];
-  markerLoading = false;
-  markerError: string | null = null;
-
-  get canAddMarkers(): boolean {
-    return !!this.controls?.markerGenes && this.markerColumnOptions.length > 0;
-  }
-
-  /**
-   * Every categorical column but the segmentation method, which says nothing about genes.
-   *
-   * Bound to a `p-dropdown`, so the same array comes back until the columns change: a
-   * fresh array per change-detection pass makes PrimeNG re-render the options (see
-   * `transcriptModeOptions` for what that does to a click).
-   */
-  get markerColumnOptions(): { label: string; value: string }[] {
-    const columns = this.dataset?.columns;
-    const hit = this.markerColumnMemo;
-    if (hit && hit.columns === columns) return hit.options;
-    const options = markerColumnOptions(columns);
-    this.markerColumnMemo = { columns, options };
-    return options;
-  }
-  private markerColumnMemo: {
-    columns: SpatialDataset['columns'] | undefined; options: { label: string; value: string }[];
-  } | null = null;
-
-  openMarkers(): void {
-    const options = this.markerColumnOptions;
-    const active = this.activeCellTypeColumn;
-    if (!this.markerColumn || !options.some((o) => o.value === this.markerColumn)) {
-      this.markerColumn = active && options.some((o) => o.value === active) ? active : options[0]?.value ?? null;
-    }
-    this.markerError = null;
-    this.refreshMarkerClusters();
-    this.markersOpen = true;
-    this.open = { ...this.open, transcripts: true };
-  }
-
-  onMarkerColumn(column: string): void {
-    this.markerColumn = column;
-    this.refreshMarkerClusters();
-  }
-
-  /** The clusters of the chosen column, all picked to start with. */
-  private refreshMarkerClusters(): void {
-    const col = this.dataset?.columns.find((c) => c.name === this.markerColumn);
-    const categories = col && col.kind === 'categorical' ? col.categories : [];
-    this.markerClusterOptions = categories.map((c) => ({ label: c, value: c }));
-    this.markerClusters = [...categories];
-  }
-
-  /**
-   * Add each picked cluster's top marker genes as a gene group named after it, and select
-   * them. A gene that marks several clusters goes to the one it is most specific to, so the
-   * tree lists it once.
-   */
-  async addMarkerGenes(): Promise<void> {
-    const column = this.markerColumn;
-    const markerGenes = this.controls?.markerGenes;
-    if (!column || !markerGenes || !this.markerClusters.length) return;
-    // The form stays editable while the scan runs: apply what was picked when it was asked.
-    const picked = new Set(this.markerClusters);
-    this.markerLoading = true;
-    this.markerError = null;
-    try {
-      const result = await markerGenes(column, this.markerPerGroup);
-      this.zone.run(() => {
-        const groups = markerGeneGroups(result, picked);
-        if (!groups.length) {
-          this.markerError = 'No marker genes passed the filter for the chosen clusters.';
-          return;
-        }
-        this.controls?.setViewState(markerGenesPatch(this.view, groups));
-        this.markersOpen = false;
-      });
-    } catch (err) {
-      this.zone.run(() => {
-        const e = err as { error?: { error?: string }; message?: string };
-        this.markerError = e?.error?.error ?? e?.message ?? 'Could not compute marker genes.';
-      });
-    } finally {
-      this.zone.run(() => { this.markerLoading = false; });
-    }
-  }
-
-  onNewGeneGroup(): void {
-    const name = (globalThis.prompt?.('Name for this gene group', 'Gene group') ?? '').trim();
-    if (!name) return;
-    const groups = this.view.transcriptGeneGroups.filter((g) => g.name !== name);
-    this.controls?.setViewState({
-      transcriptGeneGroups: [...groups, { name, genes: [...this.view.transcriptGenes] }],
-    });
-  }
-
-  /**
-   * Import gene groups: CSV/TSV with a group and a gene column (header optional), e.g.
-   * marker genes per cell type. The genes are added to the selection.
-   */
-  async onImportGeneGroups(input: HTMLInputElement): Promise<void> {
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    this.geneGroupError = null;
-    const groups = parseGeneGroups(await file.text());
-    if (!groups.length) {
-      this.zone.run(() => { this.geneGroupError = 'No "group,gene" rows found in that file.'; });
-      return;
-    }
-    this.zone.run(() => this.controls?.setViewState(importGeneGroupsPatch(this.view, groups)));
-  }
-
-  // density
-  readonly densityBins = [10, 20, 40, 80];
-
-  get densityBinIndex(): number {
-    return Math.max(0, this.densityBins.indexOf(this.view.densityBin));
-  }
-
-  onDensityBinIndex(i: number | undefined): void {
-    if (i === undefined) return;
-    this.controls?.setViewState({ densityBin: this.densityBins[i] ?? 10 });
-  }
-
-  onDensityOpacityPercent(v: number | null): void {
-    if (v === null || !Number.isFinite(v)) return;
-    this.controls?.setViewState({ densityOpacity: Math.min(1, Math.max(0.05, v / 100)) });
-  }
-
-  /**
-   * The threshold window shown: the one set, else the one derived. A stored array, not a
-   * getter: a range slider's `ngModel` given a fresh array every change-detection pass
-   * schedules another pass, forever — which hung the page the moment the density
-   * controls appeared.
-   */
-  densityWindow: [number, number] = [0, 1];
-  densitySliderMax = 1;
-  densityStep = 0.005;
-
-  private refreshDensityWindow(): void {
-    const next: [number, number] = this.view.densityRange
-      ?? (this.densityStats ? [this.densityStats.lo, this.densityStats.hi] : [0, 1]);
-    if (next[0] !== this.densityWindow[0] || next[1] !== this.densityWindow[1]) this.densityWindow = next;
-    this.densitySliderMax = Math.max(this.densityStats?.max ?? 1, this.densityWindow[1]);
-    this.densityStep = this.densitySliderMax / 200;
-  }
-
-  onDensityRange(range: [number, number] | number[] | undefined): void {
-    if (!range || range.length !== 2) return;
-    this.controls?.setViewState({ densityRange: [Math.min(range[0], range[1]), Math.max(range[0], range[1])] });
-  }
-
-  onDensityRangeEnd(which: 0 | 1, v: number | null): void {
-    if (v === null || !Number.isFinite(v)) return;
-    const next: [number, number] = [...this.densityWindow];
-    next[which] = v;
-    this.onDensityRange(next);
-  }
-
-  onDensityAuto(): void {
-    this.controls?.setViewState({ densityRange: null });
-  }
-
-  selectedDensityColormapNode: ColormapNode | null = null;
-
-  onDensityColormap(node: ColormapNode | null): void {
-    this.selectedDensityColormapNode = node;
-    this.controls?.setViewState({ densityColormap: node?.data?.value ?? null });
-  }
-
-  /** Built once per density colormap: a 256-entry LUT per change-detection pass is waste. */
-  get densityColorBarCss(): string {
-    const colormap = this.view.densityColormap;
-    if (!this.densityBarMemo || this.densityBarMemo.colormap !== colormap) {
-      this.densityBarMemo = { colormap, css: densityColorBarCss(colormap) };
-    }
-    return this.densityBarMemo.css;
-  }
-  private densityBarMemo: { colormap: SpatialViewState['densityColormap']; css: string } | null = null;
-
-  onTranscriptMode(mode: SpatialViewState['transcriptMode']): void {
-    // Seed the gene list from the gene being coloured by, so switching transcripts on
-    // shows something straight away.
-    const seed = !this.view.transcriptGenes.length && this.view.colorBy?.kind === 'feature'
-      ? [this.view.colorBy.name] : null;
-    this.controls?.setViewState({ transcriptMode: mode, ...(seed ? { transcriptGenes: seed } : {}) });
-  }
-
-  onTranscriptGenes(genes: string[] | null): void {
-    this.controls?.setViewState({ transcriptGenes: [...(genes ?? [])] });
-  }
-
-  /** "All genes" needs the grouping pyramid, or at least tiles to draw individually. */
-  get canShowAllGenes(): boolean {
-    return !!this.dataset?.transcriptBins;
-  }
-
-  /** Why "All genes" is not offered yet, while the server builds its pyramid. */
-  get allGenesPreparing(): string | null {
-    return allGenesPreparingNote(this.dataset);
-  }
-
-  get showingAllGenes(): boolean {
-    return this.canShowAllGenes && this.view.transcriptAllGenes && this.view.transcriptMode !== 'density';
-  }
-
-  onTranscriptAllGenes(on: boolean): void {
-    this.controls?.setViewState({ transcriptAllGenes: on });
-  }
-
-  onTranscriptBudget(n: number): void {
-    this.controls?.setViewState({ transcriptBudget: n });
-  }
-
-  onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {
-    this.controls?.setViewState({ transcriptColorBy: by });
-  }
-
-  onTranscriptScale(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ transcriptScale: value });
-  }
-
-  onTranscriptOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ transcriptOpacity: value });
-  }
-
-  onTranscriptQuality(includeLow: boolean): void {
-    this.controls?.setViewState({ transcriptQuality: includeLow ? 'all' : 'high' });
-  }
-
-  onDensityOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ densityOpacity: value });
-  }
-
-  glyphOf(gene: string, slot: number): TranscriptGlyphName {
-    return this.view.transcriptGlyphs[gene] ?? defaultGlyphFor(slot);
-  }
-
-  onGlyph(gene: string, glyph: TranscriptGlyphName): void {
-    this.controls?.setViewState({ transcriptGlyphs: { ...this.view.transcriptGlyphs, [gene]: glyph } });
-  }
-
-  /** The colour gene `slot` is drawn in when transcripts are coloured by gene. */
-  geneColor(slot: number): string {
-    const gene = this.view?.transcriptGenes[slot];
-    return (gene && this.view.transcriptGeneColors[gene])
-      || DEFAULT_CATEGORICAL_PALETTE[slot % DEFAULT_CATEGORICAL_PALETTE.length];
-  }
-
-  /** Colours of the cells' groups, by name — what a cluster of the same name is drawn in. */
-  private cellGroupColors = new Map<string, string>();
-  /** The grouping {@link cellGroupColors} belongs to — a repeat request for it is a no-op. */
-  private cellGroupColorsFor: string | null = null;
-  /** Latest wins among colour loads for {@link cellGroupColors}. */
-  private readonly cellGroupColorsLoad = new Supersede();
-
-  private async refreshCellGroupColors(): Promise<void> {
-    const column = this.activeCellTypeColumn;
-    if (column === this.cellGroupColorsFor) return;
-    this.cellGroupColorsFor = column;
-    const task = this.cellGroupColorsLoad.next();
-    const map = new Map<string, string>();
-    const meta = column ? this.dataset?.columns.find((c) => c.name === column) : null;
-    if (meta && meta.kind === 'categorical' && this.controls) {
-      try {
-        const colors = await this.controls.categoryColors(column!);
-        meta.categories.forEach((c, k) => { if (colors[k]) map.set(c, colors[k]); });
-      } catch {
-        // No colours: palette colours, as the markers fall back to.
-      }
-    }
-    // The cells' grouping changed while the colours loaded: the newer request applies its own.
-    if (!task.isCurrent()) return;
-    this.zone.run(() => { this.cellGroupColors = map; });
-  }
-
-  /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
-  geneSwatchOf(gene: string): string {
-    if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
-    return this.clusterColors().get(clusterOfGene(gene, this.view.transcriptGeneGroups))
-      ?? this.geneColorOf(gene);
-  }
-
-  /**
-   * The cluster colours, rebuilt only when what they come from changes. The template asks
-   * once per gene row per change-detection pass, and rebuilding per call made that O(G²).
-   */
-  private clusterColors(): Map<string, string> {
-    const { transcriptGenes: genes, transcriptGeneGroups: groups } = this.view;
-    const hit = this.clusterColorMemo;
-    if (hit && hit.genes === genes && hit.groups === groups && hit.cellColors === this.cellGroupColors) {
-      return hit.colors;
-    }
-    const colors = clusterColorMap(genes, groups, this.cellGroupColors, DEFAULT_CATEGORICAL_PALETTE);
-    this.clusterColorMemo = { genes, groups, cellColors: this.cellGroupColors, colors };
-    return colors;
-  }
-  private clusterColorMemo: {
-    genes: SpatialViewState['transcriptGenes'];
-    groups: SpatialViewState['transcriptGeneGroups'];
-    cellColors: Map<string, string>;
-    colors: Map<string, string>;
-  } | null = null;
-
-  geneColorOf(gene: string): string {
-    return this.geneColor(Math.max(0, this.view.transcriptGenes.indexOf(gene)));
-  }
-
-
 
   reset(): void {
     this.controls?.setViewState({ ...DEFAULT_SPATIAL_VIEW });

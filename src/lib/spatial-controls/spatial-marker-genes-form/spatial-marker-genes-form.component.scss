@@ -1,0 +1,17 @@
+@use '../spatial-panel';
+
+:host {
+  display: contents;
+}
+
+// The "Add marker genes" form.
+.sc-markers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  margin: 0.25rem 0 0.5rem;
+  border: 1px solid var(--surface-border, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+}
+.sc-markers-actions { gap: 0.5rem; }

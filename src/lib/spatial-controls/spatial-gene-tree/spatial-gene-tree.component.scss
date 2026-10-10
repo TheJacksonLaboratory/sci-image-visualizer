@@ -1,0 +1,106 @@
+@use '../spatial-panel';
+
+:host {
+  display: contents;
+}
+
+.sc-gene-group { padding-left: 1rem; }
+.sc-gene-leaf { padding-left: 1rem; }
+.sc-gene-leaf.nested { padding-left: 2rem; }
+
+.sc-eye {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: var(--text-color-secondary, #6c757d);
+  .pi-eye { color: var(--text-color, #333); }
+}
+
+.sc-gene-footer {
+  text-align: right;
+  font-size: 0.78rem;
+  padding: 0.2rem 0;
+  color: var(--text-color-secondary, #6c757d);
+}
+
+// Per-gene marker button in the gene tree, and the icon/colour picker it opens.
+.sc-gene-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  &:hover, &:focus-visible { border-color: var(--surface-border, rgba(0, 0, 0, 0.2)); }
+}
+
+::ng-deep .sc-gene-style .p-overlaypanel-content { padding: 0.75rem; }
+
+.sc-style-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 15rem;
+}
+
+.sc-style-title { font-weight: 600; font-size: 0.9rem; }
+.sc-style-sub { font-size: 0.75rem; text-transform: uppercase; opacity: 0.7; }
+
+.sc-style-icons, .sc-style-presets {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.35rem;
+}
+
+.sc-style-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.9rem;
+  border: 1px solid var(--surface-border, rgba(0, 0, 0, 0.15));
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-color, inherit);
+  cursor: pointer;
+  .sc-glyph-svg { width: 1.1rem; height: 1.1rem; }
+  &.active { border-color: var(--primary-color, #3b82f6); background: var(--highlight-bg, rgba(59, 130, 246, 0.12)); }
+}
+
+.sc-style-color { display: flex; gap: 0.5rem; align-items: center; }
+
+.sc-style-swatch {
+  position: relative;
+  flex: 0 0 3rem;
+  height: 2rem;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+}
+
+.sc-style-hex { flex: 1 1 auto; min-width: 0; font-family: monospace; }
+
+.sc-style-preset {
+  width: 1.4rem;
+  height: 1.4rem;
+  justify-self: center;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  &.active { border-color: var(--text-color, #000); }
+}
+
+// Per-gene transcript count in view, right-aligned on the gene row.
+.sc-gene-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  padding-left: 0.5rem;
+}

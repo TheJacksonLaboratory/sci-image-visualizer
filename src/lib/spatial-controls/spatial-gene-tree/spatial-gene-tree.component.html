@@ -1,0 +1,96 @@
+<div class="sc-subhead">Selected genes</div>
+<div class="sc-gene-tree">
+  <div class="sc-gene-row sc-gene-root">
+    <button type="button" class="sc-eye"
+            (click)="view.transcriptAllGenes ? onToggleAllGenes() : onGenesShown(view.transcriptGenes, !areGenesShown(view.transcriptGenes))">
+      <i class="pi" [class.pi-eye]="view.transcriptAllGenes || areGenesShown(view.transcriptGenes)"
+         [class.pi-eye-slash]="!view.transcriptAllGenes && !areGenesShown(view.transcriptGenes)"></i>
+    </button>
+    <span class="sc-group-label">Genes</span>
+    <span class="sc-count">({{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }})</span>
+    <button type="button" class="sc-icon-btn" (click)="geneTreeOpen = !geneTreeOpen"
+            *ngIf="!view.transcriptAllGenes && view.transcriptGenes.length">
+      <i class="pi" [class.pi-chevron-down]="geneTreeOpen" [class.pi-chevron-right]="!geneTreeOpen"></i>
+    </button>
+  </div>
+  <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
+    <ng-container *ngFor="let node of geneTree; trackBy: trackByNode">
+      <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
+        <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !areGenesShown(node.genes))">
+          <i class="pi" [class.pi-eye]="areGenesShown(node.genes)" [class.pi-eye-slash]="!areGenesShown(node.genes)"></i>
+        </button>
+        <span class="sc-group-label" [title]="node.name">{{ node.name }}</span>
+        <span class="sc-count">({{ node.genes.length }})</span>
+        <button type="button" class="sc-icon-btn" (click)="toggleGeneGroup(node.name)">
+          <i class="pi" [class.pi-chevron-down]="!collapsedGeneGroups.has(node.name)"
+             [class.pi-chevron-right]="collapsedGeneGroups.has(node.name)"></i>
+        </button>
+      </div>
+      <ng-container *ngIf="!node.name || !collapsedGeneGroups.has(node.name)">
+        <div class="sc-gene-row sc-gene-leaf" [class.nested]="!!node.name"
+             *ngFor="let gene of node.genes; trackBy: trackByLabelString">
+          <button type="button" class="sc-eye" (click)="onGenesShown([gene], !isGeneShown(gene))">
+            <i class="pi" [class.pi-eye]="isGeneShown(gene)" [class.pi-eye-slash]="!isGeneShown(gene)"></i>
+          </button>
+          <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
+               Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
+          <button type="button" class="sc-gene-icon" [style.color]="geneSwatchOf(gene)"
+                  [attr.aria-label]="'Icon and colour for ' + gene" pTooltip="Icon and colour"
+                  tooltipPosition="top" (click)="openGeneStyle($event, gene, genePop)">
+            <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
+              <polygon *ngIf="view.transcriptMode === 'glyphs'; else dotIcon"
+                       [attr.points]="glyphPoints(glyphOf(gene, view.transcriptGenes.indexOf(gene)))"></polygon>
+              <ng-template #dotIcon><circle r="0.75"></circle></ng-template>
+            </svg>
+          </button>
+          <span class="sc-group-label">{{ gene }}</span>
+          <span class="sc-gene-count" *ngIf="geneCountOf(gene) as n; else zeroCount"
+                title="Transcripts in view">{{ n | number }}</span>
+          <ng-template #zeroCount>
+            <span class="sc-gene-count" *ngIf="geneCounts" title="Transcripts in view">0</span>
+          </ng-template>
+        </div>
+      </ng-container>
+    </ng-container>
+  </ng-container>
+  <!-- One picker for every gene row, filled for the gene that opened it. -->
+  <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+    <ng-template pTemplate="content">
+      <div class="sc-style-pop" *ngIf="styleGene as gene">
+        <div class="sc-style-title">Transcript Icon</div>
+        <div class="sc-style-icons" role="radiogroup" [attr.aria-label]="'Icon for ' + gene">
+          <button type="button" *ngFor="let opt of glyphOptions" class="sc-style-icon"
+                  role="radio" [attr.aria-checked]="opt.value === styleGlyph"
+                  [class.active]="opt.value === styleGlyph" [title]="opt.label"
+                  (click)="onGlyph(gene, opt.value)">
+            <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><polygon [attr.points]="opt.points"></polygon></svg>
+          </button>
+        </div>
+        <small class="sc-hint" *ngIf="view.transcriptMode !== 'glyphs'">
+          Icons show when the transcript point style is Icons.
+        </small>
+        <div class="sc-style-title">Transcript Color</div>
+        <div class="sc-style-color">
+          <label class="sc-style-swatch" [style.background]="geneColorOf(gene)" title="Pick a colour">
+            <input type="color" [value]="geneColorOf(gene)" (change)="onGeneColor(gene, $any($event.target).value)" />
+          </label>
+          <input pInputText class="sc-style-hex" [value]="geneColorOf(gene)" maxlength="7"
+                 [attr.aria-label]="'Hex colour for ' + gene"
+                 (change)="onGeneHex(gene, $any($event.target).value)"
+                 (keydown.enter)="onGeneHex(gene, $any($event.target).value)" />
+        </div>
+        <div class="sc-style-title sc-style-sub">Presets</div>
+        <div class="sc-style-presets">
+          <button type="button" *ngFor="let c of colorPresets" class="sc-style-preset"
+                  [style.background]="c" [class.active]="c === geneColorOf(gene).toLowerCase()"
+                  [title]="c" [attr.aria-label]="'Colour ' + c" (click)="onGeneColor(gene, c)"></button>
+        </div>
+        <p-button label="Reset to default" icon="pi pi-refresh" size="small" [text]="true"
+                  styleClass="sc-style-reset" (onClick)="resetGeneStyle(gene)"></p-button>
+      </div>
+    </ng-template>
+  </p-overlayPanel>
+  <div class="sc-gene-footer">
+    {{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }} genes selected
+  </div>
+</div>
