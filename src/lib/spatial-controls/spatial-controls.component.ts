@@ -5,19 +5,21 @@ import { Subscription, combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
-import {
-  CategoricalColumnMeta, SpatialColumnMeta, SpatialDataset,
-} from '../contracts/spatial-dataset.contract';
+import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import {
   ColormapNode, ColormapValue, SpatialViewState, DEFAULT_SPATIAL_VIEW, TranscriptGlyphName,
 } from '../contracts/display-types';
+import { DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES } from '../spatial/spatial-encoding';
 import {
-  DEFAULT_CATEGORICAL_PALETTE, SPATIAL_3D_MAX_CATEGORIES, lutFor, spatialContinuousLut,
-} from '../spatial/spatial-encoding';
-import {
-  INFERNO_SCALE, TRANSCRIPT_GLYPHS, cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
-  glyphOutline,
+  cellTypeColumnFor, cellsShown, clusterColorMap, clusterOfGene, defaultGlyphFor,
 } from '../spatial/spatial-tiles';
+import {
+  CLIP_OPTIONS, FAMILY_PREFIX, GLYPH_OPTIONS, allGenesPreparingNote, buildGeneTree, columnOptions,
+  continuousColorBarCss, countGroupRows, densityColorBarCss, familyMembers, geneOption, glyphPoints,
+  groupEntryFor, groupOptions, groupVariantOptions, importGeneGroupsPatch, markerColumnOptions,
+  markerGeneGroups, markerGenesPatch, middleSection, parseGeneGroups, sectionLabel, tileOptions,
+  toggleHidden,
+} from '../spatial/spatial-panel-model';
 import {
   SpatialSelectionMask, emptySelection,
 } from '../spatial/spatial-selection';
@@ -31,47 +33,11 @@ export interface SpatialLegendEntry {
   color: string;
 }
 
-/** A gene name as a dropdown option. Objects rather than bare strings because the
- *  dropdown filters on a named field (`filterBy="label"`), which a string has not. */
-const geneOption = (name: string): { label: string; value: string } => ({
-  label: name,
-  value: name,
-});
+/** @deprecated Moved to `spatial/spatial-panel-model`; re-exported for one release. */
+export { parseGeneGroups };
 
 /** Per-instance id source — see {@link SpatialControlsComponent.chartsBodyId}. */
 let controlsInstanceSeq = 0;
-
-/** Glyph choices with an SVG `points` string for the preview. */
-const GLYPH_OPTIONS = TRANSCRIPT_GLYPHS.map((g) => {
-  const o = glyphOutline(g);
-  const pts: string[] = [];
-  for (let i = 0; i < o.length; i += 2) pts.push(`${o[i].toFixed(3)},${o[i + 1].toFixed(3)}`);
-  return { label: g.replace('-', ' '), value: g as TranscriptGlyphName, points: pts.join(' ') };
-});
-
-/**
- * `group,gene` rows (CSV or TSV, header optional) → gene groups, in file order.
- * Exported for tests.
- */
-export function parseGeneGroups(text: string): { name: string; genes: string[] }[] {
-  const groups = new Map<string, string[]>();
-  for (const line of text.split(/\r?\n/)) {
-    const [a, b] = line.split(/,|\t/).map((f) => f.trim().replace(/^"|"$/g, ''));
-    if (!a || !b || (/^(group|cell_?type|name)$/i.test(a) && /^(gene|genes|feature)$/i.test(b))) continue;
-    const list = groups.get(a) ?? [];
-    if (!list.includes(b)) list.push(b);
-    groups.set(a, list);
-  }
-  return [...groups].map(([name, genes]) => ({ name, genes }));
-}
-
-/** Outlier clipping presets, as `[lo, hi]` percentile fractions. */
-const CLIP_OPTIONS: { label: string; value: [number, number] }[] = [
-  { label: 'None', value: [0, 1] },
-  { label: '1%', value: [0.01, 0.99] },
-  { label: '2%', value: [0.02, 0.98] },
-  { label: '5%', value: [0.05, 0.95] },
-];
 
 /**
  * Spatial-omics controls: a non-modal, resizable, draggable dialog for choosing
@@ -218,10 +184,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
     this.subs.add(this.controls.getDataset$().subscribe((dataset) => {
       this.dataset = dataset;
-      this.columnOptions = [
-        { label: 'None (flat colour)', value: null },
-        ...(dataset?.columns ?? []).map((c) => ({ label: this.columnLabel(c), value: c.name })),
-      ];
+      this.columnOptions = columnOptions(dataset);
       // A new dataset almost certainly has different columns; drop stale UI state.
       this.selectedGene = null;
       this.geneSearchFailed = false;
@@ -253,7 +216,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.selectedGene = view.colorBy?.kind === 'feature' ? view.colorBy.name : null;
       this.selectedColormapNode = this.colormapNodeFor(view.continuousColormap);
       this.selectedDensityColormapNode = this.colormapNodeFor(view.densityColormap);
-      this.geneTree = this.buildGeneTree();
+      this.geneTree = buildGeneTree(view.transcriptGenes, view.transcriptGeneGroups);
       this.geneMenu = this.buildGeneMenu();
       this.refreshDensityWindow();
       void this.refreshKey();
@@ -511,8 +474,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.controls?.setViewState({ geneMapSection: null });
       return;
     }
-    const middle = this.sections ? Math.floor((this.sections.length - 1) / 2) : 0;
-    this.controls?.setViewState({ geneMapSection: middle });
+    this.controls?.setViewState({ geneMapSection: middleSection(this.sections) });
   }
   onGeneMapSection(value: number | undefined): void {
     if (value === undefined) return;
@@ -523,10 +485,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
   /** "12 of 53" for the gene map's own section, 1-based like the cloud's. */
   get geneMapSectionLabel(): string {
-    const total = this.sections?.length ?? 0;
-    if (!total) return '';
-    const at = Math.max(0, Math.min(total - 1, this.view.geneMapSection ?? 0));
-    return `${at + 1} of ${total}`;
+    return sectionLabel(this.sections, this.view.geneMapSection);
   }
   onGeneMapSmoothing(value: number | undefined): void {
     if (value === undefined) return;
@@ -584,8 +543,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     }
     // Open in the middle of the stack rather than on the first section, which for
     // a brain is a nearly empty olfactory-bulb slide.
-    const middle = this.sections ? Math.floor((this.sections.length - 1) / 2) : 0;
-    this.controls?.setViewState({ pointSection: middle });
+    this.controls?.setViewState({ pointSection: middleSection(this.sections) });
   }
   onPointSection(value: number | undefined): void {
     if (value === undefined) return;
@@ -601,10 +559,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
   /** "12 of 53" — 1-based, because the sections are slides, not array slots. */
   get sectionLabel(): string {
-    const total = this.sections?.length ?? 0;
-    if (!total) return '';
-    const at = Math.max(0, Math.min(total - 1, this.view.pointSection ?? 0));
-    return `${at + 1} of ${total}`;
+    return sectionLabel(this.sections, this.view.pointSection);
   }
   /** Whether this dataset has sections to pick from at all. */
   get isSectioned(): boolean {
@@ -675,29 +630,13 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   transcriptModeOptions: { label: string; value: SpatialViewState['transcriptMode'] }[] = [];
 
   private buildTileOptions(ds: SpatialDataset | null): void {
-    // Short labels, cell set first, and "Both" when there are two — as Xenium Explorer.
-    const sets = [...(ds?.polygonTiles?.sets ?? [])]
-      .sort((a, b) => (a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0));
-    this.cellSetOptions = [
-      ...sets.map((s) => ({ label: s.label.replace(/\s*boundar(y|ies)$/i, ''), value: s.name })),
-      ...(sets.length > 1 ? [{ label: 'Both', value: 'both' }] : []),
-    ];
-    this.transcriptModeOptions = [
-      ...(ds?.transcriptTiles ? [
-        { label: 'Points', value: 'circles' as const },
-        { label: 'Icons', value: 'glyphs' as const },
-      ] : []),
-      ...(ds?.density ? [{ label: 'Density Map', value: 'density' as const }] : []),
-    ];
-    const has = (name: string) => !!ds?.columns.some((c) => c.name === name);
-    this.cellColorOptions = [
-      { label: 'Group Affiliation', value: 'group' },
-      ...(ds?.features ? [{ label: 'Gene Expression', value: 'gene' as const }] : []),
-      ...(has('transcript_density') ? [{ label: 'Transcript Density Map', value: 'transcriptDensity' as const }] : []),
-      { label: 'Single Color', value: 'single' },
-      ...(has('segmentation_method') ? [{ label: 'Segmentation Method', value: 'segmentation' as const }] : []),
-    ];
-    this.buildGroupOptions(ds);
+    ({
+      cellSetOptions: this.cellSetOptions,
+      transcriptModeOptions: this.transcriptModeOptions,
+      cellColorOptions: this.cellColorOptions,
+    } = tileOptions(ds));
+    this.groupOptions = groupOptions(ds);
+    this.refreshVariants();
   }
 
   /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
@@ -716,51 +655,20 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   /** The last variant chosen per family, so switching away and back keeps k. */
   private familyChoice = new Map<string, string>();
 
-  private buildGroupOptions(ds: SpatialDataset | null): void {
-    const sections = new Map<string, { label: string; value: string }[]>();
-    const seenFamilies = new Set<string>();
-    for (const c of ds?.columns ?? []) {
-      if (c.kind !== 'categorical' || c.name === 'segmentation_method') continue;
-      const section = c.section ?? 'Groups';
-      const list = sections.get(section) ?? [];
-      if (c.family) {
-        if (seenFamilies.has(c.family.id)) continue;
-        seenFamilies.add(c.family.id);
-        list.push({ label: c.family.label, value: `family:${c.family.id}` });
-      } else {
-        list.push({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name });
-      }
-      sections.set(section, list);
-    }
-    this.groupOptions = [...sections].map(([label, items]) => ({ label, items }));
-    this.refreshVariants();
-  }
-
   /** The picker's value for the active group column. */
   get activeGroupEntry(): string | null {
-    const name = this.activeCellTypeColumn;
-    const meta = name ? this.dataset?.columns.find((c) => c.name === name) : undefined;
-    if (meta?.kind === 'categorical' && meta.family) return `family:${meta.family.id}`;
-    return name;
+    return groupEntryFor(this.dataset, this.activeCellTypeColumn);
   }
 
   private refreshVariants(): void {
-    const name = this.activeCellTypeColumn;
-    const meta = name ? this.dataset?.columns.find((c) => c.name === name) : undefined;
-    const family = meta?.kind === 'categorical' ? meta.family : undefined;
-    const next = family
-      ? (this.dataset?.columns ?? [])
-        .filter((c) => c.kind === 'categorical' && c.family?.id === family.id)
-        .map((c) => ({ label: (c as CategoricalColumnMeta).family!.variant, value: c.name }))
-      : [];
+    const next = groupVariantOptions(this.dataset, this.activeCellTypeColumn);
     if (JSON.stringify(next) !== JSON.stringify(this.groupVariantOptions)) this.groupVariantOptions = next;
   }
 
   onGroupEntry(value: string): void {
-    if (value.startsWith('family:')) {
-      const id = value.slice('family:'.length);
-      const members = (this.dataset?.columns ?? [])
-        .filter((c) => c.kind === 'categorical' && c.family?.id === id);
+    if (value.startsWith(FAMILY_PREFIX)) {
+      const id = value.slice(FAMILY_PREFIX.length);
+      const members = familyMembers(this.dataset, id);
       const name = this.familyChoice.get(id) ?? members[0]?.name;
       if (name) this.onCellTypeColumn(name);
       return;
@@ -802,13 +710,10 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     try {
       const v = await this.controls.categoricalView(name);
       if (!task.isCurrent()) return;
-      const counts = new Uint32Array(v.categories.length);
-      for (const c of v.codes) if (c < counts.length) counts[c]++;
-      const rows = v.categories.map((label, i) => ({ label, color: v.colors[i] ?? '#999', count: counts[i] }))
-        .sort((a, b) => b.count - a.count);
+      const { rows, total } = countGroupRows(v);
       this.zone.run(() => {
         this.groupRows = rows;
-        this.groupTotal = rows.reduce((n, r) => n + r.count, 0);
+        this.groupTotal = total;
       });
     } catch {
       // Only the current load's failure re-opens the key: a superseded one clearing it
@@ -826,10 +731,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
 
   onGroupShown(label: string, on: boolean): void {
-    const hidden = new Set(this.view.hiddenGroups);
-    if (on) hidden.delete(label);
-    else hidden.add(label);
-    this.controls?.setViewState({ hiddenGroups: [...hidden] });
+    this.controls?.setViewState({ hiddenGroups: toggleHidden(this.view.hiddenGroups, [label], on) });
   }
 
   onAllGroupsShown(on: boolean): void {
@@ -960,22 +862,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   geneTree: { name: string | null; genes: string[] }[] = [];
   geneMenu: { label: string; icon: string; command: () => void; disabled?: boolean }[] = [];
 
-  private buildGeneTree(): { name: string | null; genes: string[] }[] {
-    const selected = this.view.transcriptGenes;
-    const chosen = new Set(selected);
-    const grouped = new Set<string>();
-    const out: { name: string | null; genes: string[] }[] = [];
-    for (const g of this.view.transcriptGeneGroups) {
-      const genes = g.genes.filter((x) => chosen.has(x));
-      if (!genes.length) continue;
-      genes.forEach((x) => grouped.add(x));
-      out.push({ name: g.name, genes });
-    }
-    const rest = selected.filter((x) => !grouped.has(x));
-    if (rest.length) out.push({ name: null, genes: rest });
-    return out;
-  }
-
   /** Real genes in the panel — the tree's denominator. */
   get geneTotal(): number {
     return this.dataset?.transcriptTiles?.geneCount ?? this.dataset?.features?.count ?? this.geneNames.length;
@@ -1001,12 +887,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** The eye toggle: hide or show genes without removing them from the selection. */
   onGenesShown(genes: string[], on: boolean): void {
-    const hidden = new Set(this.view.transcriptHiddenGenes);
-    for (const g of genes) {
-      if (on) hidden.delete(g);
-      else hidden.add(g);
-    }
-    this.controls?.setViewState({ transcriptHiddenGenes: [...hidden] });
+    this.controls?.setViewState({
+      transcriptHiddenGenes: toggleHidden(this.view.transcriptHiddenGenes, genes, on),
+    });
   }
 
   onGeneColor(gene: string, hex: string): void {
@@ -1038,7 +921,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   }
 
   glyphPoints(glyph: TranscriptGlyphName): string {
-    return GLYPH_OPTIONS.find((o) => o.value === glyph)?.points ?? '';
+    return glyphPoints(glyph);
   }
 
   /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
@@ -1141,9 +1024,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     const columns = this.dataset?.columns;
     const hit = this.markerColumnMemo;
     if (hit && hit.columns === columns) return hit.options;
-    const options = (columns ?? [])
-      .filter((c): c is CategoricalColumnMeta => c.kind === 'categorical' && c.name !== 'segmentation_method')
-      .map((c) => ({ label: c.description && c.section ? c.description : this.columnLabel(c), value: c.name }));
+    const options = markerColumnOptions(columns);
     this.markerColumnMemo = { columns, options };
     return options;
   }
@@ -1192,35 +1073,12 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
     try {
       const result = await markerGenes(column, this.markerPerGroup);
       this.zone.run(() => {
-        const best = new Map<string, { group: string; score: number }>();
-        for (const g of result.groups) {
-          if (!picked.has(g.name)) continue;
-          for (const gene of g.genes) {
-            const prev = best.get(gene.name);
-            if (!prev || gene.score > prev.score) best.set(gene.name, { group: g.name, score: gene.score });
-          }
-        }
-        const groups = result.groups
-          .filter((g) => picked.has(g.name))
-          .map((g) => ({
-            name: g.name,
-            genes: g.genes.map((x) => x.name).filter((n) => best.get(n)?.group === g.name),
-          }))
-          .filter((g) => g.genes.length);
+        const groups = markerGeneGroups(result, picked);
         if (!groups.length) {
           this.markerError = 'No marker genes passed the filter for the chosen clusters.';
           return;
         }
-        const names = new Set(groups.map((g) => g.name));
-        const genes = [...this.view.transcriptGenes];
-        for (const g of groups) for (const n of g.genes) if (!genes.includes(n)) genes.push(n);
-        this.controls?.setViewState({
-          transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
-          transcriptGenes: genes,
-          // Marker groups are clusters: colour the transcripts by them, as their cells are.
-          transcriptColorBy: 'cluster',
-          ...(this.view.transcriptMode === 'off' ? { transcriptMode: 'circles' as const } : {}),
-        });
+        this.controls?.setViewState(markerGenesPatch(this.view, groups));
         this.markersOpen = false;
       });
     } catch (err) {
@@ -1256,13 +1114,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       this.zone.run(() => { this.geneGroupError = 'No "group,gene" rows found in that file.'; });
       return;
     }
-    const names = new Set(groups.map((g) => g.name));
-    const genes = [...new Set([...this.view.transcriptGenes, ...groups.flatMap((g) => g.genes)])];
-    this.zone.run(() => this.controls?.setViewState({
-      transcriptGeneGroups: [...this.view.transcriptGeneGroups.filter((g) => !names.has(g.name)), ...groups],
-      transcriptGenes: genes,
-      transcriptAllGenes: false,
-    }));
+    this.zone.run(() => this.controls?.setViewState(importGeneGroupsPatch(this.view, groups)));
   }
 
   // density
@@ -1327,13 +1179,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
   get densityColorBarCss(): string {
     const colormap = this.view.densityColormap;
     if (!this.densityBarMemo || this.densityBarMemo.colormap !== colormap) {
-      const lut = lutFor(colormap ?? INFERNO_SCALE);
-      const stops: string[] = [];
-      for (let i = 0; i <= 16; i++) {
-        const [r, g, b] = lut[Math.round((i / 16) * (lut.length - 1))];
-        stops.push(`rgb(${r},${g},${b}) ${((i / 16) * 100).toFixed(0)}%`);
-      }
-      this.densityBarMemo = { colormap, css: `linear-gradient(to right, ${stops.join(', ')})` };
+      this.densityBarMemo = { colormap, css: densityColorBarCss(colormap) };
     }
     return this.densityBarMemo.css;
   }
@@ -1358,11 +1204,7 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   /** Why "All genes" is not offered yet, while the server builds its pyramid. */
   get allGenesPreparing(): string | null {
-    const st = this.dataset?.transcriptBinsStatus;
-    if (!st || this.canShowAllGenes) return null;
-    if (st.state === 'failed') return `"All genes" is unavailable: preparing it failed (${st.message ?? 'unknown error'}).`;
-    const pct = st.total ? ` — ${Math.floor((100 * (st.done ?? 0)) / st.total)}% when this dataset was opened` : '';
-    return `"All genes" is being prepared on the server${pct}; reopen the dataset once it is done.`;
+    return allGenesPreparingNote(this.dataset);
   }
 
   get showingAllGenes(): boolean {
@@ -1513,13 +1355,6 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
   // ── internals ───────────────────────────────────────────────────────────
 
-  private columnLabel(c: SpatialColumnMeta): string {
-    const kind = c.kind === 'categorical'
-      ? `${(c as CategoricalColumnMeta).categories.length} categories`
-      : c.unit ?? 'continuous';
-    return `${c.name} — ${kind}`;
-  }
-
   /** Rebuild the legend or colour bar for the current colouring. */
   private async refreshKey(): Promise<void> {
     const by = this.view.colorBy;
@@ -1553,7 +1388,9 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
 
     // Continuous (a numeric column or a gene): a colour bar from the same LUT.
     this.legend = null;
-    this.colorBarCss = this.buildColorBar();
+    this.colorBarCss = continuousColorBarCss(
+      this.colormap?.data?.value, this.reverse, this.view.continuousColormap,
+    );
   }
 
   /**
@@ -1581,25 +1418,5 @@ export class SpatialControlsComponent implements OnInit, OnDestroy {
       if (group.data?.value === value) return group;
     }
     return null;
-  }
-
-  /**
-   * `linear-gradient(...)` sampling the active colormap at 16 stops.
-   *
-   * Resolved exactly the way the renderer resolves it — the same override, the
-   * same grey fallback. Built from `lutFor` alone, this bar showed a black-to-white
-   * ramp while the canvas drew Viridis, which makes the key worse than no key.
-   */
-  private buildColorBar(): string {
-    const lut = spatialContinuousLut(
-      this.colormap?.data?.value, this.reverse, this.view.continuousColormap,
-    );
-    const stops: string[] = [];
-    const steps = 16;
-    for (let i = 0; i <= steps; i++) {
-      const [r, g, b] = lut[Math.round((i / steps) * 255)];
-      stops.push(`rgb(${r},${g},${b}) ${((i / steps) * 100).toFixed(0)}%`);
-    }
-    return `linear-gradient(to right, ${stops.join(', ')})`;
   }
 }
