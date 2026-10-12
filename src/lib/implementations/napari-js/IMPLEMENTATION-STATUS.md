@@ -1,7 +1,7 @@
 # napari-js backend: architecture and known gaps
 
 The WebGPU backend of `sci-image-visualizer`, built on
-[`napari-js`](https://github.com/TheJacksonLaboratory/napari-js) (`^0.14.0`, a runtime
+[`napari-js`](https://github.com/TheJacksonLaboratory/napari-js) (`^0.15.0`, a runtime
 dependency). It is one `IViewerBackend` next to OSD and Plotly, chosen by the router
 (`RoutingVisualizerService`) for the `napari-*` plot types (`NAPARI_IMAGE`, `NAPARI_SCATTER`,
 `NAPARI_SURFACE`, `NAPARI_SCATTER3D`, `NAPARI_VOLUME`, `NAPARI_ISOSURFACE`), for the spatial-omics
@@ -41,7 +41,7 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 | `napari-spatial-scene.ts` | `SpatialSession`: the dataset / view-state / selection subscription shared by both spatial scenes. |
 | `napari-spatial-2d-scene.ts`, `napari-spatial-3d-scene.ts` | Spatial omics: markers over the tissue image; the 3D point cloud. |
 | `napari-spatial-encoding.ts` | Pure colour and grouping math of the spatial scenes. |
-| `napari-spatial-hover.ts`, `napari-spatial-tooltip.ts` | Spatial hover / click picking and the cursor tooltip. |
+| `napari-spatial-hover.ts`, `napari-spatial-tooltip.ts` | Spatial hover / click and the cursor tooltip. The pick is napari-js's, on the layer each scene drew: `PointsLayer.pick` in 2D (nearest centre within the marker or a 10 px slack), `PointPicker` in 3D (front-most). |
 | `napari-spatial-tiles.ts` | Coordinator of the 2D spatial view's camera-driven level-of-detail layers (see `spatial-tiles/`). |
 | `napari-tile-client.ts` | Talks to the tile server: descriptors, 2D tiles, volume assembly (decimated by the Resolution control), native >8-bit histograms, TIFF export. |
 | `napari-tool-bridge.ts` | The canvas tools' host and the region overlay's viewer adapter, in 2D world space and the 3D view's screen space. |
@@ -81,11 +81,14 @@ Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 - **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
 - **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
   min.
-- **napari-js 0.15 APIs not adopted yet:** per-point symbols (NAPARI-BOUNDARY-25), per-shape
-  colours (NAPARI-BOUNDARY-27), `transparentBelow` for GPU density windowing
-  (NAPARI-BOUNDARY-28), picking, `canvasTransform`, whole-level reads and the overlays entry.
-  Already adopted: `LayerList.move` (no re-upload on a restack), packed point colours,
-  `Points3DLayer.colors` (no 3D category ceiling), `invert` on the 3D layers,
-  `Camera3D.worldPerPixel`, `LruCache`, `luminance8`, `Colormap` + `buildLut`.
+- **napari-js 0.15 APIs not adopted yet:** whole-level reads (`readLevel`/`assembleVolume`),
+  the `napari-js/overlays`, `napari-js/colormaps` and `napari-js/geometry` entries, and
+  `visibleTiles` ordering. Already adopted: `LayerList.move` (no re-upload on a restack), packed
+  point colours, `Points3DLayer.colors` (no 3D category ceiling), `invert` on the 3D layers,
+  `Camera3D.worldPerPixel`, `LruCache`, `luminance8`, `Colormap` + `buildLut`, per-point symbols
+  (transcript icons, NAPARI-BOUNDARY-25), per-shape `faceColor` (cells, NAPARI-BOUNDARY-27),
+  `transparentBelow` (GPU density windowing, NAPARI-BOUNDARY-28), `PointsLayer.pick` and
+  `PointPicker` (NAPARI-BOUNDARY-24, NAPARI-SVC-17), `canvasTransform` (region overlay,
+  NAPARI-BOUNDARY-10).
 - **SAM** embeds the displayed viewport at screen resolution, as on OSD: zoom in to segment
   small features.

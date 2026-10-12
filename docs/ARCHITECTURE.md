@@ -266,7 +266,7 @@ See [guides/spatial-omics.md](./guides/spatial-omics.md).
 ## The napari-js boundary
 
 Only `implementations/napari-js/` imports `napari-js` (a regular dependency,
-`^0.14.0`). SIV uses its `Viewer` and layer types (image, volume, surface,
+`^0.15.0`). SIV uses its `Viewer` and layer types (image, volume, surface,
 points, 3D points, axes, shapes, tiled sources), the multichannel views, the
 colormap helpers and the projection/picking helpers. Rendering concerns that
 are generic, such as tile pyramids, picking and per-point colour, belong in

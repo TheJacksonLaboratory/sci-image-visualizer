@@ -211,10 +211,14 @@ Confirmed missing against the shipped `0.11.1` typings — these are the asks on
    which replaced the stepped-LUT workaround and its 95-category ceiling.)_
 2. **A shapes/polygon layer** (instanced or tessellated fills + outlines) for cell boundaries. The
    existing SVG region overlay is DOM-based; it is right for a handful of hand-drawn ROIs and wrong
-   for 10⁴–10⁵ segmentation polygons.
+   for 10⁴–10⁵ segmentation polygons. _(Done: `ShapesLayer`, with per-shape `faceColor` in 0.15,
+   which replaced the per-category colormap bands and their ~127-group ceiling.)_
 3. **Lasso / rectangle selection returning indices.** Picking today is
    `nearestPointIndex(...)` — a CPU single-point hit test, 2D only. Needs a set-returning
    selection, and a spatial index (uniform grid or quadtree) so it is not O(N) per drag frame.
+   _(Partly done: the single-point pick is indexed in 0.15 — `PointsLayer.pick` over a
+   `GridIndex` in 2D, `PointPicker` in 3D — and the spatial hover uses both. Selection stays
+   SIV's, from the drawn ROIs.)_
 4. **Screen-space size floor for 2D points.** `PointsLayer.size` is in data units (correct for
    55 µm Visium spots) but individual cells vanish when zoomed out; want
    `sizeUnits: 'data' | 'screen'` or a min-screen-diameter clamp.

@@ -88,7 +88,8 @@ observations — every cell on a slide shares that slide's registered z, so no
 section-label column is needed — and a dataset whose z is continuous rather than
 sectioned is offered no section control instead of having one invented for it.
 
-**Hover and click** — hovering an observation names it in a cursor tooltip: the
+**Hover and click** — hovering an observation (anywhere on its marker, or within a few
+pixels of a small one; in 3D the front-most) names it in a cursor tooltip: the
 class for a categorical column, the value with its unit for a gene or numeric one,
 and nothing at all when no colour source is set (there is no cluster to name).
 Clicking a marker selects that whole class, the same selection the legend's rows
