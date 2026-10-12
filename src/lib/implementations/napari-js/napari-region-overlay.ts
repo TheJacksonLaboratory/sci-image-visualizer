@@ -3,6 +3,7 @@ import { Subscription } from 'rxjs';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
+import type { Affine } from '../../region-overlay/svg-region-renderer';
 
 import {
   hitHandle,
@@ -54,36 +55,39 @@ const OPEN_PATH_HIT_PX = 6;
 /**
  * The slice of the napari Viewer the overlay needs (coord transforms + control gating).
  *
- * COORDINATE SPACES: both transforms speak CLIENT pixels (viewport coordinates, as a pointer
- * event's `clientX/Y`), exactly as napari-js `Viewer.canvasToWorld`/`worldToCanvas` do. The
- * overlay subtracts its svg's client rect itself to get svg-local pixels. An implementation
- * that returned canvas-local pixels from `worldToCanvas` would draw everything offset by the
- * host's page position whenever the host is not at the page origin.
+ * COORDINATE SPACES: `canvasToWorld` takes CLIENT pixels (viewport coordinates, as a pointer
+ * event's `clientX/Y`), exactly as napari-js `Viewer.canvasToWorld` does. `canvasTransform` is
+ * the camera's world → CANVAS-LOCAL CSS-pixel affine, napari-js `Viewer.canvasTransform`, which
+ * reads no layout: drawing and following the camera use it, so a camera frame costs one
+ * `matrix(...)` and no `getBoundingClientRect()` (review NAPARI-BOUNDARY-10). The svg covers the
+ * plot host and the canvas is the host's in-flow child at its top-left, so canvas-local and
+ * svg-local pixels are the same; a pointer's client pixels are mapped into the svg by the
+ * overlay itself.
  *
  * Exported because the 3D spatial mode supplies a SCREEN-SPACE implementation of it: there the
  * drawn shape is a lasso in canvas pixels, not a rectangle in image space, so "world" is the
- * canvas itself and both transforms are the client↔canvas offset. That lets the 3D view reuse
- * this whole overlay — every tool, the handles, the store round-trip — with no 3D-specific
- * drawing code.
+ * canvas itself — `canvasToWorld` is the client → canvas offset and `canvasTransform` the
+ * identity. That lets the 3D view reuse this whole overlay — every tool, the handles, the store
+ * round-trip — with no 3D-specific drawing code.
  */
 export interface OverlayViewer {
   /** Client px → world. */
   canvasToWorld(clientX: number, clientY: number): [number, number];
-  /** World → client px (NOT canvas-local px). */
-  worldToCanvas(worldX: number, worldY: number): [number, number];
+  /** World → canvas-local (= svg-local) CSS px, as an SVG affine `[a, b, c, d, e, f]`. */
+  canvasTransform(): Affine;
   setControlsEnabled(enabled: boolean): void;
   readonly camera: { readonly changed: { connect(listener: () => void): () => void } };
 }
 
 /**
  * SVG region overlay for the napari-js WebGPU image view (jit-ui#102), mirroring the OSD backend's
- * {@link OsdRegionOverlay} but driven by napari's `canvasToWorld`/`worldToCanvas` transforms
+ * {@link OsdRegionOverlay} but driven by napari's `canvasToWorld`/`canvasTransform` transforms
  * (see {@link OverlayViewer} for their coordinate spaces).
  * Vector shapes are drawn in an absolutely-positioned `<svg>` over the canvas (no need to push
  * them through WebGPU) by {@link NapariRegionSvgRenderer} over the shared `SvgRegionRenderer`:
  * in world coordinates inside one transformed group, rebuilt on a region or selection change,
- * while a camera move only rewrites the transform (derived from `worldToCanvas`, i.e.
- * napari-js's camera centre/zoom) and the few screen-space handles and labels. This class is
+ * while a camera move only rewrites the transform (napari-js's `canvasTransform`, the camera
+ * centre/zoom) and the few screen-space handles and labels. This class is
  * the gesture controller: pointer handlers, the tool mode, and the edit/draft/marquee state.
  * It writes completed shapes to the shared {@link RegionStore} (so save / undo / export work
  * identically to OSD).
@@ -423,10 +427,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
   private updateMarqueeEl(): void {
     if (!this.marquee) return;
     const { x0, y0, x1, y1 } = this.marquee;
-    const [[lx, ly], [rx, ry]] = this.projection.withOrigin(() => [
-      this.projection.toLocal(Math.min(x0, x1), Math.min(y0, y1)),
-      this.projection.toLocal(Math.max(x0, x1), Math.max(y0, y1)),
-    ]);
+    const [lx, ly] = this.projection.toLocal(Math.min(x0, x1), Math.min(y0, y1));
+    const [rx, ry] = this.projection.toLocal(Math.max(x0, x1), Math.max(y0, y1));
     this.renderer.showMarquee(lx, ly, rx, ry);
   }
 
@@ -511,14 +513,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
 
   /**
    * Rebuild every element from the store: the regions in world coordinates (one transformed
-   * group), their labels, and the overlay. The svg's origin is read once.
+   * group), their labels, and the overlay. Reads no layout: the camera affine is the viewer's.
    */
   redraw(): void {
-    this.projection.withOrigin(() => {
-      this.renderer.setCamera(this.projection.affine());
-      this.renderer.render(this.regionsVisible ? this.store.getRegions() : [], this.selected);
-      this.renderOverlay();
-    });
+    this.renderer.setCamera(this.projection.affine());
+    this.renderer.render(this.regionsVisible ? this.store.getRegions() : [], this.selected);
+    this.renderOverlay();
   }
 
   /** Rebuild the screen-space overlay only: the selected regions' handles and the draft. */

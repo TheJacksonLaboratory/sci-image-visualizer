@@ -1,15 +1,17 @@
 import { PIXEL_WORLD_QUANTUM, snapToWorldGrid } from '../../../spatial/world-grid';
 import type { ToScreen } from '../../../region-overlay/region-geometry';
-import { Affine, affineFromProjection } from '../../../region-overlay/svg-region-renderer';
+import { Affine, applyAffine } from '../../../region-overlay/svg-region-renderer';
 import type { OverlayViewer } from '../napari-region-overlay';
 
 /**
  * The region overlay's coordinate spaces: pointer CLIENT pixels, svg-LOCAL pixels and WORLD
  * units, through the viewer's own transforms (see {@link OverlayViewer}).
  *
- * The svg's client origin is read once per {@link withOrigin} block: every vertex is converted
- * through it, and an uncached read per vertex — interleaved with the elements a redraw appends
- * — forced a synchronous layout per vertex (review NAPARI-BOUNDARY-10).
+ * World → svg-local is the viewer's camera affine (`canvasTransform`), which reads no layout, so
+ * drawing and following the camera read none. Only a pointer, in client pixels, needs the svg's
+ * client origin: read once per {@link withOrigin} block (a gesture event), as an uncached read
+ * per vertex — interleaved with the elements a redraw appends — forced a synchronous layout per
+ * vertex (review NAPARI-BOUNDARY-10).
  */
 export class OverlayProjection {
   /**
@@ -21,8 +23,9 @@ export class OverlayProjection {
    * placeable positions and no ROI can be drawn at all.
    */
   private worldQuantum = PIXEL_WORLD_QUANTUM;
-  /** The svg's client origin, cached while a {@link withOrigin} block runs. */
+  /** The svg's client origin and the camera affine, cached while a {@link withOrigin} block runs. */
   private origin: { left: number; top: number } | null = null;
+  private camera: Affine | null = null;
 
   constructor(
     private readonly svg: SVGSVGElement,
@@ -59,15 +62,17 @@ export class OverlayProjection {
     return Number.isFinite(per) && per > 0 ? per : 1;
   }
 
-  /** Run `fn` with the svg's client origin read once (nested calls reuse it). */
+  /** Run `fn` with the svg's client origin and the camera affine read once (nested calls reuse them). */
   withOrigin<T>(fn: () => T): T {
     if (this.origin) return fn();
     const r = this.svg.getBoundingClientRect();
     this.origin = { left: r.left, top: r.top };
+    this.camera = this.viewer.canvasTransform();
     try {
       return fn();
     } finally {
       this.origin = null;
+      this.camera = null;
     }
   }
 
@@ -77,10 +82,9 @@ export class OverlayProjection {
     return [clientX - o.left, clientY - o.top];
   }
 
-  /** World coords → SVG-local px (the svg overlays the canvas at the same client rect). */
+  /** World coords → SVG-local px, through the camera affine: no layout read. */
   toLocal(imgX: number, imgY: number): [number, number] {
-    const [cx, cy] = this.viewer.worldToCanvas(imgX, imgY);
-    return this.clientToLocal(cx, cy);
+    return applyAffine(this.affine(), imgX, imgY);
   }
 
   /** {@link toLocal} as the shared region geometry takes it. */
@@ -93,8 +97,11 @@ export class OverlayProjection {
     return Math.hypot(px - lx, py - ly);
   }
 
-  /** The world → svg-local affine for the current camera (one svg rect read). */
+  /**
+   * The world → svg-local affine for the current camera: the viewer's `canvasTransform`, which
+   * reads no layout. The svg and the canvas share an origin (see {@link OverlayViewer}).
+   */
   affine(): Affine {
-    return this.withOrigin(() => affineFromProjection(this.toScreen));
+    return this.camera ?? this.viewer.canvasTransform();
   }
 }

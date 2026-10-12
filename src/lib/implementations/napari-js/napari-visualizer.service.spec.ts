@@ -2810,10 +2810,10 @@ describe('NapariVisualizerService', () => {
       expect(() => overlay?.setMode('none')).not.toThrow();
     });
 
-    it('hands the region overlay CLIENT pixels both ways, wherever the canvas sits', async () => {
-      // Regression (NAPARI-BOUNDARY-6): the 3D screen-space adapter returned canvas-local px
-      // from worldToCanvas while the overlay expects client px (it subtracts its own rect), so
-      // with the canvas anywhere but the page origin the lasso was drawn offset from the cursor.
+    it('maps the pointer from client pixels into the canvas, wherever the canvas sits', async () => {
+      // Regression (NAPARI-BOUNDARY-6): with the canvas anywhere but the page origin the 3D lasso
+      // was drawn offset from the cursor. "World" is canvas-local px, which the overlay draws in
+      // as they are (the svg shares the canvas's origin).
       await mount3d();
       const internals = service as unknown as {
         canvas: HTMLCanvasElement;
@@ -2821,7 +2821,7 @@ describe('NapariVisualizerService', () => {
         tools: {
           screenSpaceViewer(v: unknown): {
             canvasToWorld(x: number, y: number): [number, number];
-            worldToCanvas(x: number, y: number): [number, number];
+            canvasTransform(): readonly number[];
           };
         };
       };
@@ -2830,7 +2830,7 @@ describe('NapariVisualizerService', () => {
         .mockReturnValue({ left: 100, top: 50, width: 300, height: 150 } as DOMRect);
       const screen = internals.tools.screenSpaceViewer(internals.viewer);
       expect(screen.canvasToWorld(130, 70)).toEqual([30, 20]);
-      expect(screen.worldToCanvas(30, 20)).toEqual([130, 70]);
+      expect(screen.canvasTransform()).toEqual([1, 0, 0, 1, 0, 0]);
     });
 
     it('an orbit clears only the regions drawn in 3D, not the ones it found', async () => {

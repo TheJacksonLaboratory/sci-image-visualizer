@@ -166,6 +166,10 @@ CORE-1) refer to the review document attached to #45.
   bookkeeping are gone. The nearest centre still wins in 2D and the front-most in 3D; an exact tie
   between transcripts now goes to the one drawn on top (NAPARI-BOUNDARY-24, NAPARI-SVC-17,
   SPATIAL-14).
+- The napari region overlay takes its world → screen matrix from napari-js's
+  `Viewer.canvasTransform()`: a camera frame and a region redraw read no layout (they read the
+  canvas and svg rects three and one times); only a pointer event reads the svg's position. The
+  3D lasso's screen-space viewer draws with the identity (NAPARI-BOUNDARY-10).
 
 ### Docs
 

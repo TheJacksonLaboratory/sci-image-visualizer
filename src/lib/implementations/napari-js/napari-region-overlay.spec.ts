@@ -11,7 +11,8 @@ import { bezierAnchorHandles } from '../../models/bezier';
  *
  * The fake napari Viewer uses an *identity* transform: image coords == client
  * coords == SVG-local px (the svg's getBoundingClientRect is the jsdom default
- * {left:0, top:0}), so a press at client (5,5) is image pixel (5,5). The camera's
+ * {left:0, top:0}, and `canvasTransform` is the identity), so a press at client
+ * (5,5) is image pixel (5,5). The camera's
  * `changed.connect` records the listener and returns a disconnect fn so teardown
  * can be asserted. `setControlsEnabled` is tracked.
  *
@@ -33,7 +34,7 @@ beforeAll(() => {
 
 interface FakeViewer {
   canvasToWorld: (clientX: number, clientY: number) => [number, number];
-  worldToCanvas: (worldX: number, worldY: number) => [number, number];
+  canvasTransform: () => [number, number, number, number, number, number];
   setControlsEnabled: (enabled: boolean) => void;
   camera: { changed: { connect(listener: () => void): () => void } };
   cameraListeners: Array<() => void>;
@@ -45,7 +46,7 @@ function fakeViewer(): FakeViewer {
   const controlsEnabledLog: boolean[] = [];
   return {
     canvasToWorld: (clientX: number, clientY: number) => [clientX, clientY],
-    worldToCanvas: (worldX: number, worldY: number) => [worldX, worldY],
+    canvasTransform: () => [1, 0, 0, 1, 0, 0],
     setControlsEnabled: (enabled: boolean) => {
       controlsEnabledLog.push(enabled);
     },
@@ -236,18 +237,21 @@ describe('NapariRegionOverlay', () => {
     expect(svgOf(overlay).style.pointerEvents).toBe('none');
   });
 
-  it('reads the svg rect once per redraw, not once per vertex (review NAPARI-BOUNDARY-10)', () => {
+  it('reads no layout to follow the camera or to redraw: one transform per camera (NAPARI-BOUNDARY-10)', () => {
     for (let i = 0; i < 5; i++) store.addRegion(triRegion()); // the last one is selected
     store.setShowShapeLabel(true);
     const read = jest.spyOn(svgOf(overlay), 'getBoundingClientRect');
+    const transform = jest.spyOn(viewer, 'canvasTransform');
     viewer.cameraListeners[0]();
-    expect(read).toHaveBeenCalledTimes(1);
+    overlay.redraw();
+    expect(read).not.toHaveBeenCalled();
+    expect(transform).toHaveBeenCalledTimes(2); // once per camera change, once per redraw
     expect(svgOf(overlay).querySelectorAll('polygon')).toHaveLength(5);
   });
 
   it('a camera move rewrites one transform and does not rebuild the regions (NAPARI-BOUNDARY-10)', () => {
     let zoom = 1;
-    viewer.worldToCanvas = (x: number, y: number) => [x * zoom + 5, y * zoom];
+    viewer.canvasTransform = () => [zoom, 0, 0, zoom, 5, 0];
     store.addRegion(triRegion());
     store.setSelectedShapeIndices([]); // no handles: only the regions are on screen
     overlay.redraw();
@@ -270,7 +274,7 @@ describe('NapariRegionOverlay', () => {
 
   it("a camera move re-positions the selected region's handles in place", () => {
     let zoom = 1;
-    viewer.worldToCanvas = (x: number, y: number) => [x * zoom, y * zoom];
+    viewer.canvasTransform = () => [zoom, 0, 0, zoom, 0, 0];
     store.addRegion(rectRegionAt(0, 0, 10, 10)); // selected → four corner handles
     const handles = () =>
       Array.from(svgOf(overlay).querySelectorAll('rect')).filter((el) => el.getAttribute('fill') === '#fff');
@@ -314,7 +318,7 @@ describe('NapariRegionOverlay', () => {
     function tinyWorldOverlay(quantum: number) {
       const v = fakeViewer();
       v.canvasToWorld = (cx: number, cy: number) => [cx * PER_PX, cy * PER_PX];
-      v.worldToCanvas = (wx: number, wy: number) => [wx / PER_PX, wy / PER_PX];
+      v.canvasTransform = () => [1 / PER_PX, 0, 0, 1 / PER_PX, 0, 0];
       const o = new NapariRegionOverlay(host, v as any, store);
       o.setWorldQuantum(quantum);
       return o;
@@ -604,9 +608,10 @@ describe('NapariRegionOverlay', () => {
   });
 
   /**
-   * The transforms speak CLIENT px, and the overlay maps them into its svg itself. With the
-   * host at the page origin (jsdom's default zero rects) a canvas-local transform would pass
-   * too, so these put the host at (100, 50) (review NAPARI-BOUNDARY-6).
+   * A pointer speaks CLIENT px, and the overlay maps it into its svg itself; drawing is
+   * canvas-local (= svg-local). With the host at the page origin (jsdom's default zero rects) a
+   * mix-up of the two would pass too, so these put the host at (100, 50) (review
+   * NAPARI-BOUNDARY-6).
    */
   describe('a host away from the page origin', () => {
     const LEFT = 100;
@@ -617,7 +622,7 @@ describe('NapariRegionOverlay', () => {
       const v = fakeViewer();
       // What napari-js does: client px = canvas rect origin + canvas-local px.
       v.canvasToWorld = (cx: number, cy: number) => [cx - LEFT, cy - TOP];
-      v.worldToCanvas = (wx: number, wy: number) => [wx + LEFT, wy + TOP];
+      // ...and canvas-local px = world: the identity camera.
       offset = new NapariRegionOverlay(host, v, store);
       jest
         .spyOn(svgOf(offset), 'getBoundingClientRect')

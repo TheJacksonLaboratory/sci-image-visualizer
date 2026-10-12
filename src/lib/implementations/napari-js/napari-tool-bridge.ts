@@ -6,6 +6,7 @@ import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { PixelData } from '../../contracts/visualizer.contract';
 import { ICellSegmenter } from '../../contracts/cell-segmenter.contract';
 import { RegionStore } from '../../store/region-store.service';
+import { IDENTITY_AFFINE } from '../../region-overlay/svg-region-renderer';
 import { CachedImageData, CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { CanvasToolManager } from '../../toolbar/tool-kit/canvas-tool-manager';
 import { createCanvasToolManager } from '../../toolbar/canvas-tools';
@@ -191,25 +192,17 @@ export class NapariToolBridge {
 
   /**
    * The {@link OverlayViewer} the 3D region overlay draws through: "world" is the canvas, in
-   * canvas-local CSS pixels. The overlay's contract is CLIENT pixels on both sides (it subtracts
-   * its own rect, as for napari-js's `Viewer.worldToCanvas`), so both directions apply the
-   * canvas's client offset — returning canvas-local pixels from `worldToCanvas` drew the lasso
-   * offset from the cursor whenever the canvas was not at the page origin.
+   * canvas-local CSS pixels. A pointer arrives in CLIENT pixels, so `canvasToWorld` subtracts the
+   * canvas's client offset (without it the lasso was drawn offset from the cursor whenever the
+   * canvas was not at the page origin); drawing is then the identity, with no layout read.
    */
   screenSpaceViewer(viewer: Viewer): OverlayViewer {
-    const offset = (): [number, number] => {
-      const r = this.host.canvas()?.getBoundingClientRect();
-      return r ? [r.left, r.top] : [0, 0];
-    };
     return {
       canvasToWorld: (clientX: number, clientY: number) => {
-        const [left, top] = offset();
-        return [clientX - left, clientY - top];
+        const r = this.host.canvas()?.getBoundingClientRect();
+        return r ? [clientX - r.left, clientY - r.top] : [clientX, clientY];
       },
-      worldToCanvas: (x: number, y: number) => {
-        const [left, top] = offset();
-        return [x + left, y + top];
-      },
+      canvasTransform: () => IDENTITY_AFFINE,
       setControlsEnabled: (enabled: boolean) => viewer.setControlsEnabled(enabled),
       camera: viewer.camera3d,
     };

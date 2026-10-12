@@ -2,10 +2,11 @@ import type { OverlayViewer } from '../napari-region-overlay';
 import { OverlayProjection } from './overlay-projection';
 
 describe('OverlayProjection', () => {
-  // World = client px / 10, with the svg 100 px right of and 50 px below the client origin.
+  // World = client px / 10, with the svg (and the canvas) 100 px right of and 50 px below the
+  // client origin: world → svg-local is ×10 less that offset.
   const viewer = {
     canvasToWorld: (x: number, y: number) => [x / 10, y / 10] as [number, number],
-    worldToCanvas: (x: number, y: number) => [x * 10, y * 10] as [number, number],
+    canvasTransform: () => [10, 0, 0, 10, -100, -50] as [number, number, number, number, number, number],
     setControlsEnabled: () => undefined,
     camera: { changed: { connect: () => () => undefined } },
   } as OverlayViewer;
@@ -26,17 +27,22 @@ describe('OverlayProjection', () => {
     expect(projection.toWorld(123, 47)).toEqual([12.3, 4.7]);
   });
 
-  it('converts world points to svg-local pixels, reading the svg rect once per block', () => {
+  it('converts world points to svg-local pixels through the camera affine, with no layout read', () => {
     const { projection, rect } = setup();
     expect(projection.toLocal(20, 10)).toEqual([100, 50]);
-    rect.mockClear();
+    expect(projection.affine()).toEqual([10, 0, 0, 10, -100, -50]);
+    expect(rect).not.toHaveBeenCalled();
+  });
+
+  it('reads the svg rect once per block for pointers, however many it converts', () => {
+    const { projection, rect } = setup();
     projection.withOrigin(() => {
       projection.toLocal(1, 1);
       projection.toScreen(2, 2);
-      projection.screenDist(110, 60, 1, 1);
+      expect(projection.screenDist(110, 60, 11, 6)).toBe(0); // the same point, both ways
+      projection.clientToLocal(5, 5);
     });
     expect(rect).toHaveBeenCalledTimes(1);
-    expect(projection.affine()).toEqual([10, 0, 0, 10, -100, -50]);
   });
 
   it('measures world units per screen pixel through the transform', () => {

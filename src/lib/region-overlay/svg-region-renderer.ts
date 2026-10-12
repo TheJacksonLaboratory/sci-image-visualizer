@@ -33,10 +33,9 @@ export const IDENTITY_AFFINE: Affine = [1, 0, 0, 1, 0, 0];
 
 /**
  * The affine of a projection that is affine (pan/zoom/rotate/flip), read from
- * where it sends (0,0), (1,0) and (0,1). Both overlays' world → screen
- * projections are: OSD's viewport transform, and napari-js's
- * `worldToCanvas` (camera centre/zoom plus the canvas rect), so this is how
- * either gets its matrix without depending on viewer internals.
+ * where it sends (0,0), (1,0) and (0,1) — how the OSD overlay gets its matrix
+ * from the viewport transform without depending on viewer internals. (napari-js
+ * hands the napari overlay its matrix directly: `Viewer.canvasTransform()`.)
  */
 export function affineFromProjection(project: (x: number, y: number) => readonly [number, number]): Affine {
   const [ox, oy] = project(0, 0);
