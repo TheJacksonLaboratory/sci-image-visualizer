@@ -39,6 +39,13 @@ function transcriptsOf<T>(tiles: NapariSpatialTileLayers): T {
   return (tiles as unknown as { transcripts: T }).transcripts;
 }
 
+/** A headless viewer looking at `center`, `zoom` CSS px per world unit. */
+function viewerAt(center: [number, number], zoom: number): Viewer {
+  const viewer = new Viewer({ canvas: document.createElement('canvas') });
+  viewer.camera.set(center, zoom);
+  return viewer;
+}
+
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
     count: 1,
@@ -73,48 +80,14 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
       continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     };
-    const listeners: (() => void)[] = [];
-    const items: unknown[] = [];
-    const layer = () => {
-      const l = { values: null };
-      return l;
-    };
-    const viewer = {
-      camera: {
-        center: [50, 50],
-        zoom: 4,
-        changed: {
-          connect: (f: () => void) => {
-            listeners.push(f);
-            return () => undefined;
-          },
-        },
-      },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addShapes: jest.fn(() => {
-        const l = layer();
-        items.push(l);
-        return l;
-      }),
-      addPoints: jest.fn(() => {
-        const l = layer();
-        items.push(l);
-        return l;
-      }),
-      addImage: jest.fn(() => {
-        const l = layer();
-        items.push(l);
-        return l;
-      }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 4);
     const tiles = new NapariSpatialTileLayers(port, host);
     tiles.attach(viewer);
-    return { tiles, getPolygonTile, moveCamera: () => listeners.forEach((f) => f()) };
+    return {
+      tiles,
+      getPolygonTile,
+      moveCamera: () => viewer.camera.set(viewer.camera.center, viewer.camera.zoom),
+    };
   }
 
   /** Let the debounce and every awaited fetch settle. */
@@ -202,31 +175,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
       continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [50, 50], zoom: 4, changed: { connect: () => () => undefined } },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addPoints: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      addShapes: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      addImage: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 4);
     const tiles = new NapariSpatialTileLayers(port, host);
     tiles.attach(viewer);
     type WithColors = { transcriptColors: (...a: unknown[]) => unknown };
@@ -337,19 +286,7 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
       })),
       transcriptBudget: budget,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [5, 5], zoom, changed: { connect: () => () => undefined } },
-      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([5, 5], zoom);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
       canvasSize: () => [400, 400],
@@ -477,15 +414,7 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
       transcriptBudget: budget,
       transcriptQuality: quality,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
-      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => ({})),
-      addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], zoom);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
       canvasSize: () => [400, 400],
@@ -644,14 +573,7 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'] };
-    const viewer = {
-      camera: { center: [50, 50], zoom: 40, changed: { connect: () => () => undefined } },
-      layers: { items: [] as unknown[], add: () => undefined, remove: () => undefined },
-      addPoints: jest.fn(() => ({})),
-      addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 40);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
       canvasSize: () => [400, 400],
@@ -984,31 +906,7 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
       },
     } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, ...o.view };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [5, 5], zoom: o.zoom, changed: { connect: () => () => undefined } },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addPoints: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      addShapes: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      addImage: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([5, 5], o.zoom);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(4)],
       canvasSize: () => [400, 400],
@@ -1017,7 +915,7 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
     });
     tiles.attach(viewer);
     const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
-    return { tiles, plan, getTranscriptSummary, items };
+    return { tiles, plan, getTranscriptSummary, viewer };
   }
 
   const flush = async () => {
@@ -1126,14 +1024,14 @@ describe('NapariSpatialTileLayers: hovering a transcript', () => {
   });
 
   it('says nothing once the transcript layer is gone from the viewer', async () => {
-    const { tiles, plan, items } = setup({
+    const { tiles, plan, viewer } = setup({
       view: { transcriptGenes: ['G0'] },
       zoom: 20,
       tile: entries({ x: [5] }),
     });
     await plan();
     expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).not.toBeNull();
-    items.length = 0;
+    for (const layer of [...viewer.layers.items]) viewer.layers.remove(layer);
     expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
     tiles.detach();
   });
@@ -1156,23 +1054,7 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
       density: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
     } as unknown as SpatialDataset;
     let view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'density' as const, transcriptGenes: ['A'], ...patch };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [2, 2], zoom: 40, changed: { connect: () => () => undefined } },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addPoints: jest.fn(() => ({})),
-      addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => {
-        const l = {};
-        items.push(l);
-        return l;
-      }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([2, 2], 40);
     const densityChanged = jest.fn();
     const tiles = new NapariSpatialTileLayers({ getDensity } as unknown as SpatialDataPort, {
       latest: () => [dataset, view, emptySelection(1)],
@@ -1191,13 +1073,14 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
 
   it('draws once, and an unchanged plan neither refetches nor redraws', async () => {
     const { tiles, plan, setView, getDensity, viewer } = setup();
+    const addImage = jest.spyOn(viewer, 'addImage');
     await plan();
     await plan();
     expect(getDensity).toHaveBeenCalledTimes(1);
-    expect(viewer.addImage).toHaveBeenCalledTimes(1);
+    expect(addImage).toHaveBeenCalledTimes(1);
     setView({ densityOpacity: 0.3 }); // part of the key
     await plan();
-    expect(viewer.addImage).toHaveBeenCalledTimes(2);
+    expect(addImage).toHaveBeenCalledTimes(2);
     tiles.detach();
   });
 
@@ -1250,14 +1133,7 @@ describe('NapariSpatialTileLayers: the transcripts-in-view estimate', () => {
       transcriptHiddenGenes: ['B'],
       ...patch,
     };
-    const viewer = {
-      camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
-      layers: { items: [], add: () => undefined, remove: () => undefined },
-      addPoints: jest.fn(() => ({})),
-      addShapes: jest.fn(() => ({})),
-      addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], zoom);
     const estimateChanged = jest.fn();
     const tiles = new NapariSpatialTileLayers({ getTranscriptCounts } as unknown as SpatialDataPort, {
       latest: () => [dataset, view, emptySelection(1)],

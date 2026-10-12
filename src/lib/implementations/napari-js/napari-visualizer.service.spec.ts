@@ -562,19 +562,10 @@ describe('NapariVisualizerService', () => {
     document.body.appendChild(div);
     const loaded = await service.load(imageInfo(), 0);
     await service.plot('lazy-readback-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
-    type Internals = {
-      viewer: { camera: { changed: { connect(l: () => void): () => void } } };
-      tools: { install2dInteraction(v: unknown, h: HTMLElement): void };
+    const { camera } = (service as unknown as { viewer: Viewer }).viewer;
+    const pan = () => {
+      camera.center = [camera.center[0] + 1, camera.center[1]];
     };
-    const internals = service as unknown as Internals;
-    // The stub camera never emits: capture the listeners the 2D interaction installs.
-    const listeners: Array<() => void> = [];
-    internals.viewer.camera.changed.connect = (l) => {
-      listeners.push(l);
-      return () => undefined;
-    };
-    internals.tools.install2dInteraction(internals.viewer, div);
-    const pan = () => listeners.forEach((l) => l());
     const settle = () => new Promise((r) => setTimeout(r, 300));
     await settle();
     const readback = jest.spyOn(Viewer.prototype, 'readDisplayedPixels');
@@ -825,7 +816,7 @@ describe('NapariVisualizerService', () => {
   });
 
   it('volume display state drives the layer contrast window + gamma from the store', async () => {
-    // Capture the volume layer the stub Viewer hands back so we can assert what the
+    // Capture the volume layer the Viewer hands back so we can assert what the
     // display-state subscription writes onto it (regression: min/max/gamma must reach the volume).
     const addVolume = jest.spyOn(
       Viewer.prototype as unknown as { addVolume: (...a: unknown[]) => unknown },
@@ -1245,19 +1236,14 @@ describe('NapariVisualizerService', () => {
     document.body.appendChild(div);
     const loaded = await service.load(imageInfo(), 0);
     await service.plot('zoom-3d-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
-    const viewer = (
-      service as unknown as {
-        viewer: { dims: { ndisplay?: number }; camera: { zoom: number }; camera3d: { zoomBy?: jest.Mock } };
-      }
-    ).viewer;
-    // The stub models neither; napari-js 0.14 has both.
-    viewer.dims.ndisplay = 3;
-    viewer.camera3d.zoomBy = jest.fn();
+    const viewer = (service as unknown as { viewer: Viewer }).viewer;
+    expect(viewer.dims.ndisplay).toBe(3); // addVolume switched the viewer to 3D
+    const zoomBy = jest.spyOn(viewer.camera3d, 'zoomBy');
 
     service.zoomIn();
     service.zoomOut();
     // zoomBy scales the orbit DISTANCE, so zooming in shrinks it.
-    expect(viewer.camera3d.zoomBy.mock.calls.map((c) => c[0])).toEqual([1 / 1.3, 1.3]);
+    expect(zoomBy.mock.calls.map((c) => c[0])).toEqual([1 / 1.3, 1.3]);
     expect(viewer.camera.zoom).toBe(1);
 
     service.unsubscribe();
@@ -1796,7 +1782,7 @@ describe('NapariVisualizerService', () => {
         await new Promise((r) => setTimeout(r, 20));
       }
 
-      /** Where the identity-projection stub puts observation `i` on the canvas. */
+      /** Where the 3D camera puts observation `i` on the canvas. */
       const screenOf = (i: number) => {
         const p = (
           service as unknown as {
@@ -2815,30 +2801,14 @@ describe('NapariVisualizerService', () => {
       // Regression (NAPARI-SVC-11): every camera change with any region present emptied the
       // app-wide RegionStore — including the image's own regions, which have nothing to do
       // with a screen-space lasso.
-      await mount3d();
       regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
       const [found] = regionStore.getRegions();
-      // Re-install the 3D interaction on a viewer whose orbit the test can drive (the stub's
-      // camera never emits).
-      let orbit!: () => void;
-      const viewer = {
-        camera3d: {
-          changed: {
-            connect: (l: () => void) => {
-              orbit = l;
-              return () => undefined;
-            },
-          },
-        },
-        setControlsEnabled: () => undefined,
-      };
-      (
-        service as unknown as { tools: { install3dInteraction(v: unknown, h: HTMLElement): void } }
-      ).tools.install3dInteraction(viewer, document.getElementById('spatial3d-host')!);
+      await mount3d();
       regionStore.addRegion({ bounds: { x: 10, y: 10, width: 5, height: 5 } } as never);
       expect(regionStore.getRegions()).toHaveLength(2);
 
-      orbit();
+      const { camera3d } = (service as unknown as { viewer: Viewer }).viewer;
+      camera3d.orbit(0.1, 0);
       expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id]);
     });
 
@@ -3151,7 +3121,7 @@ describe('NapariVisualizerService', () => {
       addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
     });
 
-    /** Layers currently in the stub viewer's scene. */
+    /** Layers currently in the viewer's scene. */
     const viewerLayers = () =>
       ((service as unknown as { viewer: { layers: { items: readonly unknown[] } } }).viewer?.layers.items ??
         []) as readonly unknown[];
@@ -3170,21 +3140,17 @@ describe('NapariVisualizerService', () => {
 
     describe('a dataset that brings no image', () => {
       /**
-       * Exercised directly against a stub scene rather than through a mount: this suite's
-       * image fixture carries no urls, so no image layer is ever built and an assertion
-       * over "the image layers" would pass on an empty list — which is how the first
-       * version of these tests passed while proving nothing.
+       * Exercised directly against a viewer of its own rather than through a mount: this
+       * suite's image fixture carries no urls, so no image layer is ever built and an
+       * assertion over "the image layers" would pass on an empty list — which is how the
+       * first version of these tests passed while proving nothing.
        */
       const scene = () => {
-        const layers = [
-          { kind: 'image', visible: true },
-          { kind: 'points', visible: true },
-          { kind: 'image', visible: true },
-        ];
-        return {
-          layers,
-          viewer: { layers: { items: layers }, requestRender: jest.fn() },
-        };
+        const viewer = new Viewer({ canvas: document.createElement('canvas') });
+        const pixel = () =>
+          ({ kind: 'typed', width: 1, height: 1, channels: 1, dtype: 'uint8', data: new Uint8Array(1) }) as const;
+        const layers = [viewer.addImage(pixel()), viewer.addPoints([[0, 0]]), viewer.addImage(pixel())];
+        return { layers, viewer };
       };
       /** The spatial scene, unmounted: hiding reads only its session and its own gene map. */
       let spatialScene: Spatial2dScene;
@@ -3287,8 +3253,9 @@ describe('NapariVisualizerService', () => {
 
       it('asks for a redraw, or the change would not be on screen until something else did', () => {
         const { viewer } = scene();
+        const requestRender = jest.spyOn(viewer, 'requestRender');
         hide(viewer, false);
-        expect(viewer.requestRender).toHaveBeenCalled();
+        expect(requestRender).toHaveBeenCalled();
       });
     });
 
