@@ -106,6 +106,30 @@ describe('WandTool', () => {
     expect(state.regions[0].label).toBe('Region'); // default class label
   });
 
+  it('seeds at the pixel under the click, not the nearest pixel corner', () => {
+    // A bright 2×2 block whose last pixel (11, 11) covers [11, 12)²: a click at (11.7, 11.7)
+    // is on it. Rounding seeded (12, 12), in the background, and grew that instead.
+    const img = cached();
+    for (const [x, y] of [
+      [10, 10],
+      [11, 10],
+      [10, 11],
+      [11, 11],
+    ])
+      (img.frames[0] as number[][])[y][x] = 250;
+    const { host, container, state } = makeHost({ cached: img });
+    // Client coordinates are whole numbers: put the click 0.7 px into the pixel in data space.
+    const transform = host.getCoordinateTransform();
+    host.getCoordinateTransform = () => ({ ...transform, clientToData: (x, y) => ({ x: x + 0.7, y: y + 0.7 }) });
+    tool.activate(host, { patchSize: 9, simpleMode: true });
+
+    cv(container).dispatchEvent(mouse('pointerdown', 11, 11));
+
+    const poly = state.regions[0].bounds as Polygon;
+    expect(Math.min(...poly.xpoints, ...poly.ypoints)).toBe(10);
+    expect(Math.max(...poly.xpoints, ...poly.ypoints)).toBeLessThanOrEqual(12);
+  });
+
   it('a drag (mousedown → mousemove) keeps extending the same region', () => {
     const { host, container, state } = makeHost();
     tool.activate(host, { patchSize: 9, simpleMode: true });

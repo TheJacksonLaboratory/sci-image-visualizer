@@ -27,11 +27,14 @@ export interface CachedImageData {
    *  (false). Packed frames always read as RGB. */
   isGrayscale: boolean;
   /**
-   * Data-coords of matrix pixel (0,0). Lets the matrix be a *crop* of the data
-   * space rather than starting at the origin — e.g. the OSD backend samples the
-   * currently rendered viewport, so when zoomed in the matrix covers only the
-   * visible sub-region at screen resolution. Defaults to 0 (full-frame matrix,
-   * as Plotly provides). matrixIndex = (data - origin) / ratio.
+   * Data-coords of matrix pixel (0,0)'s top-left corner. Lets the matrix be a
+   * *crop* of the data space rather than starting at the origin — e.g. the OSD
+   * backend samples the currently rendered viewport, so when zoomed in the matrix
+   * covers only the visible sub-region at screen resolution. Defaults to 0.
+   * matrix = (data - origin) / ratio, and matrix pixel (i, j) covers
+   * `[i, i + 1) × [j, j + 1)` on every backend: a click floors to its pixel, and
+   * traced outlines run along pixel edges. Plotly, which centres its cells on
+   * whole data units, reports an origin half a cell before its first centre.
    */
   originX?: number;
   originY?: number;

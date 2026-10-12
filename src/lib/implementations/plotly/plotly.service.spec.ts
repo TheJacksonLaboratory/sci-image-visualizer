@@ -17,6 +17,8 @@ import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { Subject } from 'rxjs';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { PlotUtilities } from '../../plot.utilities';
+import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
+import { MatrixFrame } from '../../toolbar/tool-kit/matrix-frame';
 import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
 
 describe('PlotlyService', () => {
@@ -826,6 +828,18 @@ describe('PlotlyService canvas tools (setActiveTool)', () => {
     expect(overlays()).toBe(1);
     service.setActiveTool('drawrect'); // a region mode arms no canvas tool
     expect(overlays()).toBe(0);
+  });
+
+  it("hands the tools a frame whose whole pixels are a heatmap cell's edges", () => {
+    // Plotly centres cell (i, j) on origin + (i, j)·ratio; the tools take a matrix pixel to
+    // cover [i, i + 1), as on OSD and napari, so the frame starts half a cell early.
+    service.setSamplingFrames([[[1, 2]]], [2, 4], [100, 50]);
+    const cached = (service as unknown as { toolHost: CanvasToolHost }).toolHost.getCachedImageData()!;
+    expect([cached.originX, cached.originY]).toEqual([99, 48]);
+    const frame = MatrixFrame.from(cached);
+    // Cell 0's centre (100, 50) is in matrix pixel 0; its right edge (101) starts pixel 1.
+    expect([Math.floor(frame.toMatrixX(100)), Math.floor(frame.toMatrixY(50))]).toEqual([0, 0]);
+    expect(Math.floor(frame.toMatrixX(101))).toBe(1);
   });
 
   it('a deprecated setter disarms only its own tool', () => {

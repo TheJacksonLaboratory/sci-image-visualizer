@@ -57,6 +57,16 @@ describe('wand-region-grow', () => {
     expect(patch.mask[10 * 21 + 10]).toBe(1);
   });
 
+  it('centres the patch on the pixel containing the click (pixel x covers [x, x + 1))', () => {
+    const img = discImage(false);
+    expect(computeWandPatchMask(img, 60.9, 60.9, { patchSize: 21 })).toEqual(
+      computeWandPatchMask(img, 60, 60, { patchSize: 21 }),
+    );
+    expect(computeWandRegion(img, 60.9, 60.9, { patchSize: 21 })).toEqual(
+      computeWandRegion(img, 60, 60, { patchSize: 21 }),
+    );
+  });
+
   it('rejects an even patch size', () => {
     expect(() => computeWandPatchMask(discImage(false), 60, 60, { patchSize: 20 })).toThrow(/odd/);
   });

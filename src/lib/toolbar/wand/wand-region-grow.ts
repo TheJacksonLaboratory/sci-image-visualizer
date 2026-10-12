@@ -65,8 +65,8 @@ export function computeWandRegion(
       patch.mask,
       patch.size,
       patch.size,
-      Math.round(cx) - (patch.size - 1) / 2,
-      Math.round(cy) - (patch.size - 1) / 2,
+      Math.floor(cx) - (patch.size - 1) / 2,
+      Math.floor(cy) - (patch.size - 1) / 2,
       1,
       4,
     )[0] ?? null
@@ -147,8 +147,9 @@ export function computeWandPatchMask(
 function extractPatch(image: WandImage, cx: number, cy: number, W: number, type: WandType): Float32Array {
   const channels = type === 'GRAY' ? 1 : 3;
   const half = (W - 1) / 2;
-  const x0 = Math.round(cx) - half;
-  const y0 = Math.round(cy) - half;
+  // The patch centres on the pixel under the click: pixel x covers [x, x + 1) on every backend.
+  const x0 = Math.floor(cx) - half;
+  const y0 = Math.floor(cy) - half;
   const buf = new Float32Array(W * W * channels);
   const pixels = framePixels(image.data, image.isGrayscale);
   // A grayscale nested frame reads as (v, v, v): its value is rgb[0].

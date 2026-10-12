@@ -177,8 +177,9 @@ export class WandTool implements ICanvasTool<WandOptions> {
 
     const W = patch.size;
     const half = (W - 1) / 2;
-    const px0 = Math.round(matrixX) - half;
-    const py0 = Math.round(matrixY) - half;
+    // The patch is centred on the clicked pixel (`computePatchMask` floors the same way).
+    const px0 = Math.floor(matrixX) - half;
+    const py0 = Math.floor(matrixY) - half;
 
     // With no active region, a click on an existing region adopts it so this
     // stroke extends (or erases from) it.

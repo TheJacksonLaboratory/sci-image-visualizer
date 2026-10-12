@@ -98,10 +98,11 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
     service.setSamplingFrames([crop], [0.5, 0.5], [100, 50]);
 
     const data = (service as unknown as Cache).getCachedImageData();
+    // The tools' frame starts half a crop pixel before the crop's first cell centre.
     expect(data).toEqual(
       expect.objectContaining({
-        originX: 100,
-        originY: 50,
+        originX: 99.75,
+        originY: 49.75,
         width: 3,
         height: 2,
         ratios: [0.5, 0.5],
@@ -109,7 +110,7 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
     );
   });
 
-  it('reports origin 0,0 for a full-frame cache', () => {
+  it('reports origin -0.5,-0.5 (cell 0 centred on 0) for a full-frame cache', () => {
     service.setSamplingFrames(
       [
         [
@@ -120,7 +121,7 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
       [1, 1],
     );
     const data = (service as unknown as Cache).getCachedImageData();
-    expect(data).toEqual(expect.objectContaining({ originX: 0, originY: 0, width: 2, height: 2 }));
+    expect(data).toEqual(expect.objectContaining({ originX: -0.5, originY: -0.5, width: 2, height: 2 }));
   });
 });
 
