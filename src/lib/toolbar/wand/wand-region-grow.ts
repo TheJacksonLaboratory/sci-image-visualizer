@@ -1,6 +1,7 @@
 import { Polygon } from '../../models/region';
 import { maskToPolygons } from '../../geometry/contour';
 import { IWandOptions, WandType } from '../../contracts/display-types';
+import { bt601Luminance } from '../../contracts/intensity';
 import { CachedFrame, framePixels, isPackedFrame } from '../tool-kit/frame-pixels';
 
 /**
@@ -165,7 +166,7 @@ function extractPatch(image: WandImage, cx: number, cy: number, W: number, type:
         }
       } else if (channels === 1) {
         // GRAY type forced on RGB image: convert with luminance.
-        buf[dst] = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+        buf[dst] = bt601Luminance(rgb[0], rgb[1], rgb[2]);
       } else {
         buf[dst] = rgb[0];
         buf[dst + 1] = rgb[1];

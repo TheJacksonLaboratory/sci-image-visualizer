@@ -10,10 +10,9 @@ import { IHistogram } from './channel-histogram-api.contract';
  *    pixels).
  */
 
-/** ITU-R BT.601 luminance for an RGB pixel (Plotly's scalar projection). */
-export function bt601Luminance(r: number, g: number, b: number): number {
-  return 0.299 * r + 0.587 * g + 0.114 * b;
-}
+/** ITU-R BT.601 luminance for an RGB pixel (Plotly's scalar projection): napari-js's
+ *  `luminance8`, under the name SIV's callers use, so there is one copy of the weights. */
+export { luminance8 as bt601Luminance } from 'napari-js';
 
 /** Max of the three channels (the OSD tile path's scalar projection).
  *  NOTE: the per-pixel recolor loop in `osd/display-pipeline.ts` keeps this
