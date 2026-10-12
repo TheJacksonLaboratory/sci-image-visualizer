@@ -2533,6 +2533,27 @@ describe('NapariVisualizerService', () => {
         expect(layers[0].width).toBeLessThan(4 * 100);
       });
 
+      it('follows the invert setting, live, whatever the previous scene left behind', async () => {
+        // Regression: the volumes read `invert` from the display state, which only the image,
+        // volume and surface scenes keep current. Opened straight into the cloud, they took the
+        // stale default (or whatever the previous scene left), and a toggle never reached them.
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        spatialPort.getColumn.mockResolvedValue(column);
+        store.setInvert(true);
+        await mount3d(clustered());
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' }, densityVolume: true });
+        await flush();
+
+        const layers = densityLayers(addVolume);
+        expect(layers).toHaveLength(3);
+        expect(layers.map((l) => l.invert)).toEqual([true, true, true]);
+
+        store.setInvert(false);
+        expect(layers.map((l) => l.invert)).toEqual([false, false, false]);
+        expect(densityLayers(addVolume)).toHaveLength(3); // restyled, not rebuilt
+      });
+
       it('divides the opacity budget across the clusters so overlap does not blow out', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));

@@ -119,6 +119,18 @@ export class NapariDisplayState implements DisplaySnapshot {
     });
   }
 
+  /**
+   * Follow the invert setting alone: record it for the builders, then hand it to `apply` — for a
+   * scene that draws inverted layers without the channel states (the spatial cloud's density
+   * volumes). Emits at once with the current value.
+   */
+  watchInvert(apply: (invert: boolean) => void): Subscription {
+    return this.store.getInvert().subscribe((invert) => {
+      this.invert = invert;
+      apply(invert);
+    });
+  }
+
   /** The spatial scenes' share: they follow the colormap and reverse flag (not invert) through
    *  their own subscription, because a gene map recolours with them. */
   record(colormap: ColormapNode | null, reverse: boolean): void {

@@ -77,6 +77,8 @@ CORE-1) refer to the review document attached to #45.
 - **napari 2D spatial: a stitched slice re-render dropped the gene map**, and the cell,
   transcript and density overlays until the camera next moved; they now come back with the
   markers.
+- **napari 3D spatial: the density volumes ignored the invert setting**: they read it without
+  following it, so they took whatever the previous scene left and a toggle never reached them.
 
 ### Changed
 

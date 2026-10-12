@@ -1,3 +1,4 @@
+import { Subscription } from 'rxjs';
 import { colormapFromLut } from 'napari-js';
 import type { Points3DLayer, ProjectedPoints, Viewer, VolumeLayer } from 'napari-js';
 
@@ -91,12 +92,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    *  one; a rebuild that leaves the key alone lets it finish. */
   private readonly densityLoads = new Supersede();
   private readonly geneMapLoads = new Supersede();
+  /** The store's invert setting, which the density volumes follow (no other subscription of
+   *  this scene carries it). */
+  private invertSub: Subscription | null = null;
 
   constructor(ctx: SceneContext, session: SpatialSession) {
     super(ctx, session, true);
   }
 
   async mount(): Promise<void> {
+    // Before the spatial subscription, so the first build already reads the current value.
+    this.invertSub = this.ctx.display.watchInvert((invert) => {
+      // A live setter: the volumes restyle, nothing is rasterised again.
+      for (const layer of this.densityLayers) layer.invert = invert;
+      this.ctx.viewer.requestRender();
+    });
     this.ctx.tools.install3dInteraction(this.ctx.viewer, this.ctx.host);
     this.hover.install(this.ctx.host);
     this.subscribeSpatial();
@@ -118,6 +128,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   dispose(): void {
     this.disposeSpatial();
+    this.invertSub?.unsubscribe();
+    this.invertSub = null;
     this.densityLoads.cancel();
     this.geneMapLoads.cancel();
     this.scaleBar?.destroy();
