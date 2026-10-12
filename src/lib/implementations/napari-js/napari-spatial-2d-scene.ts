@@ -6,7 +6,6 @@ import {
   SpatialColumn,
   SpatialDataset,
   SpatialImageRef,
-  SpatialObservations,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
@@ -66,6 +65,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    *  change (size, colour, opacity, selection) can update them in place. */
   private points: PointsLayer | null = null;
   private layerKey: string | null = null;
+  /** The observation each marker is, in draw order; null when every observation is drawn. */
+  private drawn: Uint32Array | null = null;
   /** The gene map's layer and the inputs it was coloured for (its field is cached in the session,
    *  on a clock of its own). */
   geneMapLayer: ImageLayer | null = null;
@@ -147,26 +148,29 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   }
 
   /**
-   * The markers' WORLD positions, indexed by observation, NaN for any not on the displayed plane —
-   * the same affine and the same subset the marker layer was built from, so the tooltip cannot
-   * point at a cell that is not drawn.
+   * The observation under a client position: napari-js's pick on the marker layer itself (a grid
+   * over its positions, rebuilt only when they change), so the tooltip cannot name a cell that is
+   * not drawn, then the drawn index mapped back to the observation.
+   *
+   * A marker is hit within `slackPx` screen pixels of its centre, and of several hits the
+   * NEAREST centre wins (an exact tie goes to the one drawn on top). Not napari's `'topmost'`: the
+   * slack is wider than most markers, and over a dense field of small ones "the last drawn within
+   * 10 px" names a neighbour rather than the cell under the cursor.
    */
-  protected hoverPositions(obs: SpatialObservations): Float32Array | null {
-    const dataset = this.session.latest?.[0];
-    if (!dataset || obs.count === 0) return null;
-    const slab = this.slab(dataset);
-    const ref = slab?.ref ?? dataset.imageRef;
-    const [sx, sy] = ref?.scale ?? [1, 1];
-    const [tx, ty] = ref?.translate ?? [0, 0];
-    const drawn = slab?.indices ?? null;
-    const out = new Float32Array(obs.count * 2).fill(NaN);
-    const n = drawn ? drawn.length : obs.count;
-    for (let k = 0; k < n; k++) {
-      const i = drawn ? drawn[k] : k;
-      out[i * 2] = obs.x[i] * sx + tx;
-      out[i * 2 + 1] = obs.y[i] * sy + ty;
-    }
-    return out;
+  protected pickObservation(clientX: number, clientY: number, slackPx: number): number {
+    const points = this.points;
+    if (!points) return -1;
+    const viewer = this.ctx.viewer;
+    const [wx, wy] = viewer.canvasToWorld(clientX, clientY);
+    const zoom = viewer.camera.zoom;
+    const k = points.pick(wx, wy, {
+      tolerance: slackPx / (zoom > 0 ? zoom : 1),
+      radiusAt: () => 0,
+      maxRadius: 0,
+      tieBreak: 'nearest',
+    });
+    if (k < 0) return -1;
+    return this.drawn ? this.drawn[k] : k;
   }
 
   /**
@@ -221,6 +225,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
         viewer.layers.remove(this.points);
         this.points = null;
         this.layerKey = null;
+        this.drawn = null;
       }
       if (this.geneMapLayer) {
         viewer.layers.remove(this.geneMapLayer);
@@ -291,6 +296,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       positions[i * 2 + 1] = obs.y[o];
     }
     this.layerKey = key;
+    this.drawn = drawn ?? null;
     this.points = viewer.addPoints(positions, {
       name: 'observations',
       size,

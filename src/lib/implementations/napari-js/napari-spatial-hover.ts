@@ -1,21 +1,14 @@
-import { nearestProjectedIndex, ScreenIndex, SCREEN_INDEX_MIN_POINTS } from 'napari-js';
 import type { Viewer } from 'napari-js';
 
 import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
-import {
-  NO_CATEGORY,
-  SpatialDataset,
-  SpatialObservations,
-  isCategoricalColumn,
-} from '../../contracts/spatial-dataset.contract';
+import { NO_CATEGORY, SpatialDataset, isCategoricalColumn } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import { sameSelection, selectByCategory } from '../../spatial/spatial-selection';
-import { type HoverSource, hoverText, nearestObservation, PointGridIndex } from '../../spatial/spatial-hover';
+import { type HoverSource, hoverText } from '../../spatial/spatial-hover';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import { Supersede } from '../../util/supersede';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
 import { NapariSpatialTileLayers } from './napari-spatial-tiles';
-import { SPATIAL_SELECTED_SIZE_SCALE } from './napari-spatial-encoding';
 
 /** Movement, in screen pixels, under which a press-release is a CLICK and not a
  *  drag. An orbit or a pan starts the same way, so the two have to be told
@@ -27,26 +20,23 @@ const CLICK_MAX_MS = 600;
 /** Pointer distance, in screen pixels, that still counts as "on" a marker.
  *  Generous relative to a 1.5px disc: the cursor is a blunt instrument, and a
  *  tooltip you have to hunt for is worse than none. */
-const HOVER_RADIUS_PX = 10;
+export const HOVER_RADIUS_PX = 10;
 
 /** What the hover reads from the spatial scene it serves. */
 export interface SpatialHoverHost {
-  /** The orbit view (positions in canvas pixels) rather than the 2D view (world units). */
+  /** The orbit view rather than the 2D view (no transcript markers to ask first). */
   readonly is3d: boolean;
   readonly viewer: Viewer;
-  readonly canvas: HTMLCanvasElement;
   readonly port: SpatialDataPort | null;
   readonly selection: SpatialSelectionStore | null;
   /** The dataset on screen, as the spatial subscription last saw it. */
   dataset(): SpatialDataset | null;
   /**
-   * Where each observation is drawn, indexed BY OBSERVATION with NaN for anything not drawn:
-   * WORLD units in 2D (the camera only scales there, so the pointer is converted instead of every
-   * point) and canvas pixels in 3D (the camera moves them, so they are rebuilt when it does).
+   * The OBSERVATION drawn under a client position, or -1 — `slackPx` screen pixels of slack
+   * around the pointer. The scene owns the pick (napari-js's, on the layer it drew) and maps the
+   * drawn index back to the observation.
    */
-  positions(obs: SpatialObservations): Float32Array | null;
-  /** Per-observation depth from the last 3D projection, for the depth-aware pick. */
-  depths(): Float32Array | null;
+  pick(clientX: number, clientY: number, slackPx: number): number;
   /** The 2D transcript markers, which sit on top of everything and are asked first. */
   tiles(): NapariSpatialTileLayers | null;
   /** A region tool owns the pointer (placing a polygon vertex is also a still click). */
@@ -74,26 +64,6 @@ export class SpatialHover {
   /** Latest wins within the scene: the KEY is only committed once a resolution lands, so a
    *  superseded fetch cannot leave the cache claiming to hold a source it never stored. */
   private readonly resolutions = new Supersede();
-  /** Hit-test positions (see {@link SpatialHoverHost.positions}) and the scene revision they were
-   *  built at. */
-  private positions: Float32Array | null = null;
-  private positionsRev = -1;
-  /**
-   * Screen-space bucket index over the 3D projection, built on the first hover after the
-   * scene moved rather than when it moves.
-   *
-   * Lazily, and that is the whole design: an orbit drag changes the camera every frame, so
-   * building eagerly would spend tens of milliseconds a frame indexing for picks nobody is
-   * making. Deferred, it is built once when the drag stops and the pointer next moves —
-   * measured upstream at 3.7M points, that turns a 12.6 ms scan per pointermove into
-   * 0.066 ms.
-   */
-  private screenIndex: ScreenIndex | null = null;
-  /** The 2D counterpart of {@link screenIndex}: a grid over the world positions. */
-  private grid2d: PointGridIndex | null = null;
-  /** Bumped whenever the cached positions go stale: a marker rebuild, or — in 3D
-   *  only, where the projection depends on it — a camera move. */
-  private sceneRev = 0;
   private pointer: { clientX: number; clientY: number } | null = null;
   private frame = 0;
   private off: (() => void)[] = [];
@@ -104,7 +74,7 @@ export class SpatialHover {
    * Listen on `el` (the plot host) rather than the canvas, so it keeps working over the region
    * overlay (an SVG covering the canvas, which would otherwise swallow every move), and throttle
    * to one hit-test per animation frame: a pointermove can fire far more often than that, and
-   * each test is a pass over the cloud.
+   * the first test after an orbit re-projects the cloud.
    */
   install(el: HTMLElement): void {
     this.dispose();
@@ -157,14 +127,6 @@ export class SpatialHover {
     this.off.push(() => el.removeEventListener('pointerleave', onLeave));
     this.off.push(() => el.removeEventListener('pointerdown', onDown));
     this.off.push(() => el.removeEventListener('pointerup', onUp));
-
-    // In 3D the cached positions are screen pixels, so an orbit invalidates them.
-    if (this.host.is3d) this.off.push(this.host.viewer.camera3d.changed.connect(() => this.invalidate()));
-  }
-
-  /** The drawn markers moved or changed meaning: the cached hit-test positions are stale. */
-  invalidate(): void {
-    this.sceneRev++;
   }
 
   /** Hide the tooltip (the navigator is being dragged, say). */
@@ -172,7 +134,7 @@ export class SpatialHover {
     this.tooltip?.hide();
   }
 
-  /** Remove the listeners and the tooltip, and drop the cached positions and colour source. */
+  /** Remove the listeners and the tooltip, and drop the colour source. */
   dispose(): void {
     for (const off of this.off) off();
     this.off = [];
@@ -181,10 +143,6 @@ export class SpatialHover {
     this.pointer = null;
     this.tooltip?.dispose();
     this.tooltip = null;
-    this.positions = null;
-    this.positionsRev = -1;
-    this.screenIndex = null;
-    this.grid2d = null;
     this.resolutions.cancel();
     this.hoverSource = null;
     this.hoverSourceKey = null;
@@ -283,7 +241,7 @@ export class SpatialHover {
       }
     }
 
-    const hit = this.hitTest(dataset.observations, pointer.clientX, pointer.clientY);
+    const hit = this.host.pick(pointer.clientX, pointer.clientY, HOVER_RADIUS_PX);
     const lines = hoverText(this.hoverSource, hit);
     if (!lines) {
       tip.hide();
@@ -313,7 +271,7 @@ export class SpatialHover {
 
     // The same pick the tooltip makes — depth-aware in 3D — so a click selects the class the
     // tooltip names, not an occluded marker's.
-    const hit = this.hitTest(dataset.observations, clientX, clientY);
+    const hit = this.host.pick(clientX, clientY, HOVER_RADIUS_PX);
     if (hit < 0) return;
     const code = source.codes[hit];
     // A cell the annotation does not cover has no class to select.
@@ -326,93 +284,5 @@ export class SpatialHover {
       return;
     }
     store.set(next);
-  }
-
-  /**
-   * The observation under a client position, or -1: the one hit-test the hover tooltip and the
-   * click-to-select share. 3D compares canvas pixels against the projected cloud; 2D holds world
-   * positions, so the pointer and the radius are converted once instead of projecting the cloud.
-   */
-  private hitTest(obs: SpatialObservations, clientX: number, clientY: number): number {
-    const positions = this.positionsFor(obs);
-    const { canvas, viewer, is3d } = this.host;
-    if (!positions) return -1;
-    const zoom = is3d ? 1 : (viewer.camera.zoom ?? 1);
-    const radius = HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);
-    if (is3d) {
-      const rect = canvas.getBoundingClientRect();
-      return this.pick(positions, clientX - rect.left, clientY - rect.top, radius);
-    }
-    const world = viewer.canvasToWorld(clientX, clientY);
-    if (!world) return -1;
-    return this.pick(positions, world[0], world[1], radius);
-  }
-
-  /**
-   * Which observation is under the cursor.
-   *
-   * In 3D this defers to napari-js's {@link nearestProjectedIndex} WITH the depths the
-   * projection produced, so the front-most candidate wins. That matters more than it
-   * sounds: the renderer depth-tests the billboards, and in a 3.7M-point cloud the cursor
-   * covers many of them — picking the one nearest the cursor's centre regularly names a
-   * cell that something else is drawn over, which reads as a wrong tooltip rather than as
-   * a subtlety of picking.
-   *
-   * In 2D the positions are WORLD coordinates on one plane, so there is no depth to break
-   * ties with and the existing nearest-marker rule is the right one.
-   */
-  private pick(positions: Float32Array, x: number, y: number, radius: number): number {
-    if (!this.host.is3d) {
-      return this.grid2d ? this.grid2d.nearest(x, y, radius) : nearestObservation(positions, x, y, radius);
-    }
-    // The cloud draws a selected marker LARGER, so the pick has to use the same radius the
-    // renderer used — otherwise the highlighted cells, the ones a reader is most likely to
-    // be pointing at, are the hardest to hover.
-    const scale = SPATIAL_SELECTED_SIZE_SCALE;
-    const mask = this.host.selection?.current()?.mask;
-    const opts = mask?.length ? { radiusAt: (i: number) => (mask[i] ? radius * scale : radius) } : undefined;
-    // `radius` still bounds which buckets are visited, so it has to be the LARGEST any
-    // point can claim, not the base one.
-    const reach = mask?.length ? radius * scale : radius;
-    if (this.screenIndex) return this.screenIndex.pick(x, y, reach, opts);
-    return nearestProjectedIndex(positions, x, y, reach, this.host.depths(), opts);
-  }
-
-  /**
-   * Positions to hit-test against, rebuilt only when the scene or camera moved.
-   *
-   * A pass over 3.7M observations is not something to do per pointermove, and the
-   * cloud does not move between frames unless something says it did.
-   */
-  private positionsFor(obs: SpatialObservations): Float32Array | null {
-    if (this.positions && this.positionsRev === this.sceneRev) return this.positions;
-    const { is3d, canvas } = this.host;
-    const built = this.host.positions(obs);
-    this.positions = built;
-    this.positionsRev = this.sceneRev;
-    // Built here, in the same lazy slot, so it is paid for on the first hover after the
-    // scene moved and not on every frame of an orbit. Only worth it past the point where
-    // the linear scan stops being free; below that the build costs more than it saves.
-    this.screenIndex = null;
-    // 2D: the world positions only change with the dataset or section, so a grid built once
-    // replaces a linear scan of every observation per pointermove.
-    this.grid2d = !is3d && built ? PointGridIndex.build(built) : null;
-    if (is3d && built && built.length / 2 >= SCREEN_INDEX_MIN_POINTS) {
-      const w = canvas.clientWidth || canvas.width;
-      const h = canvas.clientHeight || canvas.height;
-      if (w && h) {
-        this.screenIndex = new ScreenIndex(
-          { screen: built, depth: this.host.depths() ?? new Float32Array(built.length / 2) },
-          w,
-          h,
-          // The largest radius any pick here can claim: the base hover radius, times the
-          // scale a SELECTED marker is drawn at. Stated rather than left to the default,
-          // because it is what decides whether a marker straddling the canvas edge is
-          // found — its centre is off screen while part of it is not.
-          { maxReach: HOVER_RADIUS_PX * SPATIAL_SELECTED_SIZE_SCALE },
-        );
-      }
-    }
-    return built;
   }
 }

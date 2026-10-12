@@ -3322,6 +3322,28 @@ describe('NapariVisualizerService', () => {
         expect(layer.translate).toEqual([0, 0]);
       });
 
+      it('names the observation a marker on the plane stands for', async () => {
+        // The layer holds the plane's observations only, in its own packing: the pick's index is
+        // a DRAWN index, and naming it without the mapping would name observation 0.
+        jest
+          .spyOn(Viewer.prototype, 'canvasToWorld')
+          .mockImplementation((cx: number, cy: number) => [cx, cy] as [number, number]);
+        spatialPort.getColumn.mockResolvedValue({
+          meta: { kind: 'categorical', name: 'region', categories: ['Cortex', 'Thalamus', 'Striatum'] },
+          codes: new Uint16Array([0, 1, 2]),
+        });
+        document.getElementById('spatial-slice-host')?.remove();
+        await mountAt(sliced(), 1);
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        // Observation 1, at data (10, 20), is world (0.1, 0.1) in the slice's pixel grid.
+        const host = document.getElementById('spatial-slice-host')!;
+        host.dispatchEvent(new MouseEvent('pointermove', { clientX: 0.1, clientY: 0.1, bubbles: true }));
+        await new Promise((r) => setTimeout(r, 20));
+        expect(host.querySelector('div[style*="z-index: 6"]')?.textContent).toContain('Thalamus');
+      });
+
       it('follows a scrub to the new plane', async () => {
         await mountAt(sliced(), 1);
         service.setZIndex(2);

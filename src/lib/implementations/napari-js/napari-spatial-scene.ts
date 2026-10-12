@@ -161,12 +161,10 @@ export abstract class SpatialSceneBase {
     this.hover = new SpatialHover({
       is3d,
       viewer: ctx.viewer,
-      canvas: ctx.canvas,
       port: session.port,
       selection: session.selection,
       dataset: () => session.latest?.[0] ?? null,
-      positions: (obs) => this.hoverPositions(obs),
-      depths: () => this.hoverDepths(),
+      pick: (clientX, clientY, slackPx) => this.pickObservation(clientX, clientY, slackPx),
       tiles: () => this.hoverTiles(),
       toolActive: () => !!ctx.tools.regionOverlay?.toolActive,
       outsideZone: (fn) => ctx.outsideZone(fn),
@@ -183,9 +181,8 @@ export abstract class SpatialSceneBase {
         // Kept so a slice change can redraw the markers for the new plane, which
         // arrives through setZIndex rather than through any of these streams.
         this.session.latest = [dataset, view, selection];
-        // The markers are about to move or change meaning, so both halves of the
-        // tooltip — where the points are, and what they are — are stale.
-        this.hover.invalidate();
+        // What the markers are may have changed; where they are is the layers' own pick's
+        // business (it follows their data and the camera).
         void this.hover.resolveSource(dataset, view);
         void this.rebuild(dataset, view, selection);
         this.afterChange();
@@ -202,11 +199,8 @@ export abstract class SpatialSceneBase {
   protected afterChange(): void {
     /* nothing by default */
   }
-  /** Where the markers are drawn, for the hit-test (see `SpatialHoverHost.positions`). */
-  protected abstract hoverPositions(obs: SpatialDataset['observations']): Float32Array | null;
-  protected hoverDepths(): Float32Array | null {
-    return null;
-  }
+  /** The observation drawn under a client position, or -1 (see `SpatialHoverHost.pick`). */
+  protected abstract pickObservation(clientX: number, clientY: number, slackPx: number): number;
   protected hoverTiles(): NapariSpatialTileLayers | null {
     return null;
   }

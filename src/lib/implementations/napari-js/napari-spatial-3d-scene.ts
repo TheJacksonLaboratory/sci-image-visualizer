@@ -1,6 +1,6 @@
 import { Subscription } from 'rxjs';
-import { colormapFromLut } from 'napari-js';
-import type { Points3DLayer, ProjectedPoints, Viewer, VolumeLayer } from 'napari-js';
+import { PointPicker, colormapFromLut } from 'napari-js';
+import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import {
@@ -39,6 +39,7 @@ import {
   spatialFlatColormap,
   totalDensityGroup,
 } from './napari-spatial-encoding';
+import { HOVER_RADIUS_PX } from './napari-spatial-hover';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -80,10 +81,13 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private geneMapKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private origin: [number, number, number] = [0, 0, 0];
-  /** Reused projection buffers — see {@link screenProjection}. */
-  private projection: ProjectedPoints | undefined = undefined;
-  /** Per-observation depth from the last projection, for the depth-aware hover pick. */
-  private depths: Float32Array | null = null;
+  /**
+   * napari-js's depth-aware pick over the cloud, and the projection the ROI selection reads. It
+   * owns the caching policy: re-project lazily, on the first pick after the camera, the canvas or
+   * the cloud's data moved (never on the camera event, so an orbit drag pays nothing), into
+   * reused buffers, with a screen index once the cloud is large enough.
+   */
+  private picker: PointPicker | null = null;
   private scaleBar: NapariScaleBar | null = null;
   /** Dataset the scale bar was built for. */
   private scaleBarKey: string | null = null;
@@ -122,8 +126,31 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     return null;
   }
 
+  /**
+   * Every observation's position on the canvas under the current 3D camera (for the ROI
+   * selection), indexed by observation with NaN for anything not drawn. Null before the cloud
+   * is built.
+   *
+   * The projection is the picker's (see {@link picker}); what is left is the part that is
+   * genuinely this adapter's: SCATTERING the drawn subset back into observation order. The cloud
+   * holds only the points of the displayed section, in its own packing; every consumer indexes by
+   * observation. NaN stands for "not on screen", which is also the right answer for an
+   * observation whose section is hidden.
+   */
   screenProjection(obs: SpatialObservations): Float32Array | null {
-    return this.project(obs);
+    const projected = this.picker?.projected();
+    if (!projected) return null;
+    const drawn = this.drawn;
+    const { screen } = projected;
+    const count = screen.length >> 1;
+    const out = new Float32Array(obs.count * 2).fill(NaN);
+    for (let k = 0; k < count; k++) {
+      const i = drawn ? drawn[k] : k;
+      if (i >= obs.count) continue;
+      out[i * 2] = screen[k * 2];
+      out[i * 2 + 1] = screen[k * 2 + 1];
+    }
+    return out;
   }
 
   dispose(): void {
@@ -137,53 +164,36 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
     // a teardown is ~45MB of retained heap for a scene that no longer exists.
     this.positions = null;
-  }
-
-  protected hoverPositions(obs: SpatialObservations): Float32Array | null {
-    return this.project(obs);
-  }
-
-  protected override hoverDepths(): Float32Array | null {
-    return this.depths;
+    this.setPicker(null);
   }
 
   /**
-   * Project every observation to canvas pixels under the current 3D camera.
-   *
-   * The projection itself is the renderer's: `viewer.projectPoints` owns the camera, the
-   * viewport in CSS pixels, the perspective divide and the y-flip. What is left is the part
-   * that is genuinely this adapter's: SCATTERING the drawn subset back into observation order.
-   * The cloud holds only the points of the displayed section, in its own packing; every consumer
-   * indexes by observation. NaN stands for "not on screen", which is also the right answer for
-   * an observation whose section is hidden.
-   *
-   * Null before the cloud is built.
+   * The observation under a client position: the FRONT-most marker within `slackPx` of the
+   * pointer (ties by distance), as napari-js's {@link PointPicker} picks it. That matters more
+   * than it sounds: the renderer depth-tests the billboards, and in a 3.7M-point cloud the cursor
+   * covers many of them — picking the one nearest the cursor's centre regularly names a cell that
+   * something else is drawn over. The picker also takes each point's radius from the layer's
+   * per-point `sizes`, so a selected marker, drawn larger, is as large to the pointer.
    */
-  private project(obs: SpatialObservations): Float32Array | null {
-    if (!this.positions) return null;
-    const projected = this.ctx.viewer.projectPoints(this.positions, this.projection);
-    if (!projected) return null;
-    // Reused across camera changes: at 3.7M observations this is a 30 MB allocation that
-    // would otherwise happen on every orbit.
-    this.projection = projected;
+  protected pickObservation(clientX: number, clientY: number, slackPx: number): number {
+    const picker = this.picker;
+    if (!picker) return -1;
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    const k = picker.pick(clientX - rect.left, clientY - rect.top, slackPx);
+    if (k < 0) return -1;
+    return this.drawn ? this.drawn[k] : k;
+  }
 
-    const drawn = this.drawn;
-    const { screen, depth } = projected;
-    const count = screen.length >> 1;
-    const out = new Float32Array(obs.count * 2).fill(NaN);
-    const depths = new Float32Array(obs.count).fill(NaN);
-    for (let k = 0; k < count; k++) {
-      const i = drawn ? drawn[k] : k;
-      if (i >= obs.count) continue;
-      out[i * 2] = screen[k * 2];
-      out[i * 2 + 1] = screen[k * 2 + 1];
-      depths[i] = depth[k];
-    }
-    // Kept beside the screen positions so the hover pick can prefer the FRONT-most point
-    // under the cursor rather than the one nearest its centre — which in a dense cloud is
-    // regularly something the renderer drew another point over.
-    this.depths = depths;
-    return out;
+  /** Replace the cloud's picker (null: no cloud), releasing the old one's camera listener. */
+  private setPicker(points: Points3DLayer | null): void {
+    this.picker?.dispose();
+    this.picker = points
+      ? new PointPicker(this.ctx.viewer, points, {
+          // The largest radius a pick here can claim: the hover slack times the scale a SELECTED
+          // marker is drawn at. It decides whether a marker straddling the canvas edge is found.
+          maxReach: HOVER_RADIUS_PX * SPATIAL_SELECTED_SIZE_SCALE,
+        })
+      : null;
   }
 
   /**
@@ -346,6 +356,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         size,
         colors: colorsFor() ?? undefined,
       });
+      this.setPicker(this.points);
     } else {
       if (scalarKey !== this.scalarKey) {
         // A change of colour SOURCE, which used to mean discarding the layer and building
@@ -764,6 +775,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.volumeKey = null;
     this.origin = [0, 0, 0];
     this.points = null;
+    this.setPicker(null);
     this.layerKey = null;
     this.scalarKey = null;
     this.positions = null;

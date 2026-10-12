@@ -156,6 +156,11 @@ CORE-1) refer to the review document attached to #45.
   `bt601Luminance` is napari-js's `luminance8` (NAPARI-BOUNDARY-30); `buildColormapLut` samples a
   napari-js `Colormap` (NAPARI-BOUNDARY-23); the transcript-summary and SAM caches are `LruCache`s
   and now evict by use (NAPARI-BOUNDARY-19); the volume scene's dead slice step is gone.
+- Spatial picking is napari-js's: the 2D hover and click pick on the marker layer
+  (`PointsLayer.pick`, a grid built once per layer) and the 3D cloud through `PointPicker`
+  (lazy re-projection, reused buffers, screen index). `nearestObservation`, `PointGridIndex` and
+  the hover's six fields of projection bookkeeping are gone; the tie rules are unchanged: the
+  nearest centre in 2D, the front-most in 3D (NAPARI-BOUNDARY-24, NAPARI-SVC-17, SPATIAL-14).
 
 ### Docs
 
