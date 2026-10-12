@@ -5,6 +5,7 @@ import { NavigatorOverlay, ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { TileDescriptor } from '../tile-server';
+import type { OverviewImage } from './napari-tile-client';
 import { regionCentroids } from '../region-centroids';
 import { LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -52,7 +53,7 @@ export class Image2dScene implements NapariScene {
   private navigatorToken = 0;
   /** The current slice's per-channel thumbnail bitmaps (multichannel only), kept so a tint or
    *  visibility change recolours the thumbnail without re-fetching it. */
-  private navigatorChannels: ImageBitmap[] | null = null;
+  private navigatorChannels: OverviewImage[] | null = null;
   /** The tints/visibility the thumbnail was last composited with — see {@link recolorNavigator}. */
   private navigatorTintKey = '';
   private displaySub: Subscription | null = null;
@@ -201,7 +202,7 @@ export class Image2dScene implements NapariScene {
       planes = [await ctx.tiles.fetchChannelData(info, z)];
     } else {
       mode = 'rgb';
-      bitmap = await ctx.tiles.fetchSlice(info, z);
+      bitmap = await ctx.tiles.fetchImage(info, z);
     }
 
     // 2) Commit — unless a newer scrub superseded us or the scene was torn down.
@@ -432,12 +433,12 @@ export class Image2dScene implements NapariScene {
       if (token !== this.navigatorToken || this.navigator !== nav) return;
       const channels = desc?.multichannel ? (desc.channelInfo ?? []) : [];
       if (channels.length > 1) {
-        const bitmaps = await Promise.all(channels.map((_c, c) => tiles.fetchSlice(info, z, c, 1)));
+        const bitmaps = await Promise.all(channels.map((_c, c) => tiles.overviewImage(info, z, c)));
         if (token !== this.navigatorToken || this.navigator !== nav) return;
         this.setNavigatorChannels(bitmaps);
         this.recolorNavigator();
       } else {
-        const image = await tiles.fetchSlice(info, z, undefined, 1);
+        const image = await tiles.overviewImage(info, z);
         if (token !== this.navigatorToken || this.navigator !== nav) return;
         this.setNavigatorChannels(null);
         nav.setImage(image);
@@ -448,8 +449,8 @@ export class Image2dScene implements NapariScene {
   }
 
   /** Replace the per-channel thumbnail bitmaps (closing the previous ones). */
-  private setNavigatorChannels(bitmaps: ImageBitmap[] | null): void {
-    for (const bmp of this.navigatorChannels ?? []) bmp.close?.();
+  private setNavigatorChannels(bitmaps: OverviewImage[] | null): void {
+    for (const bmp of this.navigatorChannels ?? []) if ('close' in bmp) bmp.close?.();
     this.navigatorChannels = bitmaps;
     this.navigatorTintKey = '';
   }

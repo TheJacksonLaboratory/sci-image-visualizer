@@ -147,6 +147,8 @@ describe('NapariVisualizerService', () => {
           getImageData: (_x: number, _y: number, w: number, h: number) => ({
             data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
           }),
+          createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+          putImageData: () => undefined,
         }) as unknown as CanvasRenderingContext2D,
     );
 
@@ -806,13 +808,16 @@ describe('NapariVisualizerService', () => {
       while (infoCalls === 0) await new Promise((r) => setTimeout(r, 0));
       expect(await service.plot('superseded-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE)).toBe(true);
       const scene = internals.lifetime.signal;
-      const builtByNew = built.mock.calls.length;
+      // The view's sources are built with the render's scene; whole-slice reads (the navigator
+      // overview, the histogram samples) build their own without one.
+      const viewSources = () => built.mock.calls.filter((c) => c[3] !== undefined);
+      const builtByNew = viewSources().length;
       expect(builtByNew).toBeGreaterThan(0);
-      expect(built.mock.calls.every((c) => c[3] === scene)).toBe(true);
+      expect(viewSources().every((c) => c[3] === scene)).toBe(true);
 
       releaseInfo();
       await old;
-      expect(built.mock.calls.length).toBe(builtByNew);
+      expect(viewSources().length).toBe(builtByNew);
       expect(internals.badge.text).toBe('');
       service.unsubscribe();
       document.body.removeChild(div);
@@ -1227,6 +1232,8 @@ describe('NapariVisualizerService', () => {
           getImageData: (_x: number, _y: number, w: number, h: number) => ({
             data: new Uint8ClampedArray(Math.max(1, w) * Math.max(1, h) * 4),
           }),
+          createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+          putImageData: () => undefined,
           set fillStyle(v: string) {
             fills.push(v);
           },
@@ -1393,6 +1400,26 @@ describe('NapariVisualizerService', () => {
 
   it('decimates the surface mesh by the resolution scale', async () => {
     // A large source so the grid caps (¼ = 220, ⅛ = 110) actually downscale it and differ.
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes('tiles/info')
+          ? {
+              ok: true,
+              status: 200,
+              json: () =>
+                Promise.resolve({
+                  width: 1024,
+                  height: 768,
+                  tileSize: 1024,
+                  z: 1,
+                  channels: 1,
+                  realLevels: 1,
+                  levels: [{ res: 0, width: 1024, height: 768 }],
+                }),
+            }
+          : { ok: true, status: 200, blob: () => Promise.resolve(new Blob()) },
+      ),
+    );
     (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
       .fn()
       .mockResolvedValue({ width: 1024, height: 768, close: () => undefined });
@@ -1420,11 +1447,19 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
-  it('fetchSlice falls back to the composite overview when allowed and a channel has no in-budget level', async () => {
+  /** Slice 0 of band `channel` as a luminance plane, through the tile client's whole-slice read. */
+  const readPlane = (channel: number, opts: { maxTiles: number; compositeFallback?: boolean }) =>
+    (
+      service as unknown as {
+        tileClient: { readPlane: (info: unknown, z: number, c: number, o: typeof opts) => Promise<unknown> };
+      }
+    ).tileClient.readPlane(undefined, 0, channel, opts);
+
+  it('a surface plane falls back to the composite overview when a channel has no in-budget level', async () => {
     // Multichannel whole-slide: per-channel tiles exist ONLY at the huge real level (res 0); the
     // small overviews are composite-only. Stitching res 0 for a channel is ~1000s of tiles → server
-    // 504s (the reported bug). With the fallback opted-in (surface path), fetchSlice pulls the small
-    // composite overview instead.
+    // 504s (the reported bug). With the fallback opted-in (surface path), the plane is read from
+    // the small composite overview instead.
     const tileUrls: string[] = [];
     (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('tiles/info')) {
@@ -1456,13 +1491,7 @@ describe('NapariVisualizerService', () => {
       .mockResolvedValue({ width: 250, height: 297, close: () => undefined });
 
     // channel 1 at a small (surface ¼) tile budget, WITH composite fallback allowed.
-    await (
-      service as unknown as {
-        tileClient: {
-          fetchSlice: (info: unknown, z: number, c: number, b: number, fallback: boolean) => Promise<unknown>;
-        };
-      }
-    ).tileClient.fetchSlice(undefined, 0, 1, 3, true);
+    await readPlane(1, { maxTiles: 3, compositeFallback: true });
 
     expect(tileUrls.length).toBeGreaterThan(0);
     // Dropped to the composite (no &channel=) rather than stitching the huge per-channel level…
@@ -1473,8 +1502,8 @@ describe('NapariVisualizerService', () => {
     expect(tileUrls.length).toBeLessThanOrEqual(9);
   });
 
-  it('fetchSlice keeps each channel distinct (no composite fallback) by default — for volumes', async () => {
-    // Regression: a multichannel VOLUME assembles each channel via fetchSlice. If a channel with no
+  it('a plane read keeps each channel distinct (no composite fallback) by default — for volumes', async () => {
+    // Regression: a multichannel VOLUME assembles each channel band by band. If a channel with no
     // in-budget level silently fell back to the composite, every channel would fetch identical data
     // and the channels would collapse into one washed-out grayscale. Volume assembly leaves the
     // fallback OFF (the default), so the per-channel band is preserved even when it exceeds budget.
@@ -1507,19 +1536,15 @@ describe('NapariVisualizerService', () => {
       .fn()
       .mockResolvedValue({ width: 250, height: 250, close: () => undefined });
 
-    // Default call (allowCompositeFallback omitted → false): the volume path.
-    await (
-      service as unknown as {
-        tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
-      }
-    ).tileClient.fetchSlice(undefined, 0, 1, 3);
+    // Default call (compositeFallback omitted → false): the volume path.
+    await readPlane(1, { maxTiles: 3 });
 
     // Stayed on the requested channel (never dropped to the composite), so channels stay distinct.
     expect(tileUrls.length).toBeGreaterThan(0);
     expect(tileUrls.every((u) => u.includes('channel=1'))).toBe(true);
   });
 
-  it('fetchSlice keeps the channel when a real level fits the tile budget', async () => {
+  it('a surface plane keeps the channel when a real level fits the tile budget', async () => {
     // Small multichannel image: the real level fits, so the surface stays channel-specific.
     const tileUrls: string[] = [];
     (globalThis as { fetch: unknown }).fetch = jest.fn().mockImplementation((url: string) => {
@@ -1544,11 +1569,7 @@ describe('NapariVisualizerService', () => {
       return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
     });
 
-    await (
-      service as unknown as {
-        tileClient: { fetchSlice: (info: unknown, z: number, c: number, b: number) => Promise<unknown> };
-      }
-    ).tileClient.fetchSlice(undefined, 0, 1, 3);
+    await readPlane(1, { maxTiles: 3, compositeFallback: true });
 
     expect(tileUrls.some((u) => u.includes('channel=1'))).toBe(true);
   });
@@ -1615,6 +1636,97 @@ describe('NapariVisualizerService', () => {
     expect(addVolume).toHaveBeenCalledTimes(3); // one volume layer per channel
     // Per-channel volume histogram resolves from that channel's assembled data.
     expect(service.getHistogram(2, 256)).not.toBeNull();
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('reads each volume slice at the coarsest pyramid level that covers the target size', async () => {
+    // A 4096² pyramid (512 px tiles) at the default ¼ volume (256 px in-plane). The slices were
+    // read at the finest level within a 4-tile budget (1024², 2×2 tiles, scaled down 4×); the
+    // 256² overview already holds every pixel the volume keeps, in one tile.
+    const tileUrls: string[] = [];
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 4096,
+              height: 4096,
+              tileSize: 512,
+              z: 2,
+              channels: 1,
+              realLevels: 5,
+              levels: [4096, 2048, 1024, 512, 256].map((w, res) => ({ res, width: w, height: w })),
+            }),
+        });
+      }
+      tileUrls.push(url);
+      return Promise.resolve({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) });
+    });
+    (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
+      .fn()
+      .mockResolvedValue({ width: 256, height: 256, close: () => undefined });
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    addVolume.mockClear();
+    const div = document.createElement('div');
+    div.id = 'vol-level-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    tileUrls.length = 0; // count the volume's reads, not the load's
+    expect(await service.plot('vol-level-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME)).toBe(true);
+
+    expect(tileUrls).toHaveLength(2); // one tile per slice
+    expect(tileUrls.every((u) => u.includes('res=4'))).toBe(true);
+    const layer = addVolume.mock.results.at(-1)?.value as { width: number; height: number; depth: number };
+    expect([layer.width, layer.height, layer.depth]).toEqual([256, 256, 2]);
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('a Cancel during volume assembly aborts the tile requests in flight and draws nothing', async () => {
+    const signals: AbortSignal[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 3,
+              channels: 1,
+              realLevels: 1,
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      if (init?.signal) signals.push(init.signal);
+      return held.then(() => ({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) }));
+    });
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    addVolume.mockClear();
+    const div = document.createElement('div');
+    div.id = 'vol-cancel-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const plotted = service.plot('vol-cancel-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    for (let i = 0; i < 50 && signals.length === 0; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(signals.length).toBeGreaterThan(0); // the slice reads hand fetch a signal…
+    service.cancelLoading();
+    expect(signals.every((sig) => sig.aborted)).toBe(true); // …which the Cancel aborts
+    release();
+    await plotted;
+    expect(addVolume).not.toHaveBeenCalled();
 
     service.unsubscribe();
     document.body.removeChild(div);

@@ -1,7 +1,7 @@
 import { Observable, from, of } from 'rxjs';
 import { saveAs } from 'file-saver';
-import { bitmapToScalar, rgbaToScalar } from 'napari-js';
-import type { PixelChunk, TileKey, TiledSource } from 'napari-js';
+import { assembleVolume, bitmapToScalar, chooseStitchLevel, readLevel } from 'napari-js';
+import type { PixelChunk, StitchBudget, TileKey, TiledSource } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
@@ -9,7 +9,6 @@ import { TileAccessPort } from '../../contracts/ports/tile-access.port';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
 import {
   TileDescriptor,
-  TileLevel,
   buildTileUrl,
   exportTiffFilename,
   exportTiffUrl,
@@ -32,9 +31,11 @@ import {
   VOLUME_FETCH_CONCURRENCY,
   VOLUME_MAX_SLICE,
   create2dCanvas,
-  mapPool,
   stackDepth,
 } from './napari-helpers';
+
+/** What the navigator draws: a whole-slice picture (a canvas read from the pyramid, or a bitmap). */
+export type OverviewImage = ImageBitmap | HTMLCanvasElement | OffscreenCanvas;
 
 /** An assembled uint8 (luminance) volume, x-fastest then y then z. */
 export interface AssembledVolume {
@@ -57,7 +58,7 @@ export function bitmapToLuminance(bmp: ImageBitmap, maxSide?: number): LumaPlane
 /**
  * The napari-js backend's client of the jit-service tile server (review Appendix B, step 2), on
  * the shared `tile-server/` protocol: the `/tiles/info` descriptor (polled, cached per source,
- * shared between concurrent callers), whole-slice stitching from the pyramid, the pyramidal
+ * shared between concurrent callers), whole-slice reads from the pyramid (napari-js `readLevel`), the pyramidal
  * {@link TiledSource}s the 2D image draws, volume assembly, surface planes, the native `/histogram`
  * and the `/export/tiff` download.
  *
@@ -115,7 +116,7 @@ export class NapariTileClient {
     // series assembled client-side, each slice a different file): there is no
     // single server-tiled pyramid to describe. Returning null routes every
     // caller (2D image, volume, surface) to their stitched/single-fetch
-    // fallback, which — via fetchSlice's own SimpleSliceAccessService branch —
+    // fallback, which — via fetchImage's own SimpleSliceAccessService branch —
     // correctly fetches each slice's own URL instead of one fixed file's tile
     // pyramid.
     if (this.simpleStack.isSimple(info)) return Promise.resolve(null);
@@ -182,40 +183,21 @@ export class NapariTileClient {
   }
 
   /**
-   * Fetch a COMPLETE rendered slice as an `ImageBitmap` by stitching the server's REAL tile grid
-   * (from `/tiles/info`) — not just the top-left tile, which only ever showed a large image's
-   * corner. Picks the finest pyramid level whose grid fits `budgetTiles` and whose longest side is
-   * within the GPU texture limit, fetches that grid concurrently, and stitches it into one canvas.
+   * Slice `z` as ONE image, for a source with no pyramid to read: a `tiled:false` stack's own
+   * file for `z`, else (no descriptor) the server's single top-left tile — correct for
+   * small/simple images.
    *
-   * `channel` selects a single band as grayscale (real levels only); omit for the server composite.
-   * `budgetTiles` caps the grid: the 2D view uses the full budget for detail; volume assembly and
-   * the surface pass {@link tileBudgetFor} their target resolution, and the histogram samples and
-   * navigator 1 for a cheap overview tile. Falls back
-   * to a single `col=0,row=0` tile when no descriptor is available (small/simple images, volumes).
+   * A self-contained multi-slice stack's `z` indexes a completely different file's own preview
+   * URL, not an internal slice of one server-tiled file, so it is resolved and fetched via
+   * SimpleSliceAccessService (shared with OSD; see its docs for why this can't be a bare fetch())
+   * rather than as a /tile?info=...&z= request against whichever single file
+   * getSelectedInfoB64() points at (which would 400/mismatch for any z beyond that one file's own
+   * extent). `channel` selects a band: a serverless multichannel stack's own plane
+   * (`channelUrls[z][channel]`, the client-side analog of the server's per-channel
+   * `/tile?channel=c`), else the server's.
    */
-  async fetchSlice(
-    info: IImageInfo | undefined,
-    z: number,
-    channel?: number,
-    budgetTiles: number = MAX_STITCH_TILES,
-    /** When a specific channel has no pyramid level within `budgetTiles`, drop to the server
-     *  COMPOSITE overview instead of stitching the huge per-channel level. Only safe when the caller
-     *  wants a single decimated plane (the surface height): for a multichannel VOLUME every channel
-     *  would then fetch the same composite and the channels would collapse into one, so volume
-     *  assembly leaves this `false` to keep each band distinct. */
-    allowCompositeFallback = false,
-  ): Promise<ImageBitmap> {
-    // Self-contained multi-slice stack (tiled:false): `z` indexes a completely
-    // different file's own preview URL, not an internal slice of one server-
-    // tiled file — resolved and fetched via SimpleSliceAccessService (shared
-    // with OSD; see its docs for why this can't be a bare fetch()) instead of
-    // building a /tile?info=...&z= request against whichever single file
-    // getSelectedInfoB64() points at (which would 400/mismatch for any z
-    // beyond that one file's own extent).
+  async fetchImage(info: IImageInfo | undefined, z: number, channel?: number): Promise<ImageBitmap> {
     if (this.simpleStack.isSimple(info)) {
-      // Serverless multichannel volume: fetch the requested channel's OWN plane
-      // (channelUrls[z][channel]) so each band stays distinct — the client-side
-      // analog of the server's per-channel /tile?channel=c. Else the z-anchor URL.
       const chUrls = (info as IImageInfo).channelUrls;
       const url =
         channel != null && chUrls?.[z]?.[channel] != null
@@ -226,134 +208,110 @@ export class NapariTileClient {
     }
     const infoB64 = this.tiles.getSelectedInfoB64();
     if (!infoB64) throw new Error('[napari-js] no selected image info (getSelectedInfoB64 null)');
-    const desc = await this.ensureDescriptor(info);
-
-    // The requested band; may be dropped to the composite (undefined) below when the channel has no
-    // pyramid level small enough to stitch within budget.
-    let effectiveChannel = channel;
-    const fetchTile = async (res: number, col: number, row: number, t: number): Promise<ImageBitmap> => {
-      const url = buildTileUrl(this.api, infoB64, {
-        res,
-        col,
-        row,
-        z,
-        tileSize: t,
-        channel: effectiveChannel,
-      });
-      const resp = await fetchWithAuth(this.tiles, url);
-      if (!resp.ok) {
-        throw new Error(`[napari-js] slice fetch failed: ${resp.status} (${col}/${row} res ${res})`);
-      }
-      return createImageBitmap(await resp.blob());
-    };
-
-    // No descriptor → single top-left tile (legacy fallback; correct for small/simple images).
-    if (!desc || !desc.levels?.length) return fetchTile(0, 0, 0, TILE_SIZE);
-
-    const t = desc.tileSize || TILE_SIZE;
-    // Per-channel tiles exist ONLY at REAL Bio-Formats levels (the front of `levels`); the server
-    // composite exists at every level, including the small overviews.
-    const perChannelLevels = desc.realLevels ?? desc.levels.length;
-    const usable = channel == null ? desc.levels : desc.levels.slice(0, Math.max(1, perChannelLevels));
-
-    // Finest level whose stitched grid fits BOTH the tile budget and the GPU texture limit; if none
-    // fits, the coarsest available (fits=false).
-    const tilesFor = (lvl: TileLevel): number =>
-      Math.max(1, Math.ceil(lvl.width / t)) * Math.max(1, Math.ceil(lvl.height / t));
-    const pick = (levels: TileLevel[]): { lvl: TileLevel; fits: boolean } => {
-      let c = levels[0];
-      for (const lvl of levels) {
-        c = lvl;
-        if (tilesFor(lvl) <= budgetTiles && Math.max(lvl.width, lvl.height) <= MAX_TEXTURE_DIM) {
-          return { lvl, fits: true };
-        }
-      }
-      return { lvl: c, fits: false };
-    };
-
-    let sel = pick(usable);
-    // A specific channel only has tiles at the (few, large) real levels. When none of them fit the
-    // budget — e.g. the coarsest real level is still 14982×18670 → ~1100 full-res tiles — stitching
-    // it per slice floods the server (504s) and stalls the load. The composite pyramid has small
-    // overview levels, so fetch the composite instead and derive luminance from it. Every caller here
-    // (surface height, volume assembly, readback) downscales the plane anyway, so a composite-derived
-    // plane is the right trade for one that actually loads. Only kicks in when the channel can't fit.
-    if (allowCompositeFallback && !sel.fits && channel != null && desc.levels.length > perChannelLevels) {
-      const composite = pick(desc.levels);
-      if (composite.fits || tilesFor(composite.lvl) < tilesFor(sel.lvl)) {
-        effectiveChannel = undefined;
-        sel = composite;
-        console.warn(
-          `[napari-js] channel ${channel} has no pyramid level within the ${budgetTiles}-tile ` +
-            `budget; using the composite overview (res ${sel.lvl.res}, ${sel.lvl.width}×` +
-            `${sel.lvl.height}) for this plane.`,
-        );
-      }
-    }
-    const chosen = sel.lvl;
-    const cols = Math.max(1, Math.ceil(chosen.width / t));
-    const rows = Math.max(1, Math.ceil(chosen.height / t));
-    if (!sel.fits && budgetTiles === MAX_STITCH_TILES) {
-      console.warn(
-        `[napari-js] full resolution exceeds the ${budgetTiles}-tile/${MAX_TEXTURE_DIM}px budget; ` +
-          `displaying overview level res ${chosen.res} (${chosen.width}×${chosen.height}).`,
-      );
-    }
-
-    if (cols === 1 && rows === 1) return fetchTile(chosen.res, 0, 0, t);
-
-    // Stitch into one level-sized canvas. Fetch the grid with BOUNDED concurrency: firing every tile
-    // at once (a big grid = hundreds of requests) overwhelmed the tile server (504s). Edge tiles are
-    // narrower/shorter; drawImage places each at its grid offset so partial tiles line up.
-    const coords: Array<{ col: number; row: number }> = [];
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) coords.push({ col, row });
-    }
-    const tiles: Array<{ col: number; row: number; bmp: ImageBitmap }> = [];
-    await mapPool(coords, TILE_FETCH_CONCURRENCY, async ({ col, row }) => {
-      tiles.push({ col, row, bmp: await fetchTile(chosen.res, col, row, t) });
-    });
-
-    const { canvas, ctx } = create2dCanvas(chosen.width, chosen.height, 'slice stitch');
-    for (const { col, row, bmp } of tiles) {
-      ctx.drawImage(bmp, col * t, row * t);
-      bmp.close?.();
-    }
-
-    // Safety net: if the chosen level still exceeds the GPU texture limit (e.g. a multichannel
-    // image whose coarsest REAL level is huge — overview levels are composite-only), downscale the
-    // stitched canvas to fit so the WebGPU texture upload can't fail.
-    const longest = Math.max(chosen.width, chosen.height);
-    if (longest > MAX_TEXTURE_DIM) {
-      const scale = MAX_TEXTURE_DIM / longest;
-      const outW = Math.max(1, Math.floor(chosen.width * scale));
-      const outH = Math.max(1, Math.floor(chosen.height * scale));
-      console.warn(
-        `[napari-js] stitched level ${chosen.width}×${chosen.height} exceeds the ` +
-          `${MAX_TEXTURE_DIM}px texture limit; downscaling to ${outW}×${outH}.`,
-      );
-      const { canvas: out, ctx: octx } = create2dCanvas(outW, outH, 'slice downscale');
-      octx.drawImage(canvas as unknown as CanvasImageSource, 0, 0, outW, outH);
-      return createImageBitmap(out as unknown as ImageBitmapSource);
-    }
-    return createImageBitmap(canvas as unknown as ImageBitmapSource);
+    const url = buildTileUrl(this.api, infoB64, { res: 0, col: 0, row: 0, z, tileSize: TILE_SIZE, channel });
+    const resp = await fetchWithAuth(this.tiles, url);
+    if (!resp.ok) throw new Error(`[napari-js] slice fetch failed: ${resp.status} (0/0 res 0)`);
+    return createImageBitmap(await resp.blob());
   }
 
-  /** Fetch a stitched slice and read it back as a single-channel uint8 plane. `channel` selects a
-   *  band (multichannel); omit it for the grayscale composite (all overview levels available, so a
-   *  large image picks a fitting downscaled level rather than only the full-res real level). */
+  /**
+   * Slice `z` as a single-channel uint8 luminance plane. With a pyramid, napari-js's `readLevel`
+   * reads it from the same {@link tiledSource} the 2D view draws: the finest level whose tile grid
+   * fits `maxTiles` and whose longest side fits the GPU texture limit (no finer than `maxSide`
+   * needs, when given), stitched with bounded concurrency and area-averaged down to `maxSide`.
+   * Without one, the single image of {@link fetchImage}. `channel` selects a band (real levels
+   * only); omit it for the composite, whose overview levels let a large image read a small level.
+   * `compositeFallback`: see {@link planeSource}. `signal` cancels the read (it rejects).
+   */
+  async readPlane(
+    info: IImageInfo | undefined,
+    z: number,
+    channel: number | undefined,
+    opts: { maxTiles: number; maxSide?: number; compositeFallback?: boolean; signal?: AbortSignal },
+  ): Promise<LumaPlane> {
+    // A tiled:false stack has no pyramid: fetch its slice in this tick, as the 2D render does.
+    const desc = this.simpleStack.isSimple(info) ? null : await this.ensureDescriptor(info);
+    if (!desc?.levels?.length) return bitmapToLuminance(await this.fetchImage(info, z, channel), opts.maxSide);
+    const budget: StitchBudget = {
+      maxTiles: opts.maxTiles,
+      maxSide: opts.maxSide,
+      maxTextureDim: MAX_TEXTURE_DIM,
+    };
+    const source = opts.compositeFallback
+      ? this.planeSource(desc, channel, budget)
+      : this.tiledSource(desc, channel, 1);
+    const img = await readLevel(source, z, {
+      ...budget,
+      concurrency: TILE_FETCH_CONCURRENCY,
+      signal: opts.signal,
+    });
+    if (!img.fits && opts.maxTiles >= MAX_STITCH_TILES) {
+      console.warn(
+        `[napari-js] no level of slice ${z} fits the ${opts.maxTiles}-tile/${MAX_TEXTURE_DIM}px budget; ` +
+          `read the coarsest (level ${img.level}) and downscaled it to ${img.width}×${img.height}.`,
+      );
+    }
+    return { data: img.data as Uint8Array, width: img.width, height: img.height };
+  }
+
+  /**
+   * The scalar source for one decimated plane of band `channel`. A band has tiles only at the
+   * (few, large) real Bio-Formats levels; when none of them fits the budget — e.g. the coarsest
+   * real level is still 14982×18670, ~1100 full-res tiles — stitching it per slice floods the
+   * server (504s) and stalls the load. The composite pyramid has small overview levels, so the
+   * plane is read from the composite instead (its luminance). Only for a caller that wants one
+   * decimated plane (the surface height): for a multichannel VOLUME every channel would then read
+   * the same composite and the channels would collapse into one, so volumes keep each band.
+   */
+  private planeSource(desc: TileDescriptor, channel: number | undefined, budget: StitchBudget): TiledSource {
+    const band = this.tiledSource(desc, channel, 1);
+    if (channel == null || desc.levels.length <= (desc.realLevels ?? desc.levels.length)) return band;
+    const own = chooseStitchLevel(band, budget);
+    if (own.fits) return band;
+    const composite = this.tiledSource(desc, undefined, 1);
+    const alt = chooseStitchLevel(composite, budget);
+    if (!alt.fits && alt.cols * alt.rows >= own.cols * own.rows) return band;
+    console.warn(
+      `[napari-js] channel ${channel} has no pyramid level within the ${budget.maxTiles}-tile ` +
+        `budget; using the composite overview (${alt.width}×${alt.height}) for this plane.`,
+    );
+    return composite;
+  }
+
+  /**
+   * A small picture of the whole slice for the navigator: the composite (or band `channel`) at the
+   * finest level a single tile holds, else the coarsest level, as an RGBA canvas. Without a
+   * pyramid, the single image of {@link fetchImage}.
+   */
+  async overviewImage(info: IImageInfo | undefined, z: number, channel?: number): Promise<OverviewImage> {
+    const desc = this.simpleStack.isSimple(info) ? null : await this.ensureDescriptor(info);
+    if (!desc?.levels?.length) return this.fetchImage(info, z, channel);
+    const img = await readLevel(this.tiledSource(desc, channel, 4), z, {
+      maxTiles: 1,
+      maxTextureDim: MAX_TEXTURE_DIM,
+      concurrency: TILE_FETCH_CONCURRENCY,
+    });
+    const { canvas, ctx } = create2dCanvas(img.width, img.height, 'overview');
+    const pixels = ctx.createImageData(img.width, img.height);
+    pixels.data.set(img.data as Uint8Array);
+    ctx.putImageData(pixels, 0, 0);
+    return canvas;
+  }
+
+  /** Fetch slice `z` and read it back as a single-channel uint8 plane (see {@link readPlane}),
+   *  within `budgetTiles`: the 2D stitch fallback reads at the full budget, the histogram samples
+   *  at 1 for a cheap overview tile. */
   async fetchChannelData(
     info: IImageInfo | undefined,
     z: number,
     channel?: number,
-    budgetTiles?: number,
+    budgetTiles: number = MAX_STITCH_TILES,
   ): Promise<LumaPlane> {
-    return bitmapToLuminance(await this.fetchSlice(info, z, channel, budgetTiles));
+    return this.readPlane(info, z, channel, { maxTiles: budgetTiles });
   }
 
-  /** Tile budget to stitch a whole slice at ~`targetPx` resolution from the pyramid: a higher target
-   *  pulls a FINER pyramid level (more real detail). Shared by the surface plane fetch and the volume
-   *  assembly so both scale their in-plane resolution with the decimate factor. */
+  /** Tile budget to stitch a whole slice at ~`targetPx` resolution from the pyramid. Shared by the
+   *  surface plane fetch and the volume assembly, so both cap their reads by the decimate factor. */
   tileBudgetFor(info: IImageInfo | undefined, targetPx: number): number {
     const tileSize = this.currentDescriptor(info)?.tileSize || TILE_SIZE;
     return Math.min(MAX_STITCH_TILES, Math.max(1, Math.round((targetPx / tileSize) ** 2 * STITCH_BUDGET_COEFF)));
@@ -363,17 +321,19 @@ export class NapariTileClient {
    * Build a pyramidal TiledSource backed by the server `/tile` endpoint. `channel` selects a band
    * (grayscale luminance, real levels only); omit it for the composite (RGBA, all levels).
    *
-   * `scene` is the signal of the render that asked for it, taken before that render's awaits;
-   * `onTile` is told of each tile request and handed back the tile's end. A request issued once
-   * `scene` is aborted (a disposed source still fetching after a reset) is not reported, and one
-   * that settles after it does not end, so it can never count toward the next scene.
+   * For the 2D view, `scene` is the signal of the render that asked for it, taken before that
+   * render's awaits, and `onTile` is told of each tile request and handed back the tile's end. A
+   * request issued once `scene` is aborted (a disposed source still fetching after a reset) is not
+   * reported, and one that settles after it does not end, so it can never count toward the next
+   * scene. A tile request's own `signal` (napari-js aborts a read it no longer needs) aborts the
+   * HTTP request.
    */
   tiledSource(
     desc: TileDescriptor,
     channel: number | undefined,
     channels: 1 | 4,
-    scene: AbortSignal,
-    onTile: () => () => void,
+    scene?: AbortSignal,
+    onTile?: () => () => void,
   ): TiledSource {
     const infoB64 = this.tiles.getSelectedInfoB64() ?? '';
     // Per-channel tiles exist only at REAL Bio-Formats levels; the composite exists at all levels.
@@ -392,7 +352,7 @@ export class NapariTileClient {
       depth: Math.max(1, desc.z || 1),
       channels,
       dtype: 'uint8',
-      fetchTile: async (key: TileKey): Promise<PixelChunk> => {
+      fetchTile: async (key: TileKey, signal?: AbortSignal): Promise<PixelChunk> => {
         const res = usable[key.level]?.res ?? key.level;
         const url = buildTileUrl(api, infoB64, {
           res,
@@ -402,9 +362,9 @@ export class NapariTileClient {
           tileSize,
           channel,
         });
-        const end = scene.aborted ? null : onTile();
+        const end = !onTile || scene?.aborted ? null : onTile();
         try {
-          const resp = await fetchWithAuth(this.tiles, url);
+          const resp = await fetchWithAuth(this.tiles, url, signal ? { signal } : {});
           if (!resp.ok) {
             throw new Error(`[napari-js] tile ${key.level}/${key.col}/${key.row} → ${resp.status}`);
           }
@@ -412,18 +372,20 @@ export class NapariTileClient {
           if (channels === 4) return { width: bmp.width, height: bmp.height, data: bmp };
           return bitmapToLuminance(bmp);
         } finally {
-          if (!scene.aborted) end?.();
+          if (!scene?.aborted) end?.();
         }
       },
     };
   }
 
   /**
-   * Assemble a downsampled uint8 volume (luminance) from the per-slice tile endpoint. Slices are
-   * fetched with bounded concurrency (keeps the connection pool full without flooding it on a deep
-   * stack) and read into the volume as each arrives, reporting `progress` (0–100) so the host shows
-   * a determinate progress bar instead of a bare spinner. Null when there is nothing to assemble or
-   * `signal` aborts (a Cancel or a new plot) — a partial volume is never returned.
+   * Assemble a downsampled uint8 volume (luminance) of `info`'s stack with napari-js's
+   * `assembleVolume`: every `sliceStep`th slice, read from the band's (or composite's) pyramid at
+   * the level that `maxSlice` needs, within its tile budget, and area-averaged to `maxSlice` on
+   * the longest side. Slices are read with bounded concurrency (the connection pool stays full
+   * without flooding it on a deep stack), each reporting `progress` (0–100) as it lands so the host
+   * shows a determinate progress bar. Null when `signal` aborts (a Cancel or a new plot), which
+   * also aborts the tile requests in flight — a partial volume is never returned.
    */
   async assembleVolume(
     info: IImageInfo | undefined,
@@ -433,70 +395,72 @@ export class NapariTileClient {
   ): Promise<AssembledVolume | null> {
     const { signal } = hooks;
     const fullDepth = stackDepth(info) || 1;
-    if (fullDepth < 1) {
-      console.warn('[napari-js] no slices to assemble a volume');
-      return null;
-    }
     const step = Math.max(1, Math.floor(opts.sliceStep ?? 1));
     const maxSlice = opts.maxSlice ?? VOLUME_MAX_SLICE;
     // Source-slice indices sampled into the volume (every `step`th plane → low-res is faster).
     const zIndices: number[] = [];
     for (let z = 0; z < fullDepth; z += step) zIndices.push(z);
-    const depth = zIndices.length;
 
     hooks.progress(0);
     try {
-      // Fetch each slice at a pyramid level matching `maxSlice` (budget scales with the decimate
-      // factor), so a higher factor pulls a finer level → more real in-plane detail; then downsample
-      // to `maxSlice`. `channel` selects a band (multichannel volume); omit for the grayscale
-      // composite. The caller owns the stackLoading flag (multichannel assembles channels in turn).
-      const budget = this.tileBudgetFor(info, maxSlice);
-      const first = await this.fetchSlice(info, zIndices[0], channel, budget);
-      const scale = Math.min(1, maxSlice / Math.max(first.width, first.height, 1));
-      const width = Math.max(1, Math.round(first.width * scale));
-      const height = Math.max(1, Math.round(first.height * scale));
-      const data = new Uint8Array(width * height * depth);
-
-      const { ctx } = create2dCanvas(width, height, 'volume assembly');
-
-      // Read one fetched slice bitmap into the volume plane `z` (luminance). Synchronous between
-      // awaits, so the shared 2D context is safe to reuse across the concurrent fetch workers.
-      let done = 0;
-      const readSlice = (z: number, bmp: ImageBitmap): void => {
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(bmp, 0, 0, width, height);
-        const rgba = ctx.getImageData(0, 0, width, height).data;
-        rgbaToScalar(rgba, width, height, 'bt601', data.subarray(z * width * height, (z + 1) * width * height));
-        bmp.close?.();
-        done++;
-        hooks.progress(Math.round((done / depth) * 100));
-      };
-
-      readSlice(0, first);
-
-      // Remaining planes through a small fetch pool. Each plane `p` maps to source slice
-      // `zIndices[p]` (subsampled for low-res).
-      const planes = Array.from({ length: depth - 1 }, (_, i) => i + 1);
-      await mapPool(
-        planes,
-        VOLUME_FETCH_CONCURRENCY,
-        async (p) => readSlice(p, await this.fetchSlice(info, zIndices[p], channel, budget)),
-        () => signal.aborted,
-      );
-
+      // `channel` selects a band (multichannel volume); omit for the grayscale composite. The
+      // caller owns the stackLoading flag (multichannel assembles channels in turn).
+      const source = await this.volumeSource(info, channel, zIndices[0]);
+      return await assembleVolume(source, zIndices, {
+        maxSide: maxSlice,
+        maxTiles: this.tileBudgetFor(info, maxSlice),
+        maxTextureDim: MAX_TEXTURE_DIM,
+        concurrency: VOLUME_FETCH_CONCURRENCY,
+        tileConcurrency: TILE_FETCH_CONCURRENCY,
+        onProgress: (done, total) => hooks.progress(Math.round((done / total) * 100)),
+        signal,
+      });
+    } catch (err) {
       if (signal.aborted) return null; // cancelled → don't render a partial volume
-      return { data, width, height, depth };
+      throw err;
     } finally {
       hooks.progress(0);
     }
   }
 
   /**
+   * The scalar source a volume reads: the band's (or composite's) pyramid; without one, one whole
+   * image per slice ({@link fetchImage}) as a single-tile level sized by the first slice, which is
+   * fetched here and served again as that slice's tile.
+   */
+  private async volumeSource(info: IImageInfo | undefined, channel: number | undefined, firstZ: number) {
+    const desc = this.simpleStack.isSimple(info) ? null : await this.ensureDescriptor(info);
+    if (desc?.levels?.length) return this.tiledSource(desc, channel, 1);
+    let first: ImageBitmap | null = await this.fetchImage(info, firstZ, channel);
+    const source: TiledSource = {
+      kind: 'tiled',
+      width: first.width,
+      height: first.height,
+      tileSize: Math.max(1, first.width, first.height),
+      levels: 1,
+      depth: stackDepth(info) || 1,
+      channels: 1,
+      dtype: 'uint8',
+      fetchTile: async (key: TileKey): Promise<PixelChunk> => {
+        let bmp: ImageBitmap;
+        if (first && key.z === firstZ) {
+          bmp = first;
+          first = null;
+        } else {
+          bmp = await this.fetchImage(info, key.z, channel);
+        }
+        return { width: bmp.width, height: bmp.height, data: bmp };
+      },
+    };
+    return source;
+  }
+
+  /**
    * Slice `z` as a single WHOLE-image luminance plane (decimated to `maxGrid`), for the surface.
-   * Prefers the server pyramid, stitched at a resolution set by the decimate factor; without a
-   * descriptor, the app's complete per-slice image (`urls`/`smallUrls`, as the Plotly surface) —
-   * never a lone top-left tile, which would be a corner of the slice — and only as a last resort
-   * the single-tile fetch.
+   * Prefers the server pyramid, read at the level the grid needs ({@link readPlane}, which may
+   * drop a band to the composite overview); without a descriptor, the app's complete per-slice
+   * image (`urls`/`smallUrls`, as the Plotly surface) — never a lone top-left tile, which would be
+   * a corner of the slice — and only as a last resort the single-tile fetch.
    */
   async fetchPlane(
     info: IImageInfo | undefined,
@@ -505,43 +469,32 @@ export class NapariTileClient {
     maxGrid: number,
   ): Promise<LumaPlane> {
     const desc = await this.ensureDescriptor(info);
-    let plane: LumaPlane | null = null;
-
-    // Preferred: stitch the WHOLE slice from the server pyramid at a resolution driven by the
-    // decimate factor — a higher target grid pulls a FINER pyramid level (more real detail). With a
-    // descriptor, fetchSlice stitches the whole chosen level (never a corner), then we downscale to
-    // the grid. This is what makes "Full" actually higher-res than "½", not just a fixed preview.
+    // Preferred: the WHOLE slice from the server pyramid at a resolution driven by the decimate
+    // factor — a higher target grid reads a FINER pyramid level (more real detail). This is what
+    // makes "Full" actually higher-res than "½", not just a fixed preview. The surface is a single
+    // decimated plane, so the composite fallback is acceptable when the band has no small level.
     if (desc?.levels?.length) {
-      const budget = this.tileBudgetFor(info, maxGrid);
-      // The surface is a single decimated plane, so the composite fallback is acceptable when the
-      // channel has no small pyramid level (keeps it fast); a multichannel VOLUME must not do this.
-      plane = bitmapToLuminance(await this.fetchSlice(info, z, channel, budget, true), maxGrid);
+      return this.readPlane(info, z, channel, {
+        maxTiles: this.tileBudgetFor(info, maxGrid),
+        maxSide: maxGrid,
+        compositeFallback: true,
+      });
     }
 
     // Fallback (no pyramid): the app's COMPLETE per-slice image (urls[z], not the small blurry
     // thumbnail) — whole slice, avoids a corner tile. Capped at the image's own resolution.
-    if (!plane) {
-      const url = info?.urls?.[z] ?? info?.smallUrls?.[z];
-      if (url) {
-        try {
-          const resp = await fetchWithAuth(this.tiles, url);
-          if (resp.ok) {
-            plane = bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
-          }
-        } catch (err) {
-          console.warn(`[napari-js] surface url fetch failed for z=${z}`, err);
-        }
+    const url = info?.urls?.[z] ?? info?.smallUrls?.[z];
+    if (url) {
+      try {
+        const resp = await fetchWithAuth(this.tiles, url);
+        if (resp.ok) return bitmapToLuminance(await createImageBitmap(await resp.blob()), maxGrid);
+      } catch (err) {
+        console.warn(`[napari-js] surface url fetch failed for z=${z}`, err);
       }
     }
 
-    // Last resort (no pyramid and no complete image): a single tile.
-    if (!plane) {
-      plane = bitmapToLuminance(
-        await this.fetchSlice(info, z, channel, this.tileBudgetFor(info, maxGrid), true),
-        maxGrid,
-      );
-    }
-    return plane;
+    // Last resort (no pyramid and no complete image): the single image.
+    return bitmapToLuminance(await this.fetchImage(info, z, channel), maxGrid);
   }
 
   /**

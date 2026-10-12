@@ -190,7 +190,10 @@ export function toIHistogram(h: { counts: Uint32Array; bins: number; min: number
  * Additively composite grayscale channel images, each tinted with its display colour —
  * the navigator's picture of a multichannel image.
  */
-export function tintedComposite(images: ImageBitmap[], colors: string[]): HTMLCanvasElement {
+export function tintedComposite(
+  images: Array<CanvasImageSource & { width: number; height: number }>,
+  colors: string[],
+): HTMLCanvasElement {
   const w = images[0]?.width ?? 1;
   const h = images[0]?.height ?? 1;
   const out = document.createElement('canvas');

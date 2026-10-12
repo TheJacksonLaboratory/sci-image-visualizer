@@ -82,7 +82,7 @@ export class VolumeScene implements NapariScene {
     const desc = await ctx.tiles.ensureDescriptor(ctx.info());
     // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
     // derive the channel count from imageMeta and assemble each band from its own
-    // channelUrls[z][c] plane (fetchSlice does the per-channel routing).
+    // channelUrls[z][c] plane (fetchImage does the per-channel routing).
     const simpleMc = isServerlessMultichannel(ctx.tiles.isSimple(info), info);
     const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
     const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);

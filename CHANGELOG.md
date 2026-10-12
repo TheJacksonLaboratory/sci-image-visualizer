@@ -142,6 +142,12 @@ CORE-1) refer to the review document attached to #45.
   with `transparentBelow`, so a threshold, colormap or opacity change updates the layer's
   uniforms or LUT instead of recolouring the raster on the CPU and uploading it again
   (NAPARI-BOUNDARY-28).
+- **napari volumes, surfaces and overviews read whole slices with napari-js** (`readLevel`,
+  `assembleVolume`, from the same `TiledSource` the 2D view draws): a slice is read at the
+  coarsest pyramid level that covers the target size and area-averaged down, not at the finest
+  level within the tile budget and scaled by the canvas (a ¼ volume of a 4096² slide reads one
+  tile per slice, not four). A Cancel or a new plot now aborts the tile requests in flight
+  (NAPARI-SVC-16).
 - **The density map's default inferno is matplotlib's exact table** (napari-js/colormaps), on the
   canvas and the colour bar. It was a 9-stop approximation whose stops were inferno's ninths
   placed at eighths, so the ramp ran dark (the middle drew #a52c60 for #bb3754). `INFERNO_SCALE` is removed; `lutFor` also takes a 256-entry RGB table
