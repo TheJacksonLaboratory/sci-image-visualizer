@@ -4,7 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
-import { buildLut, framingFor, mapScalar, MultiChannelImageView, Viewer } from 'napari-js';
+import { buildLut, Camera3D, framingFor, mapScalar, MultiChannelImageView, Viewer } from 'napari-js';
 import type { Colormap } from 'napari-js';
 import { saveAs } from 'file-saver';
 
@@ -2914,11 +2914,15 @@ describe('NapariVisualizerService', () => {
     });
 
     it('shows a scale bar when the dataset declares its unit', async () => {
+      // Measured at the orbit pivot through the camera's own scale, not a re-derived formula
+      // (NAPARI-BOUNDARY-26).
+      const worldPerPixel = jest.spyOn(Camera3D.prototype, 'worldPerPixel');
       const layers = await mount3d({ ...spatialDataset3d(), micronsPerUnit: 1 });
       expect(layers.length).toBeGreaterThan(0);
       // Rendered into the plot host, so its presence is observable from the DOM
       // rather than through a private field.
       expect(document.getElementById('spatial3d-host')?.textContent).toMatch(/µm|nm|mm|cm/);
+      expect(worldPerPixel).toHaveBeenCalled();
     });
 
     it('shows NO scale bar when the coordinate unit is unknown', async () => {

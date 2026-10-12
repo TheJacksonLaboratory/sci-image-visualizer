@@ -182,11 +182,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * what a zoom moves towards, and where the eye is anyway. napari's own 3D scale bar works the
    * same way.
    *
-   * `NapariScaleBar` needs CSS px per world unit, which an orbit camera does not expose, but at
-   * the pivot it is exactly `viewportHeight / (2 * distance * tan(fov / 2))` — the same
-   * relationship `Camera3D.pan` uses to track the cursor. The bar then converts through
-   * `micronsPerUnit`, and draws nothing at all when the dataset does not declare one, because a
-   * bar labelled in microns over unknown units would read as a measurement.
+   * `NapariScaleBar` needs CSS px per world unit: at the pivot that is the reciprocal of
+   * `Camera3D.worldPerPixel` — the scale `Camera3D.pan` uses to track the cursor. The bar then
+   * converts through `micronsPerUnit`, and draws nothing at all when the dataset does not declare
+   * one, because a bar labelled in microns over unknown units would read as a measurement.
    */
   private installScaleBar(dataset: SpatialDataset | null): void {
     this.scaleBar?.destroy();
@@ -198,8 +197,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const cam = this.ctx.viewer.camera3d;
     const shim: ScaleBarCamera = {
       get zoom(): number {
-        const h = canvas?.clientHeight || canvas?.height || 0;
-        const worldPerPx = (2 * cam.distance * Math.tan(cam.fov / 2)) / (h || 1);
+        const worldPerPx = cam.worldPerPixel(canvas?.clientHeight || canvas?.height || 0);
         return worldPerPx > 0 ? 1 / worldPerPx : 0;
       },
       changed: cam.changed,
