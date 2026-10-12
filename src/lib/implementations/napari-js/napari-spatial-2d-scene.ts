@@ -470,15 +470,6 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       viewer.layers.remove(this.geneMapLayer);
       this.geneMapLayer = null;
     }
-    // ANY change here changes the order the cells have to sit above — including the
-    // first one, where there is no previous layer to remove — and the layer list is
-    // append-only. So drop the markers unconditionally and let the rebuild below put
-    // them back on top; otherwise the field is appended over the measurement.
-    if (this.points) {
-      viewer.layers.remove(this.points);
-      this.points = null;
-      this.layerKey = null;
-    }
     this.geneMapKey = key;
     if (!key || !gene || !port) {
       cache.field = null;
@@ -555,14 +546,13 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
         blending: 'translucent',
       },
     );
-    // A newer rebuild that kept this map's key drew the cells while the field was computing, so
-    // the map just landed OVER them: put the cells back on top.
-    if (this.points) {
-      viewer.layers.remove(this.points);
-      this.points = null;
-      this.layerKey = null;
-      this.redrawMarkers();
-    }
+    // `addImage` appends, so the map just landed over the cells (drawn by this rebuild's
+    // previous pass, or by a newer rebuild while the field was computing): move it to just under
+    // them. A move keeps the markers' GPU buffers, where dropping and re-adding the markers
+    // re-uploaded every one of them (NAPARI-BOUNDARY-11). Without markers on screen there is
+    // nothing to go under; the rebuild adds them over the map.
+    const under = this.points ? viewer.layers.items.indexOf(this.points) : -1;
+    if (under >= 0) viewer.layers.move(this.geneMapLayer, under);
     viewer.requestRender();
   }
 

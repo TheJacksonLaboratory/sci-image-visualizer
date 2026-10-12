@@ -3421,9 +3421,13 @@ describe('NapariVisualizerService', () => {
 
       it('hands napari an RGBA raster on the image grid, blended under the cells', async () => {
         const addImage = jest.spyOn(Viewer.prototype, 'addImage');
-        const addPoints = jest.spyOn(Viewer.prototype, 'addPoints');
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
         await mount();
+        const layers = () =>
+          (service as unknown as { viewer: Viewer }).viewer.layers.items as readonly { name?: string }[];
+        const markers = layers().find((l) => l.name === 'observations');
+        const removed: unknown[] = [];
+        (service as unknown as { viewer: Viewer }).viewer.layers.removed.connect((l) => removed.push(l));
         store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
         await flush();
 
@@ -3434,10 +3438,13 @@ describe('NapariVisualizerService', () => {
         expect(src.channels).toBe(4);
         expect(src.dtype).toBe('uint8');
         expect((opts as { blending?: string }).blending).toBe('translucent');
-        // The markers are re-added after it, so the cells stay on top of the field.
-        expect(addPoints.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
-          addImage.mock.invocationCallOrder.at(-1)!,
-        );
+        // The map goes in just under the markers, so the cells stay on top of the field — moved
+        // there, not by re-adding the markers over it (that re-uploaded every marker).
+        const names = layers().map((l) => l.name ?? '');
+        expect(names.findIndex((n) => n.startsWith('gene map'))).toBe(names.indexOf('observations') - 1);
+        expect(markers).toBeDefined();
+        expect(layers()).toContain(markers);
+        expect(removed).not.toContain(markers);
       });
 
       it('keeps the cells over a map that lands after an overlapping redraw (SPATIAL-19)', async () => {
