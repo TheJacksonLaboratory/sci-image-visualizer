@@ -12,6 +12,8 @@
  * `color` may be `'rgb(r, g, b)'` or `'#rrggbb'`/`'#rgb'`.
  */
 
+import { Colormap, buildLut } from 'napari-js';
+
 import { Rgb, parseCssColor } from './color';
 
 export type { Rgb };
@@ -203,6 +205,10 @@ function parseColor(c: string): Rgb {
 /**
  * Build a 256-entry RGB lookup table from a `COLORMAP_OPTIONS` value, indexed by
  * grayscale value 0–255. Returns null if the value can't be resolved to a scale.
+ *
+ * The Plotly side (the value's forms, the colour strings, the built-in names) is
+ * parsed here; the interpolation is napari-js's own `Colormap` sampled by `buildLut`,
+ * so both backends ramp a scale the same way.
  * @param value  array of `[stop, color]` pairs, or a Plotly built-in name string
  * @param reverse  mirror the scale (matches Plotly's `reversescale`)
  */
@@ -212,27 +218,16 @@ export function buildColormapLut(value: unknown, reverse = false): Rgb[] | null 
   else if (typeof value === 'string') scale = BUILTIN_SCALES[value] ?? null;
   if (!scale || scale.length < 2) return null;
 
-  // Normalise + sort the control points.
-  const stops = scale
-    .map((s) => [Number(s[0]), parseColor(String(s[1]))] as [number, Rgb])
-    .sort((a, b) => a[0] - b[0]);
-
+  const colormap = new Colormap(
+    'plotly-scale',
+    scale.map((s) => {
+      const [r, g, b] = parseColor(String(s[1]));
+      return { t: Number(s[0]), color: [r / 255, g / 255, b / 255] };
+    }),
+  );
+  const rgba = buildLut(colormap, 256);
   const lut: Rgb[] = new Array(256);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    // Find the bracketing control points for t.
-    let k = 0;
-    while (k < stops.length - 2 && stops[k + 1][0] < t) k++;
-    const [t0, c0] = stops[k];
-    const [t1, c1] = stops[k + 1];
-    const span = t1 - t0 || 1;
-    const f = Math.max(0, Math.min(1, (t - t0) / span));
-    lut[i] = [
-      Math.round(c0[0] + (c1[0] - c0[0]) * f),
-      Math.round(c0[1] + (c1[1] - c0[1]) * f),
-      Math.round(c0[2] + (c1[2] - c0[2]) * f),
-    ];
-  }
+  for (let i = 0; i < 256; i++) lut[i] = [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]];
   if (reverse) lut.reverse();
   return lut;
 }
