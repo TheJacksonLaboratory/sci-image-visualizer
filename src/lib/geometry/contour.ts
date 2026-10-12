@@ -1,3 +1,5 @@
+import { labelComponents } from 'napari-js/geometry';
+
 import { Polygon } from '../models/region';
 
 /**
@@ -58,32 +60,6 @@ export function maskToPolygons(
   return traceMask(mask, w, h, 0, 0, originX, originY, minSize, minHoleSize, w * h * 8);
 }
 
-/** Growable per-label bounding boxes and pixel counts (index 0 unused). */
-class LabelStats {
-  size: number[] = [0];
-  minX: number[] = [0];
-  minY: number[] = [0];
-  maxX: number[] = [0];
-  maxY: number[] = [0];
-
-  add(): number {
-    this.size.push(0);
-    this.minX.push(Infinity);
-    this.minY.push(Infinity);
-    this.maxX.push(-Infinity);
-    this.maxY.push(-Infinity);
-    return this.size.length - 1;
-  }
-
-  grow(lbl: number, x: number, y: number): void {
-    this.size[lbl]++;
-    if (x < this.minX[lbl]) this.minX[lbl] = x;
-    if (x > this.maxX[lbl]) this.maxX[lbl] = x;
-    if (y < this.minY[lbl]) this.minY[lbl] = y;
-    if (y > this.maxY[lbl]) this.maxY[lbl] = y;
-  }
-}
-
 /**
  * {@link maskToPolygons} over a mask that is itself a crop at (cropX, cropY) of
  * a larger frame; `maxSteps` caps the boundary walk as for the full frame.
@@ -100,59 +76,15 @@ function traceMask(
   minHoleSize: number,
   maxSteps: number,
 ): Polygon[] {
-  // 1. Label all 4-connected components once, recording size + bbox.
-  const labels = new Int32Array(w * h);
-  const stats = new LabelStats();
-  const queue: number[] = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      if (!mask[idx] || labels[idx]) continue;
-      const lbl = stats.add();
-      labels[idx] = lbl;
-      queue.push(idx);
-      while (queue.length) {
-        const i = queue.pop() as number;
-        const px = i % w;
-        const py = (i - px) / w;
-        stats.grow(lbl, px, py);
-        if (px > 0) {
-          const j = i - 1;
-          if (mask[j] && !labels[j]) {
-            labels[j] = lbl;
-            queue.push(j);
-          }
-        }
-        if (px < w - 1) {
-          const j = i + 1;
-          if (mask[j] && !labels[j]) {
-            labels[j] = lbl;
-            queue.push(j);
-          }
-        }
-        if (py > 0) {
-          const j = i - w;
-          if (mask[j] && !labels[j]) {
-            labels[j] = lbl;
-            queue.push(j);
-          }
-        }
-        if (py < h - 1) {
-          const j = i + w;
-          if (mask[j] && !labels[j]) {
-            labels[j] = lbl;
-            queue.push(j);
-          }
-        }
-      }
-    }
-  }
+  // 1. Label all 4-connected components once (napari-js's labelComponents: ids in raster
+  //    order of each component's first pixel, with sizes and exclusive bboxes).
+  const { labels, count, sizes, bboxes } = labelComponents({ data: mask, width: w, height: h }, 4);
 
   const wanted: number[] = [];
-  for (let lbl = 1; lbl < stats.size.length; lbl++) {
-    if (stats.size[lbl] >= minSize) wanted.push(lbl);
+  for (let lbl = 1; lbl <= count; lbl++) {
+    if (sizes[lbl] >= minSize) wanted.push(lbl);
   }
-  wanted.sort((a, b) => stats.size[b] - stats.size[a]); // largest-first (stable)
+  wanted.sort((a, b) => sizes[b] - sizes[a]); // largest-first (stable)
 
   // 2. Interior rings (holes) per foreground label — jit-ui#85.
   const holesByLabel = detectHoles(mask, labels, w, h, cropX, cropY, originX, originY, minHoleSize, maxSteps);
@@ -160,10 +92,10 @@ function traceMask(
   // 3. Trace each wanted blob inside its own bbox.
   const polys: Polygon[] = [];
   for (const lbl of wanted) {
-    const bx = stats.minX[lbl],
-      by = stats.minY[lbl];
-    const bw = stats.maxX[lbl] - bx + 1,
-      bh = stats.maxY[lbl] - by + 1;
+    const bx = bboxes[lbl * 4],
+      by = bboxes[lbl * 4 + 1];
+    const bw = bboxes[lbl * 4 + 2] - bx,
+      bh = bboxes[lbl * 4 + 3] - by;
     const comp = new Uint8Array(bw * bh);
     for (let y = 0; y < bh; y++) {
       const row = (by + y) * w + bx;
