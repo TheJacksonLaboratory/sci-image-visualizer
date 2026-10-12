@@ -69,6 +69,18 @@ describe('tilesInRect', () => {
     expect(keys).toEqual([{ level: 0, gx: 2, gy: 2 }]);
   });
 
+  it('stops at a view edge that falls exactly on a tile boundary (the view is open there)', () => {
+    // Tile 2 starts at 500 = the view's right/bottom edge: none of it is on screen.
+    const keys = tilesInRect({ x0: 0, y0: 0, x1: 500, y1: 500 }, 0, levels(1));
+    expect(keys.map((k) => `${k.gx},${k.gy}`).sort()).toEqual(['0,0', '0,1', '1,0', '1,1']);
+  });
+
+  it("keeps the tile holding the dataset bounds' far edge (the bounds are closed)", () => {
+    // The bounds are the extreme observations' coordinates: one sits at x = 500, in tile 2.
+    const keys = tilesInRect({ x0: 0, y0: 0, x1: 5000, y1: 100 }, 0, levels(1), [0, 0, 500, 100]);
+    expect(keys.map((k) => k.gx).sort()).toEqual([0, 1, 2]);
+  });
+
   it("uses the level's own tile size", () => {
     const keys = tilesInRect({ x0: 0, y0: 0, x1: 999, y1: 999 }, 2, levels(4));
     expect(keys).toEqual([{ level: 2, gx: 0, gy: 0 }]);

@@ -119,6 +119,11 @@ export function visibleDataRect(
  * Tiles of one level intersecting `rect`, clipped to the dataset's `bounds` (so zooming
  * out over empty canvas does not ask for tiles that cannot exist). Ordered from the
  * rectangle's centre outward, so the middle of the screen fills in first.
+ *
+ * Tile `g` covers `[g·s, (g+1)·s)`. The view's far edge is open — a tile starting exactly
+ * at `rect.x1` shows nothing — but the bounds' far edge is closed: the bounds are the
+ * extreme observations' coordinates, so one sits exactly on `bounds[2]`, in the tile
+ * starting there.
  */
 export function tilesInRect(
   rect: DataRect,
@@ -129,18 +134,19 @@ export function tilesInRect(
 ): TileKey[] {
   const size = levels[level]?.tileSize;
   if (!(size > 0)) return [];
-  let { x0, y0, x1, y1 } = rect;
+  let { x0, y0 } = rect;
+  // Last tile along an axis: the one before the open view edge, at most the closed bound's.
+  let gx1 = Math.ceil(rect.x1 / size) - 1;
+  let gy1 = Math.ceil(rect.y1 / size) - 1;
   if (bounds) {
     x0 = Math.max(x0, bounds[0]);
     y0 = Math.max(y0, bounds[1]);
-    x1 = Math.min(x1, bounds[2]);
-    y1 = Math.min(y1, bounds[3]);
-    if (x1 < x0 || y1 < y0) return [];
+    if (Math.min(rect.x1, bounds[2]) < x0 || Math.min(rect.y1, bounds[3]) < y0) return [];
+    gx1 = Math.min(gx1, Math.floor(bounds[2] / size));
+    gy1 = Math.min(gy1, Math.floor(bounds[3] / size));
   }
   const gx0 = Math.floor(x0 / size);
-  const gx1 = Math.floor(x1 / size);
   const gy0 = Math.floor(y0 / size);
-  const gy1 = Math.floor(y1 / size);
   const cx = (rect.x0 + rect.x1) / 2 / size;
   const cy = (rect.y0 + rect.y1) / 2 / size;
   const out: TileKey[] = [];
