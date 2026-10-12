@@ -24,11 +24,10 @@ export const TILE_LAYER_ORDER: readonly TileGroup[] = [
  * One napari-js layer per named group, kept in a fixed bottom-to-top order, plus what each
  * group currently shows (its key), so an unchanged plan is a no-op.
  *
- * napari-js's layer list is append-only (add / remove / clear), so order is kept by
- * re-adding. Each removal disposes the layer's GPU visual (re-uploaded on the next frame), so
- * a plan restores the order once, after all its groups are in place, and moves only the
- * layers that are out of place ({@link restoreOrder}). `LayerList.move` in napari-js would
- * remove the re-upload (review NAPARI-BOUNDARY-11).
+ * Order is kept with `LayerList.move`, which restacks a layer without disposing its GPU visual
+ * (a remove + re-add would re-upload its whole buffer, review NAPARI-BOUNDARY-11). A plan still
+ * restores the order once, after all its groups are in place, and moves only the layers that
+ * are out of place ({@link restoreOrder}).
  */
 export class OrderedLayerGroups<G extends string> {
   private current: Viewer | null = null;
@@ -134,9 +133,10 @@ export class OrderedLayerGroups<G extends string> {
   }
 
   /**
-   * Put the groups' layers in order, re-adding only from the first one out of place (and,
-   * with `aboveOthers`, the first one under a layer that is not ours — the service's
-   * markers). Everything before that is already where it belongs and keeps its GPU visual.
+   * Put the groups' layers in order, moving to the top only from the first one out of place
+   * (and, with `aboveOthers`, the first one under a layer that is not ours — the service's
+   * markers). Everything before that is already where it belongs. A move keeps each layer
+   * mounted (no `removed`/`added`), so nothing is re-uploaded.
    */
   restoreOrder(aboveOthers: boolean): void {
     const v = this.current;
@@ -153,10 +153,7 @@ export class OrderedLayerGroups<G extends string> {
     let k = 0;
     while (k < wanted.length && current[k] === wanted[k] && items.indexOf(wanted[k]) > lastOther) k++;
     if (k === wanted.length) return;
-    for (const layer of wanted.slice(k)) {
-      v.layers.remove(layer);
-      v.layers.add(layer);
-    }
+    for (const layer of wanted.slice(k)) v.layers.move(layer, items.length - 1);
     v.requestRender();
   }
 

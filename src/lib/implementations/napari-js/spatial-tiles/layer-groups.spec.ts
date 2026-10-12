@@ -15,32 +15,46 @@ describe('OrderedLayerGroups', () => {
     const viewer = new Viewer({ canvas: document.createElement('canvas') });
     const groups = new OrderedLayerGroups<'low' | 'mid' | 'high'>(['low', 'mid', 'high']);
     groups.attach(viewer);
-    const removals: unknown[] = [];
-    viewer.layers.removed.connect((l) => removals.push(l));
     const names = () => viewer.layers.items.map((l) => l.name);
-    return { viewer, groups, removals, names };
+    /** Every layer-list event from here on, so a spec can tell a restack from a re-add. */
+    const events: string[] = [];
+    const name = (l: { name: string }) => l.name;
+    viewer.layers.removed.connect((l) => events.push(`removed ${name(l)}`));
+    viewer.layers.added.connect((l) => events.push(`added ${name(l)}`));
+    viewer.layers.moved.connect((m) => events.push(`moved ${name(m.layer)}`));
+    return { viewer, groups, names, events };
   }
 
-  it('restores the order once, re-adding from the first layer out of place', () => {
-    const { viewer, groups, removals, names } = setup();
+  it('restores the order once, moving from the first layer out of place', () => {
+    const { viewer, groups, names, events } = setup();
     groups.replace('low', viewer.addPoints(new Float32Array(2), { name: 'low' }));
     groups.replace('high', viewer.addPoints(new Float32Array(2), { name: 'high' }));
     groups.replace('mid', viewer.addPoints(new Float32Array(2), { name: 'mid' }));
+    const layers = [...viewer.layers.items];
+    events.length = 0;
     groups.restoreOrder(false);
     expect(names()).toEqual(['low', 'mid', 'high']);
-    expect(removals.map((l) => (l as { name: string }).name)).toEqual(['mid', 'high']); // 'low' kept
+    // A restack, not a remove + re-add: the layers stay mounted, so their GPU visuals are kept
+    // (NAPARI-BOUNDARY-11). 'low' is already in place, and 'mid', on top already, ends up
+    // in place once 'high' goes over it.
+    expect(events).toEqual(['moved high']);
+    expect(new Set(viewer.layers.items)).toEqual(new Set(layers));
     groups.restoreOrder(false); // already in order: nothing moves
-    expect(removals).toHaveLength(2);
+    expect(events).toHaveLength(1);
   });
 
   it('puts its layers back above a layer that is not its own, on request', () => {
-    const { viewer, groups, names } = setup();
-    groups.replace('low', viewer.addPoints(new Float32Array(2), { name: 'low' }));
+    const { viewer, groups, names, events } = setup();
+    const low = viewer.addPoints(new Float32Array(2), { name: 'low' });
+    groups.replace('low', low);
     viewer.addPoints(new Float32Array(2), { name: 'markers' });
     groups.restoreOrder(false);
     expect(names()).toEqual(['low', 'markers']);
+    events.length = 0;
     groups.restoreOrder(true);
     expect(names()).toEqual(['markers', 'low']);
+    expect(events).toEqual(['moved low']);
+    expect(viewer.layers.items[1]).toBe(low);
   });
 
   it('restyles a shapes layer in place unless its geometry changed', () => {

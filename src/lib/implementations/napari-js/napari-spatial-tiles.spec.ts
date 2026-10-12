@@ -812,20 +812,24 @@ describe('NapariSpatialTileLayers: layer order', () => {
   }
   const names = (viewer: Viewer) => viewer.layers.items.map((l) => l.name);
 
-  it('re-adds the transcripts once when the cells are rebuilt under them', async () => {
+  it('moves the transcripts back on top once when the cells are rebuilt under them', async () => {
     const { tiles, viewer, plan, setView } = setup();
     await plan();
     expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
     const transcriptLayer = viewer.layers.items[2];
     const removals: unknown[] = [];
+    const moves: unknown[] = [];
     viewer.layers.removed.connect((l) => removals.push(l));
+    viewer.layers.moved.connect((m) => moves.push(m.layer));
 
     setView({ cellSet: 'nucleus' }); // new cell geometry; the transcripts are unchanged
     await plan();
 
     expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
     expect(viewer.layers.items[2]).toBe(transcriptLayer);
-    expect(removals.filter((l) => l === transcriptLayer)).toHaveLength(1);
+    // Restacked, never removed: its GPU visual is kept (NAPARI-BOUNDARY-11).
+    expect(moves.filter((l) => l === transcriptLayer)).toHaveLength(1);
+    expect(removals).not.toContain(transcriptLayer);
     tiles.detach();
   });
 
@@ -833,14 +837,18 @@ describe('NapariSpatialTileLayers: layer order', () => {
     const { tiles, viewer, plan } = setup();
     await plan();
     const before = [...viewer.layers.items];
+    const events: unknown[] = [];
+    viewer.layers.removed.connect((l) => events.push(l));
+    viewer.layers.moved.connect((m) => events.push(m.layer));
+    tiles.afterObservations(); // nothing was added since: already in order
+    expect(events).toHaveLength(0);
+    viewer.addPoints(new Float32Array(2), { name: 'markers' });
     const removals: unknown[] = [];
     viewer.layers.removed.connect((l) => removals.push(l));
-    tiles.afterObservations(); // nothing was added since: already in order
-    expect(removals).toHaveLength(0);
-    viewer.addPoints(new Float32Array(2), { name: 'markers' });
     tiles.afterObservations();
     expect(names(viewer)).toEqual(['markers', 'cells', 'cell outlines', 'transcripts']);
     expect(viewer.layers.items.slice(1)).toEqual(before);
+    expect(removals).toHaveLength(0); // moved over the markers, not re-added
     tiles.detach();
   });
 });
