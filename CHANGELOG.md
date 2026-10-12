@@ -149,7 +149,7 @@ CORE-1) refer to the review document attached to #45.
 
 ### Refactored
 
-- Shared modules: `implementations/tile-server/` (jit-service client), `overlays/scale-bar-core`,
+- Shared modules: `implementations/tile-server/` (jit-service client),
   `region-overlay/` (region geometry, hit tests, `SvgRegionRenderer`), `geometry/` (raster,
   contour, rings), `models/{polygon-factory,polygon-edit,region-geojson,region-clone,svg-path}`,
   `store/{region-history,region-selection,region-scope-cache}`, `toolbar/tool-kit/`,
@@ -174,6 +174,13 @@ CORE-1) refer to the review document attached to #45.
   bookkeeping are gone. The nearest centre still wins in 2D and the front-most in 3D; an exact tie
   between transcripts now goes to the one drawn on top (NAPARI-BOUNDARY-24, NAPARI-SVC-17,
   SPATIAL-14).
+- The napari overlay chrome is napari-js's (`napari-js/overlays`): the 2D and 3D scale bars are
+  `ScaleBarOverlay`, the minimap `NavigatorOverlay` and the 3D axis text `AxesLabelsOverlay`, with
+  the same look, class names and gestures. The OSD scale bar takes its length and unit from the
+  same `scaleBarFor`/`formatLength`, so both backends' bars agree. `napari-scale-bar`,
+  `napari-navigator`, `napari-axes-labels` and `overlays/scale-bar-core` are gone. A 3D axis
+  length that rounds to a whole number prints as the scale bar does, "4 mm" rather than "4.0 mm"
+  (NAPARI-BOUNDARY-32).
 - The napari region overlay takes its world → screen matrix from napari-js's
   `Viewer.canvasTransform()`: a camera frame and a region redraw read no layout (they read the
   canvas and svg rects three and one times); only a pointer event reads the svg's position. The

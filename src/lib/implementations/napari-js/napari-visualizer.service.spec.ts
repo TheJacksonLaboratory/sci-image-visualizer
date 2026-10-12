@@ -3118,6 +3118,28 @@ describe('NapariVisualizerService', () => {
       expect(labels[2]).toBe('Z · 1.5 cm');
     });
 
+    it('prints an axis length that rounds to a whole number without a trailing .0, as the scale bar', async () => {
+      // 275 x 14.6 µm = 4015 µm reads "4 mm" (it read "4.0 mm", where a 2000 µm axis read "2 mm").
+      await mountVolume(
+        imageInfo({
+          tiled: false,
+          urls: Array.from({ length: 8 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 100, z: 8, mppX: 14.6, mppY: 20 }],
+        }),
+      );
+
+      const labels = (
+        service as unknown as {
+          scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+        }
+      ).scene
+        .axesLabels({ width: 1, height: 1, depth: 1 })
+        .map((l) => l.text);
+
+      expect(labels[0]).toBe('X · 4 mm');
+      expect(labels[1]).toBe('Y · 2 mm');
+    });
+
     it('labels Z in slices when the stack declares no slice spacing', async () => {
       await mountVolume(
         imageInfo({

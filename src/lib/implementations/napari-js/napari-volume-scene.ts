@@ -1,12 +1,12 @@
 import { Subscription } from 'rxjs';
 import { MultiChannelVolumeView, histogramScalar } from 'napari-js';
 import type { Points3DLayer, VolumeChannel } from 'napari-js';
+import { formatLength } from 'napari-js/overlays';
 import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { IIsosurfaceControls, ISurface3dControls } from '../../contracts/visualizer.contract';
-import { formatUm } from '../../overlays/scale-bar-core';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { AssembledVolume } from './napari-tile-client';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
@@ -301,7 +301,7 @@ export class VolumeScene implements NapariScene {
     // shape (and for a physically sized volume it is already in µm, so reading a
     // pixel count off it and multiplying by mpp would scale the label twice).
     const { px, mpp } = this.imageExtent();
-    const len = (n: number, um: number): string => (um > 0 ? formatUm(n * um) : `${n} px`);
+    const len = (n: number, um: number): string => (um > 0 ? formatLength(n * um, 'µm') : `${n} px`);
     return [
       { anchor: [hx, -hy, -hz], text: `X · ${len(px[0], mpp[0])}`, color: '#ed4545' },
       { anchor: [-hx, hy, -hz], text: `Y · ${len(px[1], mpp[1])}`, color: '#4dd959' },

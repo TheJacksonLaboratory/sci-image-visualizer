@@ -64,7 +64,7 @@ describe('OsdScaleBar', () => {
     expect(visible(v)).toBe(false);
   });
 
-  // Covers the niceLength 1/2/5/10 tiers and every formatUm unit (nm…m).
+  // Covers the 1/2/5/10 snapping tiers and every unit (nm…m).
   it.each<[number, string]>([
     [1, '100 µm'], // nice ×1
     [2.0833, '200 µm'], // nice ×2  (target ~250 → 200)

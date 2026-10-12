@@ -1,11 +1,11 @@
 import { Subscription } from 'rxjs';
 import { heightField, histogramScalar } from 'napari-js';
 import type { SurfaceLayer } from 'napari-js';
+import { formatLength } from 'napari-js/overlays';
 import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ISurface3dControls } from '../../contracts/visualizer.contract';
-import { formatUm } from '../../overlays/scale-bar-core';
 import { Axes3dGizmo, surface3dControls } from './napari-axes-gizmo';
 import {
   LumaPlane,
@@ -136,7 +136,7 @@ export class SurfaceScene implements NapariScene {
     const size = this.ctx.imageSize();
     const descW = desc?.width ?? size.width;
     const descH = desc?.height ?? size.height;
-    const len = (px: number): string => (mppX > 0 ? formatUm(px * mppX) : `${px} px`);
+    const len = (px: number): string => (mppX > 0 ? formatLength(px * mppX, 'µm') : `${px} px`);
     return [
       { anchor: [hx, -hy, -hz], text: `X · ${len(descW)}`, color: '#ed4545' },
       { anchor: [-hx, hy, -hz], text: `Y · ${len(descH)}`, color: '#4dd959' },
