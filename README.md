@@ -300,7 +300,8 @@ switches and are editable from the Regions panel. The on-canvas tools:
   a sensitivity slider tunes strictness. Growing into another region merges them.
 - **Brush** — paint/erase a region with a circular brush (QuPath-style); a size
   slider sets the diameter, `Shift` erases, and erasing across a region can split it.
-- **Vertex eraser** — remove vertices within a radius from any region.
+- **Vertex eraser** — remove vertices within a radius from any region; the outline is rejoined
+  where it crosses the eraser's edge (a Bézier region loses the anchors outright).
 - **Delete** the selected region.
 
 Wand- and brush-drawn regions default to the `legend` class; SAM/cellpose masks

@@ -1,7 +1,7 @@
 import { IVertexEraserOptions } from '../../contracts/display-types';
 import { Polygon } from '../../models/region';
 import { makePolygon, replaceBounds } from '../../models/polygon-factory';
-import { dropVerticesWithinRadius } from '../../geometry/ring';
+import { dropVerticesWithinRadius, eraseRingWithinRadius } from '../../geometry/ring';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
@@ -17,8 +17,11 @@ export type VertexEraserToolHost = CanvasToolHost;
 /**
  * Vertex eraser. A custom canvas overlay that, on click/drag, removes any
  * polygon vertex within `radius` matrix-pixels of the cursor from every
- * annotation polygon/polyline (never an intensity-profile line). Polygons that
- * fall below 3 vertices (or polylines below 2) are removed entirely.
+ * annotation polygon/polyline (never an intensity-profile line). The outline is
+ * rejoined where it crosses the eraser's edge, so erasing a corner of a sparse
+ * outline (a traced box is four vertices) trims that corner instead of cutting
+ * to the next corners; a Bezier region's anchors are dropped outright. Polygons
+ * that fall below 3 vertices (or polylines below 2) are removed entirely.
  *
  * The cursor is rendered as a dashed-red circle on the overlay so the user
  * can see the active radius while moving.
@@ -146,7 +149,8 @@ export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
 
   /**
    * Drop every vertex of every annotation polygon/polyline that lies within the
-   * eraser's radius of the cursor. Polygons reduced below 3 vertices (or
+   * eraser's radius of the cursor, rejoining the outline at the eraser's edge
+   * (see {@link eraseRingWithinRadius}). Polygons reduced below 3 vertices (or
    * polylines below 2) are removed entirely. Edited regions keep their metadata.
    */
   private applyAtClient(e: PointerEvent) {
@@ -170,8 +174,13 @@ export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
       const b = region?.bounds;
       if (!(b instanceof Polygon) || b.xpoints.length === 0) continue;
       const closed = b.closed !== false;
+      // Bezier vertices are anchors the user placed: drop them, never add cut points.
+      const erase = (xs: number[], ys: number[], wraps: boolean) =>
+        b.bezier
+          ? dropVerticesWithinRadius(xs, ys, cmx, cmy, this.radius)
+          : eraseRingWithinRadius(xs, ys, cmx, cmy, this.radius, wraps);
       const ring = frame.ringToMatrix(b.xpoints, b.ypoints);
-      const result = dropVerticesWithinRadius(ring.xs, ring.ys, cmx, cmy, this.radius);
+      const result = erase(ring.xs, ring.ys, closed);
 
       // Erase vertices on interior rings (a donut's inner outline) too, and drop
       // a hole that degenerates below a triangle (jit-ui#85).
@@ -180,12 +189,10 @@ export class VertexEraserTool implements ICanvasTool<IVertexEraserOptions> {
       if (b.holes) {
         newHoles = [];
         for (const hole of b.holes) {
-          const hr = dropVerticesWithinRadius(
+          const hr = erase(
             hole.map((p) => frame.toMatrixX(p[0])),
             hole.map((p) => frame.toMatrixY(p[1])),
-            cmx,
-            cmy,
-            this.radius,
+            true,
           );
           if (hr.removed === 0) {
             newHoles.push(hole); // untouched — keep as-is

@@ -68,7 +68,8 @@
       [max]="vertexEraserRadiusMax"
       [step]="vertexEraserRadiusStep"
       tooltip="Eraser radius in image pixels.
-                         Vertices within this distance of the cursor are removed."
+                         Vertices within this distance of the cursor are removed, and the
+                         outline is rejoined at the eraser's edge."
       [valueText]="'' + vertexEraserRadius"
       (valueChange)="vertexEraserRadiusChange.emit(asNumber($event))"
     >

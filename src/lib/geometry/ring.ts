@@ -115,6 +115,63 @@ export function dropVerticesWithinRadius(
   return { xpoints: xs, ypoints: ys, removed };
 }
 
+/**
+ * Erase the part of a ring that lies within `radius` of (cx, cy): every vertex
+ * inside the disc goes (as {@link dropVerticesWithinRadius}), and the outline is
+ * rejoined where it crosses the disc's edge rather than at the next vertex left
+ * standing. On a densely sampled outline the two agree; on a sparse one (a
+ * traced box is four corners) dropping a corner would otherwise cut straight to
+ * the neighbouring corners. A `closed` ring wraps; an open one (a polyline) has
+ * no edge from its last vertex back to its first. Returns the trimmed parallel
+ * arrays plus how many of the ring's own vertices were removed (0: unchanged).
+ */
+export function eraseRingWithinRadius(
+  xpoints: number[],
+  ypoints: number[],
+  cx: number,
+  cy: number,
+  radius: number,
+  closed = true,
+): { xpoints: number[]; ypoints: number[]; removed: number } {
+  const n = xpoints.length;
+  // A vertex placed on the disc's edge by an earlier tick stays outside (no churn).
+  const r2 = radius * radius * (1 - 1e-9);
+  const inside = new Array<boolean>(n);
+  let removed = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xpoints[i] - cx;
+    const dy = ypoints[i] - cy;
+    inside[i] = dx * dx + dy * dy < r2;
+    if (inside[i]) removed++;
+  }
+  if (removed === 0) return { xpoints: xpoints.slice(), ypoints: ypoints.slice(), removed };
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!inside[i]) {
+      xs.push(xpoints[i]);
+      ys.push(ypoints[i]);
+    }
+    const j = i + 1 < n ? i + 1 : closed ? 0 : -1;
+    if (j < 0 || inside[i] === inside[j]) continue;
+    // The edge i→j crosses the disc's edge once: leaving it when i is inside.
+    const ax = xpoints[i] - cx,
+      ay = ypoints[i] - cy;
+    const ex = xpoints[j] - xpoints[i],
+      ey = ypoints[j] - ypoints[i];
+    const a = ex * ex + ey * ey;
+    const b = ax * ex + ay * ey;
+    const c = ax * ax + ay * ay - radius * radius;
+    const root = Math.sqrt(Math.max(0, b * b - a * c));
+    const t = (inside[i] ? -b + root : -b - root) / a;
+    // A crossing at the vertex left standing (one on the disc's edge) is that vertex.
+    if (inside[i] ? t >= 1 - 1e-12 : t <= 1e-12) continue;
+    xs.push(xpoints[i] + t * ex);
+    ys.push(ypoints[i] + t * ey);
+  }
+  return { xpoints: xs, ypoints: ys, removed };
+}
+
 /** Perpendicular distance from (px,py) to the segment (ax,ay)–(bx,by). */
 function perpDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax,

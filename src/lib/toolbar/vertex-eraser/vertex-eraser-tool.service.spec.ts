@@ -70,8 +70,51 @@ describe('VertexEraserTool (neutral Region)', () => {
     expect(committed!.length).toBe(1);
     const bounds = committed![0].bounds;
     expect(bounds).toBeInstanceOf(Polygon); // neutral model, not a Plotly dict
-    expect((bounds as Polygon).xpoints.length).toBe(3); // the (10,0) vertex was dropped
+    // The (10,0) vertex was dropped and the outline rejoined at the eraser's edge.
+    expect((bounds as Polygon).xpoints).toEqual([0, 8, 10, 10, 0]);
+    expect((bounds as Polygon).ypoints).toEqual([0, 0, 2, 10, 10]);
     expect(committed![0].id).toBe(1); // identity preserved
+  });
+
+  it("trims a sparse outline's corner at the eraser's edge, not to the next corners", () => {
+    // A traced box is four corners: dropping one and joining its neighbours made a triangle.
+    const box = squareRegion();
+    const p = box.bounds as Polygon;
+    p.xpoints = [0, 40, 40, 0];
+    p.ypoints = [0, 0, 40, 40];
+    regions = [box];
+    tool.setRadius(5);
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 40, clientY: 40, button: 0 }));
+
+    const out = committed![0].bounds as Polygon;
+    expect(out.xpoints).toEqual([0, 40, 40, 35, 0]);
+    expect(out.ypoints).toEqual([0, 0, 35, 40, 40]);
+  });
+
+  it('erases a dense outline as before: the straight edge under the eraser stays put', () => {
+    // One vertex per unit along the top edge, as a freehand stroke draws it.
+    const dense = squareRegion();
+    const p = dense.bounds as Polygon;
+    p.xpoints = [...Array.from({ length: 11 }, (_v, i) => i), 10, 0];
+    p.ypoints = [...Array.from({ length: 11 }, () => 0), 10, 10];
+    regions = [dense];
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 5, clientY: 0, button: 0 }));
+
+    const out = committed![0].bounds as Polygon;
+    expect(out.xpoints).toEqual([0, 1, 2, 3, 7, 8, 9, 10, 10, 0]);
+    expect(new Set(out.ypoints.slice(0, 8))).toEqual(new Set([0]));
+  });
+
+  it("drops a Bezier region's anchor outright (no cut points)", () => {
+    const curve = squareRegion();
+    (curve.bounds as Polygon).bezier = true;
+    regions = [curve];
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 0, button: 0 }));
+
+    expect((committed![0].bounds as Polygon).xpoints).toEqual([0, 10, 0]);
   });
 
   /** A 0–40 square exterior with a hole ring (defaults to a 10–20 square). */
@@ -104,7 +147,14 @@ describe('VertexEraserTool (neutral Region)', () => {
     const poly = committed![0].bounds as Polygon;
     expect(poly.xpoints.length).toBe(4); // exterior untouched
     expect(poly.holes!.length).toBe(1);
-    expect(poly.holes![0].length).toBe(3); // one hole vertex removed
+    // The (10,10) hole vertex removed, the inner ring rejoined at the eraser's edge.
+    expect(poly.holes![0]).toEqual([
+      [12, 10],
+      [20, 10],
+      [20, 20],
+      [10, 20],
+      [10, 12],
+    ]);
   });
 
   it('keeps the hole when erasing an exterior vertex (no donut fill)', () => {
@@ -113,7 +163,7 @@ describe('VertexEraserTool (neutral Region)', () => {
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 0, clientY: 0, button: 0 }));
 
     const poly = committed![0].bounds as Polygon;
-    expect(poly.xpoints.length).toBe(3); // exterior vertex removed
+    expect(poly.xpoints).toEqual([2, 40, 40, 0, 0]); // (0,0) trimmed off
     expect(poly.holes!.length).toBe(1); // hole preserved
   });
 
@@ -150,7 +200,7 @@ describe('VertexEraserTool (neutral Region)', () => {
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 5, clientY: 5, button: 0 })); // miss
     canvas.dispatchEvent(new MouseEvent('pointermove', { clientX: 10, clientY: 0, buttons: 1 })); // hits (10,0)
     expect(committed).not.toBeNull();
-    expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
+    expect((committed![0].bounds as Polygon).xpoints).toEqual([0, 8, 10, 10, 0]);
   });
 
   it('a bare hover (no button) just redraws the cursor and commits nothing', () => {
@@ -176,7 +226,7 @@ describe('VertexEraserTool (neutral Region)', () => {
     // Still erases a single nearby vertex with the prior valid radius (2).
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     canvas.dispatchEvent(new MouseEvent('pointerdown', { clientX: 10, clientY: 0, button: 0 }));
-    expect((committed![0].bounds as Polygon).xpoints.length).toBe(3);
+    expect((committed![0].bounds as Polygon).xpoints).toEqual([0, 8, 10, 10, 0]);
   });
 });
 
@@ -235,7 +285,10 @@ describe('VertexEraserTool — anisotropic readback (RT-14)', () => {
     bind([tallRegion()], [1, 4]);
     click(0, 0);
     expect(committed).not.toBeNull();
-    expect((committed![0].bounds as Polygon).ypoints).toEqual([6, 30, 30]);
+    // (0, 6) dropped; the cut points sit 2 rows (8 data units) from the click on Y.
+    const ys = (committed![0].bounds as Polygon).ypoints;
+    expect(ys.slice(0, 4)).toEqual([6, 6, 30, 30]);
+    expect(ys[4]).toBeCloseTo(8);
   });
 
   it('keeps a vertex outside the radius on a square readback', () => {
@@ -314,7 +367,7 @@ describe('VertexEraserTool — keeps what it does not edit (RT-5)', () => {
     click(10, 0);
 
     const out = committed![0];
-    expect((out.bounds as Polygon).xpoints.length).toBe(3);
+    expect((out.bounds as Polygon).xpoints).toEqual([0, 8, 10, 10, 0]);
     expect(out.colorOverridden).toBe(true);
     expect(out.source).toBe('yolo');
     expect(out.filename).toBe('a.tif');

@@ -82,6 +82,10 @@ CORE-1) refer to the review document attached to #45.
 - **napari 2D cells coloured by a grouping of more than ~127 groups** drew neighbouring groups in
   one colour (a band per group in a 256-entry colormap); each cell now carries its own colour,
   napari-js 0.15's per-shape `faceColor` (NAPARI-BOUNDARY-27).
+- **The vertex eraser cut a sparse outline's corner to the next corners**: erasing the corner of
+  a four-vertex box left a triangle. The outline is now rejoined where it crosses the eraser's
+  edge, so only the part under the eraser goes (as it did on densely sampled outlines); a Bézier
+  region still loses the anchors outright.
 - **Spatial tiles: a view ending exactly on a tile boundary fetched the tile beyond it**, which
   has no area on screen; the view's far edge is open. The dataset bounds' far edge stays closed
   (an observation sits on it).
