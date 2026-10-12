@@ -37,9 +37,9 @@ interface Placement {
   translate: [number, number];
 }
 
-/** Transcript colours: per-entry RGBA for points, values + colormap for shapes. */
+/** Transcript colours: packed per-entry RGBA for points, values + colormap for shapes. */
 interface TranscriptFaces {
-  rgba: RGBA[];
+  rgba: Float32Array;
   values: Float32Array;
   colormap: Colormap;
 }
@@ -217,7 +217,7 @@ export class TranscriptLayers {
   private drawTranscriptCircles(
     merged: SpatialTranscriptTile,
     diam: Float32Array,
-    rgba: RGBA[],
+    rgba: Float32Array,
     view: SpatialViewState,
     { scale, translate }: Placement,
   ): void {
@@ -355,12 +355,12 @@ export class TranscriptLayers {
       };
     }
     const { stops, valueOf } = discreteColormapStops(rgb, MISSING_COLOR);
-    const rgba: RGBA[] = new Array(t.count);
+    const rgba = new Float32Array(t.count * 4);
     const values = new Float32Array(t.count);
     const tuples: RGBA[] = rgb.map(([r, g, b]) => [r / 255, g / 255, b / 255, 1]);
     for (let i = 0; i < t.count; i++) {
       const c = codeOf(i);
-      rgba[i] = c < 0 ? UNASSIGNED_RGBA : tuples[c];
+      rgba.set(c < 0 ? UNASSIGNED_RGBA : tuples[c], i * 4);
       values[i] = valueOf(c);
     }
     return { rgba, values, colormap: new Colormap('transcript-categories', stops) };

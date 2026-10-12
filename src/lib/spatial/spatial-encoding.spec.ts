@@ -10,7 +10,6 @@ import {
   lutFor,
   markerDiameters,
   resolveCategoryColors,
-  toRgbaTuples,
 } from './spatial-encoding';
 import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
@@ -202,16 +201,6 @@ describe('spatial-encoding', () => {
 
     it('falls back for a dataset that declares no radius', () => {
       expect(markerDiameters(obs(), 5)).toBe(10);
-    });
-  });
-
-  describe('toRgbaTuples', () => {
-    it('adapts the flat buffer to napari-js RGBA[] without reordering', () => {
-      const flat = new Float32Array([1, 0, 0, 1, 0, 1, 0, 0.5]);
-      expect(toRgbaTuples(flat)).toEqual([
-        [1, 0, 0, 1],
-        [0, 1, 0, 0.5],
-      ]);
     });
   });
 

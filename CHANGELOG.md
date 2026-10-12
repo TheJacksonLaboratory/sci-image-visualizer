@@ -107,6 +107,9 @@ CORE-1) refer to the review document attached to #45.
   peers; global icon styles ship as `styles/viz-icons.scss`.
 - **napari-js 0.15.0** (was 0.14): a volume opens framed to fit the canvas (a little further
   out than before), and viridis and magma are matplotlib's exact tables.
+- **napari markers take packed colours**: per-point colours go to napari-js as the flat
+  `Float32Array` the encoders build, with no tuple per point. `toRgbaTuples` is removed from the
+  public API (NAPARI-BOUNDARY-12, SPATIAL-11).
 
 ### Refactored
 

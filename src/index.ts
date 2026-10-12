@@ -62,7 +62,6 @@ export {
   resolveCategoryColors,
   contrastWindow,
   markerDiameters,
-  toRgbaTuples,
   lutFor,
   DEFAULT_CATEGORICAL_PALETTE,
   DEFAULT_MUTED_OPACITY,

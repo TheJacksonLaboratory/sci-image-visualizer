@@ -10,13 +10,7 @@ import {
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
-import {
-  encodeCategorical,
-  markerDiameters,
-  resolveCategoryColors,
-  toRgbaTuples,
-  type RGBA,
-} from '../../spatial/spatial-encoding';
+import { encodeCategorical, markerDiameters, resolveCategoryColors } from '../../spatial/spatial-encoding';
 import {
   SpatialSelectionMask,
   emptySelection,
@@ -40,6 +34,7 @@ import {
   SPATIAL_NEUTRAL_COLOR,
   SPATIAL_NEUTRAL_HEX,
   SPATIAL_SLICE_MIN_DIAMETER_PX,
+  PointColors,
   encodeSpatialContinuous,
   gatherColors,
 } from './napari-spatial-encoding';
@@ -203,7 +198,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
 
     // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
     // superseded, and dropping the existing layer first would blank the view.
-    let faceColor: RGBA[] | RGBA;
+    let faceColor: PointColors;
     const endLoading = this.ctx.badge.begin('Observations');
     try {
       faceColor = dataset ? await this.faceColors(dataset, view, selection) : SPATIAL_NEUTRAL_COLOR;
@@ -585,7 +580,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     dataset: SpatialDataset,
     view: SpatialViewState,
     selection: SpatialSelectionMask,
-  ): Promise<RGBA[] | RGBA> {
+  ): Promise<PointColors> {
     const port = this.session.port;
     const colorBy = view.colorBy;
     // Everything NOT selected is muted; with nothing selected, nothing is muted
@@ -594,19 +589,17 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
 
     if (!port || !colorBy) {
       // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
-      // does not allocate 84k of them.
+      // does not allocate a colour per point.
       if (!muted && view.opacity >= 1) return SPATIAL_NEUTRAL_COLOR;
       // Not uniform — the opacity control or a selection varies the alpha, so it
       // has to be per-point. Returning the constant tuple here is what made the
       // Opacity slider do nothing in the default state, which is the state anyone
       // lands in before picking a colour source.
-      return toRgbaTuples(
-        encodeCategorical(new Uint16Array(dataset.observations.count), {
-          colors: [SPATIAL_NEUTRAL_HEX],
-          opacity: view.opacity,
-          muted,
-        }),
-      );
+      return encodeCategorical(new Uint16Array(dataset.observations.count), {
+        colors: [SPATIAL_NEUTRAL_HEX],
+        opacity: view.opacity,
+        muted,
+      });
     }
 
     if (colorBy.kind === 'column') {
@@ -628,15 +621,15 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
             if (c !== NO_CATEGORY && hide[c]) rgba[4 * i + 3] = 0;
           }
         }
-        return toRgbaTuples(rgba);
+        return rgba;
       }
       // A continuous column may carry its own log hint (counts); the view's
       // toggle wins once the user has set it.
-      return toRgbaTuples(this.encodeContinuous(column.values, view, muted));
+      return this.encodeContinuous(column.values, view, muted);
     }
 
     const values = await port.getFeatureVector(colorBy.name);
-    return toRgbaTuples(this.encodeContinuous(values, view, muted));
+    return this.encodeContinuous(values, view, muted);
   }
 
   /** Continuous values → RGBA through the active colormap and a clipped window. */

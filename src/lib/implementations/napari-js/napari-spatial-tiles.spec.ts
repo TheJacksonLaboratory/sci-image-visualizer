@@ -511,7 +511,7 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     v: unknown,
     t: SpatialTranscriptTile,
     c?: (i: number) => string | null,
-  ) => Promise<{ rgba: number[][] }>;
+  ) => Promise<{ rgba: Float32Array }>;
 
   it('gives a cluster one colour, the colour of the cell group of the same name', async () => {
     const meta = {
@@ -534,11 +534,12 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     const clusters = ['Cluster 2', 'Cluster 2', 'Cluster 1', 'Mine'];
     const transcripts = transcriptsOf<{ transcriptColors: Colors }>(tiles);
     const colors = transcripts.transcriptColors.bind(transcripts);
-    const { rgba } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
-    expect(rgba[0]).toEqual(rgba[1]); // genes 0 and 1: one cluster, one colour
-    expect(rgba[0]).toEqual([0, 1, 0, 1]); // Cluster 2's cells are green
-    expect(rgba[2]).toEqual([1, 0, 0, 1]); // Cluster 1's are red
-    expect(rgba[3]).not.toEqual(rgba[0]); // a cluster no cell group names: a palette colour
+    const { rgba: packed } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
+    const rgba = (i: number) => Array.from(packed.subarray(i * 4, i * 4 + 4));
+    expect(rgba(0)).toEqual(rgba(1)); // genes 0 and 1: one cluster, one colour
+    expect(rgba(0)).toEqual([0, 1, 0, 1]); // Cluster 2's cells are green
+    expect(rgba(2)).toEqual([1, 0, 0, 1]); // Cluster 1's are red
+    expect(rgba(3)).not.toEqual(rgba(0)); // a cluster no cell group names: a palette colour
   });
 });
 

@@ -23,14 +23,12 @@ import { percentileWindow } from './stats';
  *
  * COLOUR REPRESENTATION
  * ---------------------
- * Internally everything is a flat `Float32Array` of `[r,g,b,a, …]` in 0..1 —
- * one allocation for N points, GPU-upload shaped. napari-js (through 0.14)
- * `PointsLayer.faceColor` takes `RGBA[]` (an array of 4-tuples) instead, so
- * {@link toRgbaTuples} adapts at the boundary; when the layer accepts a typed
- * array the adapter goes away and the flat buffer is passed straight through.
+ * Everything is a flat `Float32Array` of `[r,g,b,a, …]` in 0..1 — one
+ * allocation for N points, GPU-upload shaped. napari-js (≥ 0.15)
+ * `PointsLayer.faceColor` and `Points3DLayer.colors` take it as is.
  */
 
-/** napari-js per-point colour tuple: r, g, b, a in 0..1. */
+/** One RGBA colour, r, g, b, a in 0..1 (napari-js's broadcast colour). */
 export type RGBA = [number, number, number, number];
 
 /** Neutral grey for observations with no value (NaN, or {@link NO_CATEGORY}). */
@@ -235,23 +233,6 @@ export function markerDiameters(observations: SpatialObservations, fallbackRadiu
     return out;
   }
   return fallbackRadius * 2;
-}
-
-/**
- * Adapt a flat RGBA buffer to the `RGBA[]` shape napari-js's (through 0.14)
- * `PointsLayer.faceColor` accepts. One 4-element array per point — the reason
- * this is a named boundary rather than inlined: it is the one place the model
- * stops being typed-array shaped, and it is what a future napari-js taking a
- * `Float32Array` would delete.
- */
-export function toRgbaTuples(flat: Float32Array): RGBA[] {
-  const n = flat.length / 4;
-  const out: RGBA[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    out[i] = [flat[o], flat[o + 1], flat[o + 2], flat[o + 3]];
-  }
-  return out;
 }
 
 /** Convenience: a 256-entry LUT for a colormap value, falling back to Viridis. */

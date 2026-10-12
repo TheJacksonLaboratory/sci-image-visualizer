@@ -3361,14 +3361,16 @@ describe('NapariVisualizerService', () => {
         const layer = addPoints.mock.results.at(-1)?.value;
         // One colour, and it is observation 1's — a colour array still indexed by
         // the whole dataset would paint this point red.
-        expect(layer.faceColor).toHaveLength(1);
-        expect(layer.faceColor[0].slice(0, 3)).toEqual([0, 1, 0]);
+        expect(layer.faceColor).toBeInstanceOf(Float32Array);
+        expect(layer.faceColor).toHaveLength(4);
+        expect(Array.from(layer.faceColor.slice(0, 3))).toEqual([0, 1, 0]);
       });
 
       it('keeps one broadcast colour for the drawn plane when nothing colours the cells', async () => {
         // A single RGBA tuple is an array too: "gathering" it down to the plane's observations
         // indexed into its four NUMBERS and handed napari a one-number colour.
         const layer = await mountAt(sliced(), 1);
+        expect(Array.isArray(layer.faceColor)).toBe(true);
         expect(layer.faceColor).toHaveLength(4);
         expect(typeof layer.faceColor[0]).toBe('number');
       });
@@ -3974,9 +3976,11 @@ describe('NapariVisualizerService', () => {
 
       const layer = addPoints.mock.results.at(-1)?.value;
       expect(spatialPort.getColumn).toHaveBeenCalledWith('region');
-      expect(layer.faceColor).toHaveLength(3); // one tuple per observation
-      expect(layer.faceColor[0].slice(0, 3)).toEqual([1, 0, 0]);
-      expect(layer.faceColor[1].slice(0, 3)).toEqual([0, 0, 1]);
+      // Packed RGBA, four floats per observation, handed to napari-js as is (no tuples).
+      expect(layer.faceColor).toBeInstanceOf(Float32Array);
+      expect(layer.faceColor).toHaveLength(12);
+      expect(Array.from(layer.faceColor.slice(0, 3))).toEqual([1, 0, 0]);
+      expect(Array.from(layer.faceColor.slice(4, 7))).toEqual([0, 0, 1]);
     });
 
     it('colours by a gene vector through the active colormap', async () => {
@@ -3988,10 +3992,10 @@ describe('NapariVisualizerService', () => {
 
       const layer = addPoints.mock.results.at(-1)?.value;
       expect(spatialPort.getFeatureVector).toHaveBeenCalledWith('Ttr');
-      expect(layer.faceColor).toHaveLength(3);
+      expect(layer.faceColor).toHaveLength(12);
       // Distinct values must map to distinct colours — a flat result would mean
       // the contrast window collapsed.
-      expect(layer.faceColor[0]).not.toEqual(layer.faceColor[2]);
+      expect(Array.from(layer.faceColor.slice(0, 4))).not.toEqual(Array.from(layer.faceColor.slice(8, 12)));
     });
 
     it('falls back to a flat colour when a gene fetch fails, rather than blanking the view', async () => {
@@ -4003,7 +4007,8 @@ describe('NapariVisualizerService', () => {
       await flush();
 
       const layer = addPoints.mock.results.at(-1)?.value;
-      expect(layer.faceColor).toHaveLength(4); // the broadcast tuple, so points still render
+      expect(Array.isArray(layer.faceColor)).toBe(true); // the broadcast tuple, so points still render
+      expect(layer.faceColor).toHaveLength(4);
     });
 
     it('ignores a superseded colour fetch that resolves late', async () => {
@@ -4061,13 +4066,15 @@ describe('NapariVisualizerService', () => {
       const layer = await mount();
       // Uniform at opacity 1: one broadcast tuple, so a flat 84k view does not
       // allocate 84k of them.
+      expect(Array.isArray(layer.faceColor)).toBe(true);
       expect(layer.faceColor).toHaveLength(4);
 
       store.setSpatialView({ opacity: 0.3 });
       await flush();
       // No longer uniform, so it becomes per-point and the alpha carries it.
-      expect(layer.faceColor).toHaveLength(3);
-      expect((layer.faceColor as number[][])[0][3]).toBeCloseTo(0.3, 2);
+      expect(layer.faceColor).toBeInstanceOf(Float32Array);
+      expect(layer.faceColor).toHaveLength(12);
+      expect(layer.faceColor[3]).toBeCloseTo(0.3, 2);
     });
 
     it('updates size and colour IN PLACE, without rebuilding the layer', async () => {

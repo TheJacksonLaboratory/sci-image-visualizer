@@ -224,7 +224,8 @@ Confirmed missing against the shipped `0.11.1` typings — these are the asks on
    array of 4-element tuples — so per-point colour costs N small arrays that `buildInstanceData()`
    immediately flattens again. Negligible for Visium (~2k), real allocation churn at 10⁵–10⁶.
    `spatial-encoding.ts` already computes a flat `Float32Array` and adapts at the boundary
-   (`toRgbaTuples`), so this ask is purely a deletion on our side. _(Found while building P2.)_
+   (`toRgbaTuples`), so this ask is purely a deletion on our side. _(Found while building P2.
+   Done: napari-js 0.15 takes the packed array, and `toRgbaTuples` is gone.)_
 
 Items 1, 3, 4 and 6 are small. Item 2 is the substantial one.
 

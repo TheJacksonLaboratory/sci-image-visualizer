@@ -197,18 +197,28 @@ export function encodeSpatialContinuous(
   });
 }
 
+/** Marker colours: packed per-point RGBA (4 floats per point, the shape napari-js copies straight
+ *  into its instance buffer), or one RGBA broadcast to every point. */
+export type PointColors = Float32Array | RGBA;
+
 /** Whether a colour input is one RGBA per point rather than one broadcast RGBA. */
-export function isPerPoint(colors: RGBA[] | RGBA): colors is RGBA[] {
-  return Array.isArray(colors[0]);
+export function isPerPoint(colors: PointColors): colors is Float32Array {
+  return colors instanceof Float32Array;
 }
 
 /** Per-point colours for the drawn subset. A broadcast tuple stays broadcast —
- *  it is one colour for every point either way. (A tuple is an array too, so it is told
- *  apart from a per-point list by its elements, not by `Array.isArray`.) */
-export function gatherColors(colors: RGBA[] | RGBA, indices?: Uint32Array): RGBA[] | RGBA {
+ *  it is one colour for every point either way. */
+export function gatherColors(colors: PointColors, indices?: Uint32Array): PointColors {
   if (!indices || !isPerPoint(colors)) return colors;
-  const out: RGBA[] = new Array(indices.length);
-  for (let i = 0; i < indices.length; i++) out[i] = colors[indices[i]];
+  const out = new Float32Array(indices.length * 4);
+  for (let i = 0; i < indices.length; i++) {
+    const s = indices[i] * 4;
+    const o = i * 4;
+    out[o] = colors[s];
+    out[o + 1] = colors[s + 1];
+    out[o + 2] = colors[s + 2];
+    out[o + 3] = colors[s + 3];
+  }
   return out;
 }
 
