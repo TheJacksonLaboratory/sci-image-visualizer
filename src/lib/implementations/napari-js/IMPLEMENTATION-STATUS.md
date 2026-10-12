@@ -69,12 +69,10 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 
 ## Testing
 
-Jest cannot load napari-js (ESM-only, needs WebGPU), so `jest.config.ts` maps `napari-js` to
-`src/lib/testing/napari-js-stub.ts`. Specs type-check against the real `.d.ts` and run against
-the stub; `napari-js-stub.conformance.spec.ts` checks the stub's shapes against the real types
-and lists the remaining deviations. Replace the stub when napari-js ships a headless
-`./testing` entry. `osd/display-pipeline.cross-backend.spec.ts` checks OSD's display pipeline
-against napari-js's own colour functions.
+Specs run the real napari-js: `jest.config.ts` maps `napari-js` to its GPU-free
+`napari-js/testing` entry, where `Viewer` is a `HeadlessViewer` (the real model, layers, framing
+and canvas maths, no device; readback is a blank frame). `osd/display-pipeline.cross-backend.spec.ts`
+checks OSD's display pipeline against napari-js's own colour functions.
 
 ## Known gaps
 

@@ -80,8 +80,9 @@ Branch names follow the change: `fix/…`, `feat/…`, `docs/…`, `chore/…`,
   the toolbar or components. eslint enforces this.
 - **Logging:** no `console.log` in library code. `console.warn` and
   `console.error` are for real failures only.
-- **napari-js:** jest runs against `src/lib/testing/napari-js-stub.ts`. If you
-  use a napari-js API the stub lacks, extend the stub in the same change.
+- **napari-js:** jest runs the real package through its GPU-free
+  `napari-js/testing` entry, where `Viewer` is a `HeadlessViewer`. Test against
+  it rather than a hand-written fake viewer.
 - **CHANGELOG:** add an entry under `## [Unreleased]` in
   [`CHANGELOG.md`](CHANGELOG.md) as part of the change, not at release time.
   Use short [Keep a Changelog](https://keepachangelog.com/) bullets (one or two

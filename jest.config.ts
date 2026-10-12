@@ -4,7 +4,7 @@ export default {
   preset: 'jest-preset-angular',
   setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
   coverageDirectory: '<rootDir>/coverage',
-  // The napari-js stub is test infrastructure, not library code.
+  // testing/ holds test doubles (fake OSD viewer, port stubs), not library code.
   coveragePathIgnorePatterns: ['/node_modules/', '<rootDir>/src/lib/testing/'],
   // The current floor: `npm run test:coverage` fails if a change drops below it.
   coverageThreshold: {

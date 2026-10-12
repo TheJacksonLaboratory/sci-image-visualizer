@@ -369,7 +369,7 @@ no Angular compiler required:
 ## Documentation
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how `src/lib` is laid out:
-  layers, backends, contracts, stores, regions, tools, workers and the test stub.
+  layers, backends, contracts, stores, regions, tools, workers and testing.
 - **Guides** — [host integration](docs/guides/host-integration.md) ·
   [spatial omics](docs/guides/spatial-omics.md) ·
   [segmentation](docs/guides/segmentation.md) ·

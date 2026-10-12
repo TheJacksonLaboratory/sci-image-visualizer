@@ -134,6 +134,9 @@ CORE-1) refer to the review document attached to #45.
 
 - Jest coverage floor and ts-jest transform config; ESLint `no-console` and a contracts import
   boundary; Prettier enforced in CI; `noUnusedLocals`.
+- Jest runs the real napari-js through its GPU-free `napari-js/testing` entry
+  (`HeadlessViewer`); the hand-written stub, its conformance spec and the specs' fake viewers
+  are gone (NAPARI-SVC-19, NAPARI-BOUNDARY-20, REPO-18).
 
 ## [0.8.3] — 2026-10-08
 
