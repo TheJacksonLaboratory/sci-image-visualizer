@@ -4,7 +4,8 @@ import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
-import { buildLut, framingFor, MultiChannelImageView, Viewer } from 'napari-js';
+import { buildLut, framingFor, mapScalar, MultiChannelImageView, Viewer } from 'napari-js';
+import type { Colormap } from 'napari-js';
 import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
@@ -839,7 +840,8 @@ describe('NapariVisualizerService', () => {
     const volLayer = addVolume.mock.results[0].value as {
       contrastLimits: [number, number];
       gamma: number;
-      colormap: { name: string };
+      invert: boolean;
+      colormap: Colormap;
     };
 
     // The histogram pane's window (min/max) + gamma now reach the 3D volume layer.
@@ -853,9 +855,24 @@ describe('NapariVisualizerService', () => {
     // Channel colour tints the volume (no explicit colormap selected) — regression.
     expect(volLayer.colormap.name).toContain('00ff00');
 
-    // Invert flips the ramp (VolumeLayer has no per-layer invert, so it's emulated).
+    // Invert is the layer's own `invert`, applied before gamma as on the 2D image — not a
+    // reversed colormap, which applies it after gamma and so draws a different ramp once γ ≠ 1
+    // (NAPARI-SVC-18).
     store.setInvert(true);
-    expect(volLayer.colormap.name).toContain('reversed');
+    expect(volLayer.invert).toBe(true);
+    expect(volLayer.colormap.name).not.toContain('reversed');
+    const drawn = (v: number) =>
+      mapScalar(v, {
+        climLo: 20,
+        climHi: 200,
+        gamma: volLayer.gamma,
+        invert: volLayer.invert,
+        colormap: volLayer.colormap,
+      });
+    // A quarter into the window: inverted to 0.75, then γ (0.5) → √0.75 of the tint's green.
+    expect(drawn(65)[1]).toBeCloseTo(Math.sqrt(0.75), 5);
+    store.setInvert(false);
+    expect(volLayer.invert).toBe(false);
 
     service.unsubscribe();
     document.body.removeChild(div);
@@ -870,6 +887,7 @@ describe('NapariVisualizerService', () => {
       addSurface.mock.results[addSurface.mock.results.length - 1].value as {
         contrastLimits: [number, number];
         gamma: number;
+        invert: boolean;
         colormap: { name: string };
       };
 
@@ -903,7 +921,9 @@ describe('NapariVisualizerService', () => {
     const beforeInvert = addSurface.mock.calls.length;
     store.setInvert(true);
     expect(addSurface.mock.calls.length).toBe(beforeInvert);
-    expect(latest().colormap.name).toContain('reversed');
+    // The layer's own invert (before gamma), not a reversed colormap (NAPARI-SVC-18).
+    expect(latest().invert).toBe(true);
+    expect(latest().colormap.name).not.toContain('reversed');
 
     // The stack slider re-slices: picking another z rebuilds the surface (from the pre-loaded cache).
     service.setZIndex(1);
@@ -1335,6 +1355,11 @@ describe('NapariVisualizerService', () => {
     expect(pos.length).toBe(val.length * 3);
     // A 3D scatter exposes the Surface-3D orbit/reset controls.
     expect(service.getSurface3dControls()).not.toBeNull();
+    // Invert reaches the cloud as the layer's own invert, not as a reversed colormap.
+    const cloud = addPoints3d.mock.results[0].value as { invert: boolean; colormap: { name: string } };
+    store.setInvert(true);
+    expect(cloud.invert).toBe(true);
+    expect(cloud.colormap.name).not.toContain('reversed');
 
     service.unsubscribe();
     document.body.removeChild(div);

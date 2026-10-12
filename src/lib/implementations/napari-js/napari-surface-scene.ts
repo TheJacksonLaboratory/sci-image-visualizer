@@ -254,6 +254,7 @@ export class SurfaceScene implements NapariScene {
       colormap: ctx.display.volumeColormap(st),
       contrastLimits: win,
       gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
+      invert: ctx.display.invert,
       wireframe: ctx.settings.surfaceWireframe,
     });
 
@@ -292,6 +293,7 @@ export class SurfaceScene implements NapariScene {
       }
       // Colour-only change: update uniforms in place, no geometry rebuild.
       layer.colormap = ctx.display.volumeColormap(st);
+      layer.invert = ctx.display.invert;
       if (st) {
         layer.contrastLimits = win;
         layer.gamma = toNapariGamma(st.gamma); // ImageJ γ → napari-js γ

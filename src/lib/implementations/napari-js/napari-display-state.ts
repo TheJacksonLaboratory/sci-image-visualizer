@@ -38,19 +38,18 @@ export function grayscaleColormap(s: DisplaySnapshot): Colormap | string {
     : 'gray';
 }
 
-/** A channel's tint colormap (black→colour) with reverse-scale / invert applied by flipping. */
+/** A channel's tint colormap (black→colour), flipped for reverse-scale. Invert is not a colormap
+ *  flip: it goes on the layer (`invert`), before gamma, as on the 2D image. */
 export function channelTintColormap(color: string, s: DisplaySnapshot): Colormap | string {
-  let cmap: Colormap | string = tintColormap(color);
-  if (s.reverse) cmap = reverseColormap(cmap);
-  if (s.invert) cmap = reverseColormap(cmap);
-  return cmap;
+  const cmap = tintColormap(color);
+  return s.reverse ? reverseColormap(cmap) : cmap;
 }
 
 /**
  * Colour map for the volume/isosurface (and the surface and 3D scatter). A real colormap
  * selection (viridis/magma/…) wins; otherwise the channel's colour tints it (so the channel-dialog
- * colour swatch recolors the 3D render). Reverse-scale and invert each flip the ramp — the
- * `VolumeLayer` has no per-layer invert, so both are emulated by reversing the colormap.
+ * colour swatch recolors the 3D render). Reverse-scale flips the ramp; invert is the layer's own
+ * `invert` (window → invert → gamma → colormap), not a second flip — the two differ once gamma ≠ 1.
  */
 export function volumeColormap(st: IChannelState | undefined, s: DisplaySnapshot): Colormap | string {
   const node = s.colormap;
@@ -62,9 +61,7 @@ export function volumeColormap(st: IChannelState | undefined, s: DisplaySnapshot
   const value = node?.data?.value;
   const lut = !grayFamily && value != null ? buildColormapLut(value, false) : null;
   let cmap: Colormap | string = lut ? colormapFromLut('vol-cmap', lut) : tintColormap(st?.color ?? '#ffffff');
-  // Reverse-scale and invert each flip the ramp (the VolumeLayer has no per-layer invert).
   if (s.reverse) cmap = reverseColormap(cmap);
-  if (s.invert) cmap = reverseColormap(cmap);
   return cmap;
 }
 

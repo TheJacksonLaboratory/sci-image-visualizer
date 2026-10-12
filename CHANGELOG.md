@@ -70,6 +70,10 @@ CORE-1) refer to the review document attached to #45.
   the region store like the OSD and napari overlays.
 - **OSD multichannel images ignored invert**; invert is now applied per channel before the
   additive merge, as napari-js does.
+- **napari 3D views inverted after gamma**: the volume, surface, 3D scatter and spatial density
+  volumes faked invert by reversing the colormap, which applies it after gamma. They now use the
+  layers' own `invert` (napari-js 0.15), in the 2D image's and OSD's order (window → invert →
+  gamma); the ramp changes wherever gamma ≠ 1 (NAPARI-SVC-18).
 
 ### Changed
 

@@ -645,6 +645,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         viewer.addVolume(data, grid.width, grid.height, grid.depth, {
           name: `density · ${group.name}`,
           colormap: this.ctx.display.channelTintColormap(group.color),
+          invert: this.ctx.display.invert,
           // Translucent, not MIP: a cluster's interior is the readable part, and MIP
           // would flatten every cloud to its brightest shell.
           rendering: 'translucent',

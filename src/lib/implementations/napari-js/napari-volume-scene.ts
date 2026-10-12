@@ -96,7 +96,7 @@ export class VolumeScene implements NapariScene {
 
     // Assemble per-channel scalar volumes from the server tiles (jit-specific); the napari-js view
     // owns the layer orchestration (one additive tinted volume per channel, or a single grayscale
-    // volume). The adapter computes each channel's colormap (incl. invert/reverse flips).
+    // volume). The adapter computes each channel's colormap (incl. the reverse flip) and invert.
     let dims: Box3 | null = null;
     const channels: VolumeChannel[] = [];
     ctx.stack.loading(true);
@@ -118,6 +118,7 @@ export class VolumeScene implements NapariScene {
             colormap: ctx.display.channelTintColormap(color),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
+            invert: ctx.display.invert,
             visible: st?.visible ?? true,
           });
         }
@@ -135,6 +136,7 @@ export class VolumeScene implements NapariScene {
             colormap: ctx.display.volumeColormap(st),
             contrastLimits: [st?.min ?? 0, st?.max ?? 255],
             gamma: toNapariGamma(st?.gamma), // ImageJ γ → napari-js γ
+            invert: ctx.display.invert,
           });
         }
       }
@@ -346,6 +348,7 @@ export class VolumeScene implements NapariScene {
           const st = channels.find((s) => s.index === c);
           view.updateChannel(c, {
             colormap: display.channelTintColormap(st?.color ?? '#ffffff'),
+            invert: display.invert,
             ...(st
               ? {
                   contrastLimits: [st.min, st.max] as [number, number],
@@ -359,6 +362,7 @@ export class VolumeScene implements NapariScene {
         const st = channels[0];
         view.updateChannel(0, {
           colormap: display.volumeColormap(st),
+          invert: display.invert,
           ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
         });
       }
@@ -417,6 +421,7 @@ export class Scatter3dScene implements NapariScene {
     this.layer = ctx.viewer.addPoints3D(new Float32Array(pos), new Float32Array(val), {
       colormap: ctx.display.volumeColormap(st),
       contrastLimits: [st?.min ?? 0, st?.max ?? 255],
+      invert: ctx.display.invert,
       size: 3,
     });
     ctx.setImageSize(width, height);
@@ -429,6 +434,7 @@ export class Scatter3dScene implements NapariScene {
       if (!layer) return;
       const s = channels[0];
       layer.colormap = ctx.display.volumeColormap(s);
+      layer.invert = ctx.display.invert;
       if (s) layer.contrastLimits = [s.min, s.max];
       ctx.viewer.requestRender();
     });
