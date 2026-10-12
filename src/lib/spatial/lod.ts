@@ -13,6 +13,8 @@
  * morphology pixel.
  */
 
+import { worldViewport } from 'napari-js';
+
 import type {
   SpatialBounds,
   SpatialDataset,
@@ -84,7 +86,8 @@ export function pixelsPerDataUnit(zoom: number, ref?: SpatialImageRef | null): n
 
 /**
  * The part of observation space the camera shows, padded by `margin` (a fraction of the
- * viewport) so tiles just off screen are already there when a pan brings them in.
+ * viewport) so tiles just off screen are already there when a pan brings them in: napari-js's
+ * `worldViewport`, mapped back through the inverse of the data→world affine.
  */
 export function visibleDataRect(
   center: readonly [number, number],
@@ -99,12 +102,12 @@ export function visibleDataRect(
   const sy = ref?.scale?.[1] ?? 1;
   const tx = ref?.translate?.[0] ?? 0;
   const ty = ref?.translate?.[1] ?? 0;
-  const halfW = (canvasW / zoom / 2) * (1 + 2 * margin);
-  const halfH = (canvasH / zoom / 2) * (1 + 2 * margin);
-  const wx0 = center[0] - halfW;
-  const wx1 = center[0] + halfW;
-  const wy0 = center[1] - halfH;
-  const wy1 = center[1] + halfH;
+  // The world rect of a canvas grown by the margin on each side (napari-js's worldViewport).
+  const v = worldViewport(center[0], center[1], zoom, canvasW * (1 + 2 * margin), canvasH * (1 + 2 * margin));
+  const wx0 = v.x;
+  const wx1 = v.x + v.width;
+  const wy0 = v.y;
+  const wy1 = v.y + v.height;
   const ax = (wx0 - tx) / sx;
   const bx = (wx1 - tx) / sx;
   const ay = (wy0 - ty) / sy;
