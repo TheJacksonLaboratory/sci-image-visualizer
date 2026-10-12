@@ -38,35 +38,6 @@ export const MISSING_COLOR: Rgb = [150, 150, 150];
 export const DEFAULT_MUTED_OPACITY = 0.15;
 
 /**
- * Largest number of CATEGORIES whose colours survive the 3D points layer's LUT
- * intact.
- *
- * That layer has no per-point RGBA — it maps a per-point SCALAR through a
- * 256-entry colormap LUT — so a categorical palette is encoded as one contiguous
- * block of LUT entries per value. Measured against napari-js, every K in 2..96
- * blocks round-trips exactly and K=97 is the first that does not: 256 texels
- * cannot keep more values apart than that.
- *
- * One of those 96 blocks is spent on {@link NO_CATEGORY}, which every column can
- * contain, so what fits is **95 categories** — the number published here. It was
- * 96 while the encoder rejected at 96, which meant a 96-category column drew flat
- * with the panel showing no warning: the one failure this ceiling exists to
- * prevent, arrived at from the other direction.
- *
- * Above it the cloud draws FLAT rather than draw a lie, because subtly wrong
- * category colours under a confident legend is the failure nobody catches.
- *
- * A limit of that one layer, and of nothing else: the 2D markers carry per-point
- * RGBA, and a density volume is a scalar field per cluster. Shared here so the
- * renderer that enforces it and the panel that explains it cannot drift apart.
- */
-export const SPATIAL_3D_MAX_CATEGORIES = 95;
-
-/** LUT blocks the 3D layer can keep apart — {@link SPATIAL_3D_MAX_CATEGORIES}
- *  plus the one reserved for a missing value. */
-export const SPATIAL_3D_LUT_BLOCKS = SPATIAL_3D_MAX_CATEGORIES + 1;
-
-/**
  * Fallback categorical palette. Colour-blind-safe and stable, so a category
  * without an authored colour still lands somewhere sensible and lands there
  * every run (`fallbackColorFor` hashes the name — same name, same colour).
@@ -116,7 +87,7 @@ export interface ContinuousEncodingOptions extends MuteOptions {
 }
 
 /** Parse a CSS colour (`#rgb` / `#rrggbb`, see {@link parseCssColor}) to 0–255 RGB; unparseable
- *  input falls back to grey. Exported so the 3D LUT path parses palettes exactly as the 2D path does. */
+ *  input falls back to grey. Exported so the tile layers parse palettes exactly as the markers do. */
 export function parseHex(hex: string): Rgb {
   return parseCssColor(hex) ?? MISSING_COLOR;
 }

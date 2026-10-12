@@ -253,11 +253,6 @@
   </div>
 
   <div class="sc-section" *ngIf="is3d">
-    <div class="sc-hint" *ngIf="exceedsCloudPalette">
-      {{ legend?.length }} categories is past the {{ cloudPaletteLimit }} the 3D cloud's colour LUT can keep apart,
-      so the points draw flat for this column. The density volumes below render it, and so does the 2D Spatial
-      omics view.
-    </div>
     <div class="sc-row">
       <p-checkbox
         [binary]="true"

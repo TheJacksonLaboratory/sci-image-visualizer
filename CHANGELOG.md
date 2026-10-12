@@ -110,6 +110,10 @@ CORE-1) refer to the review document attached to #45.
 - **napari markers take packed colours**: per-point colours go to napari-js as the flat
   `Float32Array` the encoders build, with no tuple per point. `toRgbaTuples` is removed from the
   public API (NAPARI-BOUNDARY-12, SPATIAL-11).
+- **The 3D cloud colours any number of categories**: a categorical colouring is one RGBA per
+  point (`Points3DLayer.colors`) instead of a stepped 256-entry LUT, which kept at most 95
+  categories apart and drew a wider column (e.g. `subclass`, 338) flat. The panel's "too many
+  categories" note is gone with the limit (NAPARI-SVC-18, SPATIAL-11).
 
 ### Refactored
 

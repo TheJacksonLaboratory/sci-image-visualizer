@@ -196,31 +196,6 @@ describe('SpatialObservationsPanelComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
-    it('says when a column has more categories than the 3D cloud can colour', () => {
-      // subclass (338) is served for the density volumes; a user who picks it in the
-      // cloud sees one flat colour, and a console warning is not something anyone
-      // reads — so the panel says why, and what does render it.
-      component.is3d = true;
-      component.legend = Array.from({ length: 338 }, (_, i) => ({
-        label: `s${i}`,
-        color: '#888888',
-      }));
-      expect(component['exceedsCloudPalette']).toBe(true);
-      // 95, not 96: one of the LUT's 96 distinguishable blocks is reserved for a
-      // missing value, and the panel must publish what the renderer enforces —
-      // at 96 the cloud drew flat with no warning at all.
-      expect(component['cloudPaletteLimit']).toBe(95);
-      component.legend = Array.from({ length: 96 }, () => ({ label: 'c', color: '#888' }));
-      expect(component['exceedsCloudPalette']).toBe(true);
-
-      // Within the ceiling, or in 2D, there is nothing to warn about.
-      component.legend = Array.from({ length: 95 }, () => ({ label: 'c', color: '#888' }));
-      expect(component['exceedsCloudPalette']).toBe(false);
-      component.legend = Array.from({ length: 338 }, () => ({ label: 'c', color: '#888' }));
-      component.is3d = false;
-      expect(component['exceedsCloudPalette']).toBe(false);
-    });
-
     it('says what the density volumes are showing, and that it is an estimate', () => {
       // An estimate is only honest if the reader can tell it from measurement.
       expect(component['densityNote']).toContain('not measured cells');

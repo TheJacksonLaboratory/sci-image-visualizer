@@ -162,13 +162,10 @@ overlays _Selected_ on the full distribution, violin and box narrow to it. The
 chart's subject is the map's colour source rather than an independent picker, so
 the two cannot disagree about what is being shown.
 
-Categorical colouring has one renderer-specific limit worth knowing: the 3D
-points layer maps a per-point scalar through a 256-entry LUT, which keeps 96
-blocks apart exactly — one of them reserved for a missing value, so **95
-categories** fit — and above that the cloud draws flat and the panel says so.
-The 2D markers (per-point RGBA) and the density volumes (a scalar field per
-cluster) have no such limit — which is why the example server serves `subclass`
-(338) even though the cloud cannot colour by it.
+Categorical colouring has no category limit: the 2D markers and the 3D cloud
+both take one RGBA per point, so a column like `subclass` (338 categories) keeps
+a colour per category in either view. (The cloud used to encode categories into
+a 256-entry LUT, which kept at most 95 apart.)
 
 Still to build: chart → map brushing. The design record, with the decisions behind
 all of the above, is [`../design/spatial-omics-plot-mode-design.md`](../design/spatial-omics-plot-mode-design.md).

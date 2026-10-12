@@ -22,14 +22,18 @@ import { VisualizerStore } from '../../store/visualizer-store.service';
 import { RegionStore } from '../../store/region-store.service';
 import { VIZ_CONFIG } from '../../contracts/viz-config';
 import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
-import { SPATIAL_3D_MAX_CATEGORIES } from '../../spatial/spatial-encoding';
 import * as expressionModule from '../../spatial/spatial-expression';
 import { PlotType } from '../../contracts/plot-type';
 import { ViewerFeature } from '../../contracts/capabilities.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SPATIAL_DATA_PORT } from '../../contracts/ports/spatial-data.port';
-import { CategoricalColumn, ContinuousColumn, SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import {
+  CategoricalColumn,
+  ContinuousColumn,
+  NO_CATEGORY,
+  SpatialDataset,
+} from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { SpatialViewState } from '../../contracts/display-types';
@@ -1745,34 +1749,6 @@ describe('NapariVisualizerService', () => {
       addPoints3D = jest.spyOn(Viewer.prototype, 'addPoints3D');
     });
 
-    it('draws the cloud flat above the published category ceiling, and in colour at it', async () => {
-      // The enforced limit and the one the panel publishes have to be the same
-      // number: at 96 categories the encoder rejected while the panel warned only
-      // above 96, so the cloud drew flat with nothing said.
-      const palette = (n: number) => ({
-        meta: {
-          kind: 'categorical',
-          name: 'wide',
-          categories: Array.from({ length: n }, (_, i) => `c${i}`),
-          colors: Array.from({ length: n }, () => '#123456'),
-        },
-        codes: new Uint16Array([0, 1, 2]),
-      });
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-
-      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES));
-      await mount3d(spatialDataset3d());
-      store.setSpatialView({ colorBy: { kind: 'column', name: 'wide' } });
-      await flush();
-      expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('exceeds'));
-
-      spatialPort.getColumn.mockResolvedValue(palette(SPATIAL_3D_MAX_CATEGORIES + 1));
-      store.setSpatialView({ colorBy: { kind: 'column', name: 'wider' } });
-      await flush();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('exceeds'));
-      warn.mockRestore();
-    });
-
     describe('hover tooltip', () => {
       const host = () => document.getElementById('spatial3d-host')!;
       const tip = () => host().querySelector('div[style*="z-index: 6"]') as HTMLElement | null;
@@ -2661,12 +2637,9 @@ describe('NapariVisualizerService', () => {
       expect(last(addPoints3D.mock.results.map((r) => r.value)).size).toBe(6);
     });
 
-    it('maps each category code onto its OWN colour in the LUT', async () => {
-      // The heart of the 3D categorical path. The layer has no per-point RGBA, so
-      // a palette is smuggled through a 256-entry scalar LUT as one block per
-      // category. This asserts the block arithmetic: with slot 0 reserved for
-      // "no category", code i must resolve to palette entry i and not a
-      // neighbour's blend.
+    it('gives each observation its own category colour, per point', async () => {
+      // napari-js 0.15 takes per-point RGBA on the 3D layer (`colors`), so the palette goes in as
+      // is; it used to be smuggled through the scalar channel as a stepped LUT.
       const column: CategoricalColumn = {
         meta: {
           kind: 'categorical',
@@ -2674,7 +2647,7 @@ describe('NapariVisualizerService', () => {
           categories: ['A', 'B'],
           colors: ['#ff0000', '#0000ff'],
         },
-        codes: new Uint16Array([0, 1, 0]),
+        codes: new Uint16Array([0, 1, NO_CATEGORY]),
       };
       spatialPort.getColumn.mockResolvedValue(column);
 
@@ -2683,37 +2656,30 @@ describe('NapariVisualizerService', () => {
       await flush();
 
       const layer = last(addPoints3D.mock.results.map((r) => r.value));
-      // Codes are shifted by one, keeping 0 free for the unassigned colour.
-      expect(Array.from(layer.values)).toEqual([1, 2, 1]);
-      const k = 3; // 2 categories + the reserved slot
-      expect(layer.contrastLimits).toEqual([-0.5, k - 0.5]);
+      expect(layer.colors).toBeInstanceOf(Float32Array);
+      // What the shader draws, through napari-js's own CPU reference.
+      expect(layer.colorAt(0)).toEqual([1, 0, 0, 1]); // category A
+      expect(layer.colorAt(1)).toEqual([0, 0, 1, 1]); // category B
+      // No category: the missing grey, and still opaque — the cloud dims by selection only.
+      const [r, g, b, a] = layer.colorAt(2);
+      expect([r, g, b].map((c: number) => Math.round(c * 255))).toEqual([150, 150, 150]);
+      expect(a).toBe(1);
 
-      // Resolve each code the way the shader does: normalise through
-      // contrastLimits, then index the RGBA8 LUT napari-js uploads.
-      const lut = buildLut(layer.colormap);
-      expect(lut).toHaveLength(256 * 4);
-      const colourOf = (value: number) => {
-        const [lo, hi] = layer.contrastLimits;
-        const t = (value - lo) / (hi - lo);
-        const i = Math.max(0, Math.min(255, Math.round(t * 255)));
-        return Array.from(lut.subarray(i * 4, i * 4 + 3));
-      };
-      expect(colourOf(1)).toEqual([255, 0, 0]); // category A
-      expect(colourOf(2)).toEqual([0, 0, 255]); // category B
+      // Back to a continuous colour source: the per-point colours give way to the colormap.
+      spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([0, 5, 10]));
+      store.setSpatialView({ colorBy: { kind: 'feature', name: 'Ttr' } });
+      await flush();
+      expect(layer.colors).toBeNull();
     });
 
-    it('refuses to colour more categories than the LUT can hold apart', async () => {
-      // 96 is the measured ceiling; beyond it the colours would be subtly wrong
-      // while the legend stayed confident, so the renderer draws flat instead.
+    it('colours a column with more categories than a 256-entry LUT could hold apart', async () => {
+      // The stepped LUT kept at most 95 categories apart, and above that the cloud drew flat.
+      // Per-point colours have no ceiling: 200 categories keep 200 colours (SPATIAL-11).
       const categories = Array.from({ length: 200 }, (_, i) => `c${i}`);
+      const hex = (i: number) => `#${i.toString(16).padStart(2, '0')}0000`;
       const column: CategoricalColumn = {
-        meta: {
-          kind: 'categorical',
-          name: 'many',
-          categories,
-          colors: categories.map(() => '#ff0000'),
-        },
-        codes: new Uint16Array([0, 1, 2]),
+        meta: { kind: 'categorical', name: 'many', categories, colors: categories.map((_c, i) => hex(i)) },
+        codes: new Uint16Array([0, 198, 199]),
       };
       spatialPort.getColumn.mockResolvedValue(column);
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -2722,10 +2688,10 @@ describe('NapariVisualizerService', () => {
       store.setSpatialView({ colorBy: { kind: 'column', name: 'many' } });
       await flush();
 
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('256-entry LUT'));
       const layer = last(addPoints3D.mock.results.map((r) => r.value));
-      // Flat: a two-stop colormap, every value resolving to the same colour.
-      expect((layer.colormap as any).name).toBe('spatial-flat');
+      const red = (i: number) => Math.round(layer.colorAt(i)[0] * 255);
+      expect([red(0), red(1), red(2)]).toEqual([0, 198, 199]);
+      expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
 

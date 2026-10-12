@@ -1,4 +1,4 @@
-import { colormapFromLut, LUT_SIZE } from 'napari-js';
+import { colormapFromLut } from 'napari-js';
 import type { Colormap } from 'napari-js';
 
 import { Rgb } from '../../contracts/colormap-lut';
@@ -6,11 +6,9 @@ import { CategoricalColumn, NO_CATEGORY } from '../../contracts/spatial-dataset.
 import { SpatialViewState } from '../../contracts/display-types';
 import {
   contrastWindow,
+  encodeCategorical,
   encodeContinuous,
-  parseHex,
   resolveCategoryColors,
-  MISSING_COLOR,
-  SPATIAL_3D_MAX_CATEGORIES,
   type RGBA,
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, maskToIndices } from '../../spatial/spatial-selection';
@@ -96,14 +94,24 @@ export class ContrastWindowCache {
 }
 
 /**
- * What the 3D points layer needs to colour a cloud: one scalar per point, a colormap, and the
- * window that maps scalars onto it. Categorical and continuous colourings both reduce to this,
- * because the layer offers no per-point colour channel.
+ * What the 3D points layer needs to colour a cloud: for continuous data, one scalar per point, a
+ * colormap and the window that maps scalars onto it; for categorical data, one packed RGBA per
+ * point (`Points3DLayer.colors`, which wins over the scalars).
  */
-export interface Spatial3dEncoding {
+export type Spatial3dEncoding = Spatial3dScalars | Spatial3dColors;
+
+/** A cloud coloured through the colormap: scalars, colormap and window. */
+export interface Spatial3dScalars {
+  kind: 'scalars';
   values: Float32Array;
   colormap: Colormap;
   contrastLimits: [number, number];
+}
+
+/** A cloud coloured point by point: packed RGBA, 4 floats per point. */
+export interface Spatial3dColors {
+  kind: 'colors';
+  colors: Float32Array;
 }
 
 /** A one-colour colormap, for the "nothing to colour by" state. */
@@ -116,38 +124,15 @@ export function spatialFlatColormap(): Colormap {
 }
 
 /**
- * Category codes → a stepped LUT, exact for up to {@link SPATIAL_3D_MAX_CATEGORIES}.
+ * Category codes → one RGBA per point, for any number of categories.
  *
- * Categorical data is smuggled through the 3D layer's scalar channel: codes map to LUT blocks,
- * and `contrastLimits` of `[-0.5, K - 0.5]` puts code `i` at the centre of block `i`, which is
- * what makes the round-trip exact instead of approximately right.
+ * The 2D markers' encoding, with one difference: a point with no category stays opaque (grey),
+ * as it always has in the cloud, where the selection dims through the layer's per-point alphas
+ * instead. It used to be smuggled through the scalar channel as a stepped 256-entry LUT, which
+ * kept at most 95 categories apart (review SPATIAL-11, NAPARI-SVC-18).
  */
-export function encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dEncoding | null {
-  // Slot 0 is reserved for "no category", so the palette occupies 1..K and the
-  // block count is one more than the category count — which is why the published
-  // ceiling is 95 categories rather than the LUT's 96 distinguishable blocks.
-  if (colors.length > SPATIAL_3D_MAX_CATEGORIES) {
-    console.warn(
-      `[napari-js] ${colors.length} categories exceeds the ${SPATIAL_3D_MAX_CATEGORIES} the 3D ` +
-        "layer's 256-entry LUT can hold distinctly; drawing flat instead of with wrong colours",
-    );
-    return null;
-  }
-  const k = colors.length + 1;
-  const palette: Rgb[] = [MISSING_COLOR, ...colors.map(parseHex)];
-  const lut: Rgb[] = new Array(LUT_SIZE);
-  for (let j = 0; j < LUT_SIZE; j++) {
-    lut[j] = palette[Math.min(k - 1, Math.floor((j * k) / LUT_SIZE))];
-  }
-  const values = new Float32Array(codes.length);
-  for (let i = 0; i < codes.length; i++) {
-    values[i] = codes[i] === NO_CATEGORY ? 0 : codes[i] + 1;
-  }
-  return {
-    values,
-    colormap: colormapFromLut('spatial-categories', lut),
-    contrastLimits: [-0.5, k - 0.5],
-  };
+export function encodeSpatial3dCategorical(codes: Uint16Array, colors: string[]): Spatial3dColors {
+  return { kind: 'colors', colors: encodeCategorical(codes, { colors, mutedOpacity: 1 }) };
 }
 
 /** Continuous values → `lut` over a percentile-clipped window (log1p first when the view's log
@@ -157,7 +142,7 @@ export function encodeSpatial3dContinuous(
   view: SpatialViewState,
   lut: Rgb[],
   windows: ContrastWindowCache,
-): Spatial3dEncoding {
+): Spatial3dScalars {
   const [lo, hi] = view.percentileClip ?? [0.01, 0.99];
   const log = !!view.logScale;
   let values = source;
@@ -168,6 +153,7 @@ export function encodeSpatial3dContinuous(
   // Keyed by the SOURCE vector: the log copy above is new on every call.
   const [min, max] = windows.get(source, lo, hi, log, () => contrastWindow(values, lo, hi));
   return {
+    kind: 'scalars',
     values,
     colormap: colormapFromLut('spatial-continuous', lut),
     // A degenerate window would divide by zero in the shader's normalisation.

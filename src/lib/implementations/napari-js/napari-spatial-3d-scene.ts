@@ -30,8 +30,10 @@ import {
   SPATIAL_3D_BASE_SIZE,
   SPATIAL_SELECTED_SIZE_SCALE,
   Spatial3dEncoding,
+  Spatial3dScalars,
   encodeSpatial3dCategorical,
   encodeSpatial3dContinuous,
+  gatherColors,
   rankDensityGroups,
   spatialFlatColormap,
   totalDensityGroup,
@@ -269,9 +271,13 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = SPATIAL_3D_BASE_SIZE * scale;
-    const scalars = enc?.values ?? new Float32Array(obs.count);
-    const colormap = enc?.colormap ?? spatialFlatColormap();
-    const contrastLimits: [number, number] = enc?.contrastLimits ?? [0, 1];
+    // A categorical colouring is per-point RGBA, which wins over the scalars; the flat colormap
+    // and zero scalars stand behind it, as they do for "nothing to colour by".
+    const scalar = enc?.kind === 'scalars' ? enc : null;
+    const colors = enc?.kind === 'colors' ? enc.colors : null;
+    const scalars = scalar?.values ?? new Float32Array(obs.count);
+    const colormap = scalar?.colormap ?? spatialFlatColormap();
+    const contrastLimits: [number, number] = scalar?.contrastLimits ?? [0, 1];
 
     // One imaged section, or the whole stack. The subset IS the geometry, so it
     // belongs in the geometry key rather than being re-derived per frame — and an
@@ -314,8 +320,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     }
 
     // The scalars have to follow the geometry: a per-observation vector against one
-    // section's positions would colour each cell by a stranger's value.
+    // section's positions would colour each cell by a stranger's value. So do the colours.
     const valuesFor = () => (shown ? Float32Array.from(shown, (i) => scalars[i]) : scalars);
+    const colorsFor = () => (colors ? (gatherColors(colors, shown ?? undefined) as Float32Array) : null);
 
     if (!this.points || key !== this.layerKey) {
       // New GEOMETRY — a different dataset, or a different section — so a new layer.
@@ -327,6 +334,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         colormap,
         contrastLimits,
         size,
+        colors: colorsFor() ?? undefined,
       });
     } else {
       if (scalarKey !== this.scalarKey) {
@@ -337,6 +345,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         // so there is nothing for the camera to reframe.
         this.scalarKey = scalarKey;
         this.points.values = valuesFor();
+        this.points.colors = colorsFor();
       }
       this.points.colormap = colormap;
       this.points.contrastLimits = contrastLimits;
@@ -751,11 +760,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   /**
-   * The per-point scalar + colormap + window that colour the cloud.
+   * What colours the cloud.
    *
-   * Continuous data is the natural fit: values go straight through the active colormap with the
-   * same percentile window the 2D path uses. Categorical data has to be smuggled through the same
-   * scalar channel — see `encodeSpatial3dCategorical`.
+   * Continuous data goes through the active colormap with the same percentile window the 2D path
+   * uses. Categorical data is one RGBA per point from the column's palette, so any number of
+   * categories keeps its own colour — see `encodeSpatial3dCategorical`.
    */
   private async scalarEncoding(view: SpatialViewState): Promise<Spatial3dEncoding | null> {
     const port = this.session.port;
@@ -773,7 +782,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   /** Continuous values → the active colormap over a percentile-clipped window. */
-  encodeContinuous(source: Float32Array, view: SpatialViewState): Spatial3dEncoding {
+  encodeContinuous(source: Float32Array, view: SpatialViewState): Spatial3dScalars {
     return encodeSpatial3dContinuous(
       source,
       view,
