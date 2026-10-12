@@ -152,7 +152,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    * over its positions, rebuilt only when they change), so the tooltip cannot name a cell that is
    * not drawn, then the drawn index mapped back to the observation.
    *
-   * A marker is hit within `slackPx` screen pixels of its centre, and of several hits the
+   * A marker is hit anywhere on its drawn disc, or within `slackPx` screen pixels of its centre
+   * when it is smaller than that (a 1.5 px dot still has to be hoverable), and of several hits the
    * NEAREST centre wins (an exact tie goes to the one drawn on top). Not napari's `'topmost'`: the
    * slack is wider than most markers, and over a dense field of small ones "the last drawn within
    * 10 px" names a neighbour rather than the cell under the cursor.
@@ -163,12 +164,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     const viewer = this.ctx.viewer;
     const [wx, wy] = viewer.canvasToWorld(clientX, clientY);
     const zoom = viewer.camera.zoom;
-    const k = points.pick(wx, wy, {
-      tolerance: slackPx / (zoom > 0 ? zoom : 1),
-      radiusAt: () => 0,
-      maxRadius: 0,
-      tieBreak: 'nearest',
-    });
+    const k = points.pick(wx, wy, { tolerance: slackPx / (zoom > 0 ? zoom : 1), tieBreak: 'nearest' });
     if (k < 0) return -1;
     return this.drawn ? this.drawn[k] : k;
   }

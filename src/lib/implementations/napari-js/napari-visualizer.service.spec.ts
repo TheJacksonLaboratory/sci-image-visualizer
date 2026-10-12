@@ -3746,6 +3746,29 @@ describe('NapariVisualizerService', () => {
         expect(tip()?.textContent).toContain('Cortex');
       });
 
+      it('names a large marker anywhere on its disc, not only near its centre', async () => {
+        // The fixture's spots are 27.5 units in radius, at zoom 1 far wider than the 10 px
+        // slack: the edge of a spot is still that spot.
+        spatialPort.getColumn.mockResolvedValue({
+          meta: {
+            kind: 'categorical',
+            name: 'region',
+            categories: ['Cortex', 'Thalamus'],
+            colors: ['#ff0000', '#0000ff'],
+          },
+          codes: new Uint16Array([0, 1, 0]),
+        });
+        await mount();
+        (service as unknown as { viewer: Viewer }).viewer.camera.set([0, 0], 1);
+        store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+
+        // 20 units right of observation 1 (10, 20); observation 2 (20, 40) is 22 away.
+        await hover(30, 20);
+        expect(tip()?.style.display).toBe('block');
+        expect(tip()?.textContent).toContain('Thalamus');
+      });
+
       it('says nothing over empty tissue', async () => {
         spatialPort.getColumn.mockResolvedValue({
           meta: {
