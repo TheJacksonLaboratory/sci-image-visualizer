@@ -11,6 +11,7 @@ import { saveAs } from 'file-saver';
 import { NapariVisualizerService } from './napari-visualizer.service';
 import { bitmapToLuminance } from './napari-tile-client';
 import { Image2dScene } from './napari-image-2d-scene';
+import { NapariToolBridge } from './napari-tool-bridge';
 import type { SceneContext } from './napari-scene';
 import {
   ContrastWindowCache,
@@ -1670,6 +1671,29 @@ describe('NapariVisualizerService', () => {
     expect(full[1]).toBeCloseTo(quarter[1], 3);
     expect(full[2]).toBeCloseTo(quarter[2], 3);
 
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
+  it('a slice change leaves a volume alone: the whole stack is on screen', async () => {
+    // VolumeScene.setZ wrote `viewer.dims.z`, which napari-js reads only for tiled 2D images (a
+    // volume raymarches every slice), then scheduled a readback of an unchanged frame.
+    const readback = jest.spyOn(NapariToolBridge.prototype, 'scheduleReadback');
+    const div = document.createElement('div');
+    div.id = 'vol-z-host';
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    for (const type of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE]) {
+      expect(await service.plot('vol-z-host', loaded, imageInfo(), 600, type)).toBe(true);
+      const viewer = (service as unknown as { viewer: Viewer }).viewer;
+      const layers = [...viewer.layers.items];
+      const z = viewer.dims.z;
+      readback.mockClear();
+      service.setZIndex(1);
+      expect(viewer.dims.z).toBe(z);
+      expect(viewer.layers.items).toEqual(layers);
+      expect(readback).not.toHaveBeenCalled();
+    }
     service.unsubscribe();
     document.body.removeChild(div);
   });

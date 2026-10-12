@@ -223,10 +223,14 @@ export class VolumeScene implements NapariScene {
     this.followDisplayState();
   }
 
-  /** Volume / isosurface: step the volume's z plane in place. */
-  setZ(z: number): void {
-    this.ctx.viewer.dims.z = z;
-    this.ctx.tools.scheduleReadback();
+  /**
+   * The whole stack is already on screen: no plane to step. (This used to write `viewer.dims.z`,
+   * which only a tiled 2D image reads — a volume raymarches every slice — and schedule a readback
+   * of a frame that had not changed. The toolbar shows no slice control in volume / isosurface
+   * mode, as Plotly's isosurface ignores the slice too.)
+   */
+  setZ(): void {
+    /* nothing to step */
   }
 
   /** The intensity histogram of the assembled (downsampled) uint8 volume for the requested
