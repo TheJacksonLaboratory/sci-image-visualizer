@@ -1,12 +1,11 @@
 import { Subscription } from 'rxjs';
 import { MultiChannelImageView, histogramScalar } from 'napari-js';
 import type { ChannelView, PointsLayer, TiledSource } from 'napari-js';
-import { ScaleBarOverlay } from 'napari-js/overlays';
+import { NavigatorOverlay, ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { TileDescriptor } from '../tile-server';
 import { regionCentroids } from '../region-centroids';
-import { NapariNavigator } from './napari-navigator';
 import { LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -19,7 +18,7 @@ export interface Image2dOptions {
   /** After a slice change. `rerendered` when the stitched path re-rendered the image — which
    *  CLEARS the layer list, taking every other layer with it. */
   onSlice?: (rerendered: boolean) => void;
-  /** The navigator is being dragged. */
+  /** The pointer entered the navigator (e.g. to hide a hover tooltip over the canvas). */
   onNavigatorInteract?: () => void;
 }
 
@@ -48,7 +47,7 @@ export class Image2dScene implements NapariScene {
   /** Physical scale bar overlay (null when the image has no µm/pixel). */
   private scaleBar: ScaleBarOverlay | null = null;
   /** Overview minimap (bottom-right), as OSD's navigator. */
-  private navigator: NapariNavigator | null = null;
+  private navigator: NavigatorOverlay | null = null;
   /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
   private navigatorToken = 0;
   /** The current slice's per-channel thumbnail bitmaps (multichannel only), kept so a tint or
@@ -148,7 +147,7 @@ export class Image2dScene implements NapariScene {
     this.displaySub = null;
     this.scaleBar?.dispose();
     this.scaleBar = null;
-    this.navigator?.destroy();
+    this.navigator?.dispose();
     this.navigator = null;
     this.setNavigatorChannels(null);
     this.histGen++;
@@ -398,19 +397,21 @@ export class Image2dScene implements NapariScene {
   }
 
   /**
-   * The overview navigator: a coarse thumbnail of the whole image with the viewport on it; click
-   * or drag to pan at the current zoom (as OSD).
+   * The overview navigator (napari-js's `NavigatorOverlay`): a coarse thumbnail of the whole
+   * image with the viewport on it; click or drag to pan at the current zoom (as OSD).
    */
   private installNavigator(z: number): void {
     const { ctx } = this;
-    this.navigator?.destroy();
+    this.navigator?.dispose();
     this.navigator = null;
     const { width, height } = ctx.imageSize();
     if (!width || !height) return;
-    this.navigator = new NapariNavigator(ctx.host, ctx.viewer, width, height, () =>
-      this.opts.onNavigatorInteract?.(),
-    );
-    this.navigator.setVisible(ctx.settings.navigatorVisible);
+    this.navigator = new NavigatorOverlay(ctx.host, ctx.viewer, {
+      worldWidth: width,
+      worldHeight: height,
+      onEnter: () => this.opts.onNavigatorInteract?.(),
+      visible: ctx.settings.navigatorVisible,
+    });
     void this.refreshNavigatorImage(z);
   }
 

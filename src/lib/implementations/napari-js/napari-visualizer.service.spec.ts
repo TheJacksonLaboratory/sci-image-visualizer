@@ -1251,6 +1251,25 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('puts the overview navigator in the plot host, shown and hidden by the view option', async () => {
+    const div = document.createElement('div');
+    div.id = 'nav-host';
+    Object.defineProperty(div, 'clientWidth', { value: 1000 }); // the box is sized from the host
+    document.body.appendChild(div);
+    const loaded = await service.load(imageInfo(), 0);
+    await service.plot('nav-host', loaded, imageInfo(), 600, PlotType.NAPARI_IMAGE);
+    const box = div.querySelector('.napari-navigator') as HTMLElement;
+    expect(box.style.display).toBe('block');
+    service.getOsdViewOptions()!.setNavigatorVisible(false);
+    expect(box.style.display).toBe('none');
+    service.getOsdViewOptions()!.setNavigatorVisible(true);
+    expect(box.style.display).toBe('block');
+
+    service.unsubscribe();
+    expect(div.querySelector('.napari-navigator')).toBeNull();
+    document.body.removeChild(div);
+  });
+
   it('drives the orbit camera from the zoom buttons in a 3D scene', async () => {
     // Regression (NAPARI-SVC-13): zoomIn/zoomOut only ever set the 2D camera's zoom, which
     // changes nothing visible at ndisplay 3 — yet +/- and the buttons are bound for every type.
