@@ -1,5 +1,6 @@
 import { Observable, from, of } from 'rxjs';
 import { saveAs } from 'file-saver';
+import { bitmapToScalar, rgbaToScalar } from 'napari-js';
 import type { PixelChunk, TileKey, TiledSource } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
@@ -32,7 +33,6 @@ import {
   VOLUME_MAX_SLICE,
   create2dCanvas,
   mapPool,
-  rgbaToLuminance,
   stackDepth,
 } from './napari-helpers';
 
@@ -44,23 +44,14 @@ export interface AssembledVolume {
   depth: number;
 }
 
-/** Decode an `ImageBitmap` to a single-channel uint8 luminance plane (server bands are grey,
- *  R=G=B, and decode exactly; a colour composite becomes its BT.601 luminance). `maxSide` caps
- *  the longest side (downscaling on the canvas draw) — used to keep pre-loaded surface slice
- *  planes small. Closes the bitmap. */
+/** Decode an `ImageBitmap` to a single-channel uint8 luminance plane with napari-js's
+ *  `bitmapToScalar` (server bands are grey, R=G=B, and decode exactly; a colour composite
+ *  becomes its BT.601 luminance). `maxSide` caps the longest side (downscaling on the canvas
+ *  draw) — used to keep pre-loaded surface slice planes small. Closes the bitmap. */
 export function bitmapToLuminance(bmp: ImageBitmap, maxSide?: number): LumaPlane {
-  const scale = maxSide ? Math.min(1, maxSide / Math.max(bmp.width, bmp.height, 1)) : 1;
-  const w = Math.max(1, Math.round(bmp.width * scale));
-  const h = Math.max(1, Math.round(bmp.height * scale));
-  const { ctx } = create2dCanvas(w, h, 'channel readback');
-  // Scale the WHOLE bitmap into the (possibly smaller) target canvas — drawing at natural size
-  // would crop to the top-left w×h corner when downscaling a large slice (maxSide < bmp size).
-  ctx.drawImage(bmp, 0, 0, w, h);
+  const plane = bitmapToScalar(bmp, { maxSide, weights: 'bt601' });
   bmp.close?.();
-  const rgba = ctx.getImageData(0, 0, w, h).data;
-  const data = new Uint8Array(w * h);
-  rgbaToLuminance(rgba, data);
-  return { data, width: w, height: h };
+  return plane;
 }
 
 /**
@@ -474,7 +465,8 @@ export class NapariTileClient {
       const readSlice = (z: number, bmp: ImageBitmap): void => {
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(bmp, 0, 0, width, height);
-        rgbaToLuminance(ctx.getImageData(0, 0, width, height).data, data, z * width * height);
+        const rgba = ctx.getImageData(0, 0, width, height).data;
+        rgbaToScalar(rgba, width, height, 'bt601', data.subarray(z * width * height, (z + 1) * width * height));
         bmp.close?.();
         done++;
         hooks.progress(Math.round((done / depth) * 100));

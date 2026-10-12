@@ -2,7 +2,6 @@ import type { ChannelView } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-import { bt601Luminance } from '../../contracts/intensity';
 import { NAPARI_DEFAULT_DECIMATE } from '../../contracts/plot-type';
 
 /**
@@ -99,19 +98,6 @@ export interface LumaPlane {
   data: Uint8Array;
   width: number;
   height: number;
-}
-
-/**
- * RGBA bytes → one BT.601 luminance byte per pixel, written into `out` from `offset`. Rounded,
- * so a grey pixel (R=G=B — every single-band server tile) decodes to itself exactly, while a
- * colour source (an RGB composite) becomes its luminance rather than its red channel.
- */
-export function rgbaToLuminance(rgba: ArrayLike<number>, out: Uint8Array, offset = 0): void {
-  const n = rgba.length >> 2;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    out[offset + i] = Math.round(bt601Luminance(rgba[o], rgba[o + 1], rgba[o + 2]));
-  }
 }
 
 /**
