@@ -7,7 +7,7 @@
  * to Plotly's `colorscale` — so the two surfaces stay in lock-step.
  *
  * A colormap value is either:
- *   - an array of `[stop, color]` pairs (the matplotlib `*_LUT` constants), or
+ *   - an array of `[stop, color]` pairs (the matplotlib tables, see {@link lutScale}), or
  *   - a Plotly built-in scale *name* string (e.g. 'Viridis', 'Reds').
  * `color` may be `'rgb(r, g, b)'` or `'#rrggbb'`/`'#rgb'`.
  */
@@ -196,6 +196,21 @@ const BUILTIN_SCALES: Record<string, Stop[]> = {
     [1, 'rgb(255,233,69)'],
   ],
 };
+
+/**
+ * A 256-entry RGB table (a `napari-js/colormaps` `*_LUT`, `Uint8Array(768)`) as an inline
+ * Plotly colorscale: one `[i / 255, 'rgb(r, g, b)']` stop per entry, the shape the colormap
+ * tree hands to Plotly's `colorscale` and to {@link buildColormapLut}. Stops are rounded to
+ * six decimals, as the colormap asset this replaces carried them.
+ */
+export function lutScale(lut: ArrayLike<number>): Stop[] {
+  const n = Math.floor(lut.length / 3);
+  const scale: Stop[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    scale[i] = [Number((i / (n - 1)).toFixed(6)), `rgb(${lut[i * 3]}, ${lut[i * 3 + 1]}, ${lut[i * 3 + 2]})`];
+  }
+  return scale;
+}
 
 /** Parse a Plotly colorscale color (`rgb(r,g,b)` or `#rrggbb`/`#rgb`) to RGB; black when unparseable. */
 function parseColor(c: string): Rgb {

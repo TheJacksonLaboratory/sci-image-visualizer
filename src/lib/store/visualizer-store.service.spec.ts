@@ -1,5 +1,4 @@
-import { of } from 'rxjs';
-import { HttpClient } from '@angular/common/http';
+import { GIST_NCAR_LUT } from 'napari-js/colormaps';
 import { IImageMetadata } from '../contracts/image.contract';
 import { VisualizerStore } from './visualizer-store.service';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
@@ -8,7 +7,7 @@ import { IChannelState } from '../contracts/channel-histogram-api.contract';
  * Pins the "Reset" baseline behaviour of the Channels & Histogram pane: resetting
  * a channel must restore its display window AND gamma AND its default tint colour
  * (not just min/max), so a colour the user changed snaps back on reset. The store
- * is constructed directly (no HttpClient) — the LUT fetch no-ops without one.
+ * is constructed directly (no preferences port).
  */
 describe('VisualizerStore.resetChannelState', () => {
   // channelCount>1 with rgbChannels==1 → one tinted channel per band, default
@@ -204,21 +203,16 @@ describe('VisualizerStore.setImageMeta channel re-derivation (CORE-8)', () => {
   });
 });
 
-describe('VisualizerStore colormap LUT loading (CORE-18)', () => {
-  it('fetches the LUT asset once per page, however many isolated chains create a store', async () => {
-    const lut: [number, string][] = [
-      [0, '#000000'],
-      [1, '#ffffff'],
-    ];
-    const http = { get: jest.fn(() => of({ GIST_NCAR_LUT: lut })) };
-    const first = new VisualizerStore(http as unknown as HttpClient);
-    new VisualizerStore(http as unknown as HttpClient); // e.g. the pipeline preview's provideVisualization() chain
-    await Promise.resolve();
-    expect(http.get).toHaveBeenCalledTimes(1);
-    const resolved = first
+describe('VisualizerStore colormap options (NAPARI-BOUNDARY-23)', () => {
+  it("carries matplotlib's tables inline, from napari-js/colormaps, with no asset to fetch", () => {
+    const leaves = new VisualizerStore()
       .getColormapOptions()
-      .flatMap((g: { children?: { label: string; data: { value: unknown } }[] }) => g.children ?? [])
-      .find((c: { label: string }) => c.label === 'gist_ncar');
-    expect(resolved.data.value).toEqual(lut);
+      .flatMap((g: { children?: { label: string; data: { value: unknown } }[] }) => g.children ?? []);
+    // Every leaf is usable at once: an inline scale, or a Plotly built-in name.
+    for (const leaf of leaves) expect(String(leaf.data.value)).not.toMatch(/_LUT$/);
+    const ncar = leaves.find((c: { label: string }) => c.label === 'gist_ncar')!.data.value as [number, string][];
+    expect(ncar).toHaveLength(256);
+    expect(ncar[0]).toEqual([0, `rgb(${GIST_NCAR_LUT[0]}, ${GIST_NCAR_LUT[1]}, ${GIST_NCAR_LUT[2]})`]);
+    expect(ncar[255]).toEqual([1, `rgb(${GIST_NCAR_LUT[765]}, ${GIST_NCAR_LUT[766]}, ${GIST_NCAR_LUT[767]})`]);
   });
 });

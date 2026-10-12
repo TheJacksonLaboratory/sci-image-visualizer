@@ -165,8 +165,6 @@ describe('NapariVisualizerService', () => {
     http = TestBed.inject(HttpTestingController);
     regionStore = TestBed.inject(RegionStore);
     store = TestBed.inject(VisualizerStore);
-    // VisualizerStore fetches its colormap LUTs on construction — satisfy it here.
-    http.expectOne('assets/plotting/colormap-luts.json').flush({});
   });
 
   afterEach(() => http.verify());

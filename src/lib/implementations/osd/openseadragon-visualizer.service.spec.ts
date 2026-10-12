@@ -46,9 +46,7 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   afterEach(() => {
     service.unsubscribe();
-    // The construction chain lazily fetches the colormap LUT asset — that one
-    // request is expected; anything else from an unmounted service is not.
-    http.match((req) => req.url.includes('colormap-luts')).forEach((r) => r.flush({}));
+    // Nothing is left in flight by an unmounted service.
     http.verify();
   });
 
@@ -857,7 +855,6 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
 
   afterEach(() => {
     service.unsubscribe();
-    http.match((req) => req.url.includes('colormap-luts')).forEach((r) => r.flush({}));
     http.verify();
   });
 

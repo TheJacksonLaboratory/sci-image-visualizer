@@ -1,6 +1,5 @@
 import { Injectable, Optional, Inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset';
@@ -10,16 +9,6 @@ import { IImageMetadata } from '../contracts/image.contract';
 import { IChannelState } from '../contracts/channel-histogram-api.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
-
-/**
- * The colormap LUT asset is fetched once per HttpClient — in an app, once per page,
- * since `provideVisualization()` chains share the root HttpClient — however many
- * stores exist, and resolved INTO the shared `COLORMAP_OPTIONS` tree. In place on
- * purpose: components read the options once at init and the default colormap is one
- * of those nodes, so a resolved copy would leave them holding the unresolved keys.
- * Dropped on failure so a later store can retry.
- */
-const colormapLutsLoads = new WeakMap<HttpClient, Promise<void>>();
 
 /**
  * Backend-neutral store for the **visualization session** — the state that
@@ -89,48 +78,11 @@ export class VisualizerStore {
    *  to an edit exactly as it does for an image. */
   private readonly spatialView$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
 
-  // Optional + null defaults so the store can be constructed both via DI and
-  // directly (`new VisualizerStore()` in unit tests); the LUT fetch and preset
-  // load/save no-op when their dependency is absent.
-  constructor(
-    @Optional() private readonly http: HttpClient | null = null,
-    @Optional() @Inject(PREFERENCES_PORT) private readonly prefsPort: PreferencesPort | null = null,
-  ) {
-    this.loadColormapLuts();
+  // Optional + null default so the store can be constructed both via DI and
+  // directly (`new VisualizerStore()` in unit tests); preset load/save no-op
+  // when the port is absent.
+  constructor(@Optional() @Inject(PREFERENCES_PORT) private readonly prefsPort: PreferencesPort | null = null) {
     this.initPresetPersistence();
-  }
-
-  /**
-   * Resolve the colormap tree's LUT keys (e.g. "GREYS_LUT") to their colour
-   * arrays from a served JSON asset. The ~630 KB of LUT data lives outside the
-   * bundle (as `/assets/plotting/colormap-luts.json`) so it never enters the TS
-   * / webpack module graph — that data-in-source was the main driver of the
-   * build's >2 GB heap. Named Plotly scales (e.g. "Viridis") aren't keys in the
-   * JSON, so they're left untouched. The default LUT ("Greys Inv" → the Plotly
-   * "Greys" scale) needs no JSON, so the first render works before this resolves.
-   */
-  private loadColormapLuts(): void {
-    const http = this.http;
-    if (!http || colormapLutsLoads.has(http)) return;
-    colormapLutsLoads.set(
-      http,
-      firstValueFrom(http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json')).then(
-        (luts) => {
-          for (const group of COLORMAP_OPTIONS) {
-            for (const child of group.children ?? []) {
-              const data = child.data as { value: unknown } | null;
-              const key = data?.value;
-              if (data && typeof key === 'string' && luts[key]) data.value = luts[key];
-            }
-          }
-        },
-        (err: unknown) => {
-          // Named Plotly scales still work with the keys unresolved; let a later store retry.
-          console.warn('[visualizer] colormap LUTs unavailable', err);
-          colormapLutsLoads.delete(http);
-        },
-      ),
-    );
   }
 
   // ── Preset persistence (jit-ui#70) ───────────────────────────────────

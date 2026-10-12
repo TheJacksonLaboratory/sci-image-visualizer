@@ -63,7 +63,7 @@ it working.
 2. **CSS:** `primeicons/primeicons.css`, `primeng/resources/primeng.min.css`,
    `primeflex/primeflex.css` and a PrimeNG theme.
 3. **Assets:** serve the package's `src/lib/assets` at `assets/plotting/`
-   (icons, colormap previews, `colormap-luts.json`). In `angular.json`:
+   (icons and colormap previews). In `angular.json`:
    ```json
    {
      "glob": "**/*",

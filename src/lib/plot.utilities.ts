@@ -1,31 +1,61 @@
+import * as luts from 'napari-js/colormaps';
+
 import { Polygon, Rectangle, Region } from './models/region';
 import { ShapeSelection } from './models/shape';
 import { parseSvgPath } from './models/geometry';
 import { downloadGeoJson, regionsFromGeoJson, regionsToGeoJson } from './models/region-geojson';
 import { hexToRgb, rgbToHex } from './contracts/color';
+import { lutScale } from './contracts/colormap-lut';
 
 export const COLORMAP_OPTIONS = [
   {
     label: 'Sequential',
     data: null,
     children: [
-      { label: 'Greys', data: { value: 'GREYS_LUT', src: 'assets/plotting/icons/colormap-greys.png' } },
-      { label: 'Purples', data: { value: 'PURPLES_LUT', src: 'assets/plotting/icons/colormap-purples.png' } },
-      { label: 'Blues', data: { value: 'BLUES_LUT', src: 'assets/plotting/icons/colormap-blues.png' } },
-      { label: 'Greens', data: { value: 'GREENS_LUT', src: 'assets/plotting/icons/colormap-greens.png' } },
-      { label: 'Oranges', data: { value: 'ORANGES_LUT', src: 'assets/plotting/icons/colormap-oranges.png' } },
+      {
+        label: 'Greys',
+        data: { value: lutScale(luts.GREYS_LUT), src: 'assets/plotting/icons/colormap-greys.png' },
+      },
+      {
+        label: 'Purples',
+        data: { value: lutScale(luts.PURPLES_LUT), src: 'assets/plotting/icons/colormap-purples.png' },
+      },
+      {
+        label: 'Blues',
+        data: { value: lutScale(luts.BLUES_LUT), src: 'assets/plotting/icons/colormap-blues.png' },
+      },
+      {
+        label: 'Greens',
+        data: { value: lutScale(luts.GREENS_LUT), src: 'assets/plotting/icons/colormap-greens.png' },
+      },
+      {
+        label: 'Oranges',
+        data: { value: lutScale(luts.ORANGES_LUT), src: 'assets/plotting/icons/colormap-oranges.png' },
+      },
       { label: 'Reds', data: { value: 'Reds', src: 'assets/plotting/icons/colormap-reds.png' } },
-      { label: 'YlOrBr', data: { value: 'YLORBR_LUT', src: 'assets/plotting/icons/colormap-ylorbr.png' } },
-      { label: 'YlOrRd', data: { value: 'YLORRD_LUT', src: 'assets/plotting/icons/colormap-ylorrd.png' } },
-      { label: 'OrRd', data: { value: 'ORRD_LUT', src: 'assets/plotting/icons/colormap-orrd.png' } },
-      { label: 'PuRd', data: { value: 'PURD_LUT', src: 'assets/plotting/icons/colormap-purd.png' } },
-      { label: 'RdPu', data: { value: 'RDPU_LUT', src: 'assets/plotting/icons/colormap-rdpu.png' } },
-      { label: 'BuPu', data: { value: 'BUPU_LUT', src: 'assets/plotting/icons/colormap-bupu.png' } },
-      { label: 'GnBu', data: { value: 'GNBU_LUT', src: 'assets/plotting/icons/colormap-gnbu.png' } },
-      { label: 'YlGnBu', data: { value: 'YLGNBU_LUT', src: 'assets/plotting/icons/colormap-ylgnbu.png' } },
-      { label: 'PuBuGn', data: { value: 'PUBUGN_LUT', src: 'assets/plotting/icons/colormap-pubugn.png' } },
-      { label: 'BuGn', data: { value: 'BUGN_LUT', src: 'assets/plotting/icons/colormap-bugn.png' } },
-      { label: 'YlGn', data: { value: 'YLGN_LUT', src: 'assets/plotting/icons/colormap-ylgn.png' } },
+      {
+        label: 'YlOrBr',
+        data: { value: lutScale(luts.YLORBR_LUT), src: 'assets/plotting/icons/colormap-ylorbr.png' },
+      },
+      {
+        label: 'YlOrRd',
+        data: { value: lutScale(luts.YLORRD_LUT), src: 'assets/plotting/icons/colormap-ylorrd.png' },
+      },
+      { label: 'OrRd', data: { value: lutScale(luts.ORRD_LUT), src: 'assets/plotting/icons/colormap-orrd.png' } },
+      { label: 'PuRd', data: { value: lutScale(luts.PURD_LUT), src: 'assets/plotting/icons/colormap-purd.png' } },
+      { label: 'RdPu', data: { value: lutScale(luts.RDPU_LUT), src: 'assets/plotting/icons/colormap-rdpu.png' } },
+      { label: 'BuPu', data: { value: lutScale(luts.BUPU_LUT), src: 'assets/plotting/icons/colormap-bupu.png' } },
+      { label: 'GnBu', data: { value: lutScale(luts.GNBU_LUT), src: 'assets/plotting/icons/colormap-gnbu.png' } },
+      {
+        label: 'YlGnBu',
+        data: { value: lutScale(luts.YLGNBU_LUT), src: 'assets/plotting/icons/colormap-ylgnbu.png' },
+      },
+      {
+        label: 'PuBuGn',
+        data: { value: lutScale(luts.PUBUGN_LUT), src: 'assets/plotting/icons/colormap-pubugn.png' },
+      },
+      { label: 'BuGn', data: { value: lutScale(luts.BUGN_LUT), src: 'assets/plotting/icons/colormap-bugn.png' } },
+      { label: 'YlGn', data: { value: lutScale(luts.YLGN_LUT), src: 'assets/plotting/icons/colormap-ylgn.png' } },
       { label: 'Greys Inv', data: { value: 'Greys', src: 'assets/plotting/icons/colormap-greys-inv.png' } },
       { label: 'Greens Inv', data: { value: 'Greens', src: 'assets/plotting/icons/colormap-greens-inv.png' } },
       { label: 'YlOrRd Inv', data: { value: 'YlOrRd', src: 'assets/plotting/icons/colormap-ylorrd-inv.png' } },
@@ -36,31 +66,55 @@ export const COLORMAP_OPTIONS = [
     label: 'Sequential (2)',
     data: null,
     children: [
-      { label: 'binary', data: { value: 'BINARY_LUT', src: 'assets/plotting/icons/colormap-binary.png' } },
+      {
+        label: 'binary',
+        data: { value: lutScale(luts.BINARY_LUT), src: 'assets/plotting/icons/colormap-binary.png' },
+      },
       {
         label: 'gist_yarg',
-        data: { value: 'GIST_YARG_LUT', src: 'assets/plotting/icons/colormap-gist_yarg.png' },
+        data: { value: lutScale(luts.GIST_YARG_LUT), src: 'assets/plotting/icons/colormap-gist_yarg.png' },
       },
       {
         label: 'gist_gray',
-        data: { value: 'GIST_GRAY_LUT', src: 'assets/plotting/icons/colormap-gist_gray.png' },
+        data: { value: lutScale(luts.GIST_GRAY_LUT), src: 'assets/plotting/icons/colormap-gist_gray.png' },
       },
-      { label: 'gray', data: { value: 'GRAY_LUT', src: 'assets/plotting/icons/colormap-gray.png' } },
-      { label: 'bone', data: { value: 'BONE_LUT', src: 'assets/plotting/icons/colormap-bone.png' } },
-      { label: 'pink', data: { value: 'PINK_LUT', src: 'assets/plotting/icons/colormap-pink.png' } },
-      { label: 'spring', data: { value: 'SPRING_LUT', src: 'assets/plotting/icons/colormap-spring.png' } },
-      { label: 'summer', data: { value: 'SUMMER_LUT', src: 'assets/plotting/icons/colormap-summer.png' } },
-      { label: 'autumn', data: { value: 'AUTUMN_LUT', src: 'assets/plotting/icons/colormap-autumn.png' } },
-      { label: 'winter', data: { value: 'WINTER_LUT', src: 'assets/plotting/icons/colormap-winter.png' } },
-      { label: 'cool', data: { value: 'COOL_LUT', src: 'assets/plotting/icons/colormap-cool.png' } },
-      { label: 'Wistia', data: { value: 'WISTIA_LUT', src: 'assets/plotting/icons/colormap-wistia.png' } },
-      { label: 'hot', data: { value: 'HOT_LUT', src: 'assets/plotting/icons/colormap-hot.png' } },
-      { label: 'afmhot', data: { value: 'AFMHOT_LUT', src: 'assets/plotting/icons/colormap-afmhot.png' } },
+      { label: 'gray', data: { value: lutScale(luts.GRAY_LUT), src: 'assets/plotting/icons/colormap-gray.png' } },
+      { label: 'bone', data: { value: lutScale(luts.BONE_LUT), src: 'assets/plotting/icons/colormap-bone.png' } },
+      { label: 'pink', data: { value: lutScale(luts.PINK_LUT), src: 'assets/plotting/icons/colormap-pink.png' } },
+      {
+        label: 'spring',
+        data: { value: lutScale(luts.SPRING_LUT), src: 'assets/plotting/icons/colormap-spring.png' },
+      },
+      {
+        label: 'summer',
+        data: { value: lutScale(luts.SUMMER_LUT), src: 'assets/plotting/icons/colormap-summer.png' },
+      },
+      {
+        label: 'autumn',
+        data: { value: lutScale(luts.AUTUMN_LUT), src: 'assets/plotting/icons/colormap-autumn.png' },
+      },
+      {
+        label: 'winter',
+        data: { value: lutScale(luts.WINTER_LUT), src: 'assets/plotting/icons/colormap-winter.png' },
+      },
+      { label: 'cool', data: { value: lutScale(luts.COOL_LUT), src: 'assets/plotting/icons/colormap-cool.png' } },
+      {
+        label: 'Wistia',
+        data: { value: lutScale(luts.WISTIA_LUT), src: 'assets/plotting/icons/colormap-wistia.png' },
+      },
+      { label: 'hot', data: { value: lutScale(luts.HOT_LUT), src: 'assets/plotting/icons/colormap-hot.png' } },
+      {
+        label: 'afmhot',
+        data: { value: lutScale(luts.AFMHOT_LUT), src: 'assets/plotting/icons/colormap-afmhot.png' },
+      },
       {
         label: 'gist_heat',
-        data: { value: 'GIST_HEAT_LUT', src: 'assets/plotting/icons/colormap-gist_heat.png' },
+        data: { value: lutScale(luts.GIST_HEAT_LUT), src: 'assets/plotting/icons/colormap-gist_heat.png' },
       },
-      { label: 'copper', data: { value: 'COPPER_LUT', src: 'assets/plotting/icons/colormap-copper.png' } },
+      {
+        label: 'copper',
+        data: { value: lutScale(luts.COPPER_LUT), src: 'assets/plotting/icons/colormap-copper.png' },
+      },
       { label: 'Bluered', data: { value: 'Bluered', src: 'assets/plotting/icons/colormap-bluered.png' } },
     ],
   },
@@ -69,32 +123,65 @@ export const COLORMAP_OPTIONS = [
     data: null,
     children: [
       { label: 'Viridis', data: { value: 'Viridis', src: 'assets/plotting/icons/colormap-viridis.png' } },
-      { label: 'Magma', data: { value: 'MAGMA_LUT', src: 'assets/plotting/icons/colormap-magma.png' } },
-      { label: 'Inferno', data: { value: 'INFERNO_LUT', src: 'assets/plotting/icons/colormap-inferno.png' } },
+      {
+        label: 'Magma',
+        data: { value: lutScale(luts.MAGMA_LUT), src: 'assets/plotting/icons/colormap-magma.png' },
+      },
+      {
+        label: 'Inferno',
+        data: { value: lutScale(luts.INFERNO_LUT), src: 'assets/plotting/icons/colormap-inferno.png' },
+      },
       { label: 'Cividis', data: { value: 'Cividis', src: 'assets/plotting/icons/colormap-cividis.png' } },
       { label: 'Electric', data: { value: 'Electric', src: 'assets/plotting/icons/colormap-electric.png' } },
-      { label: 'Plasma', data: { value: 'PLASMA_LUT', src: 'assets/plotting/icons/colormap-plasma.png' } },
+      {
+        label: 'Plasma',
+        data: { value: lutScale(luts.PLASMA_LUT), src: 'assets/plotting/icons/colormap-plasma.png' },
+      },
     ],
   },
   {
     label: 'Diverging',
     data: null,
     children: [
-      { label: 'PiYG', data: { value: 'PIYG_LUT', src: 'assets/plotting/icons/colormap-piyg.png' } },
-      { label: 'PRGn', data: { value: 'PRGN_LUT', src: 'assets/plotting/icons/colormap-prgn.png' } },
-      { label: 'BrBG', data: { value: 'BRBG_LUT', src: 'assets/plotting/icons/colormap-brbg.png' } },
-      { label: 'PuOr', data: { value: 'PUOR_LUT', src: 'assets/plotting/icons/colormap-puor.png' } },
-      { label: 'RdGy', data: { value: 'RDGY_LUT', src: 'assets/plotting/icons/colormap-rdgy.png' } },
-      { label: 'RdBu', data: { value: 'RDBU_LUT', src: 'assets/plotting/icons/colormap-rdbu.png' } },
-      { label: 'RdYlBu', data: { value: 'RDYLBU_LUT', src: 'assets/plotting/icons/colormap-rdylbu.png' } },
-      { label: 'RdYlGn', data: { value: 'RDYLGN_LUT', src: 'assets/plotting/icons/colormap-rdylgn.png' } },
-      { label: 'Spectral', data: { value: 'SPECTRAL_LUT', src: 'assets/plotting/icons/colormap-spectral.png' } },
-      { label: 'coolwarm', data: { value: 'COOLWARM_LUT', src: 'assets/plotting/icons/colormap-coolwarm.png' } },
-      { label: 'bwr', data: { value: 'BWR_LUT', src: 'assets/plotting/icons/colormap-bwr.png' } },
-      { label: 'seismic', data: { value: 'SEISMIC_LUT', src: 'assets/plotting/icons/colormap-seismic.png' } },
-      { label: 'berlin', data: { value: 'BERLIN_LUT', src: 'assets/plotting/icons/colormap-berlin.png' } },
-      { label: 'managua', data: { value: 'MANAGUA_LUT', src: 'assets/plotting/icons/colormap-managua.png' } },
-      { label: 'vanimo', data: { value: 'VANIMO_LUT', src: 'assets/plotting/icons/colormap-vanimo.png' } },
+      { label: 'PiYG', data: { value: lutScale(luts.PIYG_LUT), src: 'assets/plotting/icons/colormap-piyg.png' } },
+      { label: 'PRGn', data: { value: lutScale(luts.PRGN_LUT), src: 'assets/plotting/icons/colormap-prgn.png' } },
+      { label: 'BrBG', data: { value: lutScale(luts.BRBG_LUT), src: 'assets/plotting/icons/colormap-brbg.png' } },
+      { label: 'PuOr', data: { value: lutScale(luts.PUOR_LUT), src: 'assets/plotting/icons/colormap-puor.png' } },
+      { label: 'RdGy', data: { value: lutScale(luts.RDGY_LUT), src: 'assets/plotting/icons/colormap-rdgy.png' } },
+      { label: 'RdBu', data: { value: lutScale(luts.RDBU_LUT), src: 'assets/plotting/icons/colormap-rdbu.png' } },
+      {
+        label: 'RdYlBu',
+        data: { value: lutScale(luts.RDYLBU_LUT), src: 'assets/plotting/icons/colormap-rdylbu.png' },
+      },
+      {
+        label: 'RdYlGn',
+        data: { value: lutScale(luts.RDYLGN_LUT), src: 'assets/plotting/icons/colormap-rdylgn.png' },
+      },
+      {
+        label: 'Spectral',
+        data: { value: lutScale(luts.SPECTRAL_LUT), src: 'assets/plotting/icons/colormap-spectral.png' },
+      },
+      {
+        label: 'coolwarm',
+        data: { value: lutScale(luts.COOLWARM_LUT), src: 'assets/plotting/icons/colormap-coolwarm.png' },
+      },
+      { label: 'bwr', data: { value: lutScale(luts.BWR_LUT), src: 'assets/plotting/icons/colormap-bwr.png' } },
+      {
+        label: 'seismic',
+        data: { value: lutScale(luts.SEISMIC_LUT), src: 'assets/plotting/icons/colormap-seismic.png' },
+      },
+      {
+        label: 'berlin',
+        data: { value: lutScale(luts.BERLIN_LUT), src: 'assets/plotting/icons/colormap-berlin.png' },
+      },
+      {
+        label: 'managua',
+        data: { value: lutScale(luts.MANAGUA_LUT), src: 'assets/plotting/icons/colormap-managua.png' },
+      },
+      {
+        label: 'vanimo',
+        data: { value: lutScale(luts.VANIMO_LUT), src: 'assets/plotting/icons/colormap-vanimo.png' },
+      },
       { label: 'Picnic', data: { value: 'Picnic', src: 'assets/plotting/icons/colormap-picnic.png' } },
       { label: 'Portland', data: { value: 'Portland', src: 'assets/plotting/icons/colormap-portland.png' } },
     ],
@@ -103,69 +190,123 @@ export const COLORMAP_OPTIONS = [
     label: 'Cyclic',
     data: null,
     children: [
-      { label: 'twilight', data: { value: 'TWILIGHT_LUT', src: 'assets/plotting/icons/colormap-twilight.png' } },
+      {
+        label: 'twilight',
+        data: { value: lutScale(luts.TWILIGHT_LUT), src: 'assets/plotting/icons/colormap-twilight.png' },
+      },
       {
         label: 'twilight_shifted',
-        data: { value: 'TWILIGHT_SHIFTED_LUT', src: 'assets/plotting/icons/colormap-twilight_shifted.png' },
+        data: {
+          value: lutScale(luts.TWILIGHT_SHIFTED_LUT),
+          src: 'assets/plotting/icons/colormap-twilight_shifted.png',
+        },
       },
-      { label: 'hsv', data: { value: 'HSV_LUT', src: 'assets/plotting/icons/colormap-hsv.png' } },
+      { label: 'hsv', data: { value: lutScale(luts.HSV_LUT), src: 'assets/plotting/icons/colormap-hsv.png' } },
     ],
   },
   {
     label: 'Qualitative',
     data: null,
     children: [
-      { label: 'Pastel1', data: { value: 'PASTEL1_LUT', src: 'assets/plotting/icons/colormap-Pastel1.png' } },
-      { label: 'Pastel2', data: { value: 'PASTEL2_LUT', src: 'assets/plotting/icons/colormap-pastel2.png' } },
-      { label: 'Accent', data: { value: 'ACCENT_LUT', src: 'assets/plotting/icons/colormap-accent.png' } },
-      { label: 'Dark2', data: { value: 'DARK2_LUT', src: 'assets/plotting/icons/colormap-dark2.png' } },
-      { label: 'Set1', data: { value: 'SET1_LUT', src: 'assets/plotting/icons/colormap-set1.png' } },
-      { label: 'Set2', data: { value: 'SET2_LUT', src: 'assets/plotting/icons/colormap-set2.png' } },
-      { label: 'Set3', data: { value: 'SET3_LUT', src: 'assets/plotting/icons/colormap-set3.png' } },
-      { label: 'tab10', data: { value: 'TAB10_LUT', src: 'assets/plotting/icons/colormap-tab10.png' } },
-      { label: 'tab20', data: { value: 'TAB20_LUT', src: 'assets/plotting/icons/colormap-tab20.png' } },
-      { label: 'tab20b', data: { value: 'TAB20B_LUT', src: 'assets/plotting/icons/colormap-tab20b.png' } },
-      { label: 'tab20c', data: { value: 'TAB20C_LUT', src: 'assets/plotting/icons/colormap-tab20c.png' } },
+      {
+        label: 'Pastel1',
+        data: { value: lutScale(luts.PASTEL1_LUT), src: 'assets/plotting/icons/colormap-Pastel1.png' },
+      },
+      {
+        label: 'Pastel2',
+        data: { value: lutScale(luts.PASTEL2_LUT), src: 'assets/plotting/icons/colormap-pastel2.png' },
+      },
+      {
+        label: 'Accent',
+        data: { value: lutScale(luts.ACCENT_LUT), src: 'assets/plotting/icons/colormap-accent.png' },
+      },
+      {
+        label: 'Dark2',
+        data: { value: lutScale(luts.DARK2_LUT), src: 'assets/plotting/icons/colormap-dark2.png' },
+      },
+      { label: 'Set1', data: { value: lutScale(luts.SET1_LUT), src: 'assets/plotting/icons/colormap-set1.png' } },
+      { label: 'Set2', data: { value: lutScale(luts.SET2_LUT), src: 'assets/plotting/icons/colormap-set2.png' } },
+      { label: 'Set3', data: { value: lutScale(luts.SET3_LUT), src: 'assets/plotting/icons/colormap-set3.png' } },
+      {
+        label: 'tab10',
+        data: { value: lutScale(luts.TAB10_LUT), src: 'assets/plotting/icons/colormap-tab10.png' },
+      },
+      {
+        label: 'tab20',
+        data: { value: lutScale(luts.TAB20_LUT), src: 'assets/plotting/icons/colormap-tab20.png' },
+      },
+      {
+        label: 'tab20b',
+        data: { value: lutScale(luts.TAB20B_LUT), src: 'assets/plotting/icons/colormap-tab20b.png' },
+      },
+      {
+        label: 'tab20c',
+        data: { value: lutScale(luts.TAB20C_LUT), src: 'assets/plotting/icons/colormap-tab20c.png' },
+      },
     ],
   },
   {
     label: 'Miscellaneous',
     data: null,
     children: [
-      { label: 'flag', data: { value: 'FLAG_LUT', src: 'assets/plotting/icons/colormap-flag.png' } },
-      { label: 'prism', data: { value: 'PRISM_LUT', src: 'assets/plotting/icons/colormap-prism.png' } },
-      { label: 'ocean', data: { value: 'OCEAN_LUT', src: 'assets/plotting/icons/colormap-ocean.png' } },
+      { label: 'flag', data: { value: lutScale(luts.FLAG_LUT), src: 'assets/plotting/icons/colormap-flag.png' } },
+      {
+        label: 'prism',
+        data: { value: lutScale(luts.PRISM_LUT), src: 'assets/plotting/icons/colormap-prism.png' },
+      },
+      {
+        label: 'ocean',
+        data: { value: lutScale(luts.OCEAN_LUT), src: 'assets/plotting/icons/colormap-ocean.png' },
+      },
       {
         label: 'gist_earth',
-        data: { value: 'GIST_EARTH_LUT', src: 'assets/plotting/icons/colormap-gist_earth.png' },
+        data: { value: lutScale(luts.GIST_EARTH_LUT), src: 'assets/plotting/icons/colormap-gist_earth.png' },
       },
-      { label: 'terrain', data: { value: 'TERRAIN_LUT', src: 'assets/plotting/icons/colormap-terrain.png' } },
+      {
+        label: 'terrain',
+        data: { value: lutScale(luts.TERRAIN_LUT), src: 'assets/plotting/icons/colormap-terrain.png' },
+      },
       {
         label: 'gist_stern',
-        data: { value: 'GIST_STERN_LUT', src: 'assets/plotting/icons/colormap-gist_stern.png' },
+        data: { value: lutScale(luts.GIST_STERN_LUT), src: 'assets/plotting/icons/colormap-gist_stern.png' },
       },
-      { label: 'gnuplot', data: { value: 'GNUPLOT_LUT', src: 'assets/plotting/icons/colormap-gnuplot.png' } },
-      { label: 'gnuplot2', data: { value: 'GNUPLOT2_LUT', src: 'assets/plotting/icons/colormap-gnuplot2.png' } },
-      { label: 'CMRmap', data: { value: 'CMRMAP_LUT', src: 'assets/plotting/icons/colormap-cmrmap.png' } },
+      {
+        label: 'gnuplot',
+        data: { value: lutScale(luts.GNUPLOT_LUT), src: 'assets/plotting/icons/colormap-gnuplot.png' },
+      },
+      {
+        label: 'gnuplot2',
+        data: { value: lutScale(luts.GNUPLOT2_LUT), src: 'assets/plotting/icons/colormap-gnuplot2.png' },
+      },
+      {
+        label: 'CMRmap',
+        data: { value: lutScale(luts.CMRMAP_LUT), src: 'assets/plotting/icons/colormap-cmrmap.png' },
+      },
       {
         label: 'cubehelix',
-        data: { value: 'CUBEHELIX_LUT', src: 'assets/plotting/icons/colormap-cubehelix.png' },
+        data: { value: lutScale(luts.CUBEHELIX_LUT), src: 'assets/plotting/icons/colormap-cubehelix.png' },
       },
-      { label: 'brg', data: { value: 'BRG_LUT', src: 'assets/plotting/icons/colormap-brg.png' } },
+      { label: 'brg', data: { value: lutScale(luts.BRG_LUT), src: 'assets/plotting/icons/colormap-brg.png' } },
       {
         label: 'gist_rainbow',
-        data: { value: 'GIST_RAINBOW_LUT', src: 'assets/plotting/icons/colormap-gist_rainbow.png' },
+        data: { value: lutScale(luts.GIST_RAINBOW_LUT), src: 'assets/plotting/icons/colormap-gist_rainbow.png' },
       },
-      { label: 'rainbow', data: { value: 'RAINBOW_LUT', src: 'assets/plotting/icons/colormap-rainbow.png' } },
-      { label: 'jet', data: { value: 'JET_LUT', src: 'assets/plotting/icons/colormap-jet.png' } },
-      { label: 'turbo', data: { value: 'TURBO_LUT', src: 'assets/plotting/icons/colormap-turbo.png' } },
+      {
+        label: 'rainbow',
+        data: { value: lutScale(luts.RAINBOW_LUT), src: 'assets/plotting/icons/colormap-rainbow.png' },
+      },
+      { label: 'jet', data: { value: lutScale(luts.JET_LUT), src: 'assets/plotting/icons/colormap-jet.png' } },
+      {
+        label: 'turbo',
+        data: { value: lutScale(luts.TURBO_LUT), src: 'assets/plotting/icons/colormap-turbo.png' },
+      },
       {
         label: 'nipy_spectral',
-        data: { value: 'NIPY_SPECTRAL_LUT', src: 'assets/plotting/icons/colormap-nipy_spectral.png' },
+        data: { value: lutScale(luts.NIPY_SPECTRAL_LUT), src: 'assets/plotting/icons/colormap-nipy_spectral.png' },
       },
       {
         label: 'gist_ncar',
-        data: { value: 'GIST_NCAR_LUT', src: 'assets/plotting/icons/colormap-gist_ncar.png' },
+        data: { value: lutScale(luts.GIST_NCAR_LUT), src: 'assets/plotting/icons/colormap-gist_ncar.png' },
       },
       { label: 'Blackbody', data: { value: 'Blackbody', src: 'assets/plotting/icons/colormap-blackbody.png' } },
     ],

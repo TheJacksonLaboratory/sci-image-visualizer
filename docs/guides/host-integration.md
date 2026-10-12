@@ -70,9 +70,8 @@ bundles them, so they work whether or not `assets/plotting/` is served.
 
 ## 4. Assets
 
-The library loads its icons, colormap previews and `colormap-luts.json` from
-`assets/plotting/`. Serve the package's `src/lib/assets` folder there. In
-`angular.json`:
+The library loads its icons and colormap previews from `assets/plotting/`. Serve
+the package's `src/lib/assets` folder there. In `angular.json`:
 
 ```json
 "assets": [

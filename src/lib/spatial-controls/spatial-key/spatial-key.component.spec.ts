@@ -132,12 +132,10 @@ describe('SpatialKeyComponent', () => {
     });
 
     it('writes an INLINE colour scale, which is what most options become', () => {
-      // COLORMAP_OPTIONS ships `*_LUT` KEYS, and the store rewrites them in place
-      // with 256-stop `[stop, colour]` arrays once assets/plotting/colormap-luts.json
-      // loads — so at runtime most of the library's colormaps are arrays, not
-      // names. (No HTTP here, so the tree still holds the keys; the array case is
-      // built explicitly.) A handler that only accepts strings shows the pick in
-      // the dropdown and changes nothing on screen, which is the worst of both.
+      // Most of COLORMAP_OPTIONS are 256-stop `[stop, colour]` arrays (matplotlib's
+      // tables from napari-js/colormaps), not names. A handler that only accepts
+      // strings shows the pick in the dropdown and changes nothing on screen, which
+      // is the worst of both.
       const resolved = {
         label: 'Plasma',
         data: {
@@ -150,17 +148,17 @@ describe('SpatialKeyComponent', () => {
       key['onContinuousColormap'](resolved);
       expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: resolved.data.value });
 
-      // And an unresolved key is still a name, which must pass through too.
+      // And a node straight from the shipped tree passes its own scale through.
       const plasma = COLORMAP_OPTIONS.flatMap((g) => g.children ?? []).find((n) => n.label === 'Plasma')!;
-      expect(plasma.data!.value).toBe('PLASMA_LUT');
       key['onContinuousColormap'](plasma);
-      expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: 'PLASMA_LUT' });
+      expect(fake.controls.setViewState).toHaveBeenCalledWith({ continuousColormap: plasma.data!.value });
     });
 
     it('shows the colormap in use, found in the option tree', async () => {
       // The picker has to reflect state set from anywhere — a host calling
       // setViewState, or a restored session — not just its own clicks.
-      fake.view$.next({ ...fake.view$.value, continuousColormap: 'MAGMA_LUT' });
+      const magma = COLORMAP_OPTIONS.flatMap((g) => g.children ?? []).find((n) => n.label === 'Magma')!;
+      fake.view$.next({ ...fake.view$.value, continuousColormap: magma.data!.value });
       expect(key['selectedColormapNode']?.label).toBe('Magma');
       await fixture.whenStable();
       expect((accessorOf(fixture, one(root, 'p-treeSelect')).value as { label: string }).label).toBe('Magma');
