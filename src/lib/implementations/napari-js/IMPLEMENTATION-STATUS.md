@@ -35,7 +35,7 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 |---|---|
 | `napari-visualizer.service.ts` | The backend: viewer lifecycle, `load`/`plot`, the scene per plot type, readback, export, and the capability-gated getters (`getOsdViewOptions`, `getVolumeResolution`, `getIntensitySampling`). |
 | `napari-scene.ts` | The `NapariScene` interface, `SceneContext` (what a scene may use) and `NapariSettings`. |
-| `napari-image-2d-scene.ts` | The 2D image, alone or under the region-centroid scatter (`NAPARI_IMAGE`, `NAPARI_SCATTER`). |
+| `napari-image-2d-scene.ts` | The 2D image, alone or under the region-centroid scatter (`NAPARI_IMAGE`, `NAPARI_SCATTER`). Multichannel: one tinted layer per channel (a serverless stack's from its `channelUrls` planes), merged onto black. RGB: the image layer as it is at the default channel states, else its R, G and B bands as three such layers (a tiled image's bands share one `/tile` request per tile). |
 | `napari-volume-scene.ts` | Volume / isosurface (MIP or iso) and the 3D scatter. |
 | `napari-surface-scene.ts` | The slice as a height field (`NAPARI_SURFACE`). |
 | `napari-spatial-scene.ts` | `SpatialSession`: the dataset / view-state / selection subscription shared by both spatial scenes. |
@@ -72,13 +72,17 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 Specs run the real napari-js: `jest.config.ts` maps `napari-js` to its GPU-free
 `napari-js/testing` entry, where `Viewer` is a `HeadlessViewer` (the real model, layers, framing
 and canvas maths, no device; readback is a blank frame). `osd/display-pipeline.cross-backend.spec.ts`
-checks OSD's display pipeline against napari-js's own colour functions.
+checks OSD's display pipeline against napari-js's own colour functions, and
+`napari-image-2d-scene.spec.ts` the 2D image's multichannel and RGB layers against it.
 
 ## Known gaps
 
 Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 
-- **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
+- **Recoloured tiled RGB** (any channel state off its default) draws three additive band layers,
+  which have no coarse underlay but the bottom band's: while a pan or zoom loads finer tiles, the
+  new area shows that band's coarse level (red), not the blurry colour level the RGB layer shows.
+  At the default channel states the RGB layer draws, as before.
 - **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
   min.
 - **napari-js 0.15 APIs not adopted:** the flat-ring `pointInRing`/`ringArea` (SIV's regions

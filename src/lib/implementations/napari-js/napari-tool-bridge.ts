@@ -2,7 +2,6 @@ import type { Viewer } from 'napari-js';
 
 import { CanvasToolId } from '../../contracts/display-types';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
-import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { PixelData } from '../../contracts/visualizer.contract';
 import { ICellSegmenter } from '../../contracts/cell-segmenter.contract';
 import { RegionStore } from '../../store/region-store.service';
@@ -284,8 +283,7 @@ export class NapariToolBridge {
   /**
    * A 2D pan/zoom. The full-canvas GPU readback is paid for only while a pixel tool reads it
    * ({@link pixelTools}); otherwise only the viewport rect is emitted (debounced), and the pixels
-   * are marked stale for whoever next needs them ({@link rgbHistogram} refreshes lazily, and a
-   * tool arms a fresh readback as it activates).
+   * are marked stale for whoever next needs them (a tool arms a fresh readback as it activates).
    */
   private onViewChanged(): void {
     this.pixelsStale = true;
@@ -398,24 +396,5 @@ export class NapariToolBridge {
     await this.runReadback();
     this.cachedImageSource = null;
     return this.deps.cellSegmentTool.segmentBoxes(this.toolHost, segmenter);
-  }
-
-  /** Per-channel histogram of the displayed RGB composite (R/G/B byte), from the last readback. */
-  rgbHistogram(channelIndex: number, bins: number): IHistogram | null {
-    // Pans no longer read the canvas back (no pixel tool needs it), so refresh lazily here: this
-    // answer may describe the previous view, and the pane's next request gets the current one.
-    if (this.pixelsStale) this.armReadback(0);
-    const px = this.lastPixels;
-    if (!px) return null;
-    const band = Math.max(0, Math.min(2, channelIndex));
-    const n = Math.max(1, Math.min(256, Math.floor(bins) || 256));
-    const counts = new Array(n).fill(0);
-    const data = px.data;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] === 0) continue; // skip transparent padding
-      counts[Math.min(n - 1, (data[i + band] * n) >> 8)]++;
-    }
-    const binsArr = Array.from({ length: n }, (_, i) => (i * 256) / n);
-    return { bins: binsArr, counts, max: counts.reduce((m, c) => (c > m ? c : m), 0) };
   }
 }

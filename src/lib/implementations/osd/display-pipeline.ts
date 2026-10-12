@@ -189,22 +189,35 @@ export class DisplayPipeline {
   /** True when any RGB channel is windowed/hidden/gamma'd/re-tinted or the
    *  background is inverted — otherwise the tile passes through unchanged. */
   rgbNeedsRecolor(): boolean {
-    if (this.host.invertBg()) return true;
-    const defaults = ['#ff0000', '#00ff00', '#0000ff'];
-    const channelStates = this.host.channelStates();
-    for (let k = 0; k < 3; k++) {
-      const c = channelStates[k];
-      if (
-        c &&
-        (!c.visible ||
-          c.min !== 0 ||
-          c.max !== 255 ||
-          c.gamma !== 1 ||
-          (c.color || '').toLowerCase() !== defaults[k])
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return rgbNeedsRecolor(this.host.channelStates(), this.host.invertBg());
   }
+}
+
+/** An RGB image's channels' tints when nothing re-tinted them: the identity merge. */
+const RGB_DEFAULT_TINTS = ['#ff0000', '#00ff00', '#0000ff'];
+
+/**
+ * Whether an RGB image's channel states (R, G, B) change how it looks: any band windowed, hidden,
+ * gamma'd or re-tinted, or the image inverted. False means the RGB pixels pass through as they
+ * are — every backend's cue to keep drawing the image directly.
+ */
+export function rgbNeedsRecolor(
+  channelStates: ReadonlyArray<IChannelState | undefined>,
+  invert: boolean,
+): boolean {
+  if (invert) return true;
+  for (let k = 0; k < 3; k++) {
+    const c = channelStates[k];
+    if (
+      c &&
+      (!c.visible ||
+        c.min !== 0 ||
+        c.max !== 255 ||
+        c.gamma !== 1 ||
+        (c.color || '').toLowerCase() !== RGB_DEFAULT_TINTS[k])
+    ) {
+      return true;
+    }
+  }
+  return false;
 }

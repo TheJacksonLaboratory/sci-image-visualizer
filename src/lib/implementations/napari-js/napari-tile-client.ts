@@ -1,6 +1,13 @@
 import { Observable, from, of } from 'rxjs';
 import { saveAs } from 'file-saver';
-import { assembleVolume, bitmapToScalar, chooseStitchLevel, readLevel } from 'napari-js';
+import {
+  LruCache,
+  assembleVolume,
+  bitmapToScalar,
+  chooseStitchLevel,
+  decodeImageRGBA,
+  readLevel,
+} from 'napari-js';
 import type { PixelChunk, StitchBudget, TileKey, TiledSource } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
@@ -25,12 +32,14 @@ import {
   LumaPlane,
   MAX_STITCH_TILES,
   MAX_TEXTURE_DIM,
+  RGB_BAND_CACHE_TILES,
   STITCH_BUDGET_COEFF,
   TILE_FETCH_CONCURRENCY,
   TILE_SIZE,
   VOLUME_FETCH_CONCURRENCY,
   VOLUME_MAX_SLICE,
   create2dCanvas,
+  splitRgbBands,
   stackDepth,
 } from './napari-helpers';
 
@@ -53,6 +62,19 @@ export function bitmapToLuminance(bmp: ImageBitmap, maxSide?: number): LumaPlane
   const plane = bitmapToScalar(bmp, { maxSide, weights: 'bt601' });
   bmp.close?.();
   return plane;
+}
+
+/** A colour tile's R, G and B bands (closes a bitmap tile). */
+function chunkToBands(chunk: PixelChunk): LumaPlane[] {
+  if (typeof ImageBitmap !== 'undefined' && chunk.data instanceof ImageBitmap) {
+    const bmp = chunk.data;
+    try {
+      return splitRgbBands(decodeImageRGBA(bmp));
+    } finally {
+      bmp.close?.();
+    }
+  }
+  return splitRgbBands({ data: chunk.data as Uint8Array, width: chunk.width, height: chunk.height });
 }
 
 /**
@@ -298,6 +320,30 @@ export class NapariTileClient {
     return canvas;
   }
 
+  /**
+   * Slice `z`'s R, G and B bands, as three uint8 planes: the composite read as RGBA at the
+   * finest level within `maxTiles` (as {@link readPlane} picks it; 1 for a cheap overview
+   * sample), else the single image of {@link fetchImage}. The raw bands of an RGB image, for the
+   * per-band layers and their histograms.
+   */
+  async readRgbBands(
+    info: IImageInfo | undefined,
+    z: number,
+    maxTiles: number = MAX_STITCH_TILES,
+  ): Promise<LumaPlane[]> {
+    const desc = this.simpleStack.isSimple(info) ? null : await this.ensureDescriptor(info);
+    if (!desc?.levels?.length) {
+      const bmp = await this.fetchImage(info, z);
+      return chunkToBands({ width: bmp.width, height: bmp.height, data: bmp });
+    }
+    const img = await readLevel(this.tiledSource(desc, undefined, 4), z, {
+      maxTiles,
+      maxTextureDim: MAX_TEXTURE_DIM,
+      concurrency: TILE_FETCH_CONCURRENCY,
+    });
+    return splitRgbBands({ data: img.data as Uint8Array, width: img.width, height: img.height });
+  }
+
   /** Fetch slice `z` and read it back as a single-channel uint8 plane (see {@link readPlane}),
    *  within `budgetTiles`: the 2D stitch fallback reads at the full budget, the histogram samples
    *  at 1 for a cheap overview tile. */
@@ -376,6 +422,39 @@ export class NapariTileClient {
         }
       },
     };
+  }
+
+  /**
+   * The composite pyramid's R, G and B bands as three scalar {@link TiledSource}s — one per
+   * additive layer, so each band takes its own window, gamma, invert, tint and visibility — that
+   * share ONE `/tile` request per tile. The three layers ask for a tile in the same frame: the
+   * first fetches the RGBA tile and splits it, the other two take their band from the same
+   * promise, and the split tile is dropped once all three have it. A band that asks later (one
+   * shown again after being hidden) finds it in a small LRU, else fetches it again. `scene` and
+   * `onTile` as {@link tiledSource}: the loading badge counts the one request.
+   */
+  rgbBandSources(desc: TileDescriptor, scene?: AbortSignal, onTile?: () => () => void): TiledSource[] {
+    const composite = this.tiledSource(desc, undefined, 4, scene, onTile);
+    const split = new LruCache<{ bands: Promise<LumaPlane[]>; taken: Set<number> }>(RGB_BAND_CACHE_TILES);
+    const band = (key: TileKey, b: number): Promise<PixelChunk> => {
+      const id = `${key.z}/${key.level}/${key.col}/${key.row}`;
+      let entry = split.get(id);
+      if (!entry) {
+        const bands = composite.fetchTile(key).then(chunkToBands);
+        const fresh = { bands, taken: new Set<number>() };
+        // A failed tile is not remembered: the next ask fetches it again.
+        bands.catch(() => split.get(id) === fresh && split.delete(id));
+        split.set(id, (entry = fresh));
+      }
+      entry.taken.add(b);
+      if (entry.taken.size === 3) split.delete(id);
+      return entry.bands.then((planes) => planes[b]);
+    };
+    return [0, 1, 2].map((b): TiledSource => ({
+      ...composite,
+      channels: 1,
+      fetchTile: (key: TileKey) => band(key, b),
+    }));
   }
 
   /**

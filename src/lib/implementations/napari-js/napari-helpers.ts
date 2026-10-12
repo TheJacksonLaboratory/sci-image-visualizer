@@ -87,6 +87,9 @@ export const MAX_TEXTURE_DIM = 8192;
  *  for a large level) overwhelmed the tile server (504s); a small pool keeps the pipe full without
  *  flooding it — and slice-level workers already run several stitches in parallel on top of this. */
 export const TILE_FETCH_CONCURRENCY = 6;
+/** Split RGB tiles kept for a band that asks after the other two (see
+ *  `NapariTileClient.rgbBandSources`): ~3 × 256 KB per 512px tile. */
+export const RGB_BAND_CACHE_TILES = 16;
 /** How long to poll `/tiles/info` (202 while the server caches the source) before falling back to
  *  a single tile. Generous like the OSD backend — a cold whole-slide can take minutes to cache. */
 export const DESCRIPTOR_TIMEOUT_MS = 120000;
@@ -163,6 +166,20 @@ export function isServerlessMultichannel(simple: boolean, info: IImageInfo | und
 /** The stack's declared slice count (`imageMeta.z`, else one URL per slice); 0 when unknown. */
 export function stackDepth(info: IImageInfo | undefined): number {
   return info?.imageMeta?.[0]?.z || info?.urls?.length || 0;
+}
+
+/** The R, G and B bands of RGBA8 pixels as three uint8 planes (alpha dropped). */
+export function splitRgbBands(px: { data: ArrayLike<number>; width: number; height: number }): LumaPlane[] {
+  const n = px.width * px.height;
+  const bands = [new Uint8Array(n), new Uint8Array(n), new Uint8Array(n)];
+  const [r, g, b] = bands;
+  const d = px.data;
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    r[i] = d[o];
+    g[i] = d[o + 1];
+    b[i] = d[o + 2];
+  }
+  return bands.map((data) => ({ data, width: px.width, height: px.height }));
 }
 
 /** A decoded single-channel uint8 plane as a napari-js typed image source. */

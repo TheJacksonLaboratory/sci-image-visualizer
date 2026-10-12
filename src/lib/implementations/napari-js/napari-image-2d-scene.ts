@@ -1,15 +1,17 @@
 import { Subscription } from 'rxjs';
-import { MultiChannelImageView, histogramScalar } from 'napari-js';
+import { MultiChannelImageView, decodeImageRGBA, histogramScalar, tintColormap } from 'napari-js';
 import type { ChannelView, ImageLayer, PointsLayer, TiledSource } from 'napari-js';
 import { NavigatorOverlay, ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { TileDescriptor } from '../tile-server';
+import { rgbNeedsRecolor } from '../osd/display-pipeline';
 import type { OverviewImage } from './napari-tile-client';
 import { regionCentroids } from '../region-centroids';
 import {
   LumaPlane,
   isServerlessMultichannel,
+  splitRgbBands,
   tintFor,
   tintedComposite,
   toIHistogram,
@@ -45,9 +47,10 @@ function mergeOntoBlack(layers: readonly ImageLayer[]): void {
  * The 2D image (review Appendix B, cluster E): pyramidal `TiledSource`s against the `/tile`
  * endpoint when `/tiles/info` describes the image, else a single stitched level (`tiled:false`
  * stacks fetch each slice's own URL, a serverless multichannel stack each channel's own plane);
- * multichannel additive tints, grayscale colormap or RGB; the coarse histogram samples of the
- * tiled path, the scale bar, the overview navigator and the 2D interaction stack (region overlay
- * + pixel tools). The region-centroid scatter and the spatial 2D scene are built over it.
+ * multichannel additive tints, grayscale colormap or RGB (recoloured per band, see
+ * {@link syncRgbBands}); the coarse histogram samples of the tiled path, the scale bar, the
+ * overview navigator and the 2D interaction stack (region overlay + pixel tools). The
+ * region-centroid scatter and the spatial 2D scene are built over it.
  */
 export class Image2dScene implements NapariScene {
   /** How the image is composited (drives the histogram and the display-state updates). */
@@ -58,8 +61,15 @@ export class Image2dScene implements NapariScene {
   private channelView: MultiChannelImageView | null = null;
   /** Latest wins for a stitched slice: a slow older slice can't clobber a newer one. */
   private sliceReq = 0;
+  /** RGB: the R, G and B bands as layer sources (typed planes, or band `TiledSource`s that share
+   *  one request per tile) and the stitched level's scale — what {@link syncRgbBands} draws. */
+  private rgbBands: { sources: ChannelView['source'][]; scale?: [number, number] } | null = null;
+  /** RGB: the three additive band layers while the channel states recolour the image; null while
+   *  the RGB layer draws it as it is. */
+  private bandLayers: ImageLayer[] | null = null;
   /** Coarse per-channel luminance sample (keyed by channel index) for the histogram in tiled mode,
-   *  where the layers have no full in-memory pixels. Refreshed on mount + slice change. */
+   *  where the layers have no full in-memory pixels — and an RGB image's raw bands in either mode.
+   *  Refreshed on mount + slice change. */
   readonly histSamples = new Map<number, Uint8Array>();
   /** Latest-wins token for {@link refreshHistogramSamples}. */
   private histGen = 0;
@@ -128,27 +138,24 @@ export class Image2dScene implements NapariScene {
   }
 
   histogram(channel: number, bins: number): IHistogram | null {
-    const { tools, viewer } = this.ctx;
-    // Tiled mode has no full in-memory pixels → use the coarse per-channel sample (RGB: readback).
-    if (this.tiled) {
-      if (this.imageMode === 'rgb') return tools.rgbHistogram(channel, bins);
+    // Tiled mode has no full in-memory pixels → the coarse per-channel sample. RGB: its raw band
+    // (either mode) — never the displayed pixels, which the channel states have recoloured.
+    if (this.tiled || this.imageMode === 'rgb') {
       const sample = this.histSamples.get(this.imageMode === 'grayscale' ? 0 : channel);
       return sample ? toIHistogram(histogramScalar(sample, bins, 0, 255)) : null;
     }
     // Grayscale/multichannel (stitch): native per-channel histogram straight from the in-memory
-    // scalar layer (no GPU readback). RGB: bin the displayed pixels' R/G/B byte (8-bit client path).
+    // scalar layer (no GPU readback).
     const layer = this.channelView?.layers[this.imageMode === 'grayscale' ? 0 : channel];
-    if (layer) {
-      const h = viewer.layerHistogram(layer, bins);
-      if (h) return toIHistogram(h);
-    }
-    if (this.imageMode === 'rgb') return tools.rgbHistogram(channel, bins);
-    return null;
+    const h = layer ? this.ctx.viewer.layerHistogram(layer, bins) : null;
+    return h ? toIHistogram(h) : null;
   }
 
   setImageSmoothing(enabled: boolean): void {
     // Apply live to the rendered image layers; baked into the next render too.
-    this.channelView?.setInterpolation(enabled ? 'linear' : 'nearest');
+    const interpolation = enabled ? 'linear' : 'nearest';
+    this.channelView?.setInterpolation(interpolation);
+    this.bandLayers?.forEach((layer) => (layer.interpolation = interpolation));
   }
 
   setNavigatorVisible(visible: boolean): void {
@@ -172,6 +179,8 @@ export class Image2dScene implements NapariScene {
     this.histGen++;
     this.histSamples.clear();
     this.channelView = null;
+    this.rgbBands = null;
+    this.bandLayers = null;
   }
 
   /**
@@ -224,7 +233,9 @@ export class Image2dScene implements NapariScene {
       planes = [await ctx.tiles.fetchChannelData(info, z)];
     } else {
       mode = 'rgb';
+      // The bitmap draws the image as it is; its raw bands, the per-band layers and histograms.
       bitmap = await ctx.tiles.fetchImage(info, z);
+      planes = splitRgbBands(decodeImageRGBA(bitmap));
     }
 
     // 2) Commit — unless a newer scrub superseded us or the scene was torn down.
@@ -237,8 +248,8 @@ export class Image2dScene implements NapariScene {
     // world coordinates (level-0 pixels) so the camera, readback and — critically — pre-saved
     // regions (stored in full-res coords, e.g. ndpi) all line up regardless of which level is shown.
     // This mirrors OSD, whose coordinate system is always level 0.
-    const texW = mode === 'rgb' ? (bitmap as ImageBitmap).width : (planes[0]?.width ?? 0);
-    const texH = mode === 'rgb' ? (bitmap as ImageBitmap).height : (planes[0]?.height ?? 0);
+    const texW = planes[0]?.width ?? 0;
+    const texH = planes[0]?.height ?? 0;
     const fullW = desc?.width || texW || 1;
     const fullH = desc?.height || texH || 1;
     const scale: [number, number] = [texW ? fullW / texW : 1, texH ? fullH / texH : 1];
@@ -246,6 +257,7 @@ export class Image2dScene implements NapariScene {
     this.imageMode = mode;
     const interpolation: 'linear' | 'nearest' = ctx.settings.imageSmoothing ? 'linear' : 'nearest';
     this.channelView = new MultiChannelImageView(ctx.viewer);
+    this.bandLayers = null; // the render clears the layer list, band layers included
     if (mode === 'multichannel') {
       const views = planes.map((d, c) => this.tintedChannelView(c, states, desc, typedPlane(d), scale));
       this.channelView.render('multichannel', views, { interpolation });
@@ -255,6 +267,10 @@ export class Image2dScene implements NapariScene {
       this.channelView.render('grayscale', [view], { interpolation });
     } else {
       this.channelView.render('rgb', [{ source: bitmap as ImageBitmap, scale }], { interpolation });
+      this.rgbBands = { sources: planes.map(typedPlane), scale };
+      this.histSamples.clear();
+      planes.forEach((band, c) => this.histSamples.set(c, band.data));
+      this.syncRgbBands(states);
     }
     ctx.setImageSize(fullW, fullH);
   }
@@ -291,6 +307,10 @@ export class Image2dScene implements NapariScene {
       this.channelView.render('rgb', [{ source: this.tiledSource(desc, undefined, 4, scene) }], {
         interpolation,
       });
+      this.rgbBands = {
+        sources: ctx.tiles.rgbBandSources(desc, scene, () => this.ctx.badge.begin('Image')),
+      };
+      this.syncRgbBands(states);
     }
     ctx.setImageSize(desc.width, desc.height);
     // Await on the initial render so getHistogram/autoContrast have data immediately; slice changes
@@ -354,10 +374,16 @@ export class Image2dScene implements NapariScene {
   async refreshHistogramSamples(z: number, desc: Pick<TileDescriptor, 'channels'>): Promise<void> {
     const gen = ++this.histGen;
     this.histSamples.clear();
-    if (this.imageMode === 'rgb') return; // RGB uses the displayed-pixel readback (rgbHistogram)
+    const info = this.ctx.info();
+    if (this.imageMode === 'rgb') {
+      // One coarse composite tile, split into its raw R, G and B bands.
+      const bands = await this.ctx.tiles.readRgbBands(info, z, 1).catch(() => null);
+      if (gen !== this.histGen || !bands) return;
+      bands.forEach((band, c) => this.histSamples.set(c, band.data));
+      return;
+    }
     const multichannel = this.imageMode === 'multichannel';
     const channelCount = multichannel ? (desc.channels ?? 1) : 1;
-    const info = this.ctx.info();
     const samples = await Promise.all(
       Array.from({ length: channelCount }, (_, c) =>
         // budget 1 → coarsest single tile; a failed channel leaves its sample unset.
@@ -388,7 +414,9 @@ export class Image2dScene implements NapariScene {
     const view = this.channelView;
     const { display } = this.ctx;
     if (!view) return;
-    if (this.imageMode === 'multichannel') {
+    if (this.imageMode === 'rgb') {
+      this.syncRgbBands(channels);
+    } else if (this.imageMode === 'multichannel') {
       view.layers.forEach((_, c) => {
         const st = channels.find((s) => s.index === c);
         if (!st) return;
@@ -409,6 +437,54 @@ export class Image2dScene implements NapariScene {
         ...(st ? { contrastLimits: [st.min, st.max] as [number, number], gamma: toNapariGamma(st.gamma) } : {}),
       });
     }
+  }
+
+  /**
+   * RGB: draw the image as it is while its channel states leave it so (default R/G/B tints, full
+   * window, γ 1, all shown, no invert: {@link rgbNeedsRecolor}) — the RGB layer, unchanged, with
+   * the coarse underlay a tiled one keeps while it pans. Otherwise draw its R, G and B bands as
+   * three additive layers, each with its channel's window, invert, gamma, tint and visibility —
+   * what OSD's RGB recolour computes per pixel (the merge order of `osd/display-pipeline`). The
+   * band layers sit just above the hidden RGB layer, so whatever is drawn over the image stays
+   * over it. A host with no R/G/B channel model (fewer than three states) gets only the invert.
+   */
+  private syncRgbBands(channels: IChannelState[]): void {
+    const { viewer, display } = this.ctx;
+    const rgb = this.channelView?.layers[0];
+    const bands = this.rgbBands;
+    if (!rgb || !bands) return;
+    const states = channels.length >= 3 ? channels : [];
+    if (!rgbNeedsRecolor(states, display.invert)) {
+      this.bandLayers?.forEach((layer) => viewer.layers.remove(layer));
+      this.bandLayers = null;
+      rgb.visible = true;
+      viewer.requestRender();
+      return;
+    }
+    if (!this.bandLayers) {
+      const at = viewer.layers.items.indexOf(rgb);
+      this.bandLayers = bands.sources.map((source, c) => {
+        const layer = viewer.addImage(source, {
+          name: `rgb${c}`,
+          blending: 'additive',
+          interpolation: rgb.interpolation,
+          ...(bands.scale ? { scale: bands.scale } : {}),
+        });
+        viewer.layers.move(layer, at + 1 + c);
+        return layer;
+      });
+      rgb.visible = false;
+    }
+    this.bandLayers.forEach((layer, c) => {
+      const st = states.find((s) => s.index === c);
+      layer.colormap = tintColormap(st?.color ?? tintFor(c));
+      layer.contrastLimits = [st?.min ?? 0, st?.max ?? 255];
+      layer.gamma = toNapariGamma(st?.gamma); // ImageJ γ → napari-js γ
+      layer.visible = st?.visible ?? true;
+      layer.invert = display.invert;
+    });
+    mergeOntoBlack(this.bandLayers);
+    viewer.requestRender();
   }
 
   /** (Re)install the physical scale bar (napari-js's `ScaleBarOverlay` on the 2D camera's zoom),

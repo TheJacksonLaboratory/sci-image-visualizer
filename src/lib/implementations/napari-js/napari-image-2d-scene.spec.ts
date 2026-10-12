@@ -280,6 +280,113 @@ describe('Image2dScene channel display', () => {
     });
   });
 
+  describe('an RGB image', () => {
+    it('draws the RGB layer as it is at the default channel states', async () => {
+      const { scene, imageLayers } = rig(serverlessRgb());
+      await scene.mount();
+      expect(scene.imageMode).toBe('rgb');
+      const layers = imageLayers();
+      expect(layers).toHaveLength(1);
+      expect(layers[0].grayscale).toBe(false);
+      expect(layers[0].visible).toBe(true);
+    });
+
+    it('swaps in per-band layers that follow the channel states, and back at the defaults', async () => {
+      const { scene, imageLayers, store } = rig(serverlessRgb());
+      await scene.mount();
+      store.setChannelState(0, { max: 100, gamma: 2 });
+      let layers = imageLayers();
+      expect(layers).toHaveLength(4);
+      const [rgb, r, g, b] = layers;
+      expect(rgb.visible).toBe(false);
+      expect([r, g, b].every((l) => l.grayscale)).toBe(true);
+      expect([r, g, b].map((l) => l.blending)).toEqual(['translucent', 'additive', 'additive']);
+      expect(r.contrastLimits).toEqual([0, 100]);
+      expect(r.gamma).toBe(0.5);
+      expect(g.colormap).toEqual(tintColormap('#00ff00'));
+
+      store.setChannelState(2, { visible: false, color: '#ffff00' });
+      expect(b.visible).toBe(false);
+      expect(b.colormap).toEqual(tintColormap('#ffff00'));
+      // Further edits patch the same band layers.
+      expect(imageLayers()).toHaveLength(4);
+
+      store.setChannelStates(store.currentChannelStates().map((c, i) => ({ ...c, ...defaultRgb[i] })));
+      layers = imageLayers();
+      expect(layers).toHaveLength(1);
+      expect(layers[0].visible).toBe(true);
+    });
+
+    it('keeps the band layers right above the RGB layer, under whatever is drawn over it', async () => {
+      const { scene, viewer, imageLayers, store } = rig(serverlessRgb());
+      await scene.mount();
+      const over = viewer.addPoints([[0, 0]]);
+      store.setInvert(true);
+      const items = viewer.layers.items;
+      expect(items.indexOf(over)).toBe(items.length - 1);
+      expect(imageLayers().every((l) => l.invert || !l.visible)).toBe(true);
+    });
+
+    it("bins each channel's histogram from its raw band, not the recoloured display", async () => {
+      const { scene, store } = rig(serverlessRgb());
+      await scene.mount();
+      store.setChannelState(1, { max: 50 });
+      [0, 1, 2].forEach((c) => expect(scene.histogram(c, 256)!.counts[RGB_PIXEL[c]]).toBe(W * H));
+    });
+
+    it('matches OSD for the same channel states (cross-backend)', async () => {
+      const { scene, imageLayers, store } = rig(serverlessRgb());
+      await scene.mount();
+      store.setChannelState(0, { min: 20, max: 180, gamma: 0.6, color: '#ff00ff' });
+      store.setChannelState(1, { min: 50, max: 250, gamma: 1.8 });
+      store.setChannelState(2, { color: '#ffff00' });
+      for (const invert of [false, true]) {
+        store.setInvert(invert);
+        const states = store.currentChannelStates();
+        const values = [40, 150, 220];
+        const d = new Uint8ClampedArray([...values, 255]);
+        osd(states, invert).applyToRgba(d);
+        expectWithinOne(napariPixel(imageLayers().slice(1), values), [d[0], d[1], d[2]]);
+      }
+    });
+
+    describe('tiled (a WSI)', () => {
+      const desc = {
+        width: 1024,
+        height: 512,
+        tileSize: 512,
+        z: 1,
+        channels: 3,
+        realLevels: 1,
+        levels: [{ res: 0, width: 1024, height: 512 }],
+      } as TileDescriptor;
+      const tiledRgb = () => ({ ...serverlessRgb(), tiled: true }) as unknown as IImageInfo;
+
+      it('keeps the composite tiles at the defaults, and draws the shared band sources once recoloured', async () => {
+        const { scene, tiles, imageLayers, store } = rig(tiledRgb(), { desc });
+        await scene.mount();
+        expect(scene.tiled).toBe(true);
+        expect(imageLayers()).toHaveLength(1);
+        expect(imageLayers()[0].source).toMatchObject({ kind: 'tiled', channels: 4 });
+        store.setChannelState(1, { gamma: 1.5 });
+        const bands = tiles['rgbBandSources'].mock.results[0].value;
+        expect(
+          imageLayers()
+            .slice(1)
+            .map((l) => l.source),
+        ).toEqual(bands);
+        expect(imageLayers()[2].gamma).toBeCloseTo(1 / 1.5);
+      });
+
+      it("samples each channel's histogram from the composite's raw bands", async () => {
+        const { scene, tiles } = rig(tiledRgb(), { desc });
+        await scene.mount();
+        expect(tiles['readRgbBands']).toHaveBeenCalledWith(expect.anything(), 0, 1);
+        [0, 1, 2].forEach((c) => expect(scene.histogram(c, 256)!.counts[RGB_PIXEL[c]]).toBe(W * H));
+      });
+    });
+  });
+
   it('leaves a grayscale image on its colormap layer', async () => {
     const info = { ...serverlessRgb(), isGrayscale: true, imageMeta: [{ channelCount: 1, rgbChannels: 1 }] };
     const { scene, imageLayers, store } = rig(info as unknown as IImageInfo);
@@ -288,5 +395,60 @@ describe('Image2dScene channel display', () => {
     store.setChannelState(0, { max: 100 });
     expect(imageLayers()).toHaveLength(1);
     expect(imageLayers()[0].contrastLimits).toEqual([0, 100]);
+  });
+});
+
+const defaultRgb: Array<Partial<IChannelState>> = ['#ff0000', '#00ff00', '#0000ff'].map((color) => ({
+  color,
+  min: 0,
+  max: 255,
+  gamma: 1,
+  visible: true,
+}));
+
+describe('NapariTileClient.rgbBandSources', () => {
+  it('splits ONE composite request per tile into the three bands', async () => {
+    const client = new NapariTileClient(
+      { getSelectedInfoB64: () => 'INFO' } as never,
+      { isSimple: () => false } as never,
+      'http://srv/',
+    );
+    const fetchTile = jest.fn(async () => ({
+      width: 2,
+      height: 1,
+      data: new Uint8Array([1, 2, 3, 255, 4, 5, 6, 255]),
+    }));
+    jest.spyOn(client, 'tiledSource').mockReturnValue({ fetchTile, channels: 4 } as unknown as TiledSource);
+    const sources = client.rgbBandSources({ width: 2, height: 1 } as TileDescriptor);
+    const key = { level: 0, col: 0, row: 0, z: 0 };
+    const chunks = await Promise.all(sources.map((s) => s.fetchTile(key)));
+    expect(fetchTile).toHaveBeenCalledTimes(1);
+    expect(chunks.map((c) => Array.from(c.data as Uint8Array))).toEqual([
+      [1, 4],
+      [2, 5],
+      [3, 6],
+    ]);
+    expect(sources.every((s) => s.channels === 1)).toBe(true);
+    // All three bands took the tile, so it is not held: asking again fetches again.
+    await sources[0].fetchTile(key);
+    expect(fetchTile).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not remember a failed tile', async () => {
+    const client = new NapariTileClient(
+      { getSelectedInfoB64: () => 'INFO' } as never,
+      { isSimple: () => false } as never,
+      'http://srv/',
+    );
+    const fetchTile = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('504'))
+      .mockResolvedValue({ width: 1, height: 1, data: new Uint8Array([9, 8, 7, 255]) });
+    jest.spyOn(client, 'tiledSource').mockReturnValue({ fetchTile, channels: 4 } as unknown as TiledSource);
+    const [r] = client.rgbBandSources({ width: 1, height: 1 } as TileDescriptor);
+    const key = { level: 0, col: 0, row: 0, z: 0 };
+    await expect(r.fetchTile(key)).rejects.toThrow('504');
+    await flush();
+    expect(Array.from((await r.fetchTile(key)).data as Uint8Array)).toEqual([9]);
   });
 });
