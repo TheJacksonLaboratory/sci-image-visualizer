@@ -131,6 +131,10 @@ CORE-1) refer to the review document attached to #45.
   vertices) plus a second outline layer. The same ten shapes; the circle is a true disc, the rim
   is drawn inside the icon, and an icon outside any cell type takes the circles' translucent grey
   (NAPARI-BOUNDARY-25).
+- **The 2D transcript density is windowed on the GPU**: the raster goes to napari-js as scalars
+  with `transparentBelow`, so a threshold, colormap or opacity change updates the layer's
+  uniforms or LUT instead of recolouring the raster on the CPU and uploading it again
+  (NAPARI-BOUNDARY-28).
 
 ### Refactored
 

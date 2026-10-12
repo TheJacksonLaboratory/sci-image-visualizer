@@ -1,5 +1,5 @@
-import { Viewer, pointSymbolCode, pointSymbolDistance } from 'napari-js';
-import type { PointsLayer, ShapesLayer } from 'napari-js';
+import { Viewer, mapScalarRGBA, pointSymbolCode, pointSymbolDistance } from 'napari-js';
+import type { ImageLayer, PointsLayer, ShapesLayer } from 'napari-js';
 import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { TranscriptGlyphName } from '../../contracts/display-types';
@@ -1177,9 +1177,59 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
     await plan();
     expect(getDensity).toHaveBeenCalledTimes(1);
     expect(addImage).toHaveBeenCalledTimes(1);
-    setView({ densityOpacity: 0.3 }); // part of the key
+    setView({ densityBin: 8 }); // a different raster
     await plan();
+    expect(getDensity).toHaveBeenCalledTimes(2);
     expect(addImage).toHaveBeenCalledTimes(2);
+    tiles.detach();
+  });
+
+  it('hands napari the scalar raster, windowed on the GPU with the low end transparent', async () => {
+    const { tiles, plan, viewer } = setup({ densityRange: [0.5, 5], densityOpacity: 0.7 });
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    expect(layer.source).toMatchObject({ kind: 'typed', channels: 1, dtype: 'float32' });
+    expect(Array.from((layer.source as { data: Float32Array }).data)).toEqual([0, 1, 2, 10]); // per unit area
+    expect(layer.transparentBelow).toBe(true);
+    expect(layer.contrastLimits).toEqual([0.5, 5]);
+    expect(layer.opacity).toBe(0.7);
+    const opts = { climLo: 0.5, climHi: 5, gamma: 1, invert: false, transparentBelow: true };
+    // What the shader draws for each bin: at or below the low end, nothing.
+    const drawn = [0, 1, 2, 10].map((v) => mapScalarRGBA(v, { ...opts, colormap: layer.colormap! })[3]);
+    expect(drawn).toEqual([0, 1, 1, 1]);
+    tiles.detach();
+  });
+
+  it('moves the window, colour and opacity as uniforms: no refetch, no new layer, no re-upload', async () => {
+    // A threshold slider move used to recolour the raster on the CPU and upload a new RGBA image.
+    const { tiles, plan, setView, getDensity, viewer, densityChanged } = setup();
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    const source = layer.source;
+    const added = jest.fn();
+    const removed = jest.fn();
+    viewer.layers.added.connect(added);
+    viewer.layers.removed.connect(removed);
+
+    setView({ densityRange: [1.5, 8], densityOpacity: 0.4 });
+    await plan();
+    expect(viewer.layers.items).toEqual([layer]);
+    expect(layer.source).toBe(source);
+    expect(layer.contrastLimits).toEqual([1.5, 8]);
+    expect(layer.opacity).toBe(0.4);
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo: 1.5, hi: 8, max: 10 });
+
+    const lutVersion = layer.colormapVersion;
+    setView({ densityColormap: 'Viridis' });
+    await plan();
+    expect(layer.colormapVersion).toBe(lutVersion + 1); // a LUT, not the texture
+    setView({ densityOpacity: 0.5 });
+    await plan();
+    expect(layer.colormapVersion).toBe(lutVersion + 1); // an unchanged colormap is left alone
+
+    expect(getDensity).toHaveBeenCalledTimes(1);
+    expect(added).not.toHaveBeenCalled();
+    expect(removed).not.toHaveBeenCalled();
     tiles.detach();
   });
 

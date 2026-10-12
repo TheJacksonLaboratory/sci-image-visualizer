@@ -61,6 +61,11 @@ export class OrderedLayerGroups<G extends string> {
     return this.layers.has(group);
   }
 
+  /** `group`'s layer (on screen or not), if it has one. */
+  layer(group: G): Layer | undefined {
+    return this.layers.get(group);
+  }
+
   /** Whether `group`'s layer is in the viewer now. */
   shown(group: G): boolean {
     const layer = this.layers.get(group);

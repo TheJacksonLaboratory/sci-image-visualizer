@@ -1,3 +1,4 @@
+import { colormapFromLut } from 'napari-js';
 import type { ImageLayer, Viewer } from 'napari-js';
 
 import { ALL_GENES, type SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
@@ -5,7 +6,7 @@ import type { SpatialViewState } from '../../../contracts/display-types';
 import type { SpatialDataset, SpatialTranscriptCounts } from '../../../contracts/spatial-dataset.contract';
 import { lutFor } from '../../../spatial/spatial-encoding';
 import { visibleArea, visibleDataRect } from '../../../spatial/lod';
-import { INFERNO_SCALE, colorDensityWindow, densityAutoRange } from '../../../spatial/density-raster';
+import { INFERNO_SCALE, densityAutoRange } from '../../../spatial/density-raster';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
 
@@ -26,11 +27,19 @@ export interface TranscriptEstimate {
 
 /**
  * The transcript density image of the 2D spatial view: the visible genes' summed density
- * raster, coloured through the view's window and colormap, one layer in the `density` group.
+ * raster, one scalar layer in the `density` group, windowed and coloured on the GPU.
+ *
+ * Bins at or below the window's low end are transparent (`transparentBelow`), so a window,
+ * colormap or opacity change is a uniform or LUT update of the same layer: only new genes or a
+ * new bin size fetch and upload a raster.
  */
 export class DensityLayer {
   /** The density window in use and the densest bin, for the panel's threshold control. */
   stats: DensityStats | null = null;
+  /** The drawn raster in transcripts per unit area, its densest bin and its auto window. */
+  private raster: { perArea: Float32Array; max: number; auto: [number, number] } | null = null;
+  /** The colormap the layer was given, so an unchanged one does not rebuild its LUT. */
+  private colormapKey: string | null = null;
 
   constructor(
     private readonly port: SpatialDataPort,
@@ -45,49 +54,67 @@ export class DensityLayer {
     if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
       this.groups.drop('density');
       this.stats = null;
+      this.raster = null;
       return;
     }
-    const lut = lutFor(view.densityColormap ?? INFERNO_SCALE);
-    const key = [
-      dataset.id,
-      genes.join(','),
-      view.densityBin,
-      view.densityOpacity,
-      JSON.stringify(view.densityRange),
-      JSON.stringify(view.densityColormap),
-    ].join('|');
+    // The raster's key: what it is a raster OF. Window, colormap and opacity are the layer's style.
+    const key = [dataset.id, genes.join(','), view.densityBin].join('|');
     // `shown`, not `has`: a stitched slice re-render clears the layer list, and the key alone
     // would call the cleared layer drawn.
-    if (key === this.groups.key('density') && this.groups.shown('density')) return;
-    const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
-    if (ctx.stale()) return;
+    if (key !== this.groups.key('density') || !this.groups.shown('density') || !this.raster) {
+      const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
+      if (ctx.stale()) return;
 
-    // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
-    const meta = raster.meta;
-    const area = meta.gridSize[0] * meta.gridSize[1];
-    const perArea = raster.values.map((v) => v / area);
-    const [lo, hi] = view.densityRange ?? densityAutoRange(perArea);
-    this.stats = { lo, hi, max: perArea.reduce((m, v) => (v > m ? v : m), 0) };
-    const rgba = colorDensityWindow(perArea, lut, view.densityOpacity, lo, hi);
-    const ref = dataset.imageRef;
-    const sx = ref?.scale?.[0] ?? 1;
-    const sy = ref?.scale?.[1] ?? 1;
-    const layer: ImageLayer = this.groups.viewer!.addImage(
-      { kind: 'typed', width: meta.cols, height: meta.rows, channels: 4, dtype: 'uint8', data: rgba },
-      {
-        name: `density · ${view.transcriptAllGenes ? 'all genes' : genes.join(', ')}`,
-        scale: [meta.gridSize[0] * sx, meta.gridSize[1] * sy],
-        translate: [
-          meta.origin[0] * sx + (ref?.translate?.[0] ?? 0),
-          meta.origin[1] * sy + (ref?.translate?.[1] ?? 0),
-        ],
-        blending: 'translucent',
-        interpolation: 'nearest',
-      },
-    );
-    this.groups.setKey('density', key);
-    this.groups.replace('density', layer);
-    this.changed(this.stats);
+      // Bins drawn as squares, as Xenium Explorer does; the window is in transcripts/µm².
+      const meta = raster.meta;
+      const area = meta.gridSize[0] * meta.gridSize[1];
+      const perArea = raster.values.map((v) => v / area);
+      this.raster = {
+        perArea,
+        max: perArea.reduce((m, v) => (v > m ? v : m), 0),
+        auto: densityAutoRange(perArea),
+      };
+      const ref = dataset.imageRef;
+      const sx = ref?.scale?.[0] ?? 1;
+      const sy = ref?.scale?.[1] ?? 1;
+      const layer: ImageLayer = this.groups.viewer!.addImage(
+        { kind: 'typed', width: meta.cols, height: meta.rows, channels: 1, dtype: 'float32', data: perArea },
+        {
+          name: `density · ${view.transcriptAllGenes ? 'all genes' : genes.join(', ')}`,
+          scale: [meta.gridSize[0] * sx, meta.gridSize[1] * sy],
+          translate: [
+            meta.origin[0] * sx + (ref?.translate?.[0] ?? 0),
+            meta.origin[1] * sy + (ref?.translate?.[1] ?? 0),
+          ],
+          // Xenium Explorer's "scale threshold": empty tissue shows the image under it.
+          transparentBelow: true,
+          blending: 'translucent',
+          interpolation: 'nearest',
+        },
+      );
+      this.colormapKey = null;
+      this.groups.setKey('density', key);
+      this.groups.replace('density', layer);
+    }
+    this.restyle(this.groups.layer('density') as ImageLayer, view);
+  }
+
+  /** Window, colour and opacity onto the drawn layer: uniforms and a LUT, no re-upload. */
+  private restyle(layer: ImageLayer, view: SpatialViewState): void {
+    const raster = this.raster!;
+    const [lo, hi] = view.densityRange ?? raster.auto;
+    layer.contrastLimits = [lo, hi];
+    layer.opacity = view.densityOpacity;
+    const colormapKey = JSON.stringify(view.densityColormap ?? null);
+    if (colormapKey !== this.colormapKey) {
+      this.colormapKey = colormapKey;
+      layer.colormap = colormapFromLut('transcript-density', lutFor(view.densityColormap ?? INFERNO_SCALE));
+    }
+    this.groups.viewer!.requestRender();
+    const stats = { lo, hi, max: raster.max };
+    if (this.stats?.lo === lo && this.stats.hi === hi && this.stats.max === raster.max) return;
+    this.stats = stats;
+    this.changed(stats);
   }
 }
 
