@@ -225,6 +225,10 @@ export class OsdTileRecolorer {
       await this.recolorChannelTile(event);
       return;
     }
+    // A serverless multichannel composite is drawn in the display colours already
+    // (recomposite): recolouring its tiles as RGB applied the window, gamma and
+    // invert a second time.
+    if (this.host.isSimpleMultichannel()) return;
     const token = this.displayToken;
     if (this.host.isGrayscale()) {
       if (!this.colorLut) return;

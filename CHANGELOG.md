@@ -105,6 +105,8 @@ CORE-1) refer to the review document attached to #45.
 - **Spatial tiles: a view ending exactly on a tile boundary fetched the tile beyond it**, which
   has no area on screen; the view's far edge is open. The dataset bounds' far edge stays closed
   (an observation sits on it).
+- **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
+  was recoloured again as an RGB image, so an inverted stack drew black.
 
 ### Changed
 
