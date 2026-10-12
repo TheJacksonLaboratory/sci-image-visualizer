@@ -1,3 +1,5 @@
+import { floodFill } from 'napari-js/geometry';
+
 import { Polygon } from '../../models/region';
 import { maskToPolygons } from '../../geometry/contour';
 import { IWandOptions, WandType } from '../../contracts/display-types';
@@ -129,7 +131,13 @@ export function computeWandPatchMask(
     }
   }
 
-  const mask = floodFill(buf, W, floodChannels, threshold);
+  // Fixed-range flood fill from the patch centre (napari-js's fill bucket): a pixel is taken
+  // when every channel is within its threshold of the SEED's, 4-connected.
+  const centre = (W - 1) / 2;
+  const mask = floodFill({ data: buf, width: W, height: W }, centre, centre, {
+    channels: floodChannels,
+    tolerance: threshold,
+  });
   const closed = simple ? mask : morphClose(mask, W, 5);
   return { mask: closed, size: W };
 }
@@ -281,66 +289,6 @@ function labDistanceMap(buf: Float32Array, W: number): { values: Float32Array; m
     sum += d;
   }
   return { values, mean: sum / n, max };
-}
-
-// ── Flood fill ──────────────────────────────────────────────────────
-
-/**
- * Fixed-range scanline flood fill from the patch centre. A neighbour is
- * accepted iff for every channel `|p[c] - seed[c]| <= threshold[c]`.
- */
-function floodFill(buf: Float32Array, W: number, channels: number, threshold: number[]): Uint8Array {
-  const mask = new Uint8Array(W * W);
-  const seedX = (W - 1) / 2;
-  const seedY = (W - 1) / 2;
-  const seedIdx = (seedY * W + seedX) * channels;
-  const seed = new Array(channels);
-  for (let c = 0; c < channels; c++) seed[c] = buf[seedIdx + c];
-
-  const accept = (x: number, y: number): boolean => {
-    const idx = (y * W + x) * channels;
-    for (let c = 0; c < channels; c++) {
-      const diff = Math.abs(buf[idx + c] - seed[c]);
-      if (diff > threshold[c]) return false;
-    }
-    return true;
-  };
-
-  const stack: number[] = [seedX, seedY];
-  while (stack.length) {
-    const y = stack.pop() as number;
-    const x = stack.pop() as number;
-    if (x < 0 || x >= W || y < 0 || y >= W) continue;
-    if (mask[y * W + x]) continue;
-    if (!accept(x, y)) continue;
-
-    // Find left edge of run.
-    let xl = x;
-    while (xl > 0 && !mask[y * W + (xl - 1)] && accept(xl - 1, y)) xl--;
-    // Find right edge of run.
-    let xr = x;
-    while (xr < W - 1 && !mask[y * W + (xr + 1)] && accept(xr + 1, y)) xr++;
-
-    for (let xi = xl; xi <= xr; xi++) {
-      mask[y * W + xi] = 1;
-    }
-    // Seed runs above and below.
-    if (y > 0) {
-      for (let xi = xl; xi <= xr; xi++) {
-        if (!mask[(y - 1) * W + xi]) {
-          stack.push(xi, y - 1);
-        }
-      }
-    }
-    if (y < W - 1) {
-      for (let xi = xl; xi <= xr; xi++) {
-        if (!mask[(y + 1) * W + xi]) {
-          stack.push(xi, y + 1);
-        }
-      }
-    }
-  }
-  return mask;
 }
 
 // ── Morphological close (dilate then erode) ─────────────────────────
