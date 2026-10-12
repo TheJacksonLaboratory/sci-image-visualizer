@@ -87,7 +87,12 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       // because it defers to a frame, it lands AFTER the points are added and overwrites the
       // framing they set. That is what left an image-less dataset as a ten-pixel speck.
       fit: () => !!session.latest?.[0]?.imageRef,
-      onSlice: () => this.redrawMarkers(),
+      onSlice: (rerendered) => {
+        this.redrawMarkers();
+        // The stitched re-render cleared the cells, transcripts and density too: re-plan them now
+        // rather than at the next camera move (each group redraws only what left the scene).
+        if (rerendered) this.session.tiles?.refresh();
+      },
       onNavigatorInteract: () => this.hover.hide(),
     });
   }
@@ -459,6 +464,13 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
           this.ctx.display.continuousColormapKey(view),
         ].join('|')
       : null;
+    // A stitched slice re-render clears the whole layer list, the map with it, and the key of a
+    // registered image's map does not name the slice: a map no longer in the scene is absent,
+    // as the markers' is (see `rebuild`), so it is drawn again from the cached field.
+    if (this.geneMapLayer && !viewer.layers.items.includes(this.geneMapLayer)) {
+      this.geneMapLayer = null;
+      this.geneMapKey = null;
+    }
     if (key === this.geneMapKey) return;
 
     if (this.geneMapLayer) {

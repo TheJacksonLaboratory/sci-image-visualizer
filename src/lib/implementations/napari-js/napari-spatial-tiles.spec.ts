@@ -1093,6 +1093,16 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
     tiles.detach();
   });
 
+  it('draws again once an image render has cleared it from the viewer', async () => {
+    // A stitched slice re-render empties the layer list; the key alone said "already drawn".
+    const { tiles, plan, viewer } = setup();
+    await plan();
+    viewer.layers.clear();
+    await plan();
+    expect(viewer.layers.items.map((l) => l.name)).toEqual([expect.stringMatching(/^density/)]);
+    tiles.detach();
+  });
+
   it('derives the window from the bins per unit area, and reports it with the densest bin', async () => {
     const { tiles, plan, densityChanged } = setup();
     await plan();

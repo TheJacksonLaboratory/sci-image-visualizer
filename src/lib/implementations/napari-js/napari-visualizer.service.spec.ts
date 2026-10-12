@@ -3592,6 +3592,44 @@ describe('NapariVisualizerService', () => {
         expect(inScene()).toBe(0);
       });
 
+      it('draws the map again after a stitched slice re-render clears the layers', async () => {
+        // Regression: the stitched slice path re-renders the image, and the render empties the
+        // layer list. The markers are re-added after it, but the map's key had not changed (its
+        // field does not depend on the slice of a registered image), so the map was not.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 5, 9]));
+        await mount();
+        store.setSpatialView({ geneMap: true, colorBy: { kind: 'feature', name: 'Ttr' } });
+        await flush();
+        const viewer = (service as unknown as { viewer: Viewer }).viewer;
+        const maps = () => viewer.layers.items.filter((l) => l.name?.startsWith('gene map'));
+        expect(maps()).toHaveLength(1);
+
+        const image = (service as unknown as { scene: Spatial2dScene }).scene.image;
+        image.tiled = false;
+        // What the stitched render does to whatever was on the canvas.
+        jest.spyOn(image, 'render').mockImplementation(async () => viewer.layers.clear());
+        service.setZIndex(1);
+        await flush();
+        await flush();
+
+        expect(maps()).toHaveLength(1);
+        const names = viewer.layers.items.map((l) => l.name ?? '');
+        expect(names.findIndex((n) => n.startsWith('gene map'))).toBeLessThan(names.indexOf('observations'));
+      });
+
+      it('re-plans the tile overlays after a stitched slice re-render clears them', async () => {
+        // The cells, transcripts and density went with the same clear; they used to come back
+        // only at the next camera move.
+        await mount();
+        const scene = (service as unknown as { scene: Spatial2dScene }).scene;
+        const refresh = jest.spyOn(scene['session'].tiles!, 'refresh');
+        scene.image.tiled = false;
+        jest.spyOn(scene.image, 'render').mockResolvedValue(undefined);
+        service.setZIndex(1);
+        await flush();
+        expect(refresh).toHaveBeenCalled();
+      });
+
       it('draws the map again after a re-plot with the same view state', async () => {
         // Regression (NAPARI-SVC-1): geneMapKey outlived reset(), so the new viewer
         // never got the layer back.

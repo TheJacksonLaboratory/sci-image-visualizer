@@ -74,6 +74,9 @@ CORE-1) refer to the review document attached to #45.
   volumes faked invert by reversing the colormap, which applies it after gamma. They now use the
   layers' own `invert` (napari-js 0.15), in the 2D image's and OSD's order (window → invert →
   gamma); the ramp changes wherever gamma ≠ 1 (NAPARI-SVC-18).
+- **napari 2D spatial: a stitched slice re-render dropped the gene map**, and the cell,
+  transcript and density overlays until the camera next moved; they now come back with the
+  markers.
 
 ### Changed
 

@@ -56,7 +56,9 @@ export class DensityLayer {
       JSON.stringify(view.densityRange),
       JSON.stringify(view.densityColormap),
     ].join('|');
-    if (key === this.groups.key('density') && this.groups.has('density')) return;
+    // `shown`, not `has`: a stitched slice re-render clears the layer list, and the key alone
+    // would call the cleared layer drawn.
+    if (key === this.groups.key('density') && this.groups.shown('density')) return;
     const raster = await ctx.track('Transcript density', this.port.getDensity(genes, view.densityBin));
     if (ctx.stale()) return;
 
