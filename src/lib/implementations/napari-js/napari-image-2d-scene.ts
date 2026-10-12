@@ -7,7 +7,15 @@ import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api
 import { TileDescriptor } from '../tile-server';
 import type { OverviewImage } from './napari-tile-client';
 import { regionCentroids } from '../region-centroids';
-import { LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane } from './napari-helpers';
+import {
+  LumaPlane,
+  isServerlessMultichannel,
+  tintFor,
+  tintedComposite,
+  toIHistogram,
+  toNapariGamma,
+  typedPlane,
+} from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 
 /** What the scenes built over the 2D image add to it. */
@@ -26,10 +34,10 @@ export interface Image2dOptions {
 /**
  * The 2D image (review Appendix B, cluster E): pyramidal `TiledSource`s against the `/tile`
  * endpoint when `/tiles/info` describes the image, else a single stitched level (`tiled:false`
- * stacks fetch each slice's own URL); multichannel additive tints, grayscale colormap or RGB; the
- * coarse histogram samples of the tiled path, the scale bar, the overview navigator and the 2D
- * interaction stack (region overlay + pixel tools). The region-centroid scatter and the spatial
- * 2D scene are built over it.
+ * stacks fetch each slice's own URL, a serverless multichannel stack each channel's own plane);
+ * multichannel additive tints, grayscale colormap or RGB; the coarse histogram samples of the
+ * tiled path, the scale bar, the overview navigator and the 2D interaction stack (region overlay
+ * + pixel tools). The region-centroid scatter and the spatial 2D scene are built over it.
  */
 export class Image2dScene implements NapariScene {
   /** How the image is composited (drives the histogram and the display-state updates). */
@@ -182,8 +190,12 @@ export class Image2dScene implements NapariScene {
     const info = ctx.info();
     const desc = await ctx.tiles.ensureDescriptor(info);
     const states = ctx.store.currentChannelStates();
-    const channelCount = desc?.channels ?? (states.length || 1);
-    const multichannel = !!desc?.multichannel && channelCount > 1;
+    // A serverless multichannel stack has no descriptor: its channels are its own plane URLs
+    // (`channelUrls[z][c]`, which fetchChannelData reads), and `urls[z]` only a composite.
+    const serverlessMc = isServerlessMultichannel(ctx.tiles.isSimple(info), info);
+    const channelCount =
+      desc?.channels ?? (serverlessMc ? (info?.imageMeta?.[0]?.channelCount ?? 1) : states.length || 1);
+    const multichannel = (!!desc?.multichannel || serverlessMc) && channelCount > 1;
 
     // 1) Fetch all pixel data BEFORE touching the viewer, so a superseded scrub can bail without
     //    having torn down the visible layers (avoids flicker / out-of-order layer state).
@@ -431,9 +443,16 @@ export class Image2dScene implements NapariScene {
       const desc = await tiles.ensureDescriptor(info);
       // Superseded (a newer slice, or the scene was torn down): fetch nothing.
       if (token !== this.navigatorToken || this.navigator !== nav) return;
-      const channels = desc?.multichannel ? (desc.channelInfo ?? []) : [];
-      if (channels.length > 1) {
-        const bitmaps = await Promise.all(channels.map((_c, c) => tiles.overviewImage(info, z, c)));
+      // A serverless multichannel stack's thumbnails are its own channel planes.
+      const count = desc?.multichannel
+        ? (desc.channelInfo?.length ?? 0)
+        : isServerlessMultichannel(tiles.isSimple(info), info)
+          ? (info?.imageMeta?.[0]?.channelCount ?? 0)
+          : 0;
+      if (count > 1) {
+        const bitmaps = await Promise.all(
+          Array.from({ length: count }, (_c, c) => tiles.overviewImage(info, z, c)),
+        );
         if (token !== this.navigatorToken || this.navigator !== nav) return;
         this.setNavigatorChannels(bitmaps);
         this.recolorNavigator();

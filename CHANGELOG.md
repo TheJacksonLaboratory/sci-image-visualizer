@@ -105,6 +105,11 @@ CORE-1) refer to the review document attached to #45.
 - **Spatial tiles: a view ending exactly on a tile boundary fetched the tile beyond it**, which
   has no area on screen; the view's far edge is open. The dataset bounds' far edge stays closed
   (an observation sits on it).
+- **napari drew a serverless multichannel stack grey and ignored the Channels & Histogram
+  dialog**: with no tile descriptor it drew the host's composite as one RGB image. It now draws
+  one tinted layer per channel from the slice's own `channelUrls` planes, with each channel's
+  window, gamma, tint, visibility and invert, and each channel's own histogram; the navigator
+  composites the channels too (#46 browser testing).
 - **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
   was recoloured again as an RGB image, so an inverted stack drew black.
 
