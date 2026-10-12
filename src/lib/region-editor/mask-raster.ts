@@ -120,10 +120,16 @@ export function regionsToMask(
       const m = rasterize(part.xpoints, part.ypoints, W, H, part.holes);
       if (!m) continue;
       painted = true;
-      for (let y = 0; y < m.bh; y++) {
+      // The raster keeps a region's full extent: paint only its part inside the image (a row
+      // offset past either side would wrap into the neighbouring row).
+      const x0 = Math.max(0, -m.bx),
+        x1 = Math.min(m.bw, W - m.bx);
+      const y0 = Math.max(0, -m.by),
+        y1 = Math.min(m.bh, H - m.by);
+      for (let y = y0; y < y1; y++) {
         const srcRow = y * m.bw;
         const dstRow = (m.by + y) * W + m.bx;
-        for (let x = 0; x < m.bw; x++) {
+        for (let x = x0; x < x1; x++) {
           if (m.mask[srcRow + x]) out[dstRow + x] = value;
         }
       }

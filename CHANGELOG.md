@@ -88,6 +88,8 @@ CORE-1) refer to the review document attached to #45.
   50 → 49 → 48). Merge, inverse and the mask export lost the same row. Tracing and rasterizing
   are now napari-js's `traceContours` and `rasterizePolygon` (pixel edges, pixel-centre rule), and
   a trace → rasterize round trip gives back exactly the same pixels.
+- **The mask export wrapped a region overhanging the image's left or right edge** into the
+  neighbouring row; only the part inside the image is painted now.
 - **A hole could be given to a shape that does not enclose it**: a background area closed off
   only by two shapes together (touching at a corner) became a hole of one of them. Each shape's
   holes are now its own interior outlines.

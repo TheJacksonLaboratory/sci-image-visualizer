@@ -75,6 +75,19 @@ describe('mask-raster (jit-ui#95)', () => {
       expect(Array.from(mask.data).every((v) => v === 0 || v === 255)).toBe(true);
     });
 
+    it('paints exactly the pixels a rectangle covers', () => {
+      const mask = regionsToMask([regionToParts(rectRegion(2, 2, 4, 4))], 8, 8, 'binary', raster)!;
+      expect(Array.from(mask.data).filter((v) => v).length).toBe(16);
+    });
+
+    it('paints only the part of a region inside the image, without wrapping into the next row', () => {
+      // Overhangs the left and the right edge: 3 + 2 columns inside, 2 rows each.
+      const parts = [regionToParts(rectRegion(-3, 2, 6, 2)), regionToParts(rectRegion(6, 5, 5, 2))];
+      const mask = regionsToMask(parts, 8, 8, 'binary', raster)!;
+      const set = Array.from(mask.data).flatMap((v, i) => (v ? [`${i % 8},${Math.floor(i / 8)}`] : []));
+      expect(set).toEqual(['0,2', '1,2', '2,2', '0,3', '1,3', '2,3', '6,5', '7,5', '6,6', '7,6']);
+    });
+
     it('multiclass mode gives each region a distinct 1-based id (8-bit for ≤255)', () => {
       const parts = [regionToParts(rectRegion(1, 1, 2, 2)), regionToParts(rectRegion(5, 5, 2, 2))];
       const mask = regionsToMask(parts, 8, 8, 'multiclass', raster)!;
