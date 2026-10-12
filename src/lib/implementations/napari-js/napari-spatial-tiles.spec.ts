@@ -1,5 +1,6 @@
 import { Viewer, mapScalarRGBA, pointSymbolCode, pointSymbolDistance } from 'napari-js';
 import type { ImageLayer, PointsLayer, ShapesLayer } from 'napari-js';
+import { INFERNO_LUT } from 'napari-js/colormaps';
 import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import type { TranscriptGlyphName } from '../../contracts/display-types';
@@ -1197,6 +1198,17 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
     // What the shader draws for each bin: at or below the low end, nothing.
     const drawn = [0, 1, 2, 10].map((v) => mapScalarRGBA(v, { ...opts, colormap: layer.colormap! })[3]);
     expect(drawn).toEqual([0, 1, 1, 1]);
+    tiles.detach();
+  });
+
+  it("colours the density in matplotlib's exact inferno by default", async () => {
+    const { tiles, plan, viewer } = setup();
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    for (const i of [0, 64, 128, 200, 255]) {
+      const rgb = layer.colormap!.sample(i / 255).map((v) => Math.round(v * 255));
+      expect(rgb).toEqual([INFERNO_LUT[i * 3], INFERNO_LUT[i * 3 + 1], INFERNO_LUT[i * 3 + 2]]);
+    }
     tiles.detach();
   });
 

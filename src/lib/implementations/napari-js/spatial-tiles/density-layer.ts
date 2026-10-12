@@ -1,12 +1,13 @@
 import { colormapFromLut } from 'napari-js';
 import type { ImageLayer, Viewer } from 'napari-js';
+import { INFERNO_LUT } from 'napari-js/colormaps';
 
 import { ALL_GENES, type SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../../contracts/display-types';
 import type { SpatialDataset, SpatialTranscriptCounts } from '../../../contracts/spatial-dataset.contract';
 import { lutFor } from '../../../spatial/spatial-encoding';
 import { visibleArea, visibleDataRect } from '../../../spatial/lod';
-import { INFERNO_SCALE, densityAutoRange } from '../../../spatial/density-raster';
+import { densityAutoRange } from '../../../spatial/density-raster';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
 
@@ -108,7 +109,7 @@ export class DensityLayer {
     const colormapKey = JSON.stringify(view.densityColormap ?? null);
     if (colormapKey !== this.colormapKey) {
       this.colormapKey = colormapKey;
-      layer.colormap = colormapFromLut('transcript-density', lutFor(view.densityColormap ?? INFERNO_SCALE));
+      layer.colormap = colormapFromLut('transcript-density', lutFor(view.densityColormap ?? INFERNO_LUT));
     }
     this.groups.viewer!.requestRender();
     const stats = { lo, hi, max: raster.max };

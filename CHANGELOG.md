@@ -142,6 +142,10 @@ CORE-1) refer to the review document attached to #45.
   with `transparentBelow`, so a threshold, colormap or opacity change updates the layer's
   uniforms or LUT instead of recolouring the raster on the CPU and uploading it again
   (NAPARI-BOUNDARY-28).
+- **The density map's default inferno is matplotlib's exact table** (napari-js/colormaps), on the
+  canvas and the colour bar. It was a 9-stop approximation whose stops were inferno's ninths
+  placed at eighths, so the ramp ran dark (the middle drew #a52c60 for #bb3754). `INFERNO_SCALE` is removed; `lutFor` also takes a 256-entry RGB table
+  (NAPARI-BOUNDARY-23).
 
 ### Refactored
 

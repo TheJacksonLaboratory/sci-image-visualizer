@@ -1,3 +1,5 @@
+import { INFERNO_LUT } from 'napari-js/colormaps';
+
 import type {
   CategoricalColumnMeta,
   SpatialColumnMeta,
@@ -8,7 +10,7 @@ import type { SpatialCategoricalView } from '../contracts/visualizer.contract';
 import type { ColormapValue, SpatialViewState, TranscriptGlyphName } from '../contracts/display-types';
 import type { Rgb } from '../contracts/colormap-lut';
 import { lutFor, spatialContinuousLut } from './spatial-encoding';
-import { INFERNO_SCALE, TRANSCRIPT_GLYPHS, glyphOutline } from './spatial-tiles';
+import { TRANSCRIPT_GLYPHS, glyphOutline } from './spatial-tiles';
 
 /**
  * Pure model of the spatial-omics panel: the option lists, rows and patches its controls
@@ -341,7 +343,7 @@ export function continuousColorBarCss(
 
 /** The density map's colour bar: its own colormap, Inferno by default. */
 export function densityColorBarCss(colormap: SpatialViewState['densityColormap']): string {
-  return gradientCss(lutFor(colormap ?? INFERNO_SCALE));
+  return gradientCss(lutFor(colormap ?? INFERNO_LUT));
 }
 
 /** The middle of a section stack: where a "one section" picker opens, rather than on the

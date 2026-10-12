@@ -8,7 +8,8 @@
  *
  * A colormap value is either:
  *   - an array of `[stop, color]` pairs (the matplotlib tables, see {@link lutScale}), or
- *   - a Plotly built-in scale *name* string (e.g. 'Viridis', 'Reds').
+ *   - a Plotly built-in scale *name* string (e.g. 'Viridis', 'Reds'), or
+ *   - a 256-entry RGB table itself (a `napari-js/colormaps` `*_LUT`), used as is.
  * `color` may be `'rgb(r, g, b)'` or `'#rrggbb'`/`'#rgb'`.
  */
 
@@ -224,10 +225,17 @@ function parseColor(c: string): Rgb {
  * The Plotly side (the value's forms, the colour strings, the built-in names) is
  * parsed here; the interpolation is napari-js's own `Colormap` sampled by `buildLut`,
  * so both backends ramp a scale the same way.
- * @param value  array of `[stop, color]` pairs, or a Plotly built-in name string
+ * @param value  array of `[stop, color]` pairs, a Plotly built-in name string, or a
+ *   256-entry RGB `Uint8Array(768)`
  * @param reverse  mirror the scale (matches Plotly's `reversescale`)
  */
 export function buildColormapLut(value: unknown, reverse = false): Rgb[] | null {
+  if (value instanceof Uint8Array && value.length === 768) {
+    const lut: Rgb[] = new Array(256);
+    for (let i = 0; i < 256; i++) lut[i] = [value[i * 3], value[i * 3 + 1], value[i * 3 + 2]];
+    if (reverse) lut.reverse();
+    return lut;
+  }
   let scale: Stop[] | null = null;
   if (Array.isArray(value)) scale = value as Stop[];
   else if (typeof value === 'string') scale = BUILTIN_SCALES[value] ?? null;
