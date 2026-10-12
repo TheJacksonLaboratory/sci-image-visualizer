@@ -1,6 +1,8 @@
 # Region holes (donuts) — implementation plan
 
-**Status:** shipped (jit-ui#85, 2026-06 — in every standalone release since 0.1.0); kept as design record ·
+**Status:** shipped (jit-ui#85, 2026-06 — in every standalone release since 0.1.0); kept as design record. The
+Moore tracer and hole finder below have since been replaced by napari-js's `traceContours` (pixel-edge
+outlines, each blob's own holes; see `docs/ARCHITECTURE.md`) ·
 **Tracking:** jit-ui#85 (brush) + follow-up
 
 ## 1. Problem

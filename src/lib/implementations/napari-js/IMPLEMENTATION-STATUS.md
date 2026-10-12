@@ -81,15 +81,14 @@ Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 - **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
 - **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
   min.
-- **napari-js 0.15 APIs not adopted:** `rasterizePolygon`/`traceContours` (pixel-edge contours
-  and the pixel-centre rule; SIV's tracer outlines boundary-pixel corners, so swapping changes
-  every tool's output, and SIV's own trace → rasterize round trip drops a row), the flat-ring
-  `pointInRing`/`ringArea` (SIV's regions hold parallel `xs`/`ys`), `autoContrastLimits` (its
+- **napari-js 0.15 APIs not adopted:** the flat-ring `pointInRing`/`ringArea` (SIV's regions
+  hold parallel `xs`/`ys`; converting per hit test is not a clean swap), `autoContrastLimits` (its
   window ends at the last kept bin's upper edge, SIV's at its left edge, as ImageJ) and
   `visibleTiles` ordering (the spatial tile grid has its own origin, bounds and per-level tile
   size). Already adopted: whole-slice reads (`readLevel`, `assembleVolume`, `bitmapToScalar`),
   `napari-js/overlays` (scale bars, navigator, axis labels), `napari-js/colormaps` (the colormap
-  tree's tables), `floodFill` and `labelComponents` (wand, contour labelling), `worldViewport`,
+  tree's tables), `floodFill` (wand), `traceContours` and `rasterizePolygon` (every tool's
+  mask → outline → mask path: pixel-edge outlines, an exact round trip), `worldViewport`,
   `LayerList.move` (no re-upload on a restack), packed
   point colours, `Points3DLayer.colors` (no 3D category ceiling), `invert` on the 3D layers,
   `Camera3D.worldPerPixel`, `LruCache`, `luminance8`, `Colormap` + `buildLut`, per-point symbols

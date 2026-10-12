@@ -199,8 +199,8 @@ CORE-1) refer to the review document attached to #45.
   `bt601Luminance` is napari-js's `luminance8` (NAPARI-BOUNDARY-30); `buildColormapLut` samples a
   napari-js `Colormap` (NAPARI-BOUNDARY-23); the transcript-summary and SAM caches are `LruCache`s
   and now evict by use (NAPARI-BOUNDARY-19); the volume scene's dead slice step is gone; the
-  wand's flood fill is `floodFill` and the contour tracer labels with `labelComponents`
-  (`napari-js/geometry`, Appendix F); tile planes decode with `bitmapToScalar`; the spatial view
+  wand's flood fill is `floodFill`, and contour tracing and polygon rasterizing are
+  `traceContours` and `rasterizePolygon` (`napari-js/geometry`, Appendix F); tile planes decode with `bitmapToScalar`; the spatial view
   rect is `worldViewport` (NAPARI-BOUNDARY-31).
 - Spatial picking is napari-js's: the 2D hover and click and the transcript hover pick on the
   layer they name (`PointsLayer.pick`, a grid built once per layer), the 3D cloud through

@@ -61,7 +61,7 @@ that reason: `SpatialSelectionMask` is in `spatial-dataset.contract.ts`, not
 | `implementations/simple-slice-access.service.ts` | Per-slice URL loading for non-tiled stacks (OSD and napari)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `store/`                                         | `VisualizerStore`, `SpatialSelectionStore`, and `RegionStore` (copy-on-write façade over `RegionHistory`, `RegionSelection`, `RegionScopeCache`), class-colour helpers                                                                                                                                                                                                                                                                                                                                                  |
 | `models/`                                        | Neutral data: `region.ts`, `geometry.ts`, `bezier.ts`, `shape.ts`, `class-preset.ts`, `polygon-factory.ts` (the one place `Polygon`/`Region` are built), `polygon-edit.ts` (copy-on-write edits), `region-clone.ts`, `region-geojson.ts`, `svg-path.ts`                                                                                                                                                                                                                                                                 |
-| `geometry/`                                      | Pure, worker-safe geometry: `ring.ts` (bounds, containment with holes, vertex dropping, simplification), `raster.ts` (polygon rasterization, `BBoxMask` set operations), `contour.ts` (mask or label map → polygons with holes)                                                                                                                                                                                                                                                                                         |
+| `geometry/`                                      | Pure, worker-safe geometry: `ring.ts` (bounds, containment with holes, vertex dropping and erasing, simplification), `raster.ts` (polygon rasterization over napari-js's `rasterizePolygon`, `BBoxMask` set operations), `contour.ts` (mask or label map → pixel-edge polygons with holes, over napari-js's `traceContours`)                                                                                                                                                                                            |
 | `util/`                                          | Framework-free helpers shared across areas: `supersede.ts` (`Supersede`, latest-wins with an `AbortSignal` per task)                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `visualizer.component.ts` + `visualizer/`        | `<visualizer>`: inputs/outputs, toasts, slice navigation and dialogs; its collaborators live in `visualizer/` (`RegionActions`, `ViewerShortcuts`, `ToolModes`, `SpatialDatasetBinder`, context menu, ROI import) plus `render-session.ts` (`ImageRenderSession`), `intensity-inset/`, `plot-mode/contribution-host.ts`                                                                                                                                                                                                 |
 | `render-orchestrator.ts`                         | Two-pass render (small tier first, then the large tier, one retry) and the slice scrubber                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -191,6 +191,18 @@ through the wand's mask pipeline. All rasterizing and contour tracing goes
 through `geometry/` (`raster.ts`, `contour.ts`, `ring.ts`), which the mask-export
 worker imports too.
 
+One pixel convention holds for every tool and backend. Matrix pixel (i, j) of a
+readback covers `[i, i + 1) × [j, j + 1)` of the tools' frame (`MatrixFrame`): a
+click floors to its pixel, and `contour.ts` (napari-js's `traceContours`) outlines
+a mask along pixel edges, so `raster.ts` (napari-js's `rasterizePolygon`, which
+sets a pixel when its centre is inside) gives back exactly the traced pixels. A
+region the wand or brush picks up again after a zoom, pan or undo is therefore
+unchanged. OSD and napari read back canvases whose pixel corners sit on whole
+units; Plotly centres its heatmap cells on whole data units, so its tool frame
+starts half a cell before the first centre (`getCachedImageData`). Plotly's data
+coordinates are therefore half a pixel off the others' for the same image pixel,
+in the regions the tools trace there as in shapes drawn there.
+
 ## Toolbar tools and contributions
 
 Built-in tools live under `toolbar/`. The on-canvas tools (wand, brush, vertex
@@ -272,8 +284,8 @@ whole-slice reads (`readLevel`, `assembleVolume`), the overlays (`napari-js/over
 scale bars, navigator, axis labels) and the projection/picking helpers. Its pure,
 tree-shakeable pieces are used across the library: the colormap tables
 (`napari-js/colormaps`) in the colormap tree, `Colormap`/`buildLut`, `luminance8`, the
-scale-bar maths in the OSD scale bar, `floodFill`/`labelComponents`
-(`napari-js/geometry`) in the wand and the contour tracer, and `worldViewport` in the
+scale-bar maths in the OSD scale bar, `floodFill`, `traceContours` and
+`rasterizePolygon` (`napari-js/geometry`) in the wand and `geometry/`, and `worldViewport` in the
 spatial level-of-detail planning. Rendering concerns that
 are generic, such as tile pyramids, picking and per-point colour, belong in
 napari-js. SIV keeps a workaround only until napari-js provides the feature.
