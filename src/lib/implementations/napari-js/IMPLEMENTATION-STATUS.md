@@ -43,7 +43,7 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 | `napari-spatial-encoding.ts` | Pure colour and grouping math of the spatial scenes. |
 | `napari-spatial-hover.ts`, `napari-spatial-tooltip.ts` | Spatial hover / click and the cursor tooltip. The pick is napari-js's, on the layer each scene drew: `PointsLayer.pick` in 2D (nearest centre within the marker or a 10 px slack), `PointPicker` in 3D (front-most). |
 | `napari-spatial-tiles.ts` | Coordinator of the 2D spatial view's camera-driven level-of-detail layers (see `spatial-tiles/`). |
-| `napari-tile-client.ts` | Talks to the tile server: descriptors, 2D tiles, volume assembly (decimated by the Resolution control), native >8-bit histograms, TIFF export. |
+| `napari-tile-client.ts` | Talks to the tile server: descriptors, the `TiledSource`s (2D tiles), whole-slice reads and volume assembly through napari-js's `readLevel` / `assembleVolume` (decimated by the Resolution control), native >8-bit histograms, TIFF export. |
 | `napari-tool-bridge.ts` | The canvas tools' host and the region overlay's viewer adapter, in 2D world space and the 3D view's screen space. |
 | `napari-display-state.ts` | Channel display settings → napari layer colours (window → invert → gamma per channel, then an additive merge; gamma converted by `toNapariGamma`). |
 | `napari-helpers.ts` | Pure helpers and constants (no viewer, store or network). |
@@ -51,7 +51,7 @@ NapariVisualizerService (viewer lifecycle, load/plot, capability getters)
 | `napari-region-overlay.ts` | SVG region overlay over the canvas: draw, select, marquee, move / resize, vertex and bezier-handle editing, holes, multi-part regions. Writes to the shared `RegionStore` and redraws from its update event. |
 | `region-overlay/` | The overlay's pieces: `overlay-projection.ts` (client / svg-local / world coordinates), `region-edit.ts` (a live drag), `region-svg-renderer.ts` (handles and paths). |
 | `spatial-tiles/` | The tile layers: `cell-layers.ts` (outlines / fills, with a cached contrast window), `transcript-layers.ts` + `transcript-jobs.ts` (points and their fetch planning), `density-layer.ts`, `transcript-hover.ts`, `categorical-lookup.ts`, `layer-groups.ts`, `plan-context.ts`. |
-| `napari-navigator.ts`, `napari-scale-bar.ts`, `napari-axes-gizmo.ts`, `napari-axes-labels.ts` | Overlay chrome: minimap, physical scale bar, 3D axes gizmo and labels. |
+| `napari-axes-gizmo.ts` | The 3D axes gizmo: napari-js's `AxesLayer` and `AxesLabelsOverlay`. The minimap and the scale bars are napari-js's `NavigatorOverlay` and `ScaleBarOverlay` (`napari-js/overlays`), installed by the 2D image and 3D spatial scenes. |
 | `napari-volume-z-handle.ts` | Drag handle that restretches a volume's Z. |
 | `napari-zoom.ts` | Wheel-zoom speed derived from OSD's step, so both backends zoom alike. |
 
@@ -81,9 +81,16 @@ Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 - **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
 - **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
   min.
-- **napari-js 0.15 APIs not adopted yet:** whole-level reads (`readLevel`/`assembleVolume`),
-  the `napari-js/overlays`, `napari-js/colormaps` and `napari-js/geometry` entries, and
-  `visibleTiles` ordering. Already adopted: `LayerList.move` (no re-upload on a restack), packed
+- **napari-js 0.15 APIs not adopted:** `rasterizePolygon`/`traceContours` (pixel-edge contours
+  and the pixel-centre rule; SIV's tracer outlines boundary-pixel corners, so swapping changes
+  every tool's output, and SIV's own trace → rasterize round trip drops a row), the flat-ring
+  `pointInRing`/`ringArea` (SIV's regions hold parallel `xs`/`ys`), `autoContrastLimits` (its
+  window ends at the last kept bin's upper edge, SIV's at its left edge, as ImageJ) and
+  `visibleTiles` ordering (the spatial tile grid has its own origin, bounds and per-level tile
+  size). Already adopted: whole-slice reads (`readLevel`, `assembleVolume`, `bitmapToScalar`),
+  `napari-js/overlays` (scale bars, navigator, axis labels), `napari-js/colormaps` (the colormap
+  tree's tables), `floodFill` and `labelComponents` (wand, contour labelling), `worldViewport`,
+  `LayerList.move` (no re-upload on a restack), packed
   point colours, `Points3DLayer.colors` (no 3D category ceiling), `invert` on the 3D layers,
   `Camera3D.worldPerPixel`, `LruCache`, `luminance8`, `Colormap` + `buildLut`, per-point symbols
   (transcript icons, NAPARI-BOUNDARY-25), per-shape `faceColor` (cells, NAPARI-BOUNDARY-27),

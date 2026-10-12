@@ -265,10 +265,16 @@ See [guides/spatial-omics.md](./guides/spatial-omics.md).
 
 ## The napari-js boundary
 
-Only `implementations/napari-js/` imports `napari-js` (a regular dependency,
-`^0.15.0`). SIV uses its `Viewer` and layer types (image, volume, surface,
+`napari-js` is a regular dependency (`^0.15.0`). The renderer is used only in
+`implementations/napari-js/`: its `Viewer` and layer types (image, volume, surface,
 points, 3D points, axes, shapes, tiled sources), the multichannel views, the
-colormap helpers and the projection/picking helpers. Rendering concerns that
+whole-slice reads (`readLevel`, `assembleVolume`), the overlays (`napari-js/overlays`:
+scale bars, navigator, axis labels) and the projection/picking helpers. Its pure,
+tree-shakeable pieces are used across the library: the colormap tables
+(`napari-js/colormaps`) in the colormap tree, `Colormap`/`buildLut`, `luminance8`, the
+scale-bar maths in the OSD scale bar, `floodFill`/`labelComponents`
+(`napari-js/geometry`) in the wand and the contour tracer, and `worldViewport` in the
+spatial level-of-detail planning. Rendering concerns that
 are generic, such as tile pyramids, picking and per-point colour, belong in
 napari-js. SIV keeps a workaround only until napari-js provides the feature.
 
