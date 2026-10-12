@@ -1,6 +1,4 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as ts from 'typescript';
+import { additiveComposite, mapScalar, tintColormap, windowGamma } from 'napari-js';
 
 import { DisplayPipeline } from './display-pipeline';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
@@ -13,40 +11,9 @@ import { Rgb } from '../../contracts/colormap-lut';
  * invert is per channel, before the additive merge (each napari layer inverts on its own).
  *
  * The reference is napari-js's OWN code (`windowGamma`, `mapScalar`, `additiveComposite` — the
- * CPU ground truth its shader is tested against — and `tintColormap`), not a copy: jest maps
- * `napari-js` to a stub and cannot load the ESM bundle, so the modules are taken from the
- * installed package's source map and transpiled here. A napari-js upgrade that changes the math
- * fails this spec.
+ * CPU ground truth its shader is tested against — and `tintColormap`), not a copy: jest runs
+ * the real package. A napari-js upgrade that changes the math fails this spec.
  */
-type WindowGamma = (value: number, lo: number, hi: number, gamma: number, invert: boolean) => number;
-type RGB = [number, number, number];
-interface NapariColormap {
-  sample(t: number): RGB;
-}
-type MapScalar = (
-  value: number,
-  opts: { climLo: number; climHi: number; gamma: number; invert: boolean; colormap: NapariColormap },
-) => RGB;
-
-/** One napari-js source module (by its path suffix in the source map), transpiled to CommonJS.
- *  Only type-only imports are allowed: `require` resolves to nothing. */
-function napariModule(suffix: string): Record<string, unknown> {
-  const map = JSON.parse(
-    fs.readFileSync(path.join(process.cwd(), 'node_modules/napari-js/dist/napari-js.js.map'), 'utf8'),
-  ) as { sources: string[]; sourcesContent: string[] };
-  const i = map.sources.findIndex((s) => s.endsWith(suffix));
-  if (i < 0) throw new Error(`napari-js source map has no ${suffix}`);
-  const js = ts.transpileModule(map.sourcesContent[i], {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  }).outputText;
-  const mod: { exports: Record<string, unknown> } = { exports: {} };
-  new Function('exports', 'module', 'require', js)(mod.exports, mod, () => ({}));
-  return mod.exports;
-}
-
-function napariWindowGamma(): WindowGamma {
-  return napariModule('src/color/display-pipeline.ts')['windowGamma'] as WindowGamma;
-}
 
 const IDENTITY_LUT: Rgb[] = Array.from({ length: 256 }, (_, v) => [v, v, v] as Rgb);
 
@@ -65,8 +32,6 @@ function osdGray(st: IChannelState, invert: boolean): number[] {
 }
 
 describe('DisplayPipeline matches napari-js windowGamma (NAPARI-BOUNDARY-2)', () => {
-  const windowGamma = napariWindowGamma();
-
   it.each([
     { gamma: 2, min: 0, max: 255, invert: false },
     { gamma: 2, min: 0, max: 255, invert: true },
@@ -88,10 +53,6 @@ describe('DisplayPipeline matches napari-js windowGamma (NAPARI-BOUNDARY-2)', ()
  * invert — summed and clamped by `additiveComposite`; as 0..255 bytes.
  */
 function napariComposite(values: number[], states: IChannelState[], invert: boolean): number[] {
-  const pipeline = napariModule('src/color/display-pipeline.ts');
-  const mapScalar = pipeline['mapScalar'] as MapScalar;
-  const additiveComposite = pipeline['additiveComposite'] as (colors: readonly RGB[]) => RGB;
-  const tintColormap = napariModule('src/color/colormap.ts')['tintColormap'] as (hex: string) => NapariColormap;
   const layers = states
     .map((st, k) => ({ st, v: values[k] }))
     .filter(({ st }) => st.visible)

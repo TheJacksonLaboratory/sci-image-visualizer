@@ -4,7 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
-import { MultiChannelImageView, Viewer } from 'napari-js';
+import { buildLut, framingFor, MultiChannelImageView, Viewer } from 'napari-js';
 import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
@@ -920,29 +920,19 @@ describe('NapariVisualizerService', () => {
   });
 
   it('keeps the orbit pose across a surface rebuild (fit3d: once frames only the first)', async () => {
-    // The stub's addSurface never frames; give it napari-js 0.14's behaviour (frame through the
-    // fit policy), so this pins that the rebuild leaves the camera to the policy alone.
-    type FitViewer = {
-      shouldFit3D(): boolean;
-      camera3d: { target: [number, number, number]; distance: number };
-    };
-    const addSurface = Viewer.prototype.addSurface;
-    jest.spyOn(Viewer.prototype, 'addSurface').mockImplementation(function (this: Viewer, ...args) {
-      const layer = addSurface.apply(this, args);
-      const v = this as unknown as FitViewer;
-      if (v.shouldFit3D()) {
-        v.camera3d.target = [0.5, 0.5, 0.5];
-        v.camera3d.distance = 2.5;
-      }
-      return layer;
-    });
+    const addSurface = jest.spyOn(Viewer.prototype, 'addSurface');
     const div = document.createElement('div');
     div.id = 'surf-pose-host';
     document.body.appendChild(div);
     const loaded = await service.load(imageInfo(), 0);
     await service.plot('surf-pose-host', loaded, imageInfo(), 600, PlotType.NAPARI_SURFACE);
-    const cam = (service as unknown as { viewer: FitViewer }).viewer.camera3d;
-    expect(cam.distance).toBe(2.5); // the first build framed
+    const viewer = (service as unknown as { viewer: Viewer }).viewer;
+    const cam = viewer.camera3d;
+    // The first build framed: napari-js fits the orbit camera to the mesh bounds.
+    const [vw, vh] = viewer.viewportSize();
+    const framed = framingFor(addSurface.mock.results[0].value.bounds(), { fov: cam.fov, aspect: vw / vh });
+    expect(cam.target).toEqual(framed.target);
+    expect(cam.distance).toBeCloseTo(framed.distance, 10);
 
     cam.target = [7, 8, 9];
     cam.distance = 42;
@@ -1988,11 +1978,17 @@ describe('NapariVisualizerService', () => {
         // The opening view has to come from somewhere, and the reference volume's
         // box is the framing worth having — the brain, not a stray segmentation.
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         await mount3d(spatialDatasetVolume(3));
-        // 4x6x10 voxels of 100x200x400 -> a 400 x 1200 x 4000 world box, framed at
-        // 1.8x its longest side. Suppressing every framing would leave the stub's
-        // initial distance of 1 and an unusable opening view.
-        expect(pose().distance).toBeCloseTo(4000 * 1.8, 5);
+        // 4x6x10 voxels of 100x200x400 -> a 400 x 1200 x 4000 world box about the origin,
+        // framed to fit the canvas. Suppressing every framing would leave Camera3D's
+        // initial distance of 3 and an unusable opening view.
+        const bounds = addVolume.mock.results[0].value.bounds();
+        expect(bounds.max).toEqual([200, 600, 2000]);
+        const viewer = (service as unknown as { viewer: Viewer }).viewer;
+        const [vw, vh] = viewer.viewportSize();
+        const framed = framingFor(bounds, { fov: viewer.camera3d.fov, aspect: vw / vh });
+        expect(pose().distance).toBeCloseTo(framed.distance, 5);
         expect(pose().target).toEqual([0, 0, 0]);
       });
 
@@ -2707,13 +2703,14 @@ describe('NapariVisualizerService', () => {
       expect(layer.contrastLimits).toEqual([-0.5, k - 0.5]);
 
       // Resolve each code the way the shader does: normalise through
-      // contrastLimits, then index the LUT.
-      const lut = layer.colormap.stops as [number, number, number][];
-      expect(lut).toHaveLength(256);
+      // contrastLimits, then index the RGBA8 LUT napari-js uploads.
+      const lut = buildLut(layer.colormap);
+      expect(lut).toHaveLength(256 * 4);
       const colourOf = (value: number) => {
         const [lo, hi] = layer.contrastLimits;
         const t = (value - lo) / (hi - lo);
-        return lut[Math.max(0, Math.min(255, Math.round(t * 255)))];
+        const i = Math.max(0, Math.min(255, Math.round(t * 255)));
+        return Array.from(lut.subarray(i * 4, i * 4 + 3));
       };
       expect(colourOf(1)).toEqual([255, 0, 0]); // category A
       expect(colourOf(2)).toEqual([0, 0, 255]); // category B
@@ -2846,20 +2843,27 @@ describe('NapariVisualizerService', () => {
     });
 
     it('projects observations to canvas pixels through the 3D camera', async () => {
-      await mount3d();
+      const layers = await mount3d();
       const projected = service.getSpatialScreenProjection(spatialDataset3d().observations);
       expect(projected).not.toBeNull();
       expect(projected!.length).toBe(3 * 2);
-      // The stub camera is the identity, so clip == world and the mapping reduces
-      // to NDC -> canvas: x = (nx/2 + 0.5)*w, y = (1 - (ny/2 + 0.5))*h. The y flip
-      // is the part worth pinning: NDC points up, canvas points down, and getting
+      // Each cloud position through the camera's view-projection (column-major) and the
+      // perspective divide, then NDC -> canvas: x = (nx/2 + 0.5)*w, y = (1 - (ny/2 + 0.5))*h.
+      // The y flip is the part worth pinning: NDC points up, canvas points down, and getting
       // it backwards would silently mirror every selection.
+      const viewer = (service as unknown as { viewer: Viewer }).viewer;
       const w = 300;
       const h = 150;
-      const obs = spatialDataset3d().observations;
-      for (let i = 0; i < obs.count; i++) {
-        expect(projected![i * 2]).toBeCloseTo((obs.x[i] * 0.5 + 0.5) * w, 3);
-        expect(projected![i * 2 + 1]).toBeCloseTo((1 - (obs.y[i] * 0.5 + 0.5)) * h, 3);
+      expect(viewer.viewportSize()).toEqual([w, h]);
+      const m = viewer.camera3d.viewProjection(w, h);
+      const positions = last(layers).positions as Float32Array;
+      for (let i = 0; i < 3; i++) {
+        const [x, y, z] = positions.subarray(i * 3, i * 3 + 3);
+        const cw = m[3] * x + m[7] * y + m[11] * z + m[15];
+        const nx = (m[0] * x + m[4] * y + m[8] * z + m[12]) / cw;
+        const ny = (m[1] * x + m[5] * y + m[9] * z + m[13]) / cw;
+        expect(projected![i * 2]).toBeCloseTo((nx * 0.5 + 0.5) * w, 3);
+        expect(projected![i * 2 + 1]).toBeCloseTo((1 - (ny * 0.5 + 0.5)) * h, 3);
       }
     });
 
@@ -4168,26 +4172,39 @@ describe('NapariVisualizerService', () => {
         div.remove();
       };
     }
-    const viewer = () =>
-      (
-        service as unknown as {
-          viewer: { dims: { z: number }; layers: { items: readonly object[] } };
-        }
-      ).viewer;
+    const viewer = () => (service as unknown as { viewer: Viewer }).viewer;
     const fetchedUrls = () => (globalThis.fetch as jest.Mock).mock.calls.map((c) => String(c[0]));
 
     describe('(b) setZIndex per scene', () => {
-      it("steps the volume's z plane in place", async () => {
+      /** Serve a two-plane stack: napari-js clamps `dims.z` to the tiled image's depth, and
+       *  the suite's descriptor has one plane. */
+      function twoPlanes() {
+        const fetch = globalThis.fetch as jest.Mock;
+        const serve = fetch.getMockImplementation()!;
+        fetch.mockImplementation(async (url: string) => {
+          const res = await serve(url);
+          if (!url.includes('tiles/info')) return res;
+          const desc = await res.json();
+          return { ...res, json: () => Promise.resolve({ ...desc, z: 2 }) };
+        });
+      }
+
+      it("keeps a volume's layers on a slice change, with no re-render", async () => {
+        // The volume draws every plane, so a slice change has nothing to rebuild
+        // (napari-js's `dims.z` slices only a tiled image).
         const done = await plotInto(PlotType.NAPARI_VOLUME);
+        const layers = [...viewer().layers.items];
         const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
         service.setZIndex(1);
         await flush();
-        expect(viewer().dims.z).toBe(1);
+        expect(viewer().layers.items).toHaveLength(layers.length);
+        layers.forEach((layer, i) => expect(viewer().layers.items[i]).toBe(layer));
         expect(render).not.toHaveBeenCalled();
         done();
       });
 
       it("moves a tiled image's dims plane and refreshes the histogram sample, without a re-render", async () => {
+        twoPlanes();
         const done = await plotInto(PlotType.NAPARI_IMAGE);
         const render = jest.spyOn(MultiChannelImageView.prototype, 'render');
         (globalThis.fetch as jest.Mock).mockClear();
@@ -4348,8 +4365,10 @@ describe('NapariVisualizerService', () => {
         }
         return kinds;
       }
+      /** [the method that made it, the name SIV gave it — null when it kept napari-js's
+       *  default, the layer id] per layer, bottom to top. */
       const shape = (kinds: WeakMap<object, string>) =>
-        viewer().layers.items.map((l) => [kinds.get(l), (l as { name?: string }).name ?? null]);
+        viewer().layers.items.map((l) => [kinds.get(l), l.name === l.id ? null : l.name]);
 
       it.each([
         [PlotType.NAPARI_IMAGE, [['addImage', null]]],

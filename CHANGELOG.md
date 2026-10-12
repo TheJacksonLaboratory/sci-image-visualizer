@@ -105,6 +105,8 @@ CORE-1) refer to the review document attached to #45.
 - `@jax-js/jax` moved to devDependencies (it is bundled into the t-SNE worker);
   `@types/plotly.js-dist-min` replaced by local v3 typings; `primeicons`/`primeflex` are optional
   peers; global icon styles ship as `styles/viz-icons.scss`.
+- **napari-js 0.15.0** (was 0.14): a volume opens framed to fit the canvas (a little further
+  out than before), and viridis and magma are matplotlib's exact tables.
 
 ### Refactored
 
