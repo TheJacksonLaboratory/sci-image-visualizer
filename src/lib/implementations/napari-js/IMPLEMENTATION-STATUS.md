@@ -81,9 +81,11 @@ Tracked in the code review (`sci-image-visualizer-review.md`, #45):
 - **RGB mode** ignores the channel window, gamma and invert (OSD's RGB path applies them).
 - **Empty window** (min = max): OSD maps every value to 0 before the invert, napari-js steps at
   min.
-- **Needs napari-js APIs:** `LayerList.move` (layer reorders re-upload GPU buffers,
-  NAPARI-BOUNDARY-11), flat `Float32Array` point colours (NAPARI-BOUNDARY-12), per-point
-  symbols (NAPARI-BOUNDARY-25), per-shape colours (NAPARI-BOUNDARY-27), GPU density windowing
-  (NAPARI-BOUNDARY-28).
+- **napari-js 0.15 APIs not adopted yet:** per-point symbols (NAPARI-BOUNDARY-25), per-shape
+  colours (NAPARI-BOUNDARY-27), `transparentBelow` for GPU density windowing
+  (NAPARI-BOUNDARY-28), picking, `canvasTransform`, whole-level reads and the overlays entry.
+  Already adopted: `LayerList.move` (no re-upload on a restack), packed point colours,
+  `Points3DLayer.colors` (no 3D category ceiling), `invert` on the 3D layers,
+  `Camera3D.worldPerPixel`, `LruCache`, `luminance8`, `Colormap` + `buildLut`.
 - **SAM** embeds the displayed viewport at screen resolution, as on OSD: zoom in to segment
   small features.

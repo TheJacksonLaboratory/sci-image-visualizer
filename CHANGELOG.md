@@ -134,6 +134,11 @@ CORE-1) refer to the review document attached to #45.
   split into OnPush children, `RegionStore` → façade, `WandService` → pure modules.
 - Removed dead code: the previous-shapes contract trio, spec-only exports, unread component state,
   20 unused assets, debug logging.
+- napari-js 0.15 replaces SIV workarounds: layer restacks use `LayerList.move` (no GPU re-upload,
+  NAPARI-BOUNDARY-11); the 3D scale bar reads `Camera3D.worldPerPixel` (NAPARI-BOUNDARY-26);
+  `bt601Luminance` is napari-js's `luminance8` (NAPARI-BOUNDARY-30); `buildColormapLut` samples a
+  napari-js `Colormap` (NAPARI-BOUNDARY-23); the transcript-summary and SAM caches are `LruCache`s
+  and now evict by use (NAPARI-BOUNDARY-19); the volume scene's dead slice step is gone.
 
 ### Docs
 

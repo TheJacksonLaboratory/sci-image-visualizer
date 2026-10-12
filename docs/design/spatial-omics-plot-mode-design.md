@@ -207,7 +207,8 @@ Confirmed missing against the shipped `0.11.1` typings — these are the asks on
 
 1. **`Points3DLayer`: per-point `faceColor` (RGBA[]) and per-point `size`.** Today it takes only a
    per-point scalar + colormap and a single uniform size, so categorical cell types cannot be
-   coloured in 3D at all.
+   coloured in 3D at all. _(Done: per-point size and alpha in 0.14, per-point `colors` in 0.15,
+   which replaced the stepped-LUT workaround and its 95-category ceiling.)_
 2. **A shapes/polygon layer** (instanced or tessellated fills + outlines) for cell boundaries. The
    existing SVG region overlay is DOM-based; it is right for a handful of hand-drawn ROIs and wrong
    for 10⁴–10⁵ segmentation polygons.
