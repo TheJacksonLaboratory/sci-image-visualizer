@@ -1,12 +1,12 @@
 import { Subscription } from 'rxjs';
 import { MultiChannelVolumeView, histogramScalar } from 'napari-js';
 import type { Points3DLayer, VolumeChannel } from 'napari-js';
+import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { IIsosurfaceControls, ISurface3dControls } from '../../contracts/visualizer.contract';
 import { formatUm } from '../../overlays/scale-bar-core';
-import { AxisLabelSpec } from './napari-axes-labels';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { AssembledVolume } from './napari-tile-client';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';

@@ -1,16 +1,20 @@
 /**
  * Draggable Z-height handle for the napari-js WebGPU volume (jit-ui#102). A small DOM grip is drawn
  * over the 3D canvas at the projected top-face centre of the volume box (projected with napari-js's
- * {@link projectPoint}, like the axes labels, so it tracks the box as the volume orbits). Dragging it up makes
+ * {@link projectPoint}, as the axes labels are, so it tracks the box as the volume orbits). Dragging it up makes
  * the volume taller, down makes it flatter — the host maps the drag to a Z-scale factor and
  * restretches the volume + axes live (only the model matrix changes; the voxel texture is untouched).
  *
- * Direct-manipulation counterpart of {@link NapariAxesLabels}: both are absolute-positioned overlays
- * updated on every `camera3d.changed`, but this one accepts pointer input.
+ * Direct-manipulation counterpart of napari-js's `AxesLabelsOverlay`: both are absolute-positioned
+ * overlays updated on every `camera3d.changed`, but this one accepts pointer input.
  */
 import { projectPoint } from 'napari-js';
 
-import { AxesLabelCamera3D } from './napari-axes-labels';
+/** The slice of napari's Camera3D the handle reads. `viewProjection` is column-major (gl-matrix). */
+export interface ZHandleCamera3D {
+  viewProjection(vw: number, vh: number): ArrayLike<number>;
+  readonly changed: { connect(listener: () => void): () => void };
+}
 
 export interface VolumeZHandleOptions {
   /** Current top-face-centre world point (the box is centred at the origin, so `[0, 0, +halfZ]`). */
@@ -40,7 +44,7 @@ export class NapariVolumeZHandle {
 
   constructor(
     private readonly host: HTMLElement,
-    private readonly camera3d: AxesLabelCamera3D,
+    private readonly camera3d: ZHandleCamera3D,
     opts: VolumeZHandleOptions,
   ) {
     this.opts = { ...DEFAULTS, ...opts };

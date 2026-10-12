@@ -1,11 +1,11 @@
 import { Subscription } from 'rxjs';
 import { heightField, histogramScalar } from 'napari-js';
 import type { SurfaceLayer } from 'napari-js';
+import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { ISurface3dControls } from '../../contracts/visualizer.contract';
 import { formatUm } from '../../overlays/scale-bar-core';
-import { AxisLabelSpec } from './napari-axes-labels';
 import { Axes3dGizmo, surface3dControls } from './napari-axes-gizmo';
 import {
   LumaPlane,

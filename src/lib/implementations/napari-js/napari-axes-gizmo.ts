@@ -1,7 +1,8 @@
 import type { AxesLayer, SurfaceLayer, Viewer } from 'napari-js';
+import { AxesLabelsOverlay } from 'napari-js/overlays';
+import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { ISurface3dControls } from '../../contracts/visualizer.contract';
-import { NapariAxesLabels, AxisLabelSpec } from './napari-axes-labels';
 import type { SceneContext } from './napari-scene';
 
 /** A centred world box. */
@@ -13,11 +14,12 @@ export interface Box3 {
 
 /**
  * The 3D coordinate-axes / scale gizmo (review Appendix B): napari-js's `AxesLayer` plus the DOM
- * X/Y/Z labels that track it — what the volume and the surface used to build twice.
+ * X/Y/Z labels that track it (its `AxesLabelsOverlay`) — what the volume and the surface used to
+ * build twice.
  */
 export class Axes3dGizmo {
   readonly layer: AxesLayer;
-  private readonly labels: NapariAxesLabels;
+  private readonly labels: AxesLabelsOverlay;
 
   constructor(
     private readonly viewer: Viewer,
@@ -30,8 +32,7 @@ export class Axes3dGizmo {
       ...(opts.voxelSize ? { voxelSize: opts.voxelSize } : {}),
       visible: opts.visible,
     });
-    this.labels = new NapariAxesLabels(host, viewer.camera3d, labels);
-    this.labels.setVisible(opts.visible);
+    this.labels = new AxesLabelsOverlay(host, viewer, { labels, visible: opts.visible });
   }
 
   setVisible(visible: boolean): void {
@@ -43,11 +44,11 @@ export class Axes3dGizmo {
   /** The box's depth changed (the volume's Z-height handle): restretch the axis and its labels. */
   setDepth(depth: number, labels: AxisLabelSpec[]): void {
     this.layer.depth = depth;
-    this.labels.updateAnchors(labels);
+    this.labels.setLabels(labels);
   }
 
   destroy(): void {
-    this.labels.destroy();
+    this.labels.dispose();
   }
 }
 

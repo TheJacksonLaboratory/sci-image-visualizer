@@ -1040,12 +1040,20 @@ describe('NapariVisualizerService', () => {
     expect(addAxes).toHaveBeenCalled();
     const axes = addAxes.mock.results[0].value as { visible: boolean };
 
+    // The X/Y/Z text (napari-js's AxesLabelsOverlay) is drawn in the plot host and follows the toggle.
+    const labels = (): HTMLElement[] =>
+      Array.from(div.querySelectorAll('span')).filter((el) => /^[XYZ] · /.test(el.textContent ?? ''));
+    expect(labels()).toHaveLength(3);
+    expect(labels().some((el) => el.style.display !== 'none')).toBe(true);
+
     const ctrls = service.getSurface3dControls();
     expect(ctrls?.axesVisible?.()).toBe(true);
     ctrls?.setAxesVisible?.(false);
     expect(axes.visible).toBe(false);
+    expect(labels().every((el) => el.style.display === 'none')).toBe(true);
 
     service.unsubscribe();
+    expect(labels()).toHaveLength(0);
     document.body.removeChild(div);
   });
 
