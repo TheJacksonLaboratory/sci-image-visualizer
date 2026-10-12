@@ -110,6 +110,8 @@ CORE-1) refer to the review document attached to #45.
   one tinted layer per channel from the slice's own `channelUrls` planes, with each channel's
   window, gamma, tint, visibility and invert, and each channel's own histogram; the navigator
   composites the channels too (#46 browser testing).
+- **napari multichannel images had grey blacks**: the additive channel layers added onto the
+  viewer's dark-grey background; they now merge onto black, as on OSD and Plotly.
 - **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
   was recoloured again as an RGB image, so an inverted stack drew black.
 

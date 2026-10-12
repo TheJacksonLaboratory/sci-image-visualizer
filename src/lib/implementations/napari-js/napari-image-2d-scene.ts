@@ -1,6 +1,6 @@
 import { Subscription } from 'rxjs';
 import { MultiChannelImageView, histogramScalar } from 'napari-js';
-import type { ChannelView, PointsLayer, TiledSource } from 'napari-js';
+import type { ChannelView, ImageLayer, PointsLayer, TiledSource } from 'napari-js';
 import { NavigatorOverlay, ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
@@ -29,6 +29,16 @@ export interface Image2dOptions {
   onSlice?: (rerendered: boolean) => void;
   /** The pointer entered the navigator (e.g. to hide a hover tooltip over the canvas). */
   onNavigatorInteract?: () => void;
+}
+
+/**
+ * Composite additive channel layers onto black, as OSD and Plotly merge them: the bottom-most
+ * SHOWN layer replaces what is under it, the others add onto it. All-additive layers added onto
+ * the viewer's dark-grey background instead, lifting every black pixel to that grey.
+ */
+function mergeOntoBlack(layers: readonly ImageLayer[]): void {
+  const base = layers.find((layer) => layer.visible);
+  for (const layer of layers) layer.blending = layer === base ? 'translucent' : 'additive';
 }
 
 /**
@@ -239,6 +249,7 @@ export class Image2dScene implements NapariScene {
     if (mode === 'multichannel') {
       const views = planes.map((d, c) => this.tintedChannelView(c, states, desc, typedPlane(d), scale));
       this.channelView.render('multichannel', views, { interpolation });
+      mergeOntoBlack(this.channelView.layers);
     } else if (mode === 'grayscale') {
       const view = this.grayscaleChannelView(states[0], typedPlane(planes[0]), scale);
       this.channelView.render('grayscale', [view], { interpolation });
@@ -270,6 +281,7 @@ export class Image2dScene implements NapariScene {
         this.tintedChannelView(c, states, desc, this.tiledSource(desc, c, 1, scene)),
       );
       this.channelView.render('multichannel', views, { interpolation });
+      mergeOntoBlack(this.channelView.layers);
     } else if (channelCount === 1) {
       this.imageMode = 'grayscale';
       const view = this.grayscaleChannelView(states[0], this.tiledSource(desc, undefined, 1, scene));
@@ -388,6 +400,7 @@ export class Image2dScene implements NapariScene {
           invert: display.invert,
         });
       });
+      mergeOntoBlack(view.layers);
     } else if (this.imageMode === 'grayscale') {
       const st = channels[0];
       view.updateChannel(0, {

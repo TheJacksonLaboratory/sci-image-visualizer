@@ -201,6 +201,17 @@ describe('Image2dScene channel display', () => {
       layers.forEach((layer, c) =>
         expect(layer.colormap).toEqual(tintColormap(store.currentChannelStates()[c].color)),
       );
+      // Merged onto black: the bottom channel replaces the canvas, the rest add onto it.
+      expect(layers.map((l) => l.blending)).toEqual(['translucent', 'additive', 'additive', 'additive']);
+    });
+
+    it('merges onto black from the bottom-most SHOWN channel', async () => {
+      const { scene, imageLayers, store } = rig(serverlessMc());
+      await scene.mount();
+      store.setChannelState(0, { visible: false });
+      expect(imageLayers().map((l) => l.blending)).toEqual(['additive', 'translucent', 'additive', 'additive']);
+      store.setChannelState(0, { visible: true });
+      expect(imageLayers()[0].blending).toBe('translucent');
     });
 
     it('follows every channel edit live, without re-fetching', async () => {
