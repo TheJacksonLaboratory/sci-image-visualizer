@@ -1,11 +1,12 @@
 /**
- * Transcript "icon" mode: the marker shapes and their expansion into rings for a shapes
- * layer. A napari-js candidate (a points symbol set) — see the review's SPATIAL-21 list.
+ * Transcript "icon" mode: the marker shapes, and their outlines for the panel's previews.
+ * The napari view draws them as napari-js point symbols (`GLYPH_SYMBOLS` in
+ * `spatial-tiles/transcript-layers.ts`), with these outlines' proportions.
  */
 
 import type { TranscriptGlyphName } from '../contracts/display-types';
 
-/** Marker shapes for the transcript "icon" mode. All star-convex, so a fan fills them. */
+/** Marker shapes for the transcript "icon" mode. */
 export const TRANSCRIPT_GLYPHS = [
   'circle',
   'star',
@@ -28,7 +29,10 @@ const _glyphNamesMatch: TranscriptGlyph extends TranscriptGlyphName
   : never = true;
 void _glyphNamesMatch;
 
-/** Unit outline of a glyph, radius ≈ 1, centred on the origin, as `[x0, y0, x1, y1, …]`. */
+/**
+ * Unit outline of a glyph, radius ≈ 1, centred on the origin, as `[x0, y0, x1, y1, …]` — the
+ * panel's preview of the point symbol the canvas draws.
+ */
 export function glyphOutline(glyph: TranscriptGlyph): Float32Array {
   const poly = (n: number, rot = -Math.PI / 2, r = 1) => {
     const out = new Float32Array(n * 2);
@@ -100,35 +104,4 @@ export function glyphOutline(glyph: TranscriptGlyph): Float32Array {
 /** The glyph a gene gets by default: by its position in the selected list. */
 export function defaultGlyphFor(slot: number): TranscriptGlyph {
   return TRANSCRIPT_GLYPHS[slot % TRANSCRIPT_GLYPHS.length];
-}
-
-/**
- * Expand point markers into glyph rings for a shapes layer: entry `i` becomes a copy of
- * `glyphs[gene[i]]` scaled to `radius[i]` and centred on `(x[i], y[i])`.
- */
-export function glyphRings(
-  x: Float32Array,
-  y: Float32Array,
-  radius: Float32Array,
-  glyphOf: (i: number) => Float32Array,
-): { coords: Float32Array; offsets: Uint32Array } {
-  const n = x.length;
-  const offsets = new Uint32Array(n + 1);
-  let total = 0;
-  for (let i = 0; i < n; i++) {
-    offsets[i] = total;
-    total += glyphOf(i).length / 2;
-  }
-  offsets[n] = total;
-  const coords = new Float32Array(total * 2);
-  for (let i = 0; i < n; i++) {
-    const g = glyphOf(i);
-    const r = radius[i];
-    let o = offsets[i] * 2;
-    for (let k = 0; k < g.length; k += 2) {
-      coords[o++] = x[i] + g[k] * r;
-      coords[o++] = y[i] + g[k + 1] * r;
-    }
-  }
-  return { coords, offsets };
 }

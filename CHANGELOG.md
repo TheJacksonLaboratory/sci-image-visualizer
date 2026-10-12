@@ -123,6 +123,11 @@ CORE-1) refer to the review document attached to #45.
   point (`Points3DLayer.colors`) instead of a stepped 256-entry LUT, which kept at most 95
   categories apart and drew a wider column (e.g. `subclass`, 338) flat. The panel's "too many
   categories" note is gone with the limit (NAPARI-SVC-18, SPATIAL-11).
+- **Transcript icons are napari-js point symbols**: one points layer with a symbol per point and
+  its border as the rim, instead of polygons triangulated on the CPU (up to 400k × 3–12
+  vertices) plus a second outline layer. The same ten shapes; the circle is a true disc, the rim
+  is drawn inside the icon, and an icon outside any cell type takes the circles' translucent grey
+  (NAPARI-BOUNDARY-25).
 
 ### Refactored
 

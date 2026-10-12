@@ -3,8 +3,7 @@ import type { Layer, ShapesLayer, Viewer } from 'napari-js';
 import type { SpatialPolygons } from '../../../contracts/spatial-dataset.contract';
 
 /** The layer groups of the 2D spatial tile view. */
-export type TileGroup =
-  'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts' | 'transcriptOutline';
+export type TileGroup = 'density' | 'cellFill' | 'cellOutline' | 'nucleusOutline' | 'transcripts';
 
 /**
  * Bottom to top: cell fill, cell outline, nucleus outline, the transcript density, then the
@@ -17,7 +16,6 @@ export const TILE_LAYER_ORDER: readonly TileGroup[] = [
   'nucleusOutline',
   'density',
   'transcripts',
-  'transcriptOutline',
 ];
 
 /**

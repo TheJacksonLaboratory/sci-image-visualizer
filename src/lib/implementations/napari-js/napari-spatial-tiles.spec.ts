@@ -1,6 +1,8 @@
-import { Viewer } from 'napari-js';
-import type { ShapesLayer } from 'napari-js';
+import { Viewer, pointSymbolCode, pointSymbolDistance } from 'napari-js';
+import type { PointsLayer, ShapesLayer } from 'napari-js';
+import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
+import type { TranscriptGlyphName } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
   SpatialDataset,
@@ -8,9 +10,11 @@ import {
   SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
 import { densityAutoRange } from '../../spatial/density-raster';
+import { TRANSCRIPT_GLYPHS, glyphOutline } from '../../spatial/glyphs';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
+import { GLYPH_SYMBOLS } from './spatial-tiles/transcript-layers';
 
 /** A minimal valid continuous LUT: napari-js's colormapFromLut rejects fewer than two rows. */
 const LUT: [number, number, number][] = [
@@ -343,6 +347,92 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
   });
 });
 
+describe('NapariSpatialTileLayers: transcript icons', () => {
+  /** Four transcripts, genes G0 (star) and G1 (square), drawn as icons at `zoom` px per unit. */
+  async function drawIcons(zoom: number, patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const tile: SpatialTranscriptTile = {
+      count: 4,
+      aggregated: false,
+      x: Float32Array.of(1, 2, 3, 4),
+      y: Float32Array.of(1, 1, 1, 1),
+      z: new Float32Array(4),
+      weight: new Uint32Array(4).fill(1),
+      observation: new Uint32Array(4),
+      gene: Uint16Array.of(0, 1, 0, 1),
+    };
+    const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
+      transcriptTiles: { bounds: [0, 0, 10, 10], count: 4, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'glyphs' as const,
+      transcriptGenes: ['G0', 'G1'],
+      transcriptGlyphs: { G0: 'star', G1: 'square' } as Record<string, TranscriptGlyphName>,
+      ...patch,
+    };
+    const viewer = viewerAt([2, 1], zoom);
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewer);
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    const layers = [...viewer.layers.items];
+    tiles.detach();
+    return layers;
+  }
+
+  it('draws every icon in one points layer, as per-point napari symbols', async () => {
+    // It was a shapes layer of polygons expanded on the CPU, plus a second outline layer.
+    const layers = await drawIcons(20);
+    expect(layers.map((l) => l.kind)).toEqual(['points']);
+    const points = layers[0] as PointsLayer;
+    expect(points.name).toBe('transcripts');
+    const [star, square] = [pointSymbolCode('star'), pointSymbolCode('square')];
+    expect(Array.from(points.symbols!)).toEqual([star, square, star, square]);
+    // napari's square fills the marker box; the icon was 0.8 of it.
+    expect(points.sizeAt(1) / points.sizeAt(0)).toBeCloseTo(0.8, 6);
+  });
+
+  it('gives every gene one icon when all genes are drawn', async () => {
+    const layers = await drawIcons(20, { transcriptAllGenes: true, transcriptGlyphs: { [ALL_GENES]: 'x' } });
+    const points = layers[0] as PointsLayer;
+    expect(new Set(points.symbols)).toEqual(new Set([pointSymbolCode('x')]));
+  });
+
+  it('rims a few large icons one screen pixel wide, and leaves small ones unrimmed', async () => {
+    // Markers 3 × 4 px across: over the 8 px a rim needs. Its width is in data units.
+    const big = (await drawIcons(20, { transcriptScale: 3 }))[0] as PointsLayer;
+    expect(big.borderWidth).toBeCloseTo(1 / 20, 6);
+    // At the 4 px minimum, a rim would be most of the marker.
+    const small = (await drawIcons(20))[0] as PointsLayer;
+    expect(small.borderWidth).toBe(0);
+  });
+
+  it('maps each icon onto the napari symbol of the same outline', () => {
+    // The panel previews `glyphOutline`; the canvas draws the symbol. Every vertex of the
+    // preview (scaled like the marker) lies on the symbol's edge, so the two read the same.
+    for (const glyph of TRANSCRIPT_GLYPHS) {
+      const code = pointSymbolCode(GLYPH_SYMBOLS[glyph]);
+      const scale = glyph === 'square' ? 0.8 : 1;
+      const o = glyphOutline(glyph);
+      for (let i = 0; i < o.length; i += 2) {
+        expect([glyph, pointSymbolDistance(code, o[i] / scale, o[i + 1] / scale)]).toEqual([
+          glyph,
+          expect.closeTo(1, 1),
+        ]);
+      }
+    }
+  });
+});
+
 describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid levels', () => {
   function setup(zoom: number, budget: number, quality: 'high' | 'all' = 'high') {
     // Two genes, one cluster, spread over a 100 × 100 area; each level's tile holds its bins.
@@ -511,7 +601,7 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     v: unknown,
     t: SpatialTranscriptTile,
     c?: (i: number) => string | null,
-  ) => Promise<{ rgba: Float32Array }>;
+  ) => Promise<Float32Array>;
 
   it('gives a cluster one colour, the colour of the cell group of the same name', async () => {
     const meta = {
@@ -534,7 +624,7 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
     const clusters = ['Cluster 2', 'Cluster 2', 'Cluster 1', 'Mine'];
     const transcripts = transcriptsOf<{ transcriptColors: Colors }>(tiles);
     const colors = transcripts.transcriptColors.bind(transcripts);
-    const { rgba: packed } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
+    const packed = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
     const rgba = (i: number) => Array.from(packed.subarray(i * 4, i * 4 + 4));
     expect(rgba(0)).toEqual(rgba(1)); // genes 0 and 1: one cluster, one colour
     expect(rgba(0)).toEqual([0, 1, 0, 1]); // Cluster 2's cells are green
