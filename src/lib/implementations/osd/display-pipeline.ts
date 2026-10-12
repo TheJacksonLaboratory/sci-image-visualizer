@@ -127,32 +127,41 @@ export class DisplayPipeline {
    * Additive ('lighter') merge of single-band channel planes into one opaque
    * RGBA image — what OSD's drawer shows for a per-channel image, where each
    * channel tile is tinted by {@link channelRgbLut}. Hidden channels, missing
-   * planes and planes of another size contribute nothing. Used by the
-   * serverless multichannel compositor and the multichannel composite export.
+   * planes and planes of another size contribute nothing. A plane is RGBA
+   * (`bands` 4, R=G=B, transparent pixels skipped) or one byte per pixel
+   * (`bands` 1). Used by the serverless multichannel compositor, the
+   * multichannel composite export and the Plotly image's channel display.
    */
   compositeChannels(
-    planes: ReadonlyArray<Uint8ClampedArray | null | undefined>,
+    planes: ReadonlyArray<Uint8ClampedArray | Uint8Array | null | undefined>,
     states: ReadonlyArray<IChannelState | undefined>,
+    bands: 1 | 4 = 4,
   ): Uint8ClampedArray {
     const len = planes.find((p) => p && p.length)?.length ?? 0;
-    const out = new Uint8ClampedArray(len);
+    const out = new Uint8ClampedArray((len / bands) * 4);
     for (let c = 0; c < planes.length; c++) {
       const st = states[c];
       const pd = planes[c];
       if ((st && st.visible === false) || !pd || pd.length !== len) continue;
-      this.addChannel(out, pd, st);
+      this.addChannel(out, pd, st, bands);
     }
     for (let i = 3; i < out.length; i += 4) out[i] = 255; // opaque
     return out;
   }
 
-  /** Add one single-band plane, tinted by its channel state, onto `out`
+  /** Add one single-band plane (RGBA or one byte per pixel, see
+   *  {@link compositeChannels}), tinted by its channel state, onto `out`
    *  (Uint8ClampedArray clamps → additive 'lighter'). */
-  addChannel(out: Uint8ClampedArray, plane: Uint8ClampedArray, st?: IChannelState): void {
+  addChannel(
+    out: Uint8ClampedArray,
+    plane: Uint8ClampedArray | Uint8Array,
+    st?: IChannelState,
+    bands: 1 | 4 = 4,
+  ): void {
     const { r, g, b } = this.channelRgbLut(st);
-    for (let i = 0; i < out.length; i += 4) {
-      if (plane[i + 3] === 0) continue;
-      const lum = plane[i]; // single-band plane (R=G=B)
+    for (let i = 0, p = 0; i < out.length; i += 4, p += bands) {
+      if (bands === 4 && plane[p + 3] === 0) continue;
+      const lum = plane[p]; // single-band plane (R=G=B)
       out[i] += r[lum];
       out[i + 1] += g[lum];
       out[i + 2] += b[lum];

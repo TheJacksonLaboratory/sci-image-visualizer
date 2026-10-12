@@ -6,6 +6,7 @@ import { Buffer } from 'buffer';
 import { IImageInfo } from '../../contracts/image.contract';
 import { PlotUtilities } from '../../plot.utilities';
 import { firstValueFromAbortable, throwIfAborted } from '../tile-server/transport';
+import { channelPlaneUrls } from './plotly-image-recolor';
 
 /** Parallel slice fetches when loading a stack (cf. napari's volume fetch pool). */
 const PLOTLY_STACK_FETCH_CONCURRENCY = 4;
@@ -19,6 +20,9 @@ export interface PlotlyLoaded {
   /** [width, height] of a decoded slice. */
   sizes: number[];
   filename: string | undefined;
+  /** A serverless multichannel stack's raw channel planes (one byte per pixel), per loaded
+   *  slice (aligned with `data`) and channel — what its `image` trace is composited from. */
+  channelPlanes?: Uint8Array[][];
 }
 
 /**
@@ -58,15 +62,24 @@ export class PlotlyImageLoader {
   ): Promise<PlotlyLoaded> {
     const urls = imageInfo.urls;
     const isGrayscale = imageInfo.isGrayscale;
+    const chUrls = channelPlaneUrls(imageInfo);
+    const planesOf = (z: number) => this.loadChannelPlanes(chUrls?.[z] ?? chUrls?.[0] ?? [], signal);
     const image = await this.loadImage(zIndex ? urls[zIndex] : urls[0], signal);
     const ratios = [imageInfo.trueImageSize[0] / image.width, imageInfo.trueImageSize[1] / image.height];
     const sizes = [image.width, image.height];
     onProbe();
     if (!(imageInfo.isStack && imageInfo.showStack)) {
-      return { data: [this.toMatrix(image, !!isGrayscale)], ratios, sizes, filename: imageInfo.fileName };
+      return {
+        data: [this.toMatrix(image, !!isGrayscale)],
+        ratios,
+        sizes,
+        filename: imageInfo.fileName,
+        ...(chUrls ? { channelPlanes: [await planesOf(zIndex || 0)] } : {}),
+      };
     }
     const wanted = () => stillWanted() && this.stackLoading$.value && !signal?.aborted;
     const images: any[] = new Array(urls.length);
+    const planes: Uint8Array[][] = new Array(urls.length);
     let next = 0;
     let loaded = 0;
     this.stackLoadingProgress$.next(0);
@@ -75,6 +88,7 @@ export class PlotlyImageLoader {
       while (next < urls.length && wanted()) {
         const i = next++;
         images[i] = this.toMatrix(await this.loadImage(urls[i], signal), !!isGrayscale);
+        if (chUrls) planes[i] = await planesOf(i);
         this.stackLoadingProgress$.next(Math.round((++loaded * 100) / urls.length));
       }
     };
@@ -88,8 +102,27 @@ export class PlotlyImageLoader {
     throwIfAborted(signal);
     const firstGap = images.findIndex((m) => m === undefined);
     if (firstGap >= 0) images.length = firstGap;
+    planes.length = images.length;
     this.stackLoadingProgress$.next(0);
-    return { data: images, ratios, sizes, filename: imageInfo.fileName };
+    return {
+      data: images,
+      ratios,
+      sizes,
+      filename: imageInfo.fileName,
+      ...(chUrls ? { channelPlanes: planes } : {}),
+    };
+  }
+
+  /** A slice's channel planes (`channelUrls[z]`), fetched in parallel and decoded to one byte per
+   *  pixel (a 16-bit plane to its high byte, as a canvas decodes it for OSD). */
+  private loadChannelPlanes(urls: string[], signal?: AbortSignal): Promise<Uint8Array[]> {
+    return Promise.all(
+      urls.map(async (url) => {
+        const grey = (await this.loadImage(url, signal)).grey();
+        const data = grey.data as ArrayLike<number>;
+        return grey.bitDepth === 16 ? Uint8Array.from(data, (v) => v >> 8) : Uint8Array.from(data);
+      }),
+    );
   }
 
   private toMatrix(img: any, isGrayscale: boolean): any[] {

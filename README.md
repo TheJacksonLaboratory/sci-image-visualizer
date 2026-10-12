@@ -312,7 +312,9 @@ inherit the color of the rectangle they came from.
 A floating **Channels & Histogram** dialog controls how intensities are mapped to
 display: **brightness / contrast / gamma**, **per-channel** display for
 multi-channel images, and — for grayscale — **colormap / LUT** selection with a
-**reverse** toggle (default: inverted greys). Changes apply live in both backends.
+**reverse** toggle (default: inverted greys). Changes apply live on every backend: OSD, napari-js
+and the Plotly heatmap. (A tiled multichannel image's heatmap is the server's flat composite
+preview, so its channels are adjusted in the OSD and napari-js image views.)
 
 ## Region editor (Regions panel)
 

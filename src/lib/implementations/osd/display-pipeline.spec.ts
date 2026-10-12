@@ -219,6 +219,26 @@ describe('DisplayPipeline', () => {
     expect(Array.from(out)).toEqual([100, 0, 50, 255]);
   });
 
+  it('compositeChannels takes one-byte-per-pixel planes as it takes RGBA ones', () => {
+    const { pipe } = makePipeline({ gray: false });
+    const states = [
+      ch({ color: '#ff0000', max: 200 }),
+      ch({ color: '#00ff00', gamma: 2 }),
+      ch({ color: '#0000ff' }),
+    ];
+    const out = pipe.compositeChannels(
+      [new Uint8Array([100, 7]), new Uint8Array([200, 8]), new Uint8Array([50, 9])],
+      states,
+      1,
+    );
+    const rgbaOut = pipe.compositeChannels(
+      [rgba([100, 100, 100], [7, 7, 7]), rgba([200, 200, 200], [8, 8, 8]), rgba([50, 50, 50], [9, 9, 9])],
+      states,
+    );
+    expect(Array.from(out)).toEqual(Array.from(rgbaOut));
+    expect(out).toHaveLength(8);
+  });
+
   it('compositeChannels skips missing or mis-sized planes', () => {
     const { pipe } = makePipeline({ gray: false });
     const out = pipe.compositeChannels(

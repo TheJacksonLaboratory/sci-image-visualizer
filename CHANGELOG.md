@@ -117,6 +117,13 @@ CORE-1) refer to the review document attached to #45.
   recoloured screen).
 - **napari multichannel images had grey blacks**: the additive channel layers added onto the
   viewer's dark-grey background; they now merge onto black, as on OSD and Plotly.
+- **The Plotly heatmap of a multichannel or RGB image ignored the Channels & Histogram dialog**
+  (it applied only the first channel's window, which an RGB `image` trace has no use for). It is
+  now composited per channel by OSD's display pipeline from the raw pixels — a serverless stack
+  from its `channelUrls` planes, with each channel's own histogram — and drawn as a PNG `source`
+  (~60 ms per edit for a 1-megapixel slice; Plotly paints a `z` image pixel by pixel, ~0.7 s).
+  The pixel tools, profiles and histograms keep reading the raw pixels. A tiled multichannel
+  image's heatmap is still the server's flat composite preview.
 - **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
   was recoloured again as an RGB image, so an inverted stack drew black.
 

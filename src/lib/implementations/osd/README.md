@@ -21,7 +21,7 @@ a z-stack slice cache, and a serverless "simple" mode.
 | `osd-navigator-chrome.ts` | `OsdNavigatorChrome`: navigator sizing/visibility, smoothing, fit-as-layout-settles, the toolbar repaint nudge. |
 | `osd-pixel-readback.ts`, `osd-export.ts` | Pure: the drawer-canvas reads (the tools' packed frame, the PNG snapshot); the composite PNG and TIFF exports. |
 | `slice-cache.ts` | Stack slices as separate TiledImages (opacity toggle on z-scrub), per-channel image groups, LRU sizing and the background preloader. |
-| `display-pipeline.ts` | Pure pixel math: window/gamma/invert/colormap for grayscale and RGB, per-channel tint LUTs and the additive channel merge. Shared by tile recoloring, the serverless compositor and the composite export. |
+| `display-pipeline.ts` | Pure pixel math: window/gamma/invert/colormap for grayscale and RGB, per-channel tint LUTs and the additive channel merge. Shared by tile recoloring, the serverless compositor, the composite export, the Plotly image's channel display and napari-js's RGB check (`rgbNeedsRecolor`). |
 | `histogram-sampler.ts` | Per-slice 8-bit histograms and the grayscale auto-window from sampled tiles, plus native-bit-depth histograms from `/histogram`. Generation-guarded against image switches. |
 | `tile-client.ts` | The tile fetch → decode → RGBA helpers (the `/tile` URL shape is re-exported from the shared `../tile-server/` jit-service client, which also owns the `/tiles/info` poll, `/histogram` and `/export/tiff`). |
 | `osd-region-overlay.ts` | The SVG region overlay: draws the shared `RegionStore`'s regions, and drawing, selection and edit gestures. |

@@ -51,7 +51,14 @@ import { PlotlyIsosurfaceControls } from './plotly-isosurface-controls';
 import { PlotlyShapeProjection } from './plotly-shape-projection';
 import { PlotlyZoomController } from './plotly-zoom-controller';
 import { PlotlyImageLoader, PlotlyLoaded } from './plotly-image-loader';
-import { axesSourceRect, channelDisplayRestyle, frameHistogram, tracePixels } from './plotly-readback';
+import {
+  axesSourceRect,
+  channelDisplayRestyle,
+  frameHistogram,
+  planeHistogram,
+  tracePixels,
+} from './plotly-readback';
+import { PlotlyImageRecolor, recolorKind } from './plotly-image-recolor';
 import { renderIntensityInset as renderPlotlyIntensityInset } from './plotly-intensity-inset';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
@@ -128,6 +135,21 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   private cachedImageHeight = 0;
   private cachedImageRatios: number[] = [1, 1];
   private cachedIsGrayscale = false;
+  /** A serverless multichannel stack's raw channel planes, per loaded slice: the channels'
+   *  histograms, and what its `image` trace is composited from. */
+  private cachedChannelPlanes?: Uint8Array[][];
+  /** The channel display of a colour image's `image` traces (see PlotlyImageRecolor). */
+  private readonly recolor = new PlotlyImageRecolor({
+    channelStates: () => this.store.currentChannelStates(),
+    invert: () => this.store.currentInvert(),
+  });
+  /** The pending per-frame recolour (requestAnimationFrame handle), if any. */
+  private recolorFrame: number | null = null;
+  /** A recoloured slice is being encoded; `recolorAgain`: an edit came in meanwhile. */
+  private recoloring = false;
+  private recolorAgain = false;
+  /** Recolours the slice a stack's slider brings on screen. */
+  private onSliderChange: (event: { slider?: { active?: unknown } } | undefined) => void;
   /** Data-space coordinate of the cached frame's pixel (0,0). [0,0] for the full
    *  image; a crop's top-left after a high-def zoom (so the tools sample the
    *  zoom-level pixels at the right offset/resolution). */
@@ -214,6 +236,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.onRelayoutEvent = (event: any) => {
       this.relayoutEventHandler(event);
     };
+    this.onSliderChange = (event) => {
+      const active = event?.slider?.active;
+      void this.recolorShownFrame(typeof active === 'number' ? active : this.activeFrameIndex());
+    };
 
     // The canvas tools read/mutate our state through one host, and this backend
     // owns its own tool instances (RT-21) — nothing to re-bind on activation.
@@ -259,8 +285,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     });
     // Live recolor from the Channels & Histogram pane: restyle the display window (zmin/zmax for
     // a heatmap, cmin/cmax for isosurface/surface), the colorscale (colormap), and reverse/invert
-    // when the channel state OR the colormap changes. (Gamma is applied by the OSD image view; the
-    // Plotly colorscale window covers the common contrast case.)
+    // when the channel state OR the colormap changes. A colour (RGB / multichannel) image's
+    // `image` trace has no colour scale: it is recomposited per channel instead (applyChannelDisplay).
     this.channelSub = combineLatest([
       this.store.getChannelStates(),
       this.store.getReverseScale(),
@@ -330,6 +356,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.cachedImageRatios = imageLoaded.ratios;
     this.cachedFrameOrigin = [0, 0]; // full image — reset any prior zoom-crop origin
     this.cachedIsGrayscale = !!imageInfo.isGrayscale;
+    this.cachedChannelPlanes = imageLoaded.channelPlanes;
     // The profiles sample the image on screen from now on (superseding any
     // sampling fetch still in flight for the previous one).
     this.intensity.supersede();
@@ -391,6 +418,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       imageLoaded.sizes[1],
       screenHeight,
       inPlace,
+      imageLoaded.channelPlanes,
     );
   }
 
@@ -404,6 +432,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     screenHeight: number,
     inPlace: boolean = false,
   ): Promise<boolean> {
+    this.recolor.clear();
     const traces = buildHeatmapTraces(
       images,
       trueImgSize,
@@ -425,6 +454,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     screenHeight: number,
     inPlace: boolean = false,
   ): Promise<boolean> {
+    this.recolor.clear();
     const traces = buildSurfaceTraces(
       images,
       this.store.currentColormap().data.value,
@@ -443,8 +473,10 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     );
   }
 
-  /** RGB image, one trace per z-plane. */
-  private plotRGBHeatmap(
+  /** RGB image, one trace per z-plane, in the current channel display: `images` are the raw
+   *  frames, `planes` a serverless multichannel stack's raw channel planes per frame. An image
+   *  that follows the channel states draws a `source` per slice (see PlotlyImageRecolor). */
+  private async plotRGBHeatmap(
     plotDiv: string,
     urls: string[],
     images: any[],
@@ -454,9 +486,20 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     height: number,
     screenHeight: number,
     inPlace: boolean = false,
+    planes?: Uint8Array[][],
   ): Promise<boolean> {
+    const render = this.renderGen;
+    let sources: string[] | null = null;
+    try {
+      sources = await this.recolor.plot(recolorKind(this.imageInfo, !!planes?.length), images, planes);
+    } catch (err) {
+      console.warn('[plotly] channel display unavailable; drawing the image as it is', err);
+      this.recolor.clear();
+    }
+    // A newer render took the plot over while the slices were encoded: it draws instead.
+    if (render !== this.renderGen) return true;
     // As autorange is off and the axis not reversed, the y range is set here.
-    const traces = buildRgbImageTraces(images, trueImgSize, ratios, width, height);
+    const traces = buildRgbImageTraces(images, trueImgSize, ratios, width, height, sources ?? undefined);
     const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
     return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, false);
   }
@@ -542,6 +585,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     screenHeight: number,
     inPlace: boolean = false,
   ): Promise<boolean> {
+    this.recolor.clear();
     const [x0, x1, y0, y1] = input.trueImageSize;
     const layout = (): any => {
       switch (impl.layoutKind) {
@@ -662,6 +706,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       // (Plotly.react keeps the emitter) used to add another handler.
       plot.removeListener?.('plotly_relayout', this.onRelayoutEvent);
       plot.on('plotly_relayout', this.onRelayoutEvent);
+      plot.removeListener?.('plotly_sliderchange', this.onSliderChange);
+      plot.on('plotly_sliderchange', this.onSliderChange);
 
       // Clicking on a shape activates it but Plotly doesn't fire a dedicated
       // event — sample _activeShapeIndex on the next microtask so subscribers
@@ -920,7 +966,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public getDisplayedPixelData(): PixelData | null {
     const gd: any = this.plotDiv ? document.getElementById(this.plotDiv) : null;
     if (!gd?.data || gd.data.length === 0) return null;
-    return tracePixels(gd.data[this.activeFrameIndex()] || gd.data[0]);
+    const index = gd.data[this.activeFrameIndex()] ? this.activeFrameIndex() : 0;
+    // A trace drawn from a `source` has no `z`: its pixels are the channel display's.
+    return tracePixels(gd.data[index]) ?? this.recolor.displayedPixels(index);
   }
 
   /** The image rect the displayed `z` grid covers, in full-image pixel coords —
@@ -933,6 +981,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
 
   public reset() {
     this.renderGen++;
+    this.recolor.clear();
     this.intensity.supersede();
     if (this.plotDiv) {
       Plotly.newPlot(this.plotDiv, [], this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
@@ -946,6 +995,7 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    */
   public purgePlot() {
     this.renderGen++;
+    this.recolor.clear();
     if (this.plotDiv) {
       Plotly.purge(this.plotDiv);
     }
@@ -1042,13 +1092,20 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.filenameSubscription = undefined;
     this.channelSub?.unsubscribe();
     this.channelSub = undefined;
+    if (this.recolorFrame != null) cancelAnimationFrame(this.recolorFrame);
+    this.recolorFrame = null;
   }
 
   /** Live-apply the channel display window (zmin/zmax) + reverse/invert to the
-   *  heatmap. No-op when no Plotly plot is mounted (OSD owns the div). */
+   *  heatmap — or, for a colour image's `image` trace, recomposite it per channel
+   *  (PlotlyImageRecolor). No-op when no Plotly plot is mounted (OSD owns the div). */
   private applyChannelDisplay(channels: any[], rev: boolean, inv: boolean): void {
     const gd = this.liveGd();
     if (!gd) return;
+    if (this.recolor.active) {
+      this.scheduleRecolor();
+      return;
+    }
     void Plotly.restyle(
       gd,
       channelDisplayRestyle(
@@ -1061,11 +1118,51 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     );
   }
 
+  /**
+   * Recolour the slice on screen on the next frame: a slider drag in the dialog
+   * emits per step, and coalescing them keeps one recomposite per frame — and
+   * none while the previous one is still encoding (see recolorShownFrame).
+   */
+  private scheduleRecolor(): void {
+    if (this.recolorFrame != null) return;
+    this.recolorFrame = requestAnimationFrame(() => {
+      this.recolorFrame = null;
+      void this.recolorShownFrame(this.activeFrameIndex());
+    });
+  }
+
+  /** Restyle trace `index`'s `source` into the current channel display, unless it shows it
+   *  already. One picture at a time: an edit made while one encodes is drawn after it, in the
+   *  state current by then. */
+  private async recolorShownFrame(index: number): Promise<void> {
+    if (this.recoloring) {
+      this.recolorAgain = true;
+      return;
+    }
+    this.recoloring = true;
+    try {
+      const source = await this.recolor.frame(index);
+      const gd = this.liveGd();
+      if (source && gd) await Plotly.restyle(gd, { source: [source] } as Plotly.Data, [index]);
+    } catch (err) {
+      console.warn('[plotly] channel display update failed', err);
+    } finally {
+      this.recoloring = false;
+    }
+    if (this.recolorAgain) {
+      this.recolorAgain = false;
+      void this.recolorShownFrame(this.activeFrameIndex());
+    }
+  }
+
   /** Binned intensity histogram for a channel from the cached source frames
-   *  (raw, pre-LUT). Grayscale cells are numbers; RGB cells are [r,g,b]. */
+   *  (raw, pre-LUT). Grayscale cells are numbers; RGB cells are [r,g,b]; a
+   *  serverless multichannel stack bins the channel's own raw plane. */
   getHistogram(channelIndex: number, _bins: number): IHistogram | null {
     const frames = this.cachedImageFrames;
     if (!frames?.length) return null;
+    const plane = this.cachedChannelPlanes?.[this.activeFrameIndex()]?.[channelIndex];
+    if (plane) return planeHistogram(plane);
     const frame = frames[this.activeFrameIndex()] ?? frames[0];
     if (!frame?.length) return null;
     return frameHistogram(frame, channelIndex);

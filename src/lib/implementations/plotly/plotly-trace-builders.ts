@@ -290,13 +290,16 @@ export function buildSurfaceTraces(frames: any[], colorscale: unknown, reversesc
   return frames.map((z) => ({ z, type: 'surface', colorscale, reversescale }));
 }
 
-/** One RGB `image` trace per z-plane (width × height pixels), only the first visible. */
+/** One RGB `image` trace per z-plane (width × height pixels), only the first visible. With
+ *  `sources`, each plane draws its PNG data URI instead of its `z` cells (the browser draws it;
+ *  Plotly paints `z` one rectangle per pixel). */
 export function buildRgbImageTraces(
   frames: any[],
   trueImgSize: number[],
   ratios: number[],
   width: number,
   height: number,
+  sources?: string[],
 ): any[] {
   return frames.map((z, index) => ({
     x0: trueImgSize[0],
@@ -305,7 +308,7 @@ export function buildRgbImageTraces(
     dy: ratios[0],
     x: Array.from(Array(width).keys()),
     y: Array.from(Array(height).keys()),
-    z,
+    ...(sources ? { source: sources[index] } : { z }),
     hoverinfo: 'none', // no per-cell hover text: too slow for every pixel
     type: 'image',
     name: `Slice ${index + 1}`,

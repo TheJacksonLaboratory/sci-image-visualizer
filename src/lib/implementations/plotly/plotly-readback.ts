@@ -66,6 +66,13 @@ export function frameHistogram(frame: any[], channelIndex: number): IHistogram {
   return histogram256(counts);
 }
 
+/** 256-bin histogram of a one-byte-per-pixel plane (a channel's raw pixels). */
+export function planeHistogram(plane: ArrayLike<number>): IHistogram {
+  const counts = new Array(256).fill(0);
+  for (let i = 0; i < plane.length; i++) counts[plane[i]]++;
+  return histogram256(counts);
+}
+
 type Rect = { x: number; y: number; width: number; height: number };
 
 /**
