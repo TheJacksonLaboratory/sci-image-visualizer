@@ -1,5 +1,5 @@
-import { Colormap, colormapFromLut } from 'napari-js';
-import type { RGBA } from 'napari-js';
+import { colormapFromLut } from 'napari-js';
+import type { Colormap, RGBA } from 'napari-js';
 
 import type { Rgb } from '../../../contracts/colormap-lut';
 import type { SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
@@ -30,7 +30,6 @@ import {
   tilesInRect,
   typicalCellDiameter,
 } from '../../../spatial/lod';
-import { discreteColormapStops } from '../../../spatial/density-raster';
 import { filterRings, mergePolygonTiles } from '../../../spatial/spatial-tile-merge';
 import { ContrastWindowCache } from '../napari-spatial-encoding';
 import type { CategoricalLookup, HiddenCodes } from './categorical-lookup';
@@ -195,15 +194,22 @@ export class CellLayers {
   }
 
   /**
-   * Per-shape values + colormap for the rings' owners, by the view's cell-colour mode
-   * (Xenium Explorer's "Cell Color"). A selection mutes what it leaves out.
+   * The rings' colours by their owners, by the view's cell-colour mode (Xenium Explorer's "Cell
+   * Color"): one RGBA per shape for a grouping, values + colormap for a measurement, one colour
+   * for "single". A selection mutes what it leaves out.
    */
   private async cellColors(
     dataset: SpatialDataset,
     view: SpatialViewState,
     selection: SpatialSelectionMask,
     owners: Uint32Array,
-  ): Promise<{ values?: Float32Array; colormap?: Colormap; contrastLimits?: [number, number]; color?: RGBA }> {
+  ): Promise<{
+    values?: Float32Array;
+    colormap?: Colormap;
+    contrastLimits?: [number, number];
+    color?: RGBA;
+    faceColor?: Float32Array;
+  }> {
     const muted = selection.count > 0 ? selection.mask : null;
     const mode = view.cellColorMode;
 
@@ -242,26 +248,17 @@ export class CellLayers {
         ? 'segmentation_method'
         : cellTypeColumnFor(dataset, view);
     const codes = name ? await this.lookup.codes(name) : null;
-    const { colormap, valueOf } = this.categoricalColormap(codes?.meta ?? null);
-    const values = new Float32Array(owners.length);
+    const palette = categoryRgba(codes?.meta ?? null);
+    const missing = rgba01(MISSING_COLOR);
+    // One RGBA per shape (napari Shapes' `face_color`): any number of categories keeps its own
+    // colour, where a colormap band per category ran out of LUT entries past ~127.
+    const faceColor = new Float32Array(owners.length * 4);
     for (let i = 0; i < owners.length; i++) {
       const o = owners[i];
-      const code = !codes || (muted && !muted[o]) ? -1 : codes.codes[o];
-      values[i] = valueOf(code === NO_CATEGORY ? -1 : code);
+      const code = !codes || (muted && !muted[o]) ? NO_CATEGORY : codes.codes[o];
+      faceColor.set(palette[code] ?? missing, i * 4);
     }
-    return { values, colormap, contrastLimits: [0, 1] };
-  }
-
-  private categoricalColormap(meta: SpatialColumn['meta'] | null): {
-    colormap: Colormap;
-    valueOf: (code: number) => number;
-    rgb: Rgb[];
-  } {
-    const hex =
-      meta && meta.kind === 'categorical' ? resolveCategoryColors(meta) : [DEFAULT_CATEGORICAL_PALETTE[0]];
-    const rgb = hex.map(parseHex);
-    const { stops, valueOf } = discreteColormapStops(rgb, MISSING_COLOR);
-    return { colormap: new Colormap('spatial-categories', stops), valueOf, rgb };
+    return { faceColor };
   }
 
   /**
@@ -340,4 +337,15 @@ export class CellLayers {
     this.polygonsShown = shown;
     this.host.polygonsShownChanged(shown);
   }
+}
+
+/** An 8-bit RGB as an opaque 0..1 RGBA. */
+function rgba01([r, g, b]: readonly [number, number, number]): RGBA {
+  return [r / 255, g / 255, b / 255, 1];
+}
+
+/** A grouping's category colours, as 0..1 RGBA by category code (one default without a grouping). */
+function categoryRgba(meta: SpatialColumn['meta'] | null): RGBA[] {
+  const hex = meta && meta.kind === 'categorical' ? resolveCategoryColors(meta) : [DEFAULT_CATEGORICAL_PALETTE[0]];
+  return hex.map((h) => rgba01(parseHex(h)));
 }

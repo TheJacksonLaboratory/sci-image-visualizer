@@ -89,7 +89,7 @@ export class OrderedLayerGroups<G extends string> {
 
   /**
    * Put a shapes layer in place for `group`: a geometry change builds a new layer, a
-   * colour-only change mutates values/colormap on the existing one.
+   * colour-only change mutates the per-shape colours or values/colormap of the existing one.
    */
   upsertShapes(
     group: G,
@@ -104,6 +104,8 @@ export class OrderedLayerGroups<G extends string> {
     }
     const existing = this.layers.get(group) as ShapesLayer | undefined;
     if (existing && !geometryChanged && this.current!.layers.items.includes(existing)) {
+      // Per-shape colours win over values; clearing them hands the layer back to values/colormap.
+      existing.faceColor = opts.faceColor ?? null;
       // Flat colour has no values; clearing them is what switches the layer to `color`.
       existing.values = opts.values ?? null;
       if (opts.colormap) existing.colormap = opts.colormap;

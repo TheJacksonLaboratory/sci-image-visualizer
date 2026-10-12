@@ -4,7 +4,7 @@
  * @deprecated Kept for one release so existing imports keep working. Import from
  * `./lod` (level of detail, tiles in view), `./transcript-grouping` (grouping, marker
  * sizing, cluster colours), `./glyphs` (transcript icons) or `./density-raster` (density
- * window, categorical colormap stops) instead.
+ * window and scale) instead.
  */
 
 export * from './lod';

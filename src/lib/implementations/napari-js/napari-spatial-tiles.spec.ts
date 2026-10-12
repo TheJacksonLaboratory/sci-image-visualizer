@@ -1309,6 +1309,15 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
   });
 
   const count = (l: ShapesLayer) => l.offsets!.length - 1;
+  /** Group `code`'s colour as the layer is handed it: the column's own palette, 0..1 RGBA. */
+  const rgbaOf = (m: object, code: number) => {
+    const [r, g, b] = spatialEncoding.parseHex(
+      spatialEncoding.resolveCategoryColors(m as Parameters<typeof spatialEncoding.resolveCategoryColors>[0])[
+        code
+      ],
+    );
+    return Float32Array.of(r / 255, g / 255, b / 255, 1);
+  };
 
   function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
     const getPolygonTile = jest.fn(async () => rings());
@@ -1352,7 +1361,7 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     const setExpression = (v: Float32Array) => {
       expression = v;
     };
-    return { tiles, viewer, plan, setView, setExpression, addShapes, layers, getPolygonTile, shown };
+    return { tiles, viewer, plan, setView, setExpression, addShapes, layers, getPolygonTile, getColumn, shown };
   }
 
   it('fills the cells by group by default, and reports the outlines shown', async () => {
@@ -1360,7 +1369,9 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     await plan();
     expect(layers().map((l) => [l.name, l.draw])).toEqual([['cells', 'fill']]);
     expect(count(layers()[0])).toBe(2);
-    expect(layers()[0].values).not.toBeNull(); // coloured through the group colormap
+    // One RGBA per cell, its group's colour.
+    expect(layers()[0].colorMode()).toBe('faceColor');
+    expect(layers()[0].colorAt(1)).toEqual([...rgbaOf(meta, 1)]);
     expect(shown).toHaveBeenLastCalledWith(true);
     expect(tiles.outlinesShown).toBe(true);
     tiles.detach();
@@ -1370,7 +1381,7 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     const outline = setup({ cellDraw: 'outline' });
     await outline.plan();
     expect(outline.layers().map((l) => [l.name, l.draw])).toEqual([['cell outlines', 'outline']]);
-    expect(outline.layers()[0].values).not.toBeNull();
+    expect(outline.layers()[0].colorMode()).toBe('faceColor');
     outline.tiles.detach();
 
     const both = setup({ cellDraw: 'both' });
@@ -1384,6 +1395,38 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     expect(nuclei.layers().map((l) => l.name)).toEqual(['cells', 'nucleus outlines']);
     expect(nuclei.getPolygonTile.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['cell', 'nucleus']);
     nuclei.tiles.detach();
+  });
+
+  it('gives each of hundreds of groups its own colour (NAPARI-BOUNDARY-27)', async () => {
+    // Regression: a band per group in a 256-entry colormap LUT collided past ~127 groups, so
+    // neighbouring groups drew in one colour. Now every cell carries its own RGBA.
+    const n = 300;
+    const many = {
+      kind: 'categorical',
+      name: 'cluster',
+      categories: Array.from({ length: n }, (_v, i) => `c${i}`),
+      colors: Array.from({ length: n }, (_v, i) => `#${(0x203040 + i * 97).toString(16)}`),
+    };
+    const { tiles, plan, layers, getPolygonTile, getColumn, viewer } = setup();
+    getPolygonTile.mockResolvedValue({
+      count: n,
+      observation: Uint32Array.from({ length: n }, (_v, i) => i),
+      offsets: Uint32Array.from({ length: n + 1 }, (_v, i) => i * 4),
+      coords: Float32Array.from({ length: n * 8 }, (_v, k) => {
+        const i = k >> 3;
+        const corner = (k >> 1) & 3;
+        return k & 1 ? (corner >> 1) * 0.5 : i + (corner === 1 || corner === 2 ? 0.5 : 0);
+      }),
+    });
+    getColumn.mockResolvedValue({ meta: many, codes: Uint16Array.from({ length: n }, (_v, i) => i) } as never);
+    viewer.camera.set([150, 0], 4);
+    await plan();
+    const [fill] = layers();
+    expect(fill.colorMode()).toBe('faceColor');
+    const drawn = Array.from({ length: n }, (_v, i) => fill.colorAt(i).join());
+    expect(new Set(drawn).size).toBe(n);
+    expect(fill.colorAt(299)).toEqual([...rgbaOf(many, 299)]);
+    tiles.detach();
   });
 
   it("leaves a switched-off group's cells out of the geometry", async () => {
@@ -1404,7 +1447,9 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     expect(getPolygonTile).toHaveBeenCalledTimes(1);
     expect(layers()[0]).toBe(fill);
     expect(fill.opacity).toBe(0.2);
-    expect(fill.values).toBeNull(); // flat colour now
+    expect(fill.colorMode()).toBe('flat'); // flat colour now: per-shape colours and values cleared
+    expect(fill.faceColor).toBeNull();
+    expect(fill.values).toBeNull();
     expect(Array.from(fill.color)).toEqual([1, 0, 0, 1]);
     // An unchanged plan touches nothing.
     await plan();

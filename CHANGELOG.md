@@ -79,6 +79,9 @@ CORE-1) refer to the review document attached to #45.
   markers.
 - **napari 3D spatial: the density volumes ignored the invert setting**: they read it without
   following it, so they took whatever the previous scene left and a toggle never reached them.
+- **napari 2D cells coloured by a grouping of more than ~127 groups** drew neighbouring groups in
+  one colour (a band per group in a 256-entry colormap); each cell now carries its own colour,
+  napari-js 0.15's per-shape `faceColor` (NAPARI-BOUNDARY-27).
 
 ### Changed
 
