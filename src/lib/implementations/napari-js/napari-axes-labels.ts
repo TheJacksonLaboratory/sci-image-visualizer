@@ -4,7 +4,7 @@ import { projectPoint } from 'napari-js';
  * DOM text labels for the napari-js 3D axes gizmo (jit-ui#102). The {@link AxesLayer} draws the
  * axis lines/ticks/box in WebGPU; this overlay adds the crisp X/Y/Z + scale text on top, projected
  * with the 3D camera's view-projection so each label tracks its anchor as the volume orbits.
- * Mirrors the {@link NapariScaleBar} overlay pattern (absolute-positioned over the host, updated on
+ * Mirrors the scale bar's overlay pattern (absolute-positioned over the host, updated on
  * every `camera3d.changed`). Falls back to pixel/slice counts when no physical µm/pixel is known.
  */
 

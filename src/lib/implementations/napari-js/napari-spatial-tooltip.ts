@@ -1,6 +1,6 @@
 /**
  * Cursor tooltip naming the observation under the pointer, for the spatial-omics
- * views — the same overlay-in-the-host pattern as {@link NapariScaleBar}.
+ * views — the same overlay-in-the-host pattern as napari-js's `ScaleBarOverlay`.
  *
  * A 34-entry legend cannot be read back from a dot: several classes get similar
  * colours, and matching one to a swatch by eye is the job a tooltip removes. It

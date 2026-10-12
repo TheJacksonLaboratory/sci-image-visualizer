@@ -1,6 +1,7 @@
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
 import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
+import { ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import {
@@ -23,7 +24,6 @@ import {
 import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import { isAbortError } from '../tile-server';
-import { NapariScaleBar, ScaleBarCamera } from './napari-scale-bar';
 import {
   DensityGroup,
   GENE_MAP_SIGMA,
@@ -88,7 +88,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * reused buffers, with a screen index once the cloud is large enough.
    */
   private picker: PointPicker | null = null;
-  private scaleBar: NapariScaleBar | null = null;
+  private scaleBar: ScaleBarOverlay | null = null;
   /** Dataset the scale bar was built for. */
   private scaleBarKey: string | null = null;
   /** The density rasterisation and the 3D gene-map estimate in flight (off the main thread
@@ -159,7 +159,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.invertSub = null;
     this.densityLoads.cancel();
     this.geneMapLoads.cancel();
-    this.scaleBar?.destroy();
+    this.scaleBar?.dispose();
     this.scaleBar = null;
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
     // a teardown is ~45MB of retained heap for a scene that no longer exists.
@@ -204,27 +204,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * what a zoom moves towards, and where the eye is anyway. napari's own 3D scale bar works the
    * same way.
    *
-   * `NapariScaleBar` needs CSS px per world unit: at the pivot that is the reciprocal of
-   * `Camera3D.worldPerPixel` — the scale `Camera3D.pan` uses to track the cursor. The bar then
-   * converts through `micronsPerUnit`, and draws nothing at all when the dataset does not declare
-   * one, because a bar labelled in microns over unknown units would read as a measurement.
+   * napari-js's `ScaleBarOverlay` in `'3d'` mode measures there: CSS px per world unit is the
+   * reciprocal of `Camera3D.worldPerPixel` — the scale `Camera3D.pan` uses to track the cursor.
+   * The bar then converts through `micronsPerUnit`, and draws nothing at all when the dataset does
+   * not declare one, because a bar labelled in microns over unknown units would read as a
+   * measurement.
    */
   private installScaleBar(dataset: SpatialDataset | null): void {
-    this.scaleBar?.destroy();
+    this.scaleBar?.dispose();
     this.scaleBar = null;
     const micronsPerUnit = dataset?.micronsPerUnit;
     if (!micronsPerUnit || micronsPerUnit <= 0) return;
-
-    const canvas = this.ctx.canvas;
-    const cam = this.ctx.viewer.camera3d;
-    const shim: ScaleBarCamera = {
-      get zoom(): number {
-        const worldPerPx = cam.worldPerPixel(canvas?.clientHeight || canvas?.height || 0);
-        return worldPerPx > 0 ? 1 / worldPerPx : 0;
-      },
-      changed: cam.changed,
-    };
-    this.scaleBar = new NapariScaleBar(this.ctx.host, shim, micronsPerUnit);
+    this.scaleBar = new ScaleBarOverlay(this.ctx.host, this.ctx.viewer, {
+      unitPerWorld: micronsPerUnit,
+      mode: '3d',
+    });
   }
 
   /** (Re)build the 3D point cloud for the current dataset + view state. */

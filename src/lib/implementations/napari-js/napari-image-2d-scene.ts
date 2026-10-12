@@ -1,11 +1,11 @@
 import { Subscription } from 'rxjs';
 import { MultiChannelImageView, histogramScalar } from 'napari-js';
 import type { ChannelView, PointsLayer, TiledSource } from 'napari-js';
+import { ScaleBarOverlay } from 'napari-js/overlays';
 
 import { IChannelState, IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { TileDescriptor } from '../tile-server';
 import { regionCentroids } from '../region-centroids';
-import { NapariScaleBar } from './napari-scale-bar';
 import { NapariNavigator } from './napari-navigator';
 import { LumaPlane, tintFor, tintedComposite, toIHistogram, toNapariGamma, typedPlane } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -46,7 +46,7 @@ export class Image2dScene implements NapariScene {
   /** Latest-wins token for {@link refreshHistogramSamples}. */
   private histGen = 0;
   /** Physical scale bar overlay (null when the image has no µm/pixel). */
-  private scaleBar: NapariScaleBar | null = null;
+  private scaleBar: ScaleBarOverlay | null = null;
   /** Overview minimap (bottom-right), as OSD's navigator. */
   private navigator: NapariNavigator | null = null;
   /** Bumped per thumbnail request, so a slow one cannot overwrite a newer slice's. */
@@ -146,7 +146,7 @@ export class Image2dScene implements NapariScene {
   dispose(): void {
     this.displaySub?.unsubscribe();
     this.displaySub = null;
-    this.scaleBar?.destroy();
+    this.scaleBar?.dispose();
     this.scaleBar = null;
     this.navigator?.destroy();
     this.navigator = null;
@@ -386,14 +386,15 @@ export class Image2dScene implements NapariScene {
     }
   }
 
-  /** (Re)install the physical scale bar, sized from the image's µm/pixel (`/tiles/info` mppX,
-   *  falling back to the image metadata). No-op without a physical size. */
+  /** (Re)install the physical scale bar (napari-js's `ScaleBarOverlay` on the 2D camera's zoom),
+   *  sized from the image's µm/pixel (`/tiles/info` mppX, falling back to the image metadata).
+   *  No-op without a physical size. */
   installScaleBar(): void {
     const { ctx } = this;
-    this.scaleBar?.destroy();
+    this.scaleBar?.dispose();
     this.scaleBar = null;
     const mppX = ctx.tiles.mppX(ctx.info());
-    if (mppX > 0) this.scaleBar = new NapariScaleBar(ctx.host, ctx.viewer.camera, mppX);
+    if (mppX > 0) this.scaleBar = new ScaleBarOverlay(ctx.host, ctx.viewer, { unitPerWorld: mppX, mode: '2d' });
   }
 
   /**
