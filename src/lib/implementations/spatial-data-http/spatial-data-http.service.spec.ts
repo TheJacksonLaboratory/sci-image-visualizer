@@ -456,6 +456,40 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  describe('getTranscriptSummary', () => {
+    const url = (gene: string) => `${BASE}/spatial/visium-brain/transcript-summary?genes=${gene}`;
+    const ask = (gene: string) => service.getTranscriptSummary({ genes: [gene] });
+
+    it('keeps the summaries still being asked for: least recently USED goes first', async () => {
+      // The cache was FIFO: hovering one spot for a while still evicted it after 256 others
+      // (NAPARI-BOUNDARY-19).
+      await loadDataset();
+      const held = ask('held');
+      http.expectOne(url('held')).flush({ total: 1 });
+      await held;
+      for (let i = 0; i < 255; i++) {
+        void ask(`g${i}`);
+        http.expectOne(url(`g${i}`)).flush({ total: 0 });
+      }
+      await ask('held'); // a hit: now the most recently used
+      void ask('one-more'); // past 256: evicts the least recently used, g0
+      http.expectOne(url('one-more')).flush({ total: 0 });
+      await ask('held');
+      http.expectNone(url('held'));
+      void ask('g0');
+      http.expectOne(url('g0')).flush({ total: 0 });
+    });
+
+    it('forgets a failed summary, so the next ask retries', async () => {
+      await loadDataset();
+      const first = ask('x');
+      http.expectOne(url('x')).flush('down', { status: 500, statusText: 'Server Error' });
+      await expect(first).rejects.toBeTruthy();
+      void ask('x');
+      http.expectOne(url('x')).flush({ total: 2 });
+    });
+  });
+
   describe('getTranscriptGeneBins', () => {
     const withGeneBins = {
       ...MANIFEST,

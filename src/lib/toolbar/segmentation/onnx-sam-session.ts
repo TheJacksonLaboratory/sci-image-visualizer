@@ -1,3 +1,4 @@
+import { LruCache } from 'napari-js';
 import * as ort from 'onnxruntime-web';
 
 import { ISamSession, SamEmbedding, SamMaskResult, SamModelDef, SamPrompt } from '../../contracts/sam.contract';
@@ -34,7 +35,8 @@ export class OnnxSamSession implements ISamSession {
   private encoder: ort.InferenceSession | null = null;
   private decoder: ort.InferenceSession | null = null;
   private nextToken = 1;
-  private readonly embeddings = new Map<number, CoreEmbedding>();
+  /** The few most recently used embeddings, by token (one per recently viewed image). */
+  private readonly embeddings = new LruCache<CoreEmbedding, number>(3);
 
   async loadModel(model: SamModelDef, onProgress?: (fraction: number) => void): Promise<void> {
     if (!model.encoderUrl || !model.decoderUrl) {
@@ -81,7 +83,6 @@ export class OnnxSamSession implements ISamSession {
       const e = await runEncoder(this.encoder!, image.data, image.width, image.height, this.inputSize);
       const token = this.nextToken++;
       this.embeddings.set(token, e);
-      if (this.embeddings.size > 3) this.embeddings.delete(this.embeddings.keys().next().value as number);
       return {
         data: new Float32Array(0),
         dims: e.dims,

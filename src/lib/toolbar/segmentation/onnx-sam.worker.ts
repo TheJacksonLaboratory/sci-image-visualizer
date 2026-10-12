@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { LruCache } from 'napari-js';
 import * as ort from 'onnxruntime-web';
 
 import { fetchModel, runEncoder, runDecoder, type CoreEmbedding } from './sam-onnx-core';
@@ -22,7 +23,8 @@ let encoder: ort.InferenceSession | null = null;
 let decoder: ort.InferenceSession | null = null;
 let inputSize = 1024;
 let nextToken = 1;
-const embeddings = new Map<number, CoreEmbedding>();
+/** The few most recently used embeddings, by token (one per recently viewed image). */
+const embeddings = new LruCache<CoreEmbedding, number>(3);
 
 function post(msg: any, transfer: Transferable[] = []): void {
   (self as unknown as Worker).postMessage(msg, transfer);
@@ -55,8 +57,6 @@ async function onEmbed(msg: any): Promise<void> {
   const e = await runEncoder(encoder, data, msg.width, msg.height, inputSize);
   const token = nextToken++;
   embeddings.set(token, e);
-  // Keep only the few most-recent embeddings (one per recently-viewed image).
-  if (embeddings.size > 3) embeddings.delete(embeddings.keys().next().value as number);
   post({
     id: msg.id,
     type: 'embedded',

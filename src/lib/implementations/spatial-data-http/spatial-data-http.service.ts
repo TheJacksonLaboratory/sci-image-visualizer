@@ -1,4 +1,5 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { LruCache } from 'napari-js';
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, firstValueFrom } from 'rxjs';
 import { timeout } from 'rxjs/operators';
@@ -377,8 +378,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
     ) as Promise<SpatialTranscriptTile>;
   }
 
-  /** Small JSON answers, keyed by URL — hovering back and forth must not refetch. */
-  private readonly summaryCache = new Map<string, Promise<SpatialTranscriptSummary>>();
+  /** Small JSON answers, keyed by URL — hovering back and forth must not refetch. Least recently
+   *  USED goes first, so the summary under the pointer stays while others are evicted. */
+  private readonly summaryCache = new LruCache<Promise<SpatialTranscriptSummary>>(256);
 
   getTranscriptSummary(query: {
     box?: [number, number, number, number];
@@ -396,7 +398,6 @@ export class SpatialDataHttpService implements SpatialDataPort {
       hit = this.getJson<SpatialTranscriptSummary>(url);
       hit.catch(() => this.summaryCache.delete(url));
       this.summaryCache.set(url, hit);
-      if (this.summaryCache.size > 256) this.summaryCache.delete(this.summaryCache.keys().next().value!);
     }
     return hit;
   }
