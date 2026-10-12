@@ -340,9 +340,10 @@ describe('WandService', () => {
     const polys = service.maskToPolygons(mask, 20, 20, -50, -50, 4, 4);
     expect(polys.length).toBe(1);
     expect(Math.min(...polys[0].xpoints)).toBe(-50);
+    // Hole pixels 7–12 outlined along their edges: [7, 13) − 50.
     const hole = polys[0].holes![0];
     expect(Math.min(...hole.map((p) => p[0]))).toBe(-43);
-    expect(Math.max(...hole.map((p) => p[0]))).toBe(-38);
+    expect(Math.max(...hole.map((p) => p[0]))).toBe(-37);
     expect(Math.min(...hole.map((p) => p[1]))).toBe(-43);
     expect(new Set(hole.map((p) => p.join(','))).size).toBeGreaterThanOrEqual(4);
   });

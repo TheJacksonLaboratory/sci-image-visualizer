@@ -1,6 +1,9 @@
+import { rasterizePolygon as rasterizeRing } from 'napari-js/geometry';
+
 /**
- * Pure binary-mask helpers: polygon rasterization and bbox-relative mask
- * set operations. No DOM, no Angular — the mask-export worker imports this.
+ * Pure binary-mask helpers: polygon rasterization (napari-js's `rasterizePolygon`)
+ * and bbox-relative mask set operations. No DOM, no Angular — the mask-export
+ * worker imports this.
  */
 
 /** A bbox-relative binary mask (1 = filled, 0 = empty) whose pixel (0,0) sits
@@ -20,14 +23,29 @@ export interface BBoxMask {
  */
 export const MAX_RASTER_PIXELS = 4096 * 4096;
 
+/** `[x0, y0, x1, y1, …]` from parallel arrays, the ring layout napari-js takes. */
+function flatRing(xs: ArrayLike<number>, ys: ArrayLike<number>): number[] {
+  const out = new Array<number>(xs.length * 2);
+  for (let i = 0; i < xs.length; i++) {
+    out[i * 2] = xs[i];
+    out[i * 2 + 1] = ys[i];
+  }
+  return out;
+}
+
 /**
  * Rasterize a closed polygon (minus its holes) into a bbox-relative mask, e.g.
  * as the starting point for a wand/brush stroke accumulator.
  *
+ * Pixel (px, py) covers `[px, px + 1) × [py, py + 1)` and is set when its centre
+ * is inside — the rule under which the pixel-edge outlines `geometry/contour`
+ * traces come back as exactly the pixels they were traced from.
+ *
  * Returns the bbox origin plus the filled mask, or null if the polygon is
- * degenerate. The polygon's full extent is kept even where it is negative or
- * exceeds `imageWidth`×`imageHeight`; only a bbox larger than
- * {@link MAX_RASTER_PIXELS} is clipped to that window.
+ * degenerate (covers no pixel centre). The polygon's full extent is kept even
+ * where it is negative or exceeds `imageWidth`×`imageHeight` (jit-ui#102); only
+ * a bbox larger than {@link MAX_RASTER_PIXELS} is clipped to that window (rare:
+ * a region enormous at the current zoom; accepts the clip).
  */
 export function rasterizePolygon(
   xpoints: number[],
@@ -36,74 +54,24 @@ export function rasterizePolygon(
   imageHeight: number,
   holes?: number[][][],
 ): BBoxMask | null {
-  const n = xpoints.length;
-  if (n < 3) return null;
-
-  let minX = Infinity,
-    maxX = -Infinity,
-    minY = Infinity,
-    maxY = -Infinity;
-  for (let i = 0; i < n; i++) {
-    if (xpoints[i] < minX) minX = xpoints[i];
-    if (xpoints[i] > maxX) maxX = xpoints[i];
-    if (ypoints[i] < minY) minY = ypoints[i];
-    if (ypoints[i] > maxY) maxY = ypoints[i];
+  if (xpoints.length < 3) return null;
+  const outer = flatRing(xpoints, ypoints);
+  const inner = holes?.map((ring) =>
+    flatRing(
+      ring.map((p) => p[0]),
+      ring.map((p) => p[1]),
+    ),
+  );
+  const bounds = { x: 0, y: 0, width: imageWidth, height: imageHeight };
+  let m: ReturnType<typeof rasterizeRing>;
+  try {
+    m = rasterizeRing(outer, inner, { bounds, maxPixels: MAX_RASTER_PIXELS });
+  } catch (err) {
+    // Still over the cap once clipped to the window (a large export mask): allocate the clip.
+    if (!(err instanceof RangeError)) throw err;
+    m = rasterizeRing(outer, inner, { bounds, clip: true, maxPixels: Infinity });
   }
-  // Rasterize the polygon's FULL extent (not clamped to the viewport), so a region that's
-  // partially off the visible/zoomed area keeps its off-screen part when the wand/brush extends
-  // it — the coords here are viewport-matrix units and may be negative or exceed the viewport
-  // (jit-ui#102). Memory guard: a region that's enormous at the current zoom would allocate a
-  // giant mask, so only then fall back to the viewport window (rare; accepts the clip).
-  let bx = Math.floor(minX);
-  let by = Math.floor(minY);
-  let bx1 = Math.ceil(maxX) + 1;
-  let by1 = Math.ceil(maxY) + 1;
-  if ((bx1 - bx) * (by1 - by) > MAX_RASTER_PIXELS) {
-    bx = Math.max(0, bx);
-    by = Math.max(0, by);
-    bx1 = Math.min(imageWidth, bx1);
-    by1 = Math.min(imageHeight, by1);
-  }
-  const bw = bx1 - bx;
-  const bh = by1 - by;
-  if (bw <= 0 || bh <= 0) return null;
-
-  const mask = new Uint8Array(bw * bh);
-  // Scanline ring fill — sample each row at its pixel centre, writing `value`
-  // (1 to fill the exterior, 0 to punch a hole back out).
-  const fillRing = (rx: number[], ry: number[], value: number) => {
-    const m = rx.length;
-    if (m < 3) return;
-    for (let py = 0; py < bh; py++) {
-      const y = by + py + 0.5;
-      const xs: number[] = [];
-      for (let i = 0, j = m - 1; i < m; j = i++) {
-        const yi = ry[i],
-          yj = ry[j];
-        if ((yi <= y && yj > y) || (yj <= y && yi > y)) {
-          const t = (y - yi) / (yj - yi);
-          xs.push(rx[i] + t * (rx[j] - rx[i]));
-        }
-      }
-      xs.sort((a, b) => a - b);
-      for (let k = 0; k + 1 < xs.length; k += 2) {
-        const xStart = Math.max(0, Math.ceil(xs[k] - bx));
-        const xEnd = Math.min(bw - 1, Math.floor(xs[k + 1] - bx));
-        for (let x = xStart; x <= xEnd; x++) mask[py * bw + x] = value;
-      }
-    }
-  };
-  fillRing(xpoints, ypoints, 1);
-  if (holes) {
-    for (const ring of holes) {
-      fillRing(
-        ring.map((p) => p[0]),
-        ring.map((p) => p[1]),
-        0,
-      );
-    }
-  }
-  return { bx, by, bw, bh, mask };
+  return m && { bx: m.x, by: m.y, bw: m.width, bh: m.height, mask: m.data };
 }
 
 /** Returns true if the two bbox-relative masks share at least one set pixel. */

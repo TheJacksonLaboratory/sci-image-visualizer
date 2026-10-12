@@ -82,6 +82,15 @@ CORE-1) refer to the review document attached to #45.
 - **napari 2D cells coloured by a grouping of more than ~127 groups** drew neighbouring groups in
   one colour (a band per group in a 256-entry colormap); each cell now carries its own colour,
   napari-js 0.15's per-shape `faceColor` (NAPARI-BOUNDARY-27).
+- **Wand and brush regions lost a row each time they were picked up again**: the tracer outlined
+  the boundary pixels' top-left corners and the rasterizer sampled rows at pixel centres, so after
+  a zoom, pan, tool switch or undo the re-adopted region was one row shorter (a box's bottom went
+  50 → 49 → 48). Merge, inverse and the mask export lost the same row. Tracing and rasterizing
+  are now napari-js's `traceContours` and `rasterizePolygon` (pixel edges, pixel-centre rule), and
+  a trace → rasterize round trip gives back exactly the same pixels.
+- **A hole could be given to a shape that does not enclose it**: a background area closed off
+  only by two shapes together (touching at a corner) became a hole of one of them. Each shape's
+  holes are now its own interior outlines.
 - **The wand grew from the wrong pixel on OSD and napari**: it rounded the click to the nearest
   pixel corner, so a click on the right or bottom half of a pixel seeded its neighbour. Every
   backend now floors the click to the pixel under it; Plotly's tool frame starts half a cell
@@ -164,6 +173,9 @@ CORE-1) refer to the review document attached to #45.
   canvas and the colour bar. It was a 9-stop approximation whose stops were inferno's ninths
   placed at eighths, so the ramp ran dark (the middle drew #a52c60 for #bb3754). `INFERNO_SCALE` is removed; `lutFor` also takes a 256-entry RGB table
   (NAPARI-BOUNDARY-23).
+- **Traced outlines run along pixel edges** (wand, brush, SAM, Cellpose, merge/inverse): an
+  outline now covers its pixels' full extent, one pixel further right and down than before, and a
+  straight run is a single edge instead of a vertex per pixel. Region areas equal the pixel count.
 
 ### Refactored
 
