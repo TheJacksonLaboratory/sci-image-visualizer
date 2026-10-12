@@ -1,8 +1,9 @@
+import type { PointsLayer } from 'napari-js';
+
 import type { SpatialDataPort } from '../../../contracts/ports/spatial-data.port';
 import {
   NO_CATEGORY,
   NO_OBSERVATION,
-  SpatialImageRef,
   SpatialTranscriptSummary,
   SpatialTranscriptTile,
 } from '../../../contracts/spatial-dataset.contract';
@@ -70,8 +71,11 @@ export class TranscriptHover {
   /**
    * Tooltip lines for the transcript marker under world point `(wx, wy)`, or null.
    *
-   * Returns what is known at once (gene, count, cell type); anything that needs the
-   * server — distinct genes in a group, its top genes and cells, the cell's display id —
+   * The marker is napari-js's pick on the drawn layer: hit anywhere on it, or within
+   * `radiusWorld` of its centre when it is smaller than that, the NEAREST centre winning
+   * among several (an exact tie, such as two genes' groups on one bin centre, goes to the one
+   * drawn on top). Returns what is known at once (gene, count, cell type); anything that needs
+   * the server — distinct genes in a group, its top genes and cells, the cell's display id —
    * arrives through `onDetails` once the pointer has rested on the marker briefly.
    */
   hoverAt(wx: number, wy: number, radiusWorld: number, onDetails: (lines: string[]) => void): string[] | null {
@@ -80,11 +84,7 @@ export class TranscriptHover {
       this.key = null;
       return null;
     }
-    const sx = d.ref?.scale?.[0] ?? 1;
-    const sy = d.ref?.scale?.[1] ?? 1;
-    const x = (wx - (d.ref?.translate?.[0] ?? 0)) / sx;
-    const y = (wy - (d.ref?.translate?.[1] ?? 0)) / sy;
-    const i = pickNearest(d, x, y, radiusWorld / Math.abs(sx));
+    const i = d.layer.pick(wx, wy, { tolerance: radiusWorld, tieBreak: 'nearest' });
     if (i < 0) {
       this.key = null;
       return null;
@@ -211,59 +211,12 @@ export interface DrawnTranscripts {
   kind: TranscriptKind;
   bin?: TranscriptBin;
   merged: SpatialTranscriptTile;
-  /** Marker radius per entry, in observation units. */
-  radius: Float32Array;
+  /** The layer the entries are drawn in, one marker per entry in the same order. */
+  layer: PointsLayer;
   genes: string[];
-  ref: SpatialImageRef | null;
   /** For a grouped gene selection: each entry's group, and the groups' names. */
   entryGroup?: Int32Array;
   groupNames?: string[];
   /** Each group's genes, when the markers came from the density grids (for the hover). */
   groupGenes?: string[][];
-  /** Lazily built spatial index: bucket → entry indices. */
-  grid: { size: number; buckets: Map<number, number[]> } | null;
-}
-
-/** Index of the entry under `(x, y)` — within its own radius or `tolerance` — or -1. */
-export function pickNearest(
-  d: Pick<DrawnTranscripts, 'merged' | 'radius' | 'grid'>,
-  x: number,
-  y: number,
-  tolerance: number,
-): number {
-  const t = d.merged;
-  if (!d.grid) {
-    let maxR = 0;
-    for (let i = 0; i < t.count; i++) if (d.radius[i] > maxR) maxR = d.radius[i];
-    const size = Math.max(maxR * 2, tolerance * 2, 1e-6);
-    const buckets = new Map<number, number[]>();
-    for (let i = 0; i < t.count; i++) {
-      const k = bucketKey(Math.floor(t.x[i] / size), Math.floor(t.y[i] / size));
-      let b = buckets.get(k);
-      if (!b) buckets.set(k, (b = []));
-      b.push(i);
-    }
-    d.grid = { size, buckets };
-  }
-  const { size, buckets } = d.grid;
-  const gx = Math.floor(x / size);
-  const gy = Math.floor(y / size);
-  let best = -1;
-  let bestD = Infinity;
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (const i of buckets.get(bucketKey(gx + dx, gy + dy)) ?? []) {
-        const dist = Math.hypot(t.x[i] - x, t.y[i] - y);
-        if (dist <= Math.max(d.radius[i], tolerance) && dist < bestD) {
-          bestD = dist;
-          best = i;
-        }
-      }
-    }
-  }
-  return best;
-}
-
-function bucketKey(gx: number, gy: number): number {
-  return (gx + 32768) * 65536 + (gy + 32768);
 }

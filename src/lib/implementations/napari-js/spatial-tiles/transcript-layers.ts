@@ -1,5 +1,5 @@
 import { pointSymbolCode } from 'napari-js';
-import type { PointSymbol, RGBA } from 'napari-js';
+import type { PointSymbol, PointsLayer, RGBA } from 'napari-js';
 
 import type { Rgb } from '../../../contracts/colormap-lut';
 import { ALL_GENES } from '../../../contracts/ports/spatial-data.port';
@@ -193,6 +193,14 @@ export class TranscriptLayers {
     if (ctx.incomplete) this.groups.forgetKey('transcripts');
     else this.groups.setKey('transcripts', planKey);
     const diam = px.map((d) => d / pxPerUnit);
+    const ref = dataset.imageRef;
+    const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
+    const layer =
+      mode === 'circles'
+        ? // A dark rim: a transcript coloured by its cell's type is otherwise the same colour as
+          // the cell fill it sits on, and vanishes into it.
+          this.drawTranscripts(merged, diam, rgba, view, place, null, 0.18 * median(diam))
+        : this.drawTranscriptGlyphs(merged, diam, rgba, view, place, pxPerUnit);
     this.hover.setDrawn(
       {
         kind: loaded.kind ?? job.kind,
@@ -202,25 +210,14 @@ export class TranscriptLayers {
             ? loaded.bin
             : job.bin,
         merged,
-        radius: diam.map((d) => d / 2),
+        layer,
         genes: [...view.transcriptGenes],
-        ref: dataset.imageRef ?? null,
-        grid: null,
         ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
         ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
       },
       dataset.micronsPerUnit ?? null,
     );
     this.hover.setTypes(types);
-    const ref = dataset.imageRef;
-    const place: Placement = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] };
-    if (mode === 'circles') {
-      // A dark rim: a transcript coloured by its cell's type is otherwise the same colour as the
-      // cell fill it sits on, and vanishes into it.
-      this.drawTranscripts(merged, diam, rgba, view, place, null, 0.18 * median(diam));
-    } else {
-      this.drawTranscriptGlyphs(merged, diam, rgba, view, place, pxPerUnit);
-    }
   }
 
   /**
@@ -235,7 +232,7 @@ export class TranscriptLayers {
     view: SpatialViewState,
     place: Placement,
     pxPerUnit: number,
-  ): void {
+  ): PointsLayer {
     const genes = view.transcriptGenes;
     const glyphFor = (slot: number): TranscriptGlyph =>
       (view.transcriptGlyphs[genes[slot]] as TranscriptGlyph | undefined) ?? defaultGlyphFor(slot);
@@ -257,7 +254,7 @@ export class TranscriptLayers {
     // are left off.
     const medianPx = median(diam) * pxPerUnit;
     const rim = merged.count > GLYPH_OUTLINE_MAX || medianPx < GLYPH_OUTLINE_MIN_PX ? 0 : 1 / pxPerUnit;
-    this.drawTranscripts(merged, size, rgba, view, place, symbols, rim);
+    return this.drawTranscripts(merged, size, rgba, view, place, symbols, rim);
   }
 
   /**
@@ -272,7 +269,7 @@ export class TranscriptLayers {
     { scale, translate }: Placement,
     symbols: Uint8Array | null,
     borderWidth: number,
-  ): void {
+  ): PointsLayer {
     const positions = new Float32Array(merged.count * 2);
     for (let i = 0; i < merged.count; i++) {
       positions[2 * i] = merged.x[i];
@@ -290,6 +287,7 @@ export class TranscriptLayers {
       translate,
     });
     this.groups.replace('transcripts', layer);
+    return layer;
   }
 
   /** Per-entry colours, as packed RGBA. */
