@@ -125,9 +125,13 @@ export class PlotlyImageLoader {
     );
   }
 
+  /** Grayscale: the scalar matrix. Colour: `[r, g, b]` cells in 0..255, the only range an
+   *  `image` trace draws — a 16-bit image keeps each sample's high byte, as the browser decodes
+   *  it for OSD and napari-js (its full values saturated every cell). */
   private toMatrix(img: any, isGrayscale: boolean): any[] {
-    return isGrayscale
-      ? this.utils.arrayToMatrix(Array.from(img.grey().data), img.width)
-      : this.utils.arrayToMatrix(img.getPixelsArray(), img.width);
+    if (isGrayscale) return this.utils.arrayToMatrix(Array.from(img.grey().data), img.width);
+    const pixels: number[][] = img.getPixelsArray();
+    const cells = img.bitDepth === 16 ? pixels.map((px) => px.map((v) => v >> 8)) : pixels;
+    return this.utils.arrayToMatrix(cells, img.width);
   }
 }

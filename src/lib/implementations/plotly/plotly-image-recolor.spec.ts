@@ -3,7 +3,10 @@ import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { MessageService } from 'primeng/api';
 import * as Plotly from 'plotly.js-dist-min';
 
+import { HttpClient } from '@angular/common/http';
+
 import { PlotlyService, PlotType } from './plotly.service';
+import { PlotlyImageLoader } from './plotly-image-loader';
 import { channelPlaneUrls, matrixToRgba, recolorKind } from './plotly-image-recolor';
 import { DisplayPipeline } from '../osd/display-pipeline';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -314,6 +317,26 @@ describe('PlotlyService channel display of a colour image', () => {
     await flushFrames();
     expect(restyle).toHaveBeenCalledWith(gd, expect.objectContaining({ zmin: 3, zmax: 9 }));
     expect(recolours()).toHaveLength(0);
+  });
+});
+
+describe('PlotlyImageLoader colour frames', () => {
+  it("keeps a 16-bit RGB image's high byte, the 0..255 an image trace draws", async () => {
+    const loader = new PlotlyImageLoader({} as HttpClient);
+    jest.spyOn(loader, 'loadImage').mockResolvedValue({
+      width: 1,
+      height: 1,
+      bitDepth: 16,
+      getPixelsArray: () => [[65535, 32768, 256]],
+    } as never);
+    const loaded = await loader.load(
+      rgbInfo(),
+      0,
+      undefined,
+      () => undefined,
+      () => true,
+    );
+    expect(loaded.data).toEqual([[[[255, 128, 1]]]]);
   });
 });
 

@@ -124,6 +124,8 @@ CORE-1) refer to the review document attached to #45.
   (~60 ms per edit for a 1-megapixel slice; Plotly paints a `z` image pixel by pixel, ~0.7 s).
   The pixel tools, profiles and histograms keep reading the raw pixels. A tiled multichannel
   image's heatmap is still the server's flat composite preview.
+- **The Plotly heatmap drew 16-bit RGB images as saturated colour blocks**; each sample now keeps
+  its high byte, as the browser decodes the image for OSD and napari.
 - **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
   was recoloured again as an RGB image, so an inverted stack drew black.
 
