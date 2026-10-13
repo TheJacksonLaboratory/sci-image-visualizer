@@ -1,5 +1,10 @@
 import { PlotType } from '../../contracts/plot-type';
-import { PLOTLY_PLOT_TYPE_IMPLS, TraceBuildInput } from './plotly-trace-builders';
+import {
+  buildHeatmapTraces,
+  buildRgbImageTraces,
+  PLOTLY_PLOT_TYPE_IMPLS,
+  TraceBuildInput,
+} from './plotly-trace-builders';
 
 /**
  * Unit tests for the pure plot-type trace builders. No Angular / Plotly —
@@ -46,6 +51,21 @@ describe('plotly-trace-builders', () => {
     expect(traces[0].visible).toBe(true);
     expect(traces[1].visible).toBe(false);
     expect(traces[0].dx).toBe(2);
+  });
+
+  it('draws image pixel i over [i, i + 1), as OSD and napari do', () => {
+    // Plotly centres cell i on x0 + i·dx: a zoom crop at (10, 20) with 2 image units per cell
+    // puts cell 0 over [10, 12) × [20, 22), so its centre is (11, 21).
+    const extent = [10, 18, 20, 26];
+    for (const t of [
+      buildHeatmapTraces([[[1]]], extent, [2, 2], 'Viridis', false)[0],
+      buildRgbImageTraces([[[[1, 2, 3]]]], extent, [2, 2], 1, 1)[0],
+    ]) {
+      expect([t.x0, t.y0, t.dx, t.dy]).toEqual([11, 21, 2, 2]);
+    }
+    // The contour keeps the cells' centres while it strides over them.
+    const contour = PLOTLY_PLOT_TYPE_IMPLS[PlotType.CONTOUR]!.buildTraces(grayInput({ trueImageSize: extent }))[0];
+    expect([contour.x0, contour.y0]).toEqual([11, 21]);
   });
 
   it('SCATTER plots region centroids', () => {

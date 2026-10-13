@@ -110,7 +110,9 @@ function downsampleMatrix(matrix: number[][], sx: number, sy: number): number[][
  *  the heatmap trace geometry (x0/dx/y0/dy) so it lines up with the image axes;
  *  the stride scales dx/dy so the coarser grid still spans the true extent. */
 function buildContourTraces(input: TraceBuildInput): any[] {
-  const [x0, , y0] = [input.trueImageSize[0], input.trueImageSize[1], input.trueImageSize[2]];
+  // Sample k is cell k·stride, so the samples keep the cells' centres.
+  const x0 = firstCellCentre(input.trueImageSize[0], input.ratios[0]);
+  const y0 = firstCellCentre(input.trueImageSize[2], input.ratios[0]);
   return input.frames.map((frame, index) => {
     const scalar = toScalarFrame(frame, input.isGrayscale);
     const height = scalar.length;
@@ -259,6 +261,15 @@ export const PLOTLY_PLOT_TYPE_IMPLS: Partial<Record<PlotType, PlotlyPlotTypeImpl
 // ── HEATMAP / SURFACE / RGB image (the original renderers) ─────────────────
 
 /**
+ * Plotly centres cell i on `x0 + i·dx`. Image pixel i covers `[i, i + 1)` on every backend (OSD
+ * and napari draw it there, and the tools, regions and GeoJSON use that frame), so the first cell
+ * is centred half a cell in from the image's (or the zoom crop's) corner.
+ */
+function firstCellCentre(corner: number, step: number): number {
+  return corner + step / 2;
+}
+
+/**
  * One grayscale heatmap trace per z-plane, only the first visible (the layout's
  * slider switches them). `trueImgSize` is [x0, x1, y0, y1]; `ratios` the data
  * units per pixel. No per-cell hover text: building it for every pixel is too slow.
@@ -271,9 +282,9 @@ export function buildHeatmapTraces(
   reversescale: boolean,
 ): any[] {
   return frames.map((z, index) => ({
-    x0: trueImgSize[0],
+    x0: firstCellCentre(trueImgSize[0], ratios[0]),
     dx: ratios[0],
-    y0: trueImgSize[2],
+    y0: firstCellCentre(trueImgSize[2], ratios[0]),
     dy: ratios[0],
     z,
     type: 'heatmap',
@@ -302,9 +313,9 @@ export function buildRgbImageTraces(
   sources?: string[],
 ): any[] {
   return frames.map((z, index) => ({
-    x0: trueImgSize[0],
+    x0: firstCellCentre(trueImgSize[0], ratios[0]),
     dx: ratios[0],
-    y0: trueImgSize[2],
+    y0: firstCellCentre(trueImgSize[2], ratios[0]),
     dy: ratios[0],
     x: Array.from(Array(width).keys()),
     y: Array.from(Array(height).keys()),

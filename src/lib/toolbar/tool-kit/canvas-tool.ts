@@ -33,8 +33,7 @@ export interface CachedImageData {
    * covers only the visible sub-region at screen resolution. Defaults to 0.
    * matrix = (data - origin) / ratio, and matrix pixel (i, j) covers
    * `[i, i + 1) × [j, j + 1)` on every backend: a click floors to its pixel, and
-   * traced outlines run along pixel edges. Plotly, which centres its cells on
-   * whole data units, reports an origin half a cell before its first centre.
+   * traced outlines run along pixel edges.
    */
   originX?: number;
   originY?: number;

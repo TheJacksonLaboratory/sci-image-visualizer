@@ -83,9 +83,10 @@ export function sampleLine(
   const values: number[] = [];
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
-    // Data coords → the frame's pixel grid, offset by its origin (a zoom crop).
-    const px = Math.round((x0 + t * dxData - ox) / rx);
-    const py = Math.round((y0 + t * dyData - oy) / ry);
+    // Data coords → the frame's pixel grid, offset by its origin (a zoom crop). Frame pixel i
+    // covers [i, i + 1), as for the tools.
+    const px = Math.floor((x0 + t * dxData - ox) / rx);
+    const py = Math.floor((y0 + t * dyData - oy) / ry);
     let v = 0;
     if (px >= 0 && px < w && py >= 0 && py < h) {
       const cell = frame[py][px];

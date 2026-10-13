@@ -749,26 +749,21 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   /**
    * Pixel data the wand needs for sampling. null = no image loaded.
    *
-   * Plotly centres heatmap cell (i, j) on `origin + (i, j)·ratio`, but the tools take matrix
-   * pixel (i, j) to cover `[i, i + 1) × [j, j + 1)`, as OSD and napari draw theirs. The frame
-   * therefore starts half a pixel before the cached origin: a click anywhere on a cell floors
-   * to that cell, and traced outlines run along the cells' edges.
+   * The traces draw cell (i, j) over `origin + [i, i + 1)·ratio` (see `firstCellCentre`), as OSD
+   * and napari draw their pixels, so the frame starts at the cached origin: a click anywhere on a
+   * cell floors to that cell, and traced outlines run along the cells' edges.
    */
   private getCachedImageData(): CachedImageData | null {
     if (!this.cachedImageFrames || this.cachedImageFrames.length === 0) return null;
-    const ratios = this.cachedImageRatios;
-    // Per axis as MatrixFrame reads them: a lone ratio applies to both.
-    const rx = ratios?.[0] || 1;
-    const ry = ratios?.[1] || ratios?.[0] || 1;
     return {
       frames: this.cachedImageFrames,
       width: this.cachedImageWidth,
       height: this.cachedImageHeight,
-      ratios,
+      ratios: this.cachedImageRatios,
       isGrayscale: this.cachedIsGrayscale,
       // A high-def zoom caches the crop, whose pixel (0,0) is not image (0,0).
-      originX: this.cachedFrameOrigin[0] - rx / 2,
-      originY: this.cachedFrameOrigin[1] - ry / 2,
+      originX: this.cachedFrameOrigin[0],
+      originY: this.cachedFrameOrigin[1],
     };
   }
 

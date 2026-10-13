@@ -95,9 +95,12 @@ CORE-1) refer to the review document attached to #45.
   holes are now its own interior outlines.
 - **The wand grew from the wrong pixel on OSD and napari**: it rounded the click to the nearest
   pixel corner, so a click on the right or bottom half of a pixel seeded its neighbour. Every
-  backend now floors the click to the pixel under it; Plotly's tool frame starts half a cell
-  before its first cell centre, so a matrix pixel covers `[i, i + 1)` there too and the wand,
-  brush, SAM and Cellpose outlines run along Plotly's cell edges.
+  backend now floors the click to the pixel under it, and the intensity profile samples the pixel
+  a point falls in the same way.
+- **Plotly drew the image half a pixel up and left of the other backends**: it centred cell i on
+  i, so a region drawn on Plotly sat half a pixel off on OSD, napari and in GeoJSON. Cell i now
+  covers `[i, i + 1)`, as on OSD and napari, and the wand, brush, SAM and Cellpose outlines run
+  along its edges.
 - **The vertex eraser cut a sparse outline's corner to the next corners**: erasing the corner of
   a four-vertex box left a triangle. The outline is now rejoined where it crosses the eraser's
   edge, so only the part under the eraser goes (as it did on densely sampled outlines); a Bézier

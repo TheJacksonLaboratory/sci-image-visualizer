@@ -833,15 +833,15 @@ describe('PlotlyService canvas tools (setActiveTool)', () => {
   });
 
   it("hands the tools a frame whose whole pixels are a heatmap cell's edges", () => {
-    // Plotly centres cell (i, j) on origin + (i, j)·ratio; the tools take a matrix pixel to
-    // cover [i, i + 1), as on OSD and napari, so the frame starts half a cell early.
+    // The traces draw cell (i, j) over origin + [i, i + 1)·ratio, as OSD and napari draw their
+    // pixels, so the tools' frame starts at the cached origin.
     service.setSamplingFrames([[[1, 2]]], [2, 4], [100, 50]);
     const cached = (service as unknown as { toolHost: CanvasToolHost }).toolHost.getCachedImageData()!;
-    expect([cached.originX, cached.originY]).toEqual([99, 48]);
+    expect([cached.originX, cached.originY]).toEqual([100, 50]);
     const frame = MatrixFrame.from(cached);
-    // Cell 0's centre (100, 50) is in matrix pixel 0; its right edge (101) starts pixel 1.
-    expect([Math.floor(frame.toMatrixX(100)), Math.floor(frame.toMatrixY(50))]).toEqual([0, 0]);
-    expect(Math.floor(frame.toMatrixX(101))).toBe(1);
+    // Cell 0 covers [100, 102) × [50, 54); its right edge (102) starts pixel 1.
+    expect([Math.floor(frame.toMatrixX(101.9)), Math.floor(frame.toMatrixY(53.9))]).toEqual([0, 0]);
+    expect(Math.floor(frame.toMatrixX(102))).toBe(1);
   });
 
   it('a deprecated setter disarms only its own tool', () => {

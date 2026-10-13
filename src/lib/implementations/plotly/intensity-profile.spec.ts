@@ -98,11 +98,11 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
     service.setSamplingFrames([crop], [0.5, 0.5], [100, 50]);
 
     const data = (service as unknown as Cache).getCachedImageData();
-    // The tools' frame starts half a crop pixel before the crop's first cell centre.
+    // The tools' frame starts at the crop's corner, where its first cell starts.
     expect(data).toEqual(
       expect.objectContaining({
-        originX: 99.75,
-        originY: 49.75,
+        originX: 100,
+        originY: 50,
         width: 3,
         height: 2,
         ratios: [0.5, 0.5],
@@ -110,7 +110,7 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
     );
   });
 
-  it('reports origin -0.5,-0.5 (cell 0 centred on 0) for a full-frame cache', () => {
+  it('reports origin 0,0 (cell 0 over [0, 1)) for a full-frame cache', () => {
     service.setSamplingFrames(
       [
         [
@@ -121,7 +121,7 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
       [1, 1],
     );
     const data = (service as unknown as Cache).getCachedImageData();
-    expect(data).toEqual(expect.objectContaining({ originX: -0.5, originY: -0.5, width: 2, height: 2 }));
+    expect(data).toEqual(expect.objectContaining({ originX: 0, originY: 0, width: 2, height: 2 }));
   });
 });
 
@@ -214,6 +214,22 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
     const profile = intensity.computeIntensityProfile({ x0: 100, y0: 51, x1: 102, y1: 51 });
     expect(profile.values).toEqual([4, 6]);
     expect(profile.unit).toBe('px');
+  });
+
+  it('samples the pixel a point falls in, its right and bottom halves included', () => {
+    service.setSamplingFrames(
+      [
+        [
+          [1, 2, 3],
+          [4, 5, 6],
+        ],
+      ],
+      [1, 1],
+      [100, 50],
+    );
+    // Pixel (0, 0) covers [100, 101) × [50, 51): (100.8, 50.8) is still in it.
+    const profile = intensity.computeIntensityProfile({ x0: 100.8, y0: 50.8, x1: 102.8, y1: 50.8 });
+    expect(profile.values).toEqual([1, 3]);
   });
 
   it("re-emits every line's profile, tagged with its id and colour, when a region changes", () => {

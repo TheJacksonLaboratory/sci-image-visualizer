@@ -197,11 +197,11 @@ click floors to its pixel, and `contour.ts` (napari-js's `traceContours`) outlin
 a mask along pixel edges, so `raster.ts` (napari-js's `rasterizePolygon`, which
 sets a pixel when its centre is inside) gives back exactly the traced pixels. A
 region the wand or brush picks up again after a zoom, pan or undo is therefore
-unchanged. OSD and napari read back canvases whose pixel corners sit on whole
-units; Plotly centres its heatmap cells on whole data units, so its tool frame
-starts half a cell before the first centre (`getCachedImageData`). Plotly's data
-coordinates are therefore half a pixel off the others' for the same image pixel,
-in the regions the tools trace there as in shapes drawn there.
+unchanged. Image pixel (i, j) covers the same `[i, i + 1) × [j, j + 1)` on every
+backend: OSD and napari draw it there, and Plotly, which centres a cell on
+`x0 + i·dx`, places its first cell half a cell in from the image's corner
+(`firstCellCentre` in `plotly-trace-builders.ts`). A region traced or drawn on
+one backend therefore covers the same pixels on the others and in GeoJSON.
 
 ## Toolbar tools and contributions
 
