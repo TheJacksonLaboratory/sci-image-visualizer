@@ -20,6 +20,8 @@ import { PlotUtilities } from '../../plot.utilities';
 import { CanvasToolHost } from '../../toolbar/tool-kit/canvas-tool';
 import { MatrixFrame } from '../../toolbar/tool-kit/matrix-frame';
 import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
+import { buildHeatmapTraces, buildRgbImageTraces, buildSurfaceTraces } from './plotly-trace-builders';
+import { CONFIG, CONFIG_SURFACE } from '../../plot.utilities';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -984,5 +986,151 @@ describe('PlotlyService layouts and isosurface band (characterization)', () => {
       [0, 1, 0, 1],
     );
     expect([input.isoMin, input.isoMax]).toEqual([0, 255]);
+  });
+});
+
+describe('PlotlyService dedicated renderers (characterization)', () => {
+  let service: PlotlyService;
+  /** Every Plotly draw: [function, div, traces, layout, config]. */
+  let draws: unknown[][];
+  let purge: jest.SpyInstance;
+  let setEvents: jest.SpyInstance;
+  type Internals = {
+    plotDiv: string;
+    imageLength: number;
+    urls: string[];
+    screenHeight: number;
+    recolor: { plot: () => Promise<string[] | null> };
+    getHeatmapLayout(x: number[], y: number[]): unknown;
+    renderZoomCrop(
+      frame: unknown,
+      ratios: number[],
+      size: [number, number],
+      imageSize: number[],
+    ): { rendered: Promise<unknown>; reapplyRange: boolean };
+  };
+  const internals = () => service as unknown as Internals;
+  const frames = [
+    [
+      [1, 2],
+      [3, 4],
+    ],
+    [
+      [5, 6],
+      [7, 8],
+    ],
+  ];
+  const loaded = { data: frames, ratios: [2, 3], sizes: [2, 2], filename: 'f.png' };
+  const info = (isGrayscale: boolean) =>
+    ({ fileName: 'f.png', urls: ['a.png', 'b.png'], trueImageSize: [4, 6], isGrayscale }) as unknown as IImageInfo;
+  const extent = [0, 4, 0, 6];
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+    });
+    service = TestBed.inject(PlotlyService);
+    document.body.innerHTML = '<div id="plot"></div>';
+    draws = [];
+    const record =
+      (name: string) =>
+      (...args: unknown[]) => {
+        draws.push([name, ...args]);
+        return Promise.resolve(document.getElementById('plot'));
+      };
+    jest.spyOn(Plotly, 'newPlot').mockImplementation(record('newPlot') as never);
+    jest.spyOn(Plotly, 'react').mockImplementation(record('react') as never);
+    purge = jest.spyOn(Plotly, 'purge').mockImplementation(() => undefined as never);
+    setEvents = jest
+      .spyOn(service as unknown as { setEvents(...args: unknown[]): void }, 'setEvents')
+      .mockImplementation(() => undefined);
+    // A colour image draws its raw frames (the channel display is PlotlyImageRecolor's spec).
+    internals().recolor.plot = () => Promise.resolve(null);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  /** The per-plot state a render leaves behind. */
+  const state = () => {
+    const s = internals();
+    return [s.plotDiv, s.imageLength, s.urls, s.screenHeight];
+  };
+  const store = () => TestBed.inject(VisualizerStore);
+  const colorscale = () => store().currentColormap().data.value;
+
+  it('draws a grayscale heatmap: one trace per frame, the heatmap layout and the 2D config', async () => {
+    await expect(service.plot('plot', loaded, info(true), 600, PlotType.HEATMAP)).resolves.toBe(true);
+    expect(purge).toHaveBeenCalledWith('plot');
+    expect(draws).toEqual([
+      [
+        'newPlot',
+        'plot',
+        buildHeatmapTraces(frames, extent, [2, 3], colorscale(), store().currentReverseScale()),
+        internals().getHeatmapLayout([0, 4], [6, 0]),
+        CONFIG,
+      ],
+    ]);
+    expect(state()).toEqual(['plot', 2, ['a.png', 'b.png'], 600]);
+    expect(setEvents).toHaveBeenCalledWith('plot', true, 600);
+  });
+
+  it('draws a grayscale surface with the surface layout and the 3D config', async () => {
+    await service.plot('plot', loaded, info(true), 600, PlotType.SURFACE);
+    expect(draws).toEqual([
+      [
+        'newPlot',
+        'plot',
+        buildSurfaceTraces(frames, colorscale(), store().currentReverseScale()),
+        surfaceLayout(0.4),
+        CONFIG_SURFACE,
+      ],
+    ]);
+    expect(state()).toEqual(['plot', 2, ['a.png', 'b.png'], 600]);
+    expect(setEvents).toHaveBeenCalledWith('plot', true, 600);
+  });
+
+  it('draws a colour image as RGB image traces of its size', async () => {
+    await service.plot('plot', loaded, info(false), 600, PlotType.HEATMAP);
+    expect(draws).toEqual([
+      [
+        'newPlot',
+        'plot',
+        buildRgbImageTraces(frames, extent, [2, 3], 2, 2, undefined),
+        internals().getHeatmapLayout([0, 4], [6, 0]),
+        CONFIG,
+      ],
+    ]);
+    expect(state()).toEqual(['plot', 2, ['a.png', 'b.png'], 600]);
+    expect(setEvents).toHaveBeenCalledWith('plot', false, 600);
+  });
+
+  it.each([
+    [PlotType.HEATMAP, true],
+    [PlotType.SURFACE, true],
+    [PlotType.HEATMAP, false],
+  ])('updates a %s (grayscale %s) in place with Plotly.react', async (type, gray) => {
+    await service.plot('plot', loaded, info(gray), 600, type, true);
+    expect(purge).not.toHaveBeenCalled();
+    expect(draws.map((d) => d[0])).toEqual(['react']);
+  });
+
+  it.each([true, false])("re-renders a high-def zoom crop (grayscale %s) at the crop's size", async (gray) => {
+    await service.plot('plot', loaded, info(gray), 600, PlotType.HEATMAP);
+    draws = [];
+    const crop = [
+      [
+        [9, 9, 9],
+        [9, 9, 9],
+      ],
+    ];
+    const { rendered, reapplyRange } = internals().renderZoomCrop(crop, [0.5, 0.25], [3, 2], [1, 4, 2, 4]);
+    await rendered;
+    const traces = gray
+      ? buildHeatmapTraces([crop], [1, 4, 2, 4], [0.5, 0.25], colorscale(), store().currentReverseScale())
+      : buildRgbImageTraces([crop], [1, 4, 2, 4], [0.5, 0.25], 3, 2, undefined);
+    expect(draws).toEqual([['newPlot', 'plot', traces, internals().getHeatmapLayout([1, 4], [4, 2]), CONFIG]]);
+    expect(reapplyRange).toBe(true);
+    expect(state()).toEqual(['plot', 1, ['a.png', 'b.png'], 600]);
   });
 });

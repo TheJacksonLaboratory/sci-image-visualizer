@@ -75,6 +75,19 @@ import { throwIfAborted } from '../tile-server/transport';
 // './contracts/plot-type' directly, drop this re-export.
 export { PlotType } from '../../contracts/plot-type';
 
+/** What a render draws, and where: the plot div, the image's URLs and its frames (one per
+ *  z-plane) with their extent (`trueImgSize`, [x0, x1, y0, y1]) and pixel ratios. `inPlace`
+ *  updates the existing plot (Plotly.react) instead of purge + newPlot. */
+interface FramePlot {
+  plotDiv: string;
+  urls: string[];
+  frames: any[];
+  trueImgSize: number[];
+  ratios: number[];
+  screenHeight: number;
+  inPlace?: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -386,112 +399,62 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       );
     }
 
-    if (imageInfo.isGrayscale) {
-      if (plotType === PlotType.SURFACE) {
-        return this.plotSurface(
-          plotDiv,
-          imageInfo.urls,
-          imageLoaded.data,
-          trueImageSize,
-          imageLoaded.ratios,
-          screenHeight,
-          inPlace,
-        );
-      }
-      return this.plotHeatmap(
-        plotDiv,
-        imageInfo.urls,
-        imageLoaded.data,
-        trueImageSize,
-        imageLoaded.ratios,
-        screenHeight,
-        inPlace,
-      );
-    }
-    return this.plotRGBHeatmap(
+    const target: FramePlot = {
       plotDiv,
-      imageInfo.urls,
-      imageLoaded.data,
-      trueImageSize,
-      imageLoaded.ratios,
-      imageLoaded.sizes[0],
-      imageLoaded.sizes[1],
+      urls: imageInfo.urls,
+      frames: imageLoaded.data,
+      trueImgSize: trueImageSize,
+      ratios: imageLoaded.ratios,
       screenHeight,
       inPlace,
-      imageLoaded.channelPlanes,
-    );
+    };
+    if (imageInfo.isGrayscale) {
+      return plotType === PlotType.SURFACE ? this.plotSurface(target) : this.plotHeatmap(target);
+    }
+    return this.plotRGBHeatmap(target, imageLoaded.sizes[0], imageLoaded.sizes[1], imageLoaded.channelPlanes);
   }
 
-  /** Grayscale heatmap, one trace per z-plane (`trueImgSize` is [x0, x1, y0, y1]). */
-  private plotHeatmap(
-    plotDiv: string,
-    urls: string[],
-    images: any[],
-    trueImgSize: number[],
-    ratios: number[],
-    screenHeight: number,
-    inPlace: boolean = false,
-  ): Promise<boolean> {
+  /** Grayscale heatmap, one trace per z-plane. */
+  private plotHeatmap(target: FramePlot): Promise<boolean> {
     this.recolor.clear();
+    const { frames, trueImgSize, ratios } = target;
     const traces = buildHeatmapTraces(
-      images,
+      frames,
       trueImgSize,
       ratios,
       this.store.currentColormap().data.value,
       this.store.currentReverseScale(),
     );
     const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
-    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, true);
+    return this.renderPlot(target, traces, layout, CONFIG, true);
   }
 
   /** Grayscale surface. */
-  private plotSurface(
-    plotDiv: string,
-    urls: string[],
-    images: any[],
-    _trueImgSize: number[],
-    _ratios: number[],
-    screenHeight: number,
-    inPlace: boolean = false,
-  ): Promise<boolean> {
+  private plotSurface(target: FramePlot): Promise<boolean> {
     this.recolor.clear();
     const traces = buildSurfaceTraces(
-      images,
+      target.frames,
       this.store.currentColormap().data.value,
       this.store.currentReverseScale(),
     );
-    return this.renderPlot(
-      plotDiv,
-      urls,
-      images.length,
-      screenHeight,
-      inPlace,
-      traces,
-      () => surfaceLayout(0.4),
-      CONFIG_SURFACE,
-      true,
-    );
+    return this.renderPlot(target, traces, () => surfaceLayout(0.4), CONFIG_SURFACE, true);
   }
 
-  /** RGB image, one trace per z-plane, in the current channel display: `images` are the raw
-   *  frames, `planes` a serverless multichannel stack's raw channel planes per frame. An image
-   *  that follows the channel states draws a `source` per slice (see PlotlyImageRecolor). */
+  /** RGB image (`width` × `height` pixels), one trace per z-plane, in the current channel
+   *  display: `target.frames` are the raw frames, `planes` a serverless multichannel stack's raw
+   *  channel planes per frame. An image that follows the channel states draws a `source` per
+   *  slice (see PlotlyImageRecolor). */
   private async plotRGBHeatmap(
-    plotDiv: string,
-    urls: string[],
-    images: any[],
-    trueImgSize: number[],
-    ratios: number[],
+    target: FramePlot,
     width: number,
     height: number,
-    screenHeight: number,
-    inPlace: boolean = false,
     planes?: Uint8Array[][],
   ): Promise<boolean> {
+    const { frames, trueImgSize, ratios } = target;
     const render = this.renderGen;
     let sources: string[] | null = null;
     try {
-      sources = await this.recolor.plot(recolorKind(this.imageInfo, !!planes?.length), images, planes);
+      sources = await this.recolor.plot(recolorKind(this.imageInfo, !!planes?.length), frames, planes);
     } catch (err) {
       console.warn('[plotly] channel display unavailable; drawing the image as it is', err);
       this.recolor.clear();
@@ -499,9 +462,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     // A newer render took the plot over while the slices were encoded: it draws instead.
     if (render !== this.renderGen) return true;
     // As autorange is off and the axis not reversed, the y range is set here.
-    const traces = buildRgbImageTraces(images, trueImgSize, ratios, width, height, sources ?? undefined);
+    const traces = buildRgbImageTraces(frames, trueImgSize, ratios, width, height, sources ?? undefined);
     const layout = () => this.getHeatmapLayout([trueImgSize[0], trueImgSize[1]], [trueImgSize[3], trueImgSize[2]]);
-    return this.renderPlot(plotDiv, urls, images.length, screenHeight, inPlace, traces, layout, CONFIG, false);
+    return this.renderPlot(target, traces, layout, CONFIG, false);
   }
 
   /**
@@ -512,20 +475,17 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
    * built after the per-plot state (screen height, slice count) is set.
    */
   private renderPlot(
-    plotDiv: string,
-    urls: string[],
-    sliceCount: number,
-    screenHeight: number,
-    inPlace: boolean,
+    target: FramePlot,
     traces: any[],
     layout: () => any,
     config: unknown,
     isGrayscale: boolean,
   ): Promise<boolean> {
+    const { plotDiv, screenHeight, inPlace } = target;
     if (!inPlace) Plotly.purge(plotDiv);
     this.plotDiv = plotDiv;
-    this.imageLength = sliceCount;
-    this.urls = urls;
+    this.imageLength = target.frames.length;
+    this.urls = target.urls;
     this.screenHeight = screenHeight;
     const render = inPlace ? Plotly.react : Plotly.newPlot;
     return (render as any)(plotDiv, traces as any, layout(), config as any).then(() => {
@@ -600,11 +560,15 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
       }
     };
     return this.renderPlot(
-      plotDiv,
-      this.imageInfo?.urls ?? this.urls,
-      input.frames.length,
-      screenHeight,
-      inPlace,
+      {
+        plotDiv,
+        urls: this.imageInfo?.urls ?? this.urls,
+        frames: input.frames,
+        trueImgSize: input.trueImageSize,
+        ratios: input.ratios,
+        screenHeight,
+        inPlace,
+      },
       impl.buildTraces(input),
       layout,
       impl.threeD ? CONFIG_SURFACE : CONFIG,
@@ -848,6 +812,14 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     fileName?: string,
   ): { rendered: Promise<unknown>; reapplyRange: boolean } {
     const impl = PLOTLY_PLOT_TYPE_IMPLS[this.plotType];
+    const target: FramePlot = {
+      plotDiv: this.plotDiv,
+      urls: this.urls,
+      frames: [frame],
+      trueImgSize: imageSize,
+      ratios,
+      screenHeight: this.screenHeight,
+    };
     const rendered = impl
       ? this.plotViaRegistry(
           this.plotDiv,
@@ -865,17 +837,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
           this.screenHeight,
         )
       : this.imageInfo?.isGrayscale
-        ? this.plotHeatmap(this.plotDiv, this.urls, [frame], imageSize, ratios, this.screenHeight)
-        : this.plotRGBHeatmap(
-            this.plotDiv,
-            this.urls,
-            [frame],
-            imageSize,
-            ratios,
-            size[0],
-            size[1],
-            this.screenHeight,
-          );
+        ? this.plotHeatmap(target)
+        : this.plotRGBHeatmap(target, size[0], size[1]);
     // plotViaRegistry already applies the type's own layout/range for non-image
     // layouts (chart/overlay); only the image-aligned paths re-apply the range.
     return { rendered, reapplyRange: !impl || impl.layoutKind === '2d-image' };
