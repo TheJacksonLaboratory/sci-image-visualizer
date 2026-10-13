@@ -282,7 +282,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.visible = view.showVolume;
       this.volume.opacity = view.volumeOpacity;
     }
+    this.drawCloud(viewer, dataset, view, selection, enc);
+  }
 
+  /**
+   * Draw the point cloud: a new layer for new geometry (a dataset or a section), the colour
+   * source swapped in place otherwise; then the selection and the visibility.
+   */
+  private drawCloud(
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+    enc: Spatial3dEncoding | null,
+  ): void {
+    const obs = dataset.observations;
     const scale = view.pointScale > 0 ? view.pointScale : 1;
     const size = SPATIAL_3D_BASE_SIZE * scale;
     // A categorical colouring is per-point RGBA, which wins over the scalars; the flat colormap
@@ -303,7 +317,6 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
         : null;
     const shown = section != null ? observationsInSection(obs, section) : null;
-    const shownCount = shown ? shown.length : obs.count;
 
     const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
     // Track the scalars' identity separately from the geometry's (`colorBy` plus the
@@ -321,15 +334,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
       // and cache it, so later colour changes rebuild the layer without walking
       // the observations again.
-      const [ox, oy, oz] = this.origin;
-      const positions = new Float32Array(shownCount * 3);
-      for (let k = 0; k < shownCount; k++) {
-        const i = shown ? shown[k] : k;
-        positions[k * 3] = obs.x[i] + ox;
-        positions[k * 3 + 1] = obs.y[i] + oy;
-        positions[k * 3 + 2] = obs.z[i] + oz;
-      }
-      this.positions = positions;
+      this.positions = this.cloudPositions(obs, shown);
       this.drawn = shown;
     }
 
@@ -367,37 +372,67 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.points.size = size;
     }
 
-    // Selection is a PER-POINT alpha, in the one layer.
-    //
-    // It used to be a second layer: with a single opacity for the whole cloud, the only way
-    // to highlight a subset was to draw it again on top at full opacity while the parent
-    // dropped to the muted level. That second layer had to be kept in step through every
-    // colormap, window and size change, and the two then depth-sorted against each other as
-    // separate draws. Per-point alphas and sizes give the same reading — muted cloud, bright
-    // selection, slightly larger so a small one is findable inside 3.7M points — in one.
-    const hasSelection = selection.count > 0 && selection.mask.length === obs.count;
     const cloud = this.points;
     if (cloud) {
       cloud.opacity = view.opacity;
-      if (!hasSelection) {
-        cloud.alphas = null;
-        cloud.sizes = null;
-      } else {
-        const alphas = new Float32Array(shownCount);
-        const sizes = new Float32Array(shownCount);
-        for (let k = 0; k < shownCount; k++) {
-          const i = shown ? shown[k] : k;
-          const picked = !!selection.mask[i];
-          alphas[k] = picked ? 1 : DEFAULT_MUTED_OPACITY;
-          sizes[k] = picked ? SPATIAL_SELECTED_SIZE_SCALE : 1;
-        }
-        cloud.alphas = alphas;
-        cloud.sizes = sizes;
-      }
+      this.applySelection(cloud, selection, shown, obs.count);
     }
     // Last, so it also covers a layer this pass just created.
     if (this.points) this.points.visible = view.showPoints;
     viewer.requestRender();
+  }
+
+  /** Interleaved x,y,z of the `shown` observations (null: all of them), offset by {@link origin}. */
+  private cloudPositions(obs: SpatialObservations, shown: Uint32Array | null): Float32Array {
+    // rebuild() draws only a dataset whose observations have a z.
+    const z = obs.z!;
+    const [ox, oy, oz] = this.origin;
+    const count = shown ? shown.length : obs.count;
+    const positions = new Float32Array(count * 3);
+    for (let k = 0; k < count; k++) {
+      const i = shown ? shown[k] : k;
+      positions[k * 3] = obs.x[i] + ox;
+      positions[k * 3 + 1] = obs.y[i] + oy;
+      positions[k * 3 + 2] = z[i] + oz;
+    }
+    return positions;
+  }
+
+  /**
+   * Selection is a PER-POINT alpha, in the one layer.
+   *
+   * It used to be a second layer: with a single opacity for the whole cloud, the only way
+   * to highlight a subset was to draw it again on top at full opacity while the parent
+   * dropped to the muted level. That second layer had to be kept in step through every
+   * colormap, window and size change, and the two then depth-sorted against each other as
+   * separate draws. Per-point alphas and sizes give the same reading — muted cloud, bright
+   * selection, slightly larger so a small one is findable inside 3.7M points — in one.
+   *
+   * `shown` is the drawn subset (null: every one of the `total` observations), so the alphas
+   * follow the drawn order.
+   */
+  private applySelection(
+    cloud: Points3DLayer,
+    selection: SpatialSelectionMask,
+    shown: Uint32Array | null,
+    total: number,
+  ): void {
+    if (selection.count === 0 || selection.mask.length !== total) {
+      cloud.alphas = null;
+      cloud.sizes = null;
+      return;
+    }
+    const shownCount = shown ? shown.length : total;
+    const alphas = new Float32Array(shownCount);
+    const sizes = new Float32Array(shownCount);
+    for (let k = 0; k < shownCount; k++) {
+      const i = shown ? shown[k] : k;
+      const picked = !!selection.mask[i];
+      alphas[k] = picked ? 1 : DEFAULT_MUTED_OPACITY;
+      sizes[k] = picked ? SPATIAL_SELECTED_SIZE_SCALE : 1;
+    }
+    cloud.alphas = alphas;
+    cloud.sizes = sizes;
   }
 
   /**
