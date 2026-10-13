@@ -38,6 +38,16 @@ import type { PlanContext } from './plan-context';
 
 const MAX_CELL_TILES = 48;
 
+/** The cells' colours as a shapes layer takes them: per-shape RGBA, values over a colormap, or
+ *  one colour. */
+interface CellColors {
+  values?: Float32Array;
+  colormap?: Colormap;
+  contrastLimits?: [number, number];
+  color?: RGBA;
+  faceColor?: Float32Array;
+}
+
 /** What the cell layers need from the service. */
 export interface CellLayersHost {
   /** The continuous LUT the view is using (so cells coloured by a gene match the markers). */
@@ -148,6 +158,21 @@ export class CellLayers {
     // A geometry missing a failed tile is drawn but not remembered, so the retry refetches it.
     this.cellGeometryKey = ctx.incomplete ? null : geometryKey;
     this.cellStyleKey = styleKey;
+    this.drawCells(dataset, view, geometry, colors, geometryChanged);
+    this.setPolygonsShown(true);
+  }
+
+  /**
+   * The cell layers: the fill and the outline the view's draw mode asks for, and with "both" the
+   * nucleus outlines over them. A geometry change builds new layers; a style change restyles them.
+   */
+  private drawCells(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    { rings, nuclei }: { rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null },
+    colors: CellColors,
+    geometryChanged: boolean,
+  ): void {
     const ref = dataset.imageRef;
     const common = { scale: ref?.scale ?? [1, 1], translate: ref?.translate ?? [0, 0] } as const;
     const fill = view.cellDraw !== 'outline';
@@ -182,7 +207,6 @@ export class CellLayers {
     } else {
       this.groups.drop('nucleusOutline');
     }
-    this.setPolygonsShown(true);
   }
 
   private selectionRev(selection: SpatialSelectionMask): number {
@@ -203,13 +227,7 @@ export class CellLayers {
     view: SpatialViewState,
     selection: SpatialSelectionMask,
     owners: Uint32Array,
-  ): Promise<{
-    values?: Float32Array;
-    colormap?: Colormap;
-    contrastLimits?: [number, number];
-    color?: RGBA;
-    faceColor?: Float32Array;
-  }> {
+  ): Promise<CellColors> {
     const muted = selection.count > 0 ? selection.mask : null;
     const mode = view.cellColorMode;
 
