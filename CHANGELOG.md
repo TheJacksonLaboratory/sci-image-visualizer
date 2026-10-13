@@ -123,6 +123,10 @@ CORE-1) refer to the review document attached to #45.
 - **A napari 2D plot replaced while its image was still loading kept running**: once the image
   arrived it installed its region overlay, subscriptions and spatial tiles over the plot that
   replaced it. The 2D image, region-centroid scatter and spatial scenes now stop there.
+- **Switching from an image-less spatial dataset to one with an image could leave the viewer
+  blank** ("the renderer could not draw the image"): clearing the old dataset changed the plot
+  type while the new image loaded, and the image loaded for the old type's backend went to the
+  new one's. The image is now loaded again for the new type.
 - **Cancelling a multichannel napari volume kept loading the next channel**: Cancel aborted the
   channel in progress, but each channel took the loading signal afresh, so the next one was
   fetched in full and drawn nowhere (switching resolution mid-load did the same). A load now stops

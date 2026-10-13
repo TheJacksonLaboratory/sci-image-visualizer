@@ -103,22 +103,30 @@ export class ImageRenderSession {
       // inPlace=true updates the existing render instead of rebuilding it, so the
       // canvas doesn't blank during the small→large swap.
       renderPhase: (phaseInfo, inPlace) => {
-        // Superseded BEFORE this phase started — don't even issue the load (the
-        // orchestrator calls this per tier and retries the sharpen pass).
-        if (!task.isCurrent()) return Promise.resolve(null);
-        return viz.load(phaseInfo, host.zIndex(), task.signal).then((loaded) => {
-          if (!task.isCurrent()) return null;
-          // Guard against a newer click reaching us mid-render.
-          if (phaseInfo.fileName !== loaded.filename) return null;
-          return viz
-            .plot(host.plotDivName, loaded, phaseInfo, screenHeight, host.plotType(), inPlace)
-            .then((drawn) => {
-              // A backend that cannot draw (no plot target, no WebGPU, no tile descriptor)
-              // resolves false: a failed phase, so the retry/failure paths run.
-              if (drawn === false && task.isCurrent()) throw new Error('the renderer could not draw the image');
-              return drawn;
-            });
-        });
+        const phase = (rebuild: boolean): Promise<boolean | null> => {
+          // Superseded BEFORE this phase started — don't even issue the load (the
+          // orchestrator calls this per tier and retries the sharpen pass).
+          if (!task.isCurrent()) return Promise.resolve(null);
+          // The backend that loads is the one for the type selected NOW (see RoutingVisualizerService).
+          const plotType = host.plotType();
+          return viz.load(phaseInfo, host.zIndex(), task.signal).then((loaded) => {
+            if (!task.isCurrent()) return null;
+            // Guard against a newer click reaching us mid-render.
+            if (phaseInfo.fileName !== loaded.filename) return null;
+            // The type changed while this loaded (a spatial dataset cleared mid-switch falls
+            // back to Image): the loaded image is the old backend's, so load for the new one.
+            if (host.plotType() !== plotType) return phase(true);
+            return viz
+              .plot(host.plotDivName, loaded, phaseInfo, screenHeight, plotType, inPlace && !rebuild)
+              .then((drawn) => {
+                // A backend that cannot draw (no plot target, no WebGPU, no tile descriptor)
+                // resolves false: a failed phase, so the retry/failure paths run.
+                if (drawn === false && task.isCurrent()) throw new Error('the renderer could not draw the image');
+                return drawn;
+              });
+          });
+        };
+        return phase(false);
       },
       smallShown: () => {
         if (!task.isCurrent()) return;

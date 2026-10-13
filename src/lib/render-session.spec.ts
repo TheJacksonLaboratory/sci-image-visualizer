@@ -82,6 +82,32 @@ describe('ImageRenderSession', () => {
     expect(host.landed).toHaveBeenCalledTimes(1);
   });
 
+  it('loads again for the new plot type when the type changes while the image loads', async () => {
+    // Switching from an image-less spatial dataset to one with an image: the old dataset is
+    // cleared while the new image loads, so Spatial omics falls back to Image. The load came
+    // from napari; handing it to OSD's plot() drew nothing ("could not draw the image").
+    let type = PlotType.SPATIAL_OMICS;
+    let release!: () => void;
+    const first = new Promise<void>((r) => (release = r));
+    const { session, host, visualizer } = setup({ plotType: () => type, isHeatmap: () => false });
+    visualizer.load.mockImplementationOnce((i: IImageInfo) => first.then(() => ({ filename: i.fileName })));
+    const loadTypes: PlotType[] = [];
+    visualizer.load.mockImplementation((i: IImageInfo) => {
+      loadTypes.push(type);
+      return Promise.resolve({ filename: i.fileName });
+    });
+    session.render(info('visium'));
+    type = PlotType.IMAGE; // the fallback, mid-load
+    release();
+    await settle();
+    await settle();
+    expect(loadTypes).toEqual([PlotType.IMAGE]); // loaded again, for the new type
+    expect(visualizer.plot).toHaveBeenCalledTimes(1);
+    expect(visualizer.plot.mock.calls[0][4]).toBe(PlotType.IMAGE);
+    expect(host.alert).not.toHaveBeenCalled();
+    expect(host.landed).toHaveBeenCalledTimes(1);
+  });
+
   it('cancel makes the render in flight inert', async () => {
     const { session, host, visualizer } = setup();
     visualizer.load.mockImplementationOnce(
