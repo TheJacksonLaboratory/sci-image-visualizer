@@ -111,7 +111,7 @@ $cell-h: 23px;
   padding: 4px 6px;
 
   &:focus {
-    outline: 2px solid #1976D2;
+    outline: 2px solid #1976d2;
     border-color: transparent;
   }
 }
@@ -199,7 +199,7 @@ $cell-h: 23px;
     color: #555;
   }
 
-  input[type="number"] {
+  input[type='number'] {
     width: 48px;
     text-align: center;
     font-family: monospace;
@@ -209,7 +209,7 @@ $cell-h: 23px;
     padding: 3px 2px;
 
     &:focus {
-      outline: 2px solid #1976D2;
+      outline: 2px solid #1976d2;
       border-color: transparent;
     }
 

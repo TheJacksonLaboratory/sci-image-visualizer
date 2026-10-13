@@ -19,4 +19,8 @@ export interface PreferencesPort {
   savePresetSet(set: PresetSet): Observable<void>;
 }
 
+/**
+ * DI token for the host's {@link PreferencesPort}. Optional: without it, the annotation-class
+ * preset set is not persisted.
+ */
 export const PREFERENCES_PORT = new InjectionToken<PreferencesPort>('PREFERENCES_PORT');

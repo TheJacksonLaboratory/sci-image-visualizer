@@ -1,6 +1,4 @@
-import {
-  buildVolumeStackImage, observationsInSlice, sliceIndexOf, volumeImageRef,
-} from './spatial-volume-image';
+import { buildVolumeStackImage, observationsInSlice, sliceIndexOf, volumeImageRef } from './spatial-volume-image';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -10,15 +8,16 @@ import { SpatialDataset } from '../contracts/spatial-dataset.contract';
  * plausible-looking anatomy from the wrong depth.
  */
 describe('buildVolumeStackImage', () => {
-  const dataset = (over: Partial<SpatialDataset> = {}): SpatialDataset => ({
-    id: 'abc.wholebrain',
-    name: 'Whole mouse brain MERFISH',
-    observations: { count: 2, x: new Float32Array([0, 1]), y: new Float32Array([0, 1]) },
-    columns: [],
-    volume: { width: 2, height: 3, depth: 4, voxelSize: [40, 40, 200] },
-    micronsPerUnit: 1,
-    ...over,
-  } as SpatialDataset);
+  const dataset = (over: Partial<SpatialDataset> = {}): SpatialDataset =>
+    ({
+      id: 'abc.wholebrain',
+      name: 'Whole mouse brain MERFISH',
+      observations: { count: 2, x: new Float32Array([0, 1]), y: new Float32Array([0, 1]) },
+      columns: [],
+      volume: { width: 2, height: 3, depth: 4, voxelSize: [40, 40, 200] },
+      micronsPerUnit: 1,
+      ...over,
+    }) as SpatialDataset;
 
   /** Voxel v at (x, y, z) = z * 100 + y * 10 + x, so a mis-sliced plane is obvious. */
   const voxels = (w: number, h: number, d: number) => {
@@ -42,11 +41,9 @@ describe('buildVolumeStackImage', () => {
     // restoreAllMocks and has to be cleared per test.
     createUrl = jest.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:slice-${n++}`);
     createUrl.mockClear();
-    jest
-      .spyOn(CanvasRenderingContext2D.prototype, 'putImageData')
-      .mockImplementation(((data: ImageData) => {
-        planes.push(new Uint8ClampedArray(data.data)); // copy: the encoder reuses one buffer
-      }) as unknown as typeof CanvasRenderingContext2D.prototype.putImageData);
+    jest.spyOn(CanvasRenderingContext2D.prototype, 'putImageData').mockImplementation(((data: ImageData) => {
+      planes.push(new Uint8ClampedArray(data.data)); // copy: the encoder reuses one buffer
+    }) as unknown as typeof CanvasRenderingContext2D.prototype.putImageData);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -94,17 +91,13 @@ describe('buildVolumeStackImage', () => {
   });
 
   it('scales mpp by micronsPerUnit, and reports none when the unit is unknown', async () => {
-    const known = await buildVolumeStackImage(
-      dataset({ micronsPerUnit: 2 }), voxels(2, 3, 4),
-    );
+    const known = await buildVolumeStackImage(dataset({ micronsPerUnit: 2 }), voxels(2, 3, 4));
     expect(known!.info.imageMeta[0].mppX).toBe(80);
     expect(known!.info.imageMeta[0].mppY).toBe(80);
 
     // No micronsPerUnit means the unit is UNKNOWN — a scale bar drawn from a
     // guess looks like a measurement, so mpp stays null.
-    const unknown = await buildVolumeStackImage(
-      dataset({ micronsPerUnit: undefined }), voxels(2, 3, 4),
-    );
+    const unknown = await buildVolumeStackImage(dataset({ micronsPerUnit: undefined }), voxels(2, 3, 4));
     expect(unknown!.info.imageMeta[0].mppX).toBeNull();
     expect(unknown!.info.imageMeta[0].mppY).toBeNull();
   });

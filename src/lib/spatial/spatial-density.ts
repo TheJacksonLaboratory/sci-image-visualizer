@@ -30,6 +30,7 @@ export interface DensityGrid {
   voxelSize: [number, number, number];
 }
 
+/** Kernel and observation subset for a density estimate. */
 export interface DensityOptions {
   /** Kernel σ per axis, in the observations' units. */
   sigma: [number, number, number];
@@ -47,7 +48,10 @@ export interface DensityOptions {
  * align. Without a volume the box comes from the observations' own bounds.
  */
 export function densityGrid(
-  dataset: SpatialDataset, stride = 2, targetLongAxis = 128, zStride = stride,
+  dataset: SpatialDataset,
+  stride = 2,
+  targetLongAxis = 128,
+  zStride = stride,
 ): DensityGrid | null {
   const volume = dataset.volume;
   if (volume) {
@@ -55,9 +59,7 @@ export function densityGrid(
     // z can be coarsened less than x/y — a gene map's sheets need one plane per
     // imaged section, while its in-plane detail is smooth by construction. The
     // physical extent is unchanged either way, so the box still aligns.
-    const [w, h, d] = [
-      cells(volume.width, stride), cells(volume.height, stride), cells(volume.depth, zStride),
-    ];
+    const [w, h, d] = [cells(volume.width, stride), cells(volume.height, stride), cells(volume.depth, zStride)];
     // Voxel size from the SPAN, not stride x original: `ceil` can add a fraction
     // of a voxel, and scaling the original size would push the far edge past the
     // reference volume's.
@@ -95,26 +97,41 @@ export function densityGrid(
 }
 
 /**
- * In-place separable Gaussian along one axis of a w x h x d field.
- *
- * Exported because the gene-map volume estimates a different quantity on the same
- * lattice with the same kernel (see `spatial-expression.ts`): two copies of a
- * separable blur would be two chances to smooth the estimate and its normaliser
- * differently, which is the one thing a Nadaraya-Watson field cannot survive.
+ * A normalised 1-D Gaussian kernel of radius `ceil(3σ)` (at least 1), centre at
+ * index `radius`.
  */
-export function blurVolumeAxis(
-  field: Float32Array, w: number, h: number, d: number, axis: 0 | 1 | 2, sigmaVox: number,
-): void {
-  if (!(sigmaVox > 0.01)) return;
-  const radius = Math.max(1, Math.ceil(sigmaVox * 3));
+export function gaussianKernel(sigma: number): { kernel: Float32Array; radius: number } {
+  const radius = Math.max(1, Math.ceil(sigma * 3));
   const kernel = new Float32Array(radius * 2 + 1);
   let sum = 0;
   for (let i = -radius; i <= radius; i++) {
-    const v = Math.exp(-(i * i) / (2 * sigmaVox * sigmaVox));
+    const v = Math.exp(-(i * i) / (2 * sigma * sigma));
     kernel[i + radius] = v;
     sum += v;
   }
   for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  return { kernel, radius };
+}
+
+/**
+ * In-place separable Gaussian along one axis of a w x h x d field. A 2-D field is
+ * the `d = 1` case.
+ *
+ * The ONE blur for every field in this folder: the 2-D gene map, the gene-map
+ * volume and the density volumes all smooth through it. Two copies of a separable
+ * blur would be two chances to smooth an estimate and its normaliser differently,
+ * which is the one thing a Nadaraya-Watson field cannot survive.
+ */
+export function blurVolumeAxis(
+  field: Float32Array,
+  w: number,
+  h: number,
+  d: number,
+  axis: 0 | 1 | 2,
+  sigmaVox: number,
+): void {
+  if (!(sigmaVox > 0.01)) return;
+  const { kernel, radius } = gaussianKernel(sigmaVox);
 
   const len = axis === 0 ? w : axis === 1 ? h : d;
   const stride = axis === 0 ? 1 : axis === 1 ? w : w * h;
@@ -149,7 +166,8 @@ export function blurVolumeAxis(
  * sampling artefact to correct for.
  */
 function sampledPlanes(
-  obs: SpatialObservations, grid: DensityGrid,
+  obs: SpatialObservations,
+  grid: DensityGrid,
 ): { cover: Float32Array; first: number; last: number } {
   const cover = new Float32Array(grid.depth);
   const z = obs.z;
@@ -183,7 +201,9 @@ function blur1d(profile: Float32Array, sigmaVox: number): Float32Array {
  * so the caller draws no layer rather than an empty box.
  */
 export function rasterizeDensity(
-  obs: SpatialObservations, grid: DensityGrid, opts: DensityOptions,
+  obs: SpatialObservations,
+  grid: DensityGrid,
+  opts: DensityOptions,
 ): Uint8Array | null {
   const { width: w, height: h, depth: d, voxelSize } = grid;
   const field = new Float32Array(w * h * d);
@@ -203,7 +223,9 @@ export function rasterizeDensity(
   if (!placed) return null;
 
   const sigmaVox: [number, number, number] = [
-    opts.sigma[0] / voxelSize[0], opts.sigma[1] / voxelSize[1], opts.sigma[2] / voxelSize[2],
+    opts.sigma[0] / voxelSize[0],
+    opts.sigma[1] / voxelSize[1],
+    opts.sigma[2] / voxelSize[2],
   ];
   blurVolumeAxis(field, w, h, d, 0, sigmaVox[0]);
   blurVolumeAxis(field, w, h, d, 1, sigmaVox[1]);

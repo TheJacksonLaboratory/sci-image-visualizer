@@ -29,7 +29,18 @@ describe('cropImageRegion (browser slide crop)', () => {
 
   it('honors origin/ratio (zoomed readback → data coords)', () => {
     const c: CachedImageData = {
-      frames: [[[0, 0], [0, 0]]], width: 2, height: 2, ratios: [2], isGrayscale: true, originX: 10, originY: 10,
+      frames: [
+        [
+          [0, 0],
+          [0, 0],
+        ],
+      ],
+      width: 2,
+      height: 2,
+      ratios: [2],
+      isGrayscale: true,
+      originX: 10,
+      originY: 10,
     };
     // data box (10,10)-(14,14) -> matrix (0,0)-(2,2)
     const out = cropImageRegion(c, 0, { x0: 10, y0: 10, x1: 14, y1: 14 });

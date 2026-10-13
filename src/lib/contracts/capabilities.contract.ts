@@ -1,11 +1,12 @@
 /**
  * Optional features a viewer backend may or may not support. Consumers query
- * `IImageViewer.capabilities` and degrade gracefully (hide a toolbar item,
+ * `IVisualizer.capabilities` and degrade gracefully (hide a toolbar item,
  * skip a render path) rather than calling a method that no-ops.
  *
  * The Plotly backend supports the scientific/data features; the OpenSeadragon
  * backend supports `ImageDisplay` (large zoomable image) but not the
- * scalar-data features. The eventual router picks a backend per plot type.
+ * scalar-data features. `RoutingVisualizerService` picks a backend per plot type
+ * and reports Plotly's capabilities, so the UI keeps offering every type.
  */
 export enum ViewerFeature {
   /** Display a raster/tiled image (HEATMAP/RGB image, OSD's strength). */
@@ -24,6 +25,7 @@ export enum ViewerFeature {
   Isosurface = 'isosurface',
 }
 
+/** The feature set a backend advertises (see {@link ViewerFeature}). */
 export interface ViewerCapabilities {
   has(feature: ViewerFeature): boolean;
 }

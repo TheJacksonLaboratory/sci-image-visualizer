@@ -1,4 +1,7 @@
 import { Region, Rectangle, Polygon, MultiPolygon } from '../models/region';
+import type { BBoxMask } from '../geometry/raster';
+
+export type { BBoxMask };
 
 /** A single closed ring (+ optional holes) in image-pixel coordinates. A region
  *  rasterizes as the union of its parts. Plain data so it survives a
@@ -7,15 +10,6 @@ export interface MaskPart {
   xpoints: number[];
   ypoints: number[];
   holes?: number[][][];
-}
-
-/** A bbox-relative binary mask, as returned by `WandService.rasterizePolygon`. */
-export interface BBoxMask {
-  bx: number;
-  by: number;
-  bw: number;
-  bh: number;
-  mask: Uint8Array;
 }
 
 /** Polygon-fill function (the wand's scanline rasterizer), injected so this
@@ -62,10 +56,12 @@ export function scaleParts(parts: MaskPart[], scale: number): MaskPart[] {
 export function regionToParts(region: Region): MaskPart[] {
   const b = region.bounds;
   if (b instanceof Rectangle) {
-    return [{
-      xpoints: [b.x, b.x + b.width, b.x + b.width, b.x],
-      ypoints: [b.y, b.y, b.y + b.height, b.y + b.height],
-    }];
+    return [
+      {
+        xpoints: [b.x, b.x + b.width, b.x + b.width, b.x],
+        ypoints: [b.y, b.y, b.y + b.height, b.y + b.height],
+      },
+    ];
   }
   if (b instanceof Polygon) {
     return [{ xpoints: b.xpoints, ypoints: b.ypoints, holes: b.holes }];
@@ -115,8 +111,7 @@ export function regionsToMask(
 
   const multiclass = mode === 'multiclass';
   const bitDepth: 8 | 16 = multiclass && regions.length > 255 ? 16 : 8;
-  const out: Uint8Array | Uint16Array =
-    bitDepth === 16 ? new Uint16Array(W * H) : new Uint8Array(W * H);
+  const out: Uint8Array | Uint16Array = bitDepth === 16 ? new Uint16Array(W * H) : new Uint8Array(W * H);
   let painted = false;
   for (let i = 0; i < regions.length; i++) {
     // Binary → 255 (viewable, standard). Multi-class → 1-based class id.
@@ -125,10 +120,16 @@ export function regionsToMask(
       const m = rasterize(part.xpoints, part.ypoints, W, H, part.holes);
       if (!m) continue;
       painted = true;
-      for (let y = 0; y < m.bh; y++) {
+      // The raster keeps a region's full extent: paint only its part inside the image (a row
+      // offset past either side would wrap into the neighbouring row).
+      const x0 = Math.max(0, -m.bx),
+        x1 = Math.min(m.bw, W - m.bx);
+      const y0 = Math.max(0, -m.by),
+        y1 = Math.min(m.bh, H - m.by);
+      for (let y = y0; y < y1; y++) {
         const srcRow = y * m.bw;
         const dstRow = (m.by + y) * W + m.bx;
-        for (let x = 0; x < m.bw; x++) {
+        for (let x = x0; x < x1; x++) {
           if (m.mask[srcRow + x]) out[dstRow + x] = value;
         }
       }

@@ -29,4 +29,5 @@ export interface TileAccessPort {
   getAuthHeaders(): Promise<Record<string, string>>;
 }
 
+/** DI token for the host's {@link TileAccessPort}. Required by the OpenSeadragon backend. */
 export const TILE_ACCESS_PORT = new InjectionToken<TileAccessPort>('TILE_ACCESS_PORT');

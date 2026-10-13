@@ -17,3 +17,10 @@
  * zoom visibly changing pace when a tool is picked up is the bug this constant prevents.
  */
 export const OSD_ZOOM_PER_SCROLL = 1.03;
+
+/**
+ * Zoom factor per zoom-button press / +/- key, shared by every backend (OpenSeadragon, napari-js
+ * and Plotly's axis-range zoom) so a button press zooms the same amount whichever renderer is
+ * drawing. Unlike {@link OSD_ZOOM_PER_SCROLL} it is one deliberate step per press, not per event.
+ */
+export const ZOOM_BUTTON_STEP = 1.3;

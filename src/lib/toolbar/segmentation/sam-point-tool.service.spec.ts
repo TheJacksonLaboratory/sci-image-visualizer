@@ -1,10 +1,10 @@
-import { SamPointToolService } from './sam-point-tool.service';
-import { WandService } from '../wand/wand.service';
-import { CachedImageData, WandToolHost } from '../wand/wand-tool.service';
+import { SamPointTool, SamPointToolService } from './sam-point-tool.service';
+import { CachedImageData, CanvasToolHost } from '../tool-kit/canvas-tool';
 import { ISamSession, SamEmbedding } from '../../contracts/sam.contract';
 import { Region } from '../../models/region';
 
-const W = 40, H = 40;
+const W = 40,
+  H = 40;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 /** Fake session: decode fills a fixed box so maskToPolygons yields a polygon
@@ -14,8 +14,13 @@ function fakeSession(): ISamSession {
     loadModel: async () => undefined,
     isLoaded: () => true,
     dispose: () => undefined,
-    embed: async (): Promise<SamEmbedding> =>
-      ({ data: new Float32Array(1), dims: [1, 1, 1, 1], scale: 1, imageWidth: W, imageHeight: H }),
+    embed: async (): Promise<SamEmbedding> => ({
+      data: new Float32Array(1),
+      dims: [1, 1, 1, 1],
+      scale: 1,
+      imageWidth: W,
+      imageHeight: H,
+    }),
     decode: async () => {
       const mask = new Uint8Array(W * H);
       for (let y = 8; y < 28; y++) for (let x = 8; x < 28; x++) mask[y * W + x] = 1;
@@ -24,19 +29,28 @@ function fakeSession(): ISamSession {
   };
 }
 
-function makeHost(): { host: WandToolHost; get: () => Region[]; container: HTMLElement } {
+function makeHost(): { host: CanvasToolHost; get: () => Region[]; container: HTMLElement } {
   let regs: Region[] = [];
   const container = document.createElement('div');
   document.body.appendChild(container);
   const frame = Array.from({ length: H }, () => new Array(W).fill(0));
   const cached: CachedImageData = {
-    frames: [frame], width: W, height: H, ratios: [1], isGrayscale: true, originX: 0, originY: 0,
+    frames: [frame],
+    width: W,
+    height: H,
+    ratios: [1],
+    isGrayscale: true,
+    originX: 0,
+    originY: 0,
   };
-  const host: WandToolHost = {
+  const host: CanvasToolHost = {
     getOverlayContainer: () => container,
     getCachedImageData: () => cached,
-    getCoordinateTransform: () =>
-      ({ isReady: () => true, clientToData: (x, y) => ({ x, y }), dataLengthToScreen: (n) => n }),
+    getCoordinateTransform: () => ({
+      isReady: () => true,
+      clientToData: (x, y) => ({ x, y }),
+      dataLengthToScreen: (n) => n,
+    }),
     getActiveFrameIndex: () => 0,
     getRegions: () => regs,
     // Mirror RegionStore.setRegions: mint ids so refine/clear can track the
@@ -52,35 +66,43 @@ function makeHost(): { host: WandToolHost; get: () => Region[]; container: HTMLE
   return { host, get: () => regs, container };
 }
 
+/** The tool's in-progress point prompts (private state). */
+function pointsOf(t: SamPointTool): unknown[] {
+  return (t as unknown as { points: unknown[] }).points;
+}
+
 function cv(c: HTMLElement): HTMLCanvasElement {
   return c.querySelector('canvas') as HTMLCanvasElement;
 }
 function click(x: number, y: number, shift = false): MouseEvent {
-  return new MouseEvent('mousedown', { button: 0, clientX: x, clientY: y, shiftKey: shift });
+  return new MouseEvent('pointerdown', { button: 0, clientX: x, clientY: y, shiftKey: shift });
 }
 
-describe('SamPointToolService', () => {
-  let tool: SamPointToolService;
+describe('SamPointTool', () => {
+  let service: SamPointToolService;
+  let tool: SamPointTool;
 
   beforeEach(() => {
-    tool = new SamPointToolService(new WandService());
-    tool.useSession(fakeSession());
+    service = new SamPointToolService();
+    service.useSession(fakeSession());
+    tool = service.createTool();
   });
-  afterEach(() => { tool.setMode(false); document.body.innerHTML = ''; });
+  afterEach(() => {
+    tool.deactivate();
+    document.body.innerHTML = '';
+  });
 
-  it('creates/removes the overlay on setMode', () => {
+  it('creates/removes the overlay on activate/deactivate', () => {
     const { host, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     expect(cv(container)).not.toBeNull();
-    tool.setMode(false);
+    tool.deactivate();
     expect(container.querySelector('canvas')).toBeNull();
   });
 
   it('a click produces a labelled preview region', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     cv(container).dispatchEvent(click(18, 18));
     await flush();
     expect(get()).toHaveLength(1);
@@ -89,34 +111,37 @@ describe('SamPointToolService', () => {
 
   it('signals busy + a status while a click is being segmented', async () => {
     const { host, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     const busy: boolean[] = [];
-    tool.busy$.subscribe((b) => busy.push(b));
+    service.busy$.subscribe((b) => busy.push(b));
     const statuses: string[] = [];
-    tool.status$.subscribe((s) => { if (s) statuses.push(s); });
+    service.status$.subscribe((s) => {
+      if (s) statuses.push(s);
+    });
 
     cv(container).dispatchEvent(click(18, 18));
     await flush();
 
-    expect(busy).toContain(true);             // went busy during the run…
-    expect(tool.busy$.value).toBe(false);     // …and settled when finished
+    expect(busy).toContain(true); // went busy during the run…
+    expect(service.busy$.value).toBe(false); // …and settled when finished
     expect(statuses.some((s) => /point|segment|encod|loading/i.test(s))).toBe(true);
   });
 
   it('ignores clicks while a previous one is still running (no concurrent encodes)', async () => {
     const session = fakeSession();
     let resolveEmbed!: (v: SamEmbedding) => void;
-    const embedSpy = jest.spyOn(session, 'embed')
-      .mockReturnValue(new Promise<SamEmbedding>((r) => { resolveEmbed = r; }));
-    tool.useSession(session);
+    const embedSpy = jest.spyOn(session, 'embed').mockReturnValue(
+      new Promise<SamEmbedding>((r) => {
+        resolveEmbed = r;
+      }),
+    );
+    service.useSession(session);
     const { host, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
 
-    cv(container).dispatchEvent(click(18, 18));  // first click: busy, embed pending
+    cv(container).dispatchEvent(click(18, 18)); // first click: busy, embed pending
     await flush();
-    cv(container).dispatchEvent(click(20, 20));  // second click while busy → ignored
+    cv(container).dispatchEvent(click(20, 20)); // second click while busy → ignored
     await flush();
     expect(embedSpy).toHaveBeenCalledTimes(1);
 
@@ -126,34 +151,31 @@ describe('SamPointToolService', () => {
 
   it('each positive click segments a NEW region (does not extend the previous one)', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
-    cv(container).dispatchEvent(click(12, 12));       // fiber 1
+    tool.activate(host);
+    cv(container).dispatchEvent(click(12, 12)); // fiber 1
     await flush();
     expect(get()).toHaveLength(1);
-    cv(container).dispatchEvent(click(24, 24));       // adjacent fiber 2 (positive)
+    cv(container).dispatchEvent(click(24, 24)); // adjacent fiber 2 (positive)
     await flush();
-    expect(get()).toHaveLength(2);                    // a new region, not a grown one
-    expect((tool as any).points).toHaveLength(1);     // prompt reset to the latest click only
+    expect(get()).toHaveLength(2); // a new region, not a grown one
+    expect(pointsOf(tool)).toHaveLength(1); // prompt reset to the latest click only
   });
 
   it('clicking after the region is deleted starts fresh (no stale merged prompt)', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     cv(container).dispatchEvent(click(12, 12));
     await flush();
-    host.setRegions([]);                              // user deletes the segmented region
-    cv(container).dispatchEvent(click(24, 24));       // click another fiber
+    host.setRegions([]); // user deletes the segmented region
+    cv(container).dispatchEvent(click(24, 24)); // click another fiber
     await flush();
-    expect(get()).toHaveLength(1);                    // one fresh region…
-    expect((tool as any).points).toHaveLength(1);     // …from a single fresh point
+    expect(get()).toHaveLength(1); // one fresh region…
+    expect(pointsOf(tool)).toHaveLength(1); // …from a single fresh point
   });
 
   it('a Shift/Alt click refines the current object (not a new region)', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     cv(container).dispatchEvent(click(18, 18));
     await flush();
     cv(container).dispatchEvent(click(20, 20, true)); // negative refine
@@ -163,8 +185,7 @@ describe('SamPointToolService', () => {
 
   it('commit() keeps the region; the next click starts a new object', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     cv(container).dispatchEvent(click(18, 18));
     await flush();
     tool.commit();
@@ -175,12 +196,43 @@ describe('SamPointToolService', () => {
 
   it('clear() removes the in-progress preview region', async () => {
     const { host, get, container } = makeHost();
-    tool.bindHost(host);
-    tool.setMode(true);
+    tool.activate(host);
     cv(container).dispatchEvent(click(18, 18));
     await flush();
     expect(get()).toHaveLength(1);
     tool.clear();
     expect(get()).toHaveLength(0);
+  });
+
+  it('reset() forgets the prompt but keeps the preview region', async () => {
+    const { host, get, container } = makeHost();
+    tool.activate(host);
+    cv(container).dispatchEvent(click(18, 18));
+    await flush();
+    tool.reset();
+    expect(pointsOf(tool)).toHaveLength(0);
+    tool.clear(); // nothing in progress any more: the region stays
+    expect(get()).toHaveLength(1);
+  });
+
+  it('tools created for two backends keep their own prompts but share the status feeds (RT-21)', async () => {
+    const other = service.createTool();
+    const a = makeHost();
+    const b = makeHost();
+    tool.activate(a.host);
+    other.activate(b.host);
+    const statuses: string[] = [];
+    service.status$.subscribe((s) => {
+      if (s) statuses.push(s);
+    });
+
+    cv(a.container).dispatchEvent(click(18, 18));
+    await flush();
+
+    expect(a.get()).toHaveLength(1);
+    expect(b.get()).toHaveLength(0);
+    expect(pointsOf(other)).toHaveLength(0);
+    expect(statuses.length).toBeGreaterThan(0);
+    other.deactivate();
   });
 });

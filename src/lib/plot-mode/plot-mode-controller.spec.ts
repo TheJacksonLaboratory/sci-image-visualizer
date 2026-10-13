@@ -53,7 +53,10 @@ const quietLog = () => ({ warn: jest.fn(), error: jest.fn() });
 function deferred<T>() {
   let resolve!: (v: T) => void;
   let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
   return { promise, resolve, reject };
 }
 
@@ -78,16 +81,19 @@ describe('normalizeContributions', () => {
   it('drops a clash with a built-in type, a duplicate id, an unsupported base and a malformed entry', () => {
     const log = quietLog();
     const ok = contribution('dianne');
-    const out = normalizeContributions([
-      contribution(PlotType.HEATMAP),
-      ok,
-      contribution('dianne'),
-      contribution('volume-thing', {
-        descriptor: { type: 'volume-thing', label: 'x', dimensions: '2d', baseType: PlotType.NAPARI_VOLUME },
-      }),
-      { descriptor: { type: 'no-activate' } },
-      null,
-    ], log);
+    const out = normalizeContributions(
+      [
+        contribution(PlotType.HEATMAP),
+        ok,
+        contribution('dianne'),
+        contribution('volume-thing', {
+          descriptor: { type: 'volume-thing', label: 'x', dimensions: '2d', baseType: PlotType.NAPARI_VOLUME },
+        }),
+        { descriptor: { type: 'no-activate' } },
+        null,
+      ],
+      log,
+    );
     expect(out).toEqual([ok]);
     expect(log.warn).toHaveBeenCalledTimes(5);
   });
@@ -172,7 +178,11 @@ describe('PlotModeController', () => {
 
   describe('isolation', () => {
     it('catches a throwing activate() and reports the failure', async () => {
-      const mode = contribution('dianne', { activate: jest.fn(() => { throw new Error('boom'); }) });
+      const mode = contribution('dianne', {
+        activate: jest.fn(() => {
+          throw new Error('boom');
+        }),
+      });
       const c = new PlotModeController([mode], h, log);
       await expect(c.activate(mode, ctx())).resolves.toBeUndefined();
       expect(h.onFailed).toHaveBeenCalledWith(mode, expect.any(Error));
@@ -207,7 +217,11 @@ describe('PlotModeController', () => {
     });
 
     it('swallows a throwing deactivate()', async () => {
-      const session = { deactivate: jest.fn(() => { throw new Error('bad teardown'); }) };
+      const session = {
+        deactivate: jest.fn(() => {
+          throw new Error('bad teardown');
+        }),
+      };
       const mode = contribution('dianne', { activate: () => session });
       const c = new PlotModeController([mode], h, log);
       await c.activate(mode, ctx());
@@ -224,13 +238,18 @@ describe('PlotModeController', () => {
       await c.activate(mode, ctx());
       c.deactivate();
       d.reject(new Error('async teardown'));
-      await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       expect(log.error).toHaveBeenCalledWith(expect.stringContaining('deactivate() failed'), expect.any(Error));
       expect(h.onFailed).not.toHaveBeenCalled(); // the user left: only logged
     });
 
     it('a failed cleanup during a re-render falls back instead of re-activating the mode', async () => {
-      const first = { deactivate: jest.fn(() => { throw new Error('bad teardown'); }) };
+      const first = {
+        deactivate: jest.fn(() => {
+          throw new Error('bad teardown');
+        }),
+      };
       const activate = jest.fn().mockReturnValueOnce(first).mockReturnValue({ deactivate: jest.fn() });
       const mode = contribution('dianne', { activate });
       const c = new PlotModeController([mode], h, log);
@@ -245,7 +264,8 @@ describe('PlotModeController', () => {
     it('an async cleanup rejection that lands after the mode came back ends it and falls back', async () => {
       const d = deferred<void>();
       const second = { deactivate: jest.fn() };
-      const activate = jest.fn()
+      const activate = jest
+        .fn()
         .mockReturnValueOnce({ deactivate: () => d.promise })
         .mockReturnValue(second);
       const mode = contribution('dianne', { activate: activate as any });
@@ -254,15 +274,21 @@ describe('PlotModeController', () => {
       await c.activate(mode, ctx()); // re-render: old session ends (pending), new one starts
       expect(c.current?.session).toBe(second);
       d.reject(new Error('late'));
-      await Promise.resolve(); await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       expect(second.deactivate).toHaveBeenCalledTimes(1);
       expect(h.onFailed).toHaveBeenCalledTimes(1);
       expect(c.current).toBeNull();
     });
 
     it('an explicit re-selection retries a mode whose cleanup failed', async () => {
-      const activate = jest.fn()
-        .mockReturnValueOnce({ deactivate: () => { throw new Error('bad'); } })
+      const activate = jest
+        .fn()
+        .mockReturnValueOnce({
+          deactivate: () => {
+            throw new Error('bad');
+          },
+        })
         .mockReturnValue({ deactivate: jest.fn() });
       const mode = contribution('dianne', { activate });
       const c = new PlotModeController([mode], h, log);
@@ -282,13 +308,20 @@ describe('PlotModeController', () => {
       const p = c.activate(mode, ctx());
       c.deactivate(); // user left before activate resolved
       d.resolve({ deactivate: () => Promise.reject(new Error('stale')) } as unknown as PlotModeSession);
-      await p; await Promise.resolve(); await Promise.resolve();
-      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('superseded session rejected'), expect.any(Error));
+      await p;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining('superseded session rejected'),
+        expect.any(Error),
+      );
       expect(h.onFailed).not.toHaveBeenCalled();
     });
 
     it('a throwing onActivated (the host could not show it) ends the session and falls back', async () => {
-      h.onActivated.mockImplementation(() => { throw new Error('panel render failed'); });
+      h.onActivated.mockImplementation(() => {
+        throw new Error('panel render failed');
+      });
       const session = { deactivate: jest.fn() };
       const mode = contribution('dianne', { activate: () => session });
       const c = new PlotModeController([mode], h, log);
@@ -312,8 +345,14 @@ describe('PlotModeController', () => {
     });
 
     it('swallows a throwing hook', async () => {
-      h.onFailed.mockImplementation(() => { throw new Error('host broke'); });
-      const mode = contribution('dianne', { activate: () => { throw new Error('boom'); } });
+      h.onFailed.mockImplementation(() => {
+        throw new Error('host broke');
+      });
+      const mode = contribution('dianne', {
+        activate: () => {
+          throw new Error('boom');
+        },
+      });
       const c = new PlotModeController([mode], h, log);
       await expect(c.activate(mode, ctx())).resolves.toBeUndefined();
     });
@@ -325,7 +364,10 @@ describe('PlotModeController', () => {
       let seenHost: HTMLElement | null = null;
       const session: PlotModeSession = { deactivate: jest.fn(() => order.push('deactivate')) };
       const mode = contribution('dianne', {
-        activate: jest.fn(() => { order.push('activate'); return session; }),
+        activate: jest.fn(() => {
+          order.push('activate');
+          return session;
+        }),
         panel: {
           title: 'DIANNE',
           mount: jest.fn((host: HTMLElement, c: PlotModeContext, s: PlotModeSession) => {
@@ -355,7 +397,12 @@ describe('PlotModeController', () => {
       const session: PlotModeSession = { deactivate: jest.fn() };
       const mode = contribution('dianne', {
         activate: () => session,
-        panel: { title: 'x', mount: () => { throw new Error('mount failed'); } },
+        panel: {
+          title: 'x',
+          mount: () => {
+            throw new Error('mount failed');
+          },
+        },
       });
       const c = new PlotModeController([mode], h, log);
       await c.activate(mode, ctx());
@@ -368,7 +415,12 @@ describe('PlotModeController', () => {
       const session: PlotModeSession = { deactivate: jest.fn() };
       const mode = contribution('dianne', {
         activate: () => session,
-        panel: { title: 'x', mount: () => () => { throw new Error('teardown failed'); } },
+        panel: {
+          title: 'x',
+          mount: () => () => {
+            throw new Error('teardown failed');
+          },
+        },
       });
       const c = new PlotModeController([mode], h, log);
       await c.activate(mode, ctx());

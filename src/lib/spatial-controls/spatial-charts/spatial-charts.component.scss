@@ -1,3 +1,5 @@
+@use './chart-controls';
+
 :host ::ng-deep .spatial-charts-dialog .p-dialog-content {
   padding: 0.75rem 1rem 1rem;
 }
@@ -52,30 +54,10 @@
   color: var(--text-color-secondary, #6c757d);
 }
 
-.sx-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-
-  // As in the controls panel: the host element is inline, and `styleClass` only
-  // reaches PrimeNG's inner div — so the host has to be sized here.
-  p-dropdown {
-    flex: 1 1 8rem;
-    min-width: 0;
-  }
-}
-
-:host ::ng-deep .sx-controls p-dropdown .p-dropdown {
-  width: 100%;
-}
-
 :host ::ng-deep .sx-kind .p-button {
   padding: 0.25rem 0.6rem;
   font-size: 0.78rem;
 }
-
-
 
 /* A fixed floor keeps Plotly's autosize from collapsing the plot to nothing
    while the dialog is being resized. */
@@ -83,12 +65,6 @@
   width: 100%;
   min-height: 15rem;
   flex: 1;
-}
-
-.sx-hint {
-  font-size: 0.75rem;
-  color: var(--text-color-secondary, #6c757d);
-  line-height: 1.35;
 }
 
 // Detached: the panel says where the plot went rather than showing a blank area that
@@ -101,33 +77,6 @@
   justify-content: center;
   font-size: 0.78rem;
   color: var(--text-color-secondary, #6c757d);
-}
-
-// The detached window's plot fills the dialog's content box, which is sized INLINE via
-// the dialog's `contentStyle` — not from here. `appendTo="body"` moves the dialog out of
-// this component's subtree, so a `:host ::ng-deep` rule cannot reach it: those compile to
-// a selector requiring the host as an ancestor. An earlier version of this file styled it
-// that way and the rule silently never matched, which is what left the plot 0px tall.
-//
-// This class still applies, because component styles attach to elements the template
-// created, wherever they end up in the document.
-.sx-detached-plot {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  // A 3D scene's tick labels can be drawn past the plot's own box and then sit over the
-  // caption below it.
-  overflow: hidden;
-
-  // A layout that fixed its own height — counts and the heatmap, both sized to their row
-  // count — must occupy that height and let the window's content box scroll. Left as
-  // `flex: 1` with `min-height: 0` it would instead be squeezed into the window and
-  // clipped, losing the bottom rows with nothing to scroll to.
-  &.sx-plot-fixed {
-    flex: 0 0 auto;
-    min-height: auto;
-    overflow: visible;
-  }
 }
 
 // The `?` beside the chart tabs. Pushed to the end of the row so it reads as an aside to
@@ -143,17 +92,4 @@
   &:focus-visible {
     color: var(--primary-color, #3b82f6);
   }
-}
-
-// The compute progress block. Sits where the plot will be, so the panel does not jump
-// when the result arrives.
-.sx-compute {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.5rem 0;
-}
-
-.sx-warn {
-  color: var(--orange-600, #c2410c);
 }

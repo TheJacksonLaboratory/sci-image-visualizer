@@ -1,9 +1,9 @@
 import { Rgb, buildColormapLut } from '../contracts/colormap-lut';
+import { parseCssColor } from '../contracts/color';
 import { fallbackColorFor } from '../store/class-color.util';
-import {
-  CategoricalColumnMeta, NO_CATEGORY, SpatialObservations,
-} from '../contracts/spatial-dataset.contract';
+import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
 import { ColormapValue } from '../contracts/display-types';
+import { percentileWindow } from './stats';
 
 /**
  * Turning spatial-omics columns into per-point visual attributes.
@@ -23,14 +23,12 @@ import { ColormapValue } from '../contracts/display-types';
  *
  * COLOUR REPRESENTATION
  * ---------------------
- * Internally everything is a flat `Float32Array` of `[r,g,b,a, …]` in 0..1 —
- * one allocation for N points, GPU-upload shaped. napari-js 0.12.0's
- * `PointsLayer.faceColor` takes `RGBA[]` (an array of 4-tuples) instead, so
- * {@link toRgbaTuples} adapts at the boundary; when the layer accepts a typed
- * array the adapter goes away and the flat buffer is passed straight through.
+ * Everything is a flat `Float32Array` of `[r,g,b,a, …]` in 0..1 — one
+ * allocation for N points, GPU-upload shaped. napari-js (≥ 0.15)
+ * `PointsLayer.faceColor` and `Points3DLayer.colors` take it as is.
  */
 
-/** napari-js per-point colour tuple: r, g, b, a in 0..1. */
+/** One RGBA colour, r, g, b, a in 0..1 (napari-js's broadcast colour). */
 export type RGBA = [number, number, number, number];
 
 /** Neutral grey for observations with no value (NaN, or {@link NO_CATEGORY}). */
@@ -40,43 +38,22 @@ export const MISSING_COLOR: Rgb = [150, 150, 150];
 export const DEFAULT_MUTED_OPACITY = 0.15;
 
 /**
- * Largest number of CATEGORIES whose colours survive the 3D points layer's LUT
- * intact.
- *
- * That layer has no per-point RGBA — it maps a per-point SCALAR through a
- * 256-entry colormap LUT — so a categorical palette is encoded as one contiguous
- * block of LUT entries per value. Measured against napari-js, every K in 2..96
- * blocks round-trips exactly and K=97 is the first that does not: 256 texels
- * cannot keep more values apart than that.
- *
- * One of those 96 blocks is spent on {@link NO_CATEGORY}, which every column can
- * contain, so what fits is **95 categories** — the number published here. It was
- * 96 while the encoder rejected at 96, which meant a 96-category column drew flat
- * with the panel showing no warning: the one failure this ceiling exists to
- * prevent, arrived at from the other direction.
- *
- * Above it the cloud draws FLAT rather than draw a lie, because subtly wrong
- * category colours under a confident legend is the failure nobody catches.
- *
- * A limit of that one layer, and of nothing else: the 2D markers carry per-point
- * RGBA, and a density volume is a scalar field per cluster. Shared here so the
- * renderer that enforces it and the panel that explains it cannot drift apart.
- */
-export const SPATIAL_3D_MAX_CATEGORIES = 95;
-
-/** LUT blocks the 3D layer can keep apart — {@link SPATIAL_3D_MAX_CATEGORIES}
- *  plus the one reserved for a missing value. */
-export const SPATIAL_3D_LUT_BLOCKS = SPATIAL_3D_MAX_CATEGORIES + 1;
-
-/**
  * Fallback categorical palette. Colour-blind-safe and stable, so a category
  * without an authored colour still lands somewhere sensible and lands there
  * every run (`fallbackColorFor` hashes the name — same name, same colour).
  * Okabe–Ito, plus two greys for long tails.
  */
 export const DEFAULT_CATEGORICAL_PALETTE: string[] = [
-  '#0072B2', '#E69F00', '#009E73', '#CC79A7', '#56B4E9',
-  '#D55E00', '#F0E442', '#000000', '#7F7F7F', '#BFBFBF',
+  '#0072B2',
+  '#E69F00',
+  '#009E73',
+  '#CC79A7',
+  '#56B4E9',
+  '#D55E00',
+  '#F0E442',
+  '#000000',
+  '#7F7F7F',
+  '#BFBFBF',
 ];
 
 interface MuteOptions {
@@ -88,6 +65,7 @@ interface MuteOptions {
   muted?: Uint8Array | null;
 }
 
+/** Options for {@link encodeCategorical}: a colour per category, plus muting. */
 export interface CategoricalEncodingOptions extends MuteOptions {
   /** Per-category `#rrggbb`, index-aligned with the column's categories. */
   colors: string[];
@@ -95,6 +73,7 @@ export interface CategoricalEncodingOptions extends MuteOptions {
   missingColor?: Rgb;
 }
 
+/** Options for {@link encodeContinuous}: a colormap, a contrast window and scaling, plus muting. */
 export interface ContinuousEncodingOptions extends MuteOptions {
   /** 256-entry RGB table from {@link buildColormapLut}. */
   lut: Rgb[];
@@ -107,18 +86,10 @@ export interface ContinuousEncodingOptions extends MuteOptions {
   missingColor?: Rgb;
 }
 
-/** Parse `#rgb` / `#rrggbb` to 0–255 RGB; unparseable input falls back to grey.
- *  Exported so the 3D LUT path parses palettes exactly as the 2D path does. */
+/** Parse a CSS colour (`#rgb` / `#rrggbb`, see {@link parseCssColor}) to 0–255 RGB; unparseable
+ *  input falls back to grey. Exported so the tile layers parse palettes exactly as the markers do. */
 export function parseHex(hex: string): Rgb {
-  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? '').trim());
-  if (!m) return MISSING_COLOR;
-  let h = m[1];
-  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
-  return [
-    parseInt(h.slice(0, 2), 16),
-    parseInt(h.slice(2, 4), 16),
-    parseInt(h.slice(4, 6), 16),
-  ];
+  return parseCssColor(hex) ?? MISSING_COLOR;
 }
 
 function alphaAt(i: number, opts: MuteOptions): number {
@@ -134,7 +105,8 @@ function alphaAt(i: number, opts: MuteOptions): number {
  * 40-cluster column still gets stable, distinct-ish colours.
  */
 export function resolveCategoryColors(
-  meta: CategoricalColumnMeta, palette: string[] = DEFAULT_CATEGORICAL_PALETTE,
+  meta: CategoricalColumnMeta,
+  palette: string[] = DEFAULT_CATEGORICAL_PALETTE,
 ): string[] {
   const authored = meta.colors;
   return meta.categories.map((name, i) => {
@@ -146,9 +118,7 @@ export function resolveCategoryColors(
 }
 
 /** Categorical column → flat per-point RGBA (length `4 * codes.length`). */
-export function encodeCategorical(
-  codes: Uint16Array, opts: CategoricalEncodingOptions,
-): Float32Array {
+export function encodeCategorical(codes: Uint16Array, opts: CategoricalEncodingOptions): Float32Array {
   const n = codes.length;
   const out = new Float32Array(n * 4);
   // Resolve each category once — parsing a hex string per point would dominate.
@@ -162,17 +132,16 @@ export function encodeCategorical(
     out[o + 1] = c[1] / 255;
     out[o + 2] = c[2] / 255;
     // A point with no category is background by definition — never emphasised.
-    out[o + 3] = code === NO_CATEGORY
-      ? Math.min(alphaAt(i, opts), opts.mutedOpacity ?? DEFAULT_MUTED_OPACITY)
-      : alphaAt(i, opts);
+    out[o + 3] =
+      code === NO_CATEGORY
+        ? Math.min(alphaAt(i, opts), opts.mutedOpacity ?? DEFAULT_MUTED_OPACITY)
+        : alphaAt(i, opts);
   }
   return out;
 }
 
 /** Continuous column / gene vector → flat per-point RGBA. */
-export function encodeContinuous(
-  values: Float32Array, opts: ContinuousEncodingOptions,
-): Float32Array {
+export function encodeContinuous(values: Float32Array, opts: ContinuousEncodingOptions): Float32Array {
   const n = values.length;
   const out = new Float32Array(n * 4);
   const missing = opts.missingColor ?? MISSING_COLOR;
@@ -210,25 +179,12 @@ export function encodeContinuous(
  * fractions (0.01 / 0.99 clips the extreme 1% at each end).
  *
  * Returns `[0, 1]` for an empty or all-missing vector so callers always get a
- * usable window.
+ * usable window. A large vector is windowed from an even sample of it — see
+ * `spatial/stats.ts` — because this runs on every recolour, and sorting millions
+ * of values each time cost most of a second.
  */
-export function contrastWindow(
-  values: Float32Array, lo = 0.01, hi = 0.99,
-): [number, number] {
-  const finite: number[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (Number.isFinite(values[i])) finite.push(values[i]);
-  }
-  if (finite.length === 0) return [0, 1];
-  finite.sort((a, b) => a - b);
-  const at = (f: number) => {
-    const k = Math.max(0, Math.min(finite.length - 1, Math.round(f * (finite.length - 1))));
-    return finite[k];
-  };
-  const min = at(Math.max(0, Math.min(1, lo)));
-  const max = at(Math.max(0, Math.min(1, hi)));
-  // A flat or inverted window would divide by zero downstream; widen it.
-  return max > min ? [min, max] : [min, min + 1];
+export function contrastWindow(values: Float32Array, lo = 0.01, hi = 0.99): [number, number] {
+  return percentileWindow(values, lo, hi);
 }
 
 /**
@@ -239,9 +195,7 @@ export function contrastWindow(
  * `fallbackRadius` covers a dataset that declares no radius (segmented cells
  * often don't); it is in image pixels, like everything else in this space.
  */
-export function markerDiameters(
-  observations: SpatialObservations, fallbackRadius = 4,
-): number | Float32Array {
+export function markerDiameters(observations: SpatialObservations, fallbackRadius = 4): number | Float32Array {
   const r = observations.radius;
   if (typeof r === 'number') return r * 2;
   if (r instanceof Float32Array) {
@@ -252,27 +206,9 @@ export function markerDiameters(
   return fallbackRadius * 2;
 }
 
-/**
- * Adapt a flat RGBA buffer to the `RGBA[]` shape napari-js 0.12.0's
- * `PointsLayer.faceColor` accepts. One 4-element array per point — the reason
- * this is a named boundary rather than inlined: it is the one place the model
- * stops being typed-array shaped, and it is what a future napari-js taking a
- * `Float32Array` would delete.
- */
-export function toRgbaTuples(flat: Float32Array): RGBA[] {
-  const n = flat.length / 4;
-  const out: RGBA[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    out[i] = [flat[o], flat[o + 1], flat[o + 2], flat[o + 3]];
-  }
-  return out;
-}
-
 /** Convenience: a 256-entry LUT for a colormap value, falling back to Viridis. */
 export function lutFor(colormapValue: unknown, reverse = false): Rgb[] {
-  return buildColormapLut(colormapValue, reverse)
-    ?? buildColormapLut('Viridis', reverse)!;
+  return buildColormapLut(colormapValue, reverse) ?? buildColormapLut('Viridis', reverse)!;
 }
 
 /** True when every entry of a LUT is a neutral grey. Tested on the VALUES rather
@@ -298,7 +234,9 @@ export function isGrayscaleLut(lut: readonly Rgb[]): boolean {
  * them can disagree about what a colour means, whichever way the choice falls.
  */
 export function spatialContinuousLut(
-  colormapValue: unknown, reverse = false, override?: ColormapValue | null,
+  colormapValue: unknown,
+  reverse = false,
+  override?: ColormapValue | null,
 ): Rgb[] {
   // An inline scale is an array, so emptiness has to be checked as well as
   // presence: `[]` is truthy and would resolve to the fallback LUT silently.

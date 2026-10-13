@@ -1,5 +1,4 @@
 import { Injectable, Optional, Inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
@@ -14,22 +13,18 @@ import { COLORMAP_OPTIONS } from '../plot.utilities';
 /**
  * Backend-neutral store for the **visualization session** — the state that
  * describes *how* the current image is being viewed, independent of which
- * rendering backend (Plotly or OpenSeadragon) is on screen:
+ * rendering backend (Plotly, OpenSeadragon or napari-js) is on screen:
  *
  *  - the active colormap / LUT and its reverse-scale toggle,
- *  - the current image's physical metadata (µm/pixel etc.),
- *  - the classification label → colour map,
+ *  - the current image's physical metadata (µm/pixel etc.) and its per-channel
+ *    display state (window, gamma, tint, visibility; grayscale / invert),
+ *  - the annotation-class presets (the classification label → colour map),
+ *  - the spatial-omics view state,
  *  - which on-canvas tool is currently active.
  *
- * Both backends read and write this single instance, so they stay in lock-step
- * regardless of which one is rendering. Previously this state lived inside
- * `PlotlyService`, which forced the OpenSeadragon backend to depend on the
- * Plotly service purely to read the shared colormap; this store removes that
- * coupling — neither backend owns the session state.
- *
- * NOTE: region *geometry* (the drawn shapes / per-image region cache) still
- * lives in `PlotlyService` for now; extracting it into a sibling region store
- * is a separate follow-up.
+ * Every backend reads and writes this single instance (one per visualizer chain),
+ * so they stay in lock-step regardless of which one is rendering; none of them
+ * owns the session state. Region geometry lives in the sibling `RegionStore`.
  */
 @Injectable({ providedIn: 'root' })
 export class VisualizerStore {
@@ -55,6 +50,8 @@ export class VisualizerStore {
   // The derived defaults (full window, gamma 1, default tint) for the current
   // image, kept so "Reset" can restore a channel's window/gamma/colour.
   private defaultChannelStates: IChannelState[] = [];
+  /** The image the current channel states were derived for (see setImageMeta). */
+  private channelImageKey: string | undefined;
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -81,46 +78,22 @@ export class VisualizerStore {
    *  to an edit exactly as it does for an image. */
   private readonly spatialView$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
 
-  // Optional + null defaults so the store can be constructed both via DI and
-  // directly (`new VisualizerStore()` in unit tests); the LUT fetch and preset
-  // load/save no-op when their dependency is absent.
-  constructor(
-    @Optional() private readonly http: HttpClient | null = null,
-    @Optional() @Inject(PREFERENCES_PORT) private readonly prefsPort: PreferencesPort | null = null,
-  ) {
-    this.loadColormapLuts();
+  // Optional + null default so the store can be constructed both via DI and
+  // directly (`new VisualizerStore()` in unit tests); preset load/save no-op
+  // when the port is absent.
+  constructor(@Optional() @Inject(PREFERENCES_PORT) private readonly prefsPort: PreferencesPort | null = null) {
     this.initPresetPersistence();
-  }
-
-  /**
-   * Resolve the colormap tree's LUT keys (e.g. "GREYS_LUT") to their colour
-   * arrays from a served JSON asset. The ~630 KB of LUT data lives outside the
-   * bundle (as `/assets/plotting/colormap-luts.json`) so it never enters the TS
-   * / webpack module graph — that data-in-source was the main driver of the
-   * build's >2 GB heap. Named Plotly scales (e.g. "Viridis") aren't keys in the
-   * JSON, so they're left untouched. The default LUT ("Greys Inv" → the Plotly
-   * "Greys" scale) needs no JSON, so the first render works before this resolves.
-   */
-  private loadColormapLuts(): void {
-    if (!this.http) return;
-    this.http.get<Record<string, [number, string][]>>('assets/plotting/colormap-luts.json').subscribe({
-      next: (luts) => {
-        for (const group of COLORMAP_OPTIONS as any[]) {
-          for (const child of group.children ?? []) {
-            const key = child?.data?.value;
-            if (typeof key === 'string' && luts[key]) child.data.value = luts[key];
-          }
-        }
-      },
-      error: () => { /* leave keys unresolved; named scales still work */ },
-    });
   }
 
   // ── Preset persistence (jit-ui#70) ───────────────────────────────────
   private initPresetPersistence(): void {
     // Debounced write-back so a burst of edits collapses into one PUT.
     this.savePresets$.pipe(debounceTime(800)).subscribe(() => {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     });
     // Load the user's saved set (if any); otherwise keep the seeded defaults.
     this.prefsPort?.loadPresetSet().subscribe({
@@ -131,7 +104,9 @@ export class VisualizerStore {
         }
         this.presetsLoaded = true;
       },
-      error: () => { this.presetsLoaded = true; },
+      error: () => {
+        this.presetsLoaded = true;
+      },
     });
   }
 
@@ -159,7 +134,11 @@ export class VisualizerStore {
    *  debounce. Used for explicit bulk actions (Apply / Import / Reset). */
   private savePresetsNow(): void {
     if (this.presetsLoaded) {
-      this.prefsPort?.savePresetSet(this.presetSet).subscribe({ error: () => { /* keep local copy */ } });
+      this.prefsPort?.savePresetSet(this.presetSet).subscribe({
+        error: () => {
+          /* keep local copy */
+        },
+      });
     }
   }
 
@@ -203,7 +182,8 @@ export class VisualizerStore {
    * Editor) show µm²/mm² instead of px². No-op when neither axis is positive.
    */
   setPhysicalPixelSize(mppX?: number, mppY?: number): void {
-    const hasX = (mppX ?? 0) > 0, hasY = (mppY ?? 0) > 0;
+    const hasX = (mppX ?? 0) > 0,
+      hasY = (mppY ?? 0) > 0;
     if (!hasX && !hasY) return;
     const cur = this.imageMeta$.value;
     const meta = (cur && cur.length ? cur : [{} as IImageMetadata]).map((e) => ({ ...e }));
@@ -211,17 +191,26 @@ export class VisualizerStore {
     if (hasY) meta[0].mppY = mppY;
     this.imageMeta$.next(meta);
   }
-  setImageMeta(imageMeta: IImageMetadata[]): void {
+  /**
+   * Publish the current image's metadata and derive its channels.
+   *
+   * `imageKey` identifies the image (its file name). A re-plot of the SAME image
+   * keeps the user's window/gamma/tint edits; a different image gets its own
+   * derived channels even at the same channel count — keying on the count alone
+   * left a DAPI/GFP/RFP stack's names, tints and windows on a following
+   * CD3/CD8/PanCK one. Without a key, only a change of channel count re-derives.
+   */
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
     this.imageMeta$.next(imageMeta);
-    // Re-derive channels only when their structure changes (count), so a re-plot
-    // of the same image doesn't clobber the user's window/gamma edits.
     const next = this.deriveChannels(imageMeta);
     // Always refresh the reset baseline to the current image's derived defaults
     // (names/colours can differ even at the same channel count).
     this.defaultChannelStates = next.map((c) => ({ ...c }));
-    if (next.length !== this.channelStates$.value.length) {
+    const otherImage = imageKey !== undefined && imageKey !== this.channelImageKey;
+    if (imageKey !== undefined) this.channelImageKey = imageKey;
+    if (otherImage || next.length !== this.channelStates$.value.length) {
       this.channelStates$.next(next);
-      this.selectedChannel$.next(0); // new channel structure → reset the selected band
+      this.selectedChannel$.next(0); // new image / channel structure → reset the selected band
     }
   }
 
@@ -263,8 +252,12 @@ export class VisualizerStore {
     return this.channelStates$.value;
   }
   /** The channel selected in the pane (drives a single-scalar 3D Surface). */
-  getSelectedChannel(): Observable<number> { return this.selectedChannel$.asObservable(); }
-  currentSelectedChannel(): number { return this.selectedChannel$.value; }
+  getSelectedChannel(): Observable<number> {
+    return this.selectedChannel$.asObservable();
+  }
+  currentSelectedChannel(): number {
+    return this.selectedChannel$.value;
+  }
   setSelectedChannel(index: number): void {
     if (this.selectedChannel$.value !== index) this.selectedChannel$.next(index);
   }
@@ -362,10 +355,6 @@ export class VisualizerStore {
     this.presetSet$.next(this.presetSet);
     this.savePresetsNow(); // explicit reset → persist immediately
   }
-  /** Force a (debounced) write-back of the current preset set. */
-  persistPresets(): void {
-    this.queuePresetSave();
-  }
 
   // ── spatial-omics view state ──────────────────────────────────────────
   getSpatialView$(): Observable<SpatialViewState> {
@@ -382,17 +371,8 @@ export class VisualizerStore {
     this.spatialView$.next({ ...this.spatialView$.value, ...partial });
   }
 
-  /** Reset to defaults — e.g. when a different dataset is selected, where the
-   *  previous colour column almost certainly does not exist. */
-  resetSpatialView(): void {
-    this.spatialView$.next({ ...DEFAULT_SPATIAL_VIEW });
-  }
-
   getActiveTool$(): Observable<string | null> {
     return this.activeTool$.asObservable();
-  }
-  getActiveTool(): string | null {
-    return this.activeTool$.value;
   }
   setActiveTool(tool: string | null): void {
     this.activeTool$.next(tool);

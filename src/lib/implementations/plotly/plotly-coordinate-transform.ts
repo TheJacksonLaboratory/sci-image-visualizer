@@ -7,7 +7,6 @@ import { ICoordinateTransform } from '../../contracts/coordinate-transform.contr
  * behaviour is unchanged.
  */
 export class PlotlyCoordinateTransform implements ICoordinateTransform {
-
   constructor(
     private getGraphDiv: () => any,
     private getContainer: () => HTMLElement | null,

@@ -1,0 +1,61 @@
+<!-- Key: categorical legend or a continuous colour bar, built from the same
+     functions the renderer uses so it cannot disagree with the canvas. -->
+<div class="sc-section sc-key" *ngIf="view.colorBy">
+  <span class="sc-lbl">{{ colorByLabel }}</span>
+  <!-- Derived columns say so, so they are not mistaken for measured data. -->
+  <small class="sc-hint" *ngIf="activeDescription">{{ activeDescription }}</small>
+
+  <!-- Legend rows are buttons: clicking one selects that category, clicking
+       it again clears — so a click is always reversible. -->
+  <ul class="sc-legend" *ngIf="isCategorical">
+    <li *ngFor="let entry of legend; index as i; trackBy: trackByLabel">
+      <button
+        type="button"
+        class="sc-legend-btn"
+        [class.selected]="selectedCategory === i"
+        (click)="categoryClicked.emit(i)"
+        [title]="'Select ' + entry.label"
+      >
+        <span class="sc-swatch" [style.background]="entry.color"></span>
+        <span class="sc-legend-label">{{ entry.label }}</span>
+      </button>
+    </li>
+  </ul>
+
+  <div *ngIf="isContinuous">
+    <div class="sc-colorbar" [style.background]="colorBarCss"></div>
+    <div class="sc-colorbar-ends">
+      <span>low</span>
+      <span class="sc-hint">window from percentiles</span>
+      <span>high</span>
+    </div>
+    <!-- The gradient this bar and the map are drawn with. Sits under the bar
+         it controls, with the same swatch previews the image's colormap picker
+         uses: which gradient reads best is a visual judgement, so a list of
+         names would be the wrong control. Cleared = follow the image's. -->
+    <div class="sc-row">
+      <span class="sc-lbl">Colormap</span>
+      <p-treeSelect
+        [options]="colormapOptions"
+        [ngModel]="selectedColormapNode"
+        selectionMode="single"
+        [showClear]="true"
+        placeholder="Match the image"
+        [scrollHeight]="'260px'"
+        appendTo="body"
+        pTooltip="Colour scale for gene and numeric values — the markers, the gene map and this bar. Clear it to follow the image's colormap"
+        tooltipPosition="top"
+        (onNodeSelect)="onContinuousColormap($event.node)"
+        (onClear)="onContinuousColormap(null)"
+      >
+        <ng-template let-node pTemplate="default">
+          <span class="sc-cmap-option">
+            <img *ngIf="!node.children && node.data?.src" [src]="node.data.src" class="sc-cmap-swatch" alt="" />
+            <span>{{ node.label }}</span>
+          </span>
+        </ng-template>
+      </p-treeSelect>
+      <span class="sc-val"></span>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,13 @@
+@use '../spatial-panel';
+
+:host {
+  display: contents;
+}
+
+.sc-dot {
+  flex: 0 0 auto;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}

@@ -1,6 +1,11 @@
 import {
-  SAM_MODELS, DEFAULT_SAM_MODEL_ID, getSamModel, isSamModelReady, setSamModelUrls,
-  getDefaultSamModelId, setDefaultSamModel,
+  SAM_MODELS,
+  DEFAULT_SAM_MODEL_ID,
+  getSamModel,
+  isSamModelReady,
+  setSamModelUrls,
+  getDefaultSamModelId,
+  setDefaultSamModel,
 } from './sam-model-registry';
 
 describe('sam-model-registry', () => {
@@ -39,6 +44,19 @@ describe('sam-model-registry', () => {
     expect(getSamModel().id).toBe(second);
     // reset
     setSamModelUrls(second, '', '');
+    setDefaultSamModel(SAM_MODELS[0].id);
+  });
+
+  it('records a revision with the URLs, and keeps it when only the URLs change', () => {
+    const m = SAM_MODELS[0];
+    const { encoderUrl, decoderUrl, revision } = m;
+    setSamModelUrls(m.id, 'https://x/e.onnx', 'https://x/d.onnx', '7');
+    expect(getSamModel(m.id).revision).toBe('7');
+    setSamModelUrls(m.id, 'https://y/e.onnx', 'https://y/d.onnx');
+    expect(getSamModel(m.id).revision).toBe('7');
+    // reset
+    setSamModelUrls(m.id, encoderUrl, decoderUrl);
+    m.revision = revision;
     setDefaultSamModel(SAM_MODELS[0].id);
   });
 });

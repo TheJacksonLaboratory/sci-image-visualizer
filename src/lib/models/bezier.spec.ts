@@ -1,4 +1,8 @@
-import { bezierCurve, bezierAnchorHandles } from './bezier';
+import { bezierAnchorHandles, bezierCurveFromHandles } from './bezier';
+
+/** Flatten the default (Catmull-Rom) bezier through the anchors. */
+const bezierCurve = (xs: number[], ys: number[], closed: boolean) =>
+  bezierCurveFromHandles(xs, ys, bezierAnchorHandles(xs, ys, closed), closed);
 
 describe('bezierCurve (Catmull-Rom flattening)', () => {
   it('returns a denser, smooth sampling of the anchors', () => {

@@ -1,68 +1,34 @@
 /**
- * What is under the cursor, and what to say about it.
+ * What to say about the observation under the cursor.
  *
  * A coloured cloud answers "how is this annotation distributed"; it cannot answer
  * "which class is THAT" — the legend has 34 entries, several of them similar
  * colours, and matching a dot to a swatch by eye is exactly the task a tooltip
  * exists to remove.
  *
- * Pure — no DOM, no camera, no data access. The renderer supplies screen
- * positions (it owns the projection) and the active colour source; everything
- * here is arithmetic and string formatting, so it is tested directly.
+ * Pure — no DOM, no camera, no data access. Finding the observation is the
+ * renderer's (napari-js picks on the layers it drew); this is string formatting
+ * over the active colour source, so it is tested directly.
  */
 
 /** The colour source a tooltip describes, as the renderer already has it. */
 export type HoverSource =
   | {
-    kind: 'categorical';
-    /** Column name, for the tooltip's first line. */
-    name: string;
-    categories: readonly string[];
-    /** Per-observation category index, or `NO_CATEGORY`. */
-    codes: Uint16Array;
-  }
-  | {
-    kind: 'continuous';
-    /** Column or gene name. */
-    name: string;
-    values: Float32Array;
-    /** Unit for the value, when the dataset declares one. */
-    unit?: string;
-  };
-
-/**
- * Index of the drawn observation nearest `(x, y)` within `maxDist` screen pixels,
- * or -1.
- *
- * `screen` is `[x0, y0, x1, y1, …]` indexed BY OBSERVATION, with NaN for anything
- * not currently drawn — off screen, behind the eye, or on a hidden section. NaN
- * fails every comparison, so those are skipped without a special case.
- *
- * Ties go to the LATER observation, which is the one drawn on top and therefore
- * the one the user believes they are pointing at.
- */
-export function nearestObservation(
-  screen: Float32Array,
-  x: number,
-  y: number,
-  maxDist: number,
-): number {
-  const limit = maxDist * maxDist;
-  let best = -1;
-  let bestDist = Infinity;
-  const n = screen.length >> 1;
-  for (let i = 0; i < n; i++) {
-    const dx = screen[i * 2] - x;
-    const dy = screen[i * 2 + 1] - y;
-    const d = dx * dx + dy * dy;
-    // `<=` so a later point at the same distance wins: it is drawn on top.
-    if (d <= bestDist && d <= limit) {
-      bestDist = d;
-      best = i;
+      kind: 'categorical';
+      /** Column name, for the tooltip's first line. */
+      name: string;
+      categories: readonly string[];
+      /** Per-observation category index, or `NO_CATEGORY`. */
+      codes: Uint16Array;
     }
-  }
-  return best;
-}
+  | {
+      kind: 'continuous';
+      /** Column or gene name. */
+      name: string;
+      values: Float32Array;
+      /** Unit for the value, when the dataset declares one. */
+      unit?: string;
+    };
 
 /** A number for a tooltip: enough digits to distinguish, few enough to read. */
 function formatValue(v: number): string {

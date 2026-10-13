@@ -1,95 +1,42 @@
 import { NgModule } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-
-import { ToolbarModule } from 'primeng/toolbar';
-import { ButtonModule } from 'primeng/button';
-import { MenuModule } from 'primeng/menu';
-import { DropdownModule } from 'primeng/dropdown';
-import { SliderModule } from 'primeng/slider';
-import { TreeSelectModule } from 'primeng/treeselect';
-import { InputNumberModule } from 'primeng/inputnumber';
-import { DialogModule } from 'primeng/dialog';
-import { ContextMenuModule } from 'primeng/contextmenu';
-import { ProgressBarModule } from 'primeng/progressbar';
-import { ToastModule } from 'primeng/toast';
-import { TooltipModule } from 'primeng/tooltip';
-import { RippleModule } from 'primeng/ripple';
-import { TableModule } from 'primeng/table';
-import { PaginatorModule } from 'primeng/paginator';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
-import { ConfirmDialogModule } from 'primeng/confirmdialog';
-import { InputTextModule } from 'primeng/inputtext';
-import { CheckboxModule } from 'primeng/checkbox';
-import { MultiSelectModule } from 'primeng/multiselect';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { SelectButtonModule } from 'primeng/selectbutton';
-import { AutoCompleteModule } from 'primeng/autocomplete';
 
 import { VisualizerComponent } from './visualizer.component';
-import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
 import { SpatialControlsComponent } from './spatial-controls/spatial-controls.component';
 import { SpatialChartsComponent } from './spatial-controls/spatial-charts/spatial-charts.component';
-import { RoutingVisualizerService } from './routing-visualizer.service';
-import { VISUALIZER } from './contracts/visualizer.contract';
-import { REGION_EDITOR_API } from './contracts/region-editor-api.contract';
-import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contract';
+import { VISUALIZER_TOKEN_BINDINGS } from './provide-visualization';
+
+/** The embeddable components, all standalone. */
+const PUBLIC_COMPONENTS = [
+  VisualizerComponent,
+  RegionEditorComponent,
+  HexColorPickerComponent,
+  ChannelHistogramComponent,
+  SpatialControlsComponent,
+  SpatialChartsComponent,
+];
 
 /**
  * Self-contained plotting UI: the {@link VisualizerComponent} (plot surface
- * + render orchestration), its {@link ToolbarComponent}, and the
- * {@link RegionEditorComponent} (the Regions tab table/editor). Consumers embed
- * `<visualizer>` / `<region-editor>` and need know nothing about the toolbar,
- * the rendering backends, or region file I/O (supplied via the REGION_IO_PORT).
+ * + render orchestration, with its toolbar), the {@link RegionEditorComponent}
+ * (the Regions table/editor), {@link HexColorPickerComponent}
+ * (`<hex-color-picker>`, `[color]` in, `(colorChange)` out),
+ * {@link ChannelHistogramComponent}, {@link SpatialControlsComponent} and
+ * {@link SpatialChartsComponent}. Consumers embed `<visualizer>` /
+ * `<region-editor>` and need know nothing about the toolbar, the rendering
+ * backends, or region file I/O (supplied via the REGION_IO_PORT).
  *
- * Also exports {@link HexColorPickerComponent} (`<hex-color-picker>`) as a
- * standalone reusable picker (`[color]` in, `(colorChange)` out) so consuming
- * apps can use it on its own, the same way as the visualizer and region editor.
+ * @deprecated A re-export shim, kept for one minor release: every component is
+ * standalone now. Import the components themselves (`imports: [VisualizerComponent]`)
+ * and bind the backend chain with {@link provideVisualization} — in the application's
+ * providers for one app-wide viewer chain, or a component's for an isolated one —
+ * instead of the root bindings this module adds.
  */
 @NgModule({
-  declarations: [
-    VisualizerComponent,
-    ToolbarComponent,
-    RegionEditorComponent,
-    HexColorPickerComponent,
-    ChannelHistogramComponent,
-    SpatialControlsComponent,
-    SpatialChartsComponent,
-  ],
-  imports: [
-    CommonModule,
-    FormsModule,
-    ToolbarModule,
-    ButtonModule,
-    MenuModule,
-    DropdownModule,
-    SliderModule,
-    TreeSelectModule,
-    InputNumberModule,
-    DialogModule,
-    ContextMenuModule,
-    ProgressBarModule,
-    ToastModule,
-    TooltipModule,
-    RippleModule,
-    TableModule,
-    PaginatorModule,
-    OverlayPanelModule,
-    ConfirmDialogModule,
-    InputTextModule,
-    CheckboxModule,
-    MultiSelectModule,
-    RadioButtonModule,
-    SelectButtonModule,
-    AutoCompleteModule,
-  ],
-  exports: [
-    VisualizerComponent, RegionEditorComponent, HexColorPickerComponent,
-    ChannelHistogramComponent, SpatialControlsComponent, SpatialChartsComponent,
-  ],
+  imports: PUBLIC_COMPONENTS,
+  exports: PUBLIC_COMPONENTS,
   providers: [
     // Internal backend wiring. All three host-facing contracts are served by the
     // RoutingVisualizerService (the Plotly/OpenSeadragon selector), so consumers
@@ -97,11 +44,9 @@ import { CHANNEL_HISTOGRAM_API } from './contracts/channel-histogram-api.contrac
     // library so importing VisualizationModule is enough — the host supplies only
     // the *ports* (IMAGE_STATE_PORT / TILE_ACCESS_PORT / REGION_IO_PORT) and
     // VIZ_CONFIG, which are app-specific. A consumer needing an isolated instance
-    // (e.g. a modal that mustn't share region/image state) re-provides this same
-    // set at component scope, which shadows these defaults for its subtree.
-    { provide: VISUALIZER, useExisting: RoutingVisualizerService },
-    { provide: REGION_EDITOR_API, useExisting: RoutingVisualizerService },
-    { provide: CHANNEL_HISTOGRAM_API, useExisting: RoutingVisualizerService },
+    // (e.g. a modal that mustn't share region/image state) uses provideVisualization(),
+    // which binds the same set at component scope and shadows these for its subtree.
+    VISUALIZER_TOKEN_BINDINGS,
   ],
 })
 export class VisualizationModule {}

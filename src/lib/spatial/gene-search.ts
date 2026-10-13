@@ -38,11 +38,7 @@ export const GENE_OPTIONS_MAX = 500;
  * typing". Matching is case-insensitive, because gene symbols are capitalised by
  * convention and nobody types `Slc17a7` exactly.
  */
-export function searchGeneNames(
-  names: readonly string[],
-  query: string,
-  limit = GENE_OPTIONS_MAX,
-): string[] {
+export function searchGeneNames(names: readonly string[], query: string, limit = GENE_OPTIONS_MAX): string[] {
   if (limit <= 0) return [];
   const q = query.trim().toLowerCase();
   if (!q) return names.slice(0, limit);

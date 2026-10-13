@@ -30,14 +30,21 @@ describe('buildColormapLut (characterization)', () => {
   });
 
   it('accepts inline [stop, color] arrays with hex colours (incl. #rgb shorthand)', () => {
-    const lut = buildColormapLut([[0, '#000'], [1, '#ffffff']])!;
+    const lut = buildColormapLut([
+      [0, '#000'],
+      [1, '#ffffff'],
+    ])!;
     expect(lut[0]).toEqual([0, 0, 0]);
     expect(lut[255]).toEqual([255, 255, 255]);
   });
 
   it('interpolates between unevenly spaced stops', () => {
     // 0→black until 0.5, then to white: value 128 sits just past the knee.
-    const lut = buildColormapLut([[0, 'rgb(0,0,0)'], [0.5, 'rgb(0,0,0)'], [1, 'rgb(255,255,255)']])!;
+    const lut = buildColormapLut([
+      [0, 'rgb(0,0,0)'],
+      [0.5, 'rgb(0,0,0)'],
+      [1, 'rgb(255,255,255)'],
+    ])!;
     expect(lut[0]).toEqual([0, 0, 0]);
     expect(lut[127]).toEqual([0, 0, 0]); // t≈0.498, still in the flat segment
     expect(lut[255]).toEqual([255, 255, 255]);
@@ -54,7 +61,10 @@ describe('buildColormapLut (characterization)', () => {
   });
 
   it('parses rgb() colours with whitespace', () => {
-    const lut = buildColormapLut([[0, 'rgb( 10 , 20 , 30 )'], [1, 'rgb(40,50,60)']])!;
+    const lut = buildColormapLut([
+      [0, 'rgb( 10 , 20 , 30 )'],
+      [1, 'rgb(40,50,60)'],
+    ])!;
     expect(lut[0]).toEqual([10, 20, 30]);
     expect(lut[255]).toEqual([40, 50, 60]);
   });

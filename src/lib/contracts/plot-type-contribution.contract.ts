@@ -191,8 +191,9 @@ export interface PlotTypeContribution {
  * library behaves exactly as before. The visualizer injects it `{ optional: true }`
  * and treats null as empty.
  */
-export const PLOT_TYPE_CONTRIBUTIONS =
-  new InjectionToken<readonly PlotTypeContribution[]>('PLOT_TYPE_CONTRIBUTIONS');
+export const PLOT_TYPE_CONTRIBUTIONS = new InjectionToken<readonly PlotTypeContribution[]>(
+  'PLOT_TYPE_CONTRIBUTIONS',
+);
 /** The active mode's context, in a component panel's injector. */
 export const PLOT_MODE_CONTEXT = new InjectionToken<PlotModeContext>('PLOT_MODE_CONTEXT');
 /** The active mode's session, in a component panel's injector. */

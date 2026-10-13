@@ -1,10 +1,22 @@
 import { ShapeSelection } from './shape';
+import { verticesToSvgPath } from './geometry';
 
+/**
+ * One annotation region — the backend-neutral model every renderer (Plotly,
+ * OpenSeadragon, napari-js), the RegionStore, the Region Editor and the
+ * GeoJSON/QuPath import/export share.
+ *
+ * Geometry lives in {@link bounds}, in full-resolution image-pixel
+ * coordinates (x right, y down) of slice {@link z}. A region with no bounds
+ * (`null`/absent) is kept but draws nowhere. Regions that arrive as JSON are
+ * rebuilt into class instances by {@link hydrateBounds} on their way into the
+ * store, so `bounds instanceof Rectangle` etc. can be relied on downstream.
+ */
 export class Region {
-  /** Stable, unique identity for selection and equality. Minted by
-   *  PlotlyService when a region first enters the system. Never derived
-   *  from array index — name collisions across delete/add cycles must
-   *  not break PrimeNG row selection. */
+  /** Stable, unique identity for selection and equality. Minted by the
+   *  RegionStore when a region first enters it. Never derived from array
+   *  index — name collisions across delete/add cycles must not break PrimeNG
+   *  row selection. */
   id!: number;
   name!: string;
   bounds?: Rectangle | Polygon | MultiPolygon | null = null;
@@ -39,6 +51,7 @@ export class Region {
    *  or a region drawn without a slice context (jit-ui#93). */
   z = 0;
   shapeColor? = '#00FFFF';
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   bytesPerPixel = 8;
   /**
    * resolution is the resolution at which the region
@@ -51,7 +64,9 @@ export class Region {
    * at resolution = 0
    */
   resolution = 0;
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   cropped = false;
+  /** @deprecated Unused by the library; will be removed in the next minor release. */
   tileNumber = 0;
   tileCoordinates: number[] | null = null;
 
@@ -62,25 +77,16 @@ export class Region {
     return this.kind === 'profile';
   }
 
+  /**
+   * A debug string: the rectangle's box, or the polygon's SVG path.
+   * @deprecated Unused by the library; will be removed in the next minor release.
+   */
   toString() {
-    // if shape is rectangle
     if (this.bounds instanceof Rectangle) {
       return `x: ${this.bounds.x}, y: ${this.bounds.y},
               width: ${this.bounds.width}, height: ${this.bounds.height}`;
     } else if (this.bounds instanceof Polygon) {
-      let path = 'M';
-      // display as path
-      for (let i = 0; i < this.bounds.npoints; i++) {
-        if (i < this.bounds.npoints - 1) {
-          path = `${path}${this.bounds.xpoints[i]},${this.bounds.ypoints[i]}L`;
-        } else {
-          path = `${path}${this.bounds.xpoints[i]},${this.bounds.ypoints[i]}`;
-        }
-      }
-      if (this.bounds.closed !== false) {
-        path += 'Z';
-      }
-      return path;
+      return verticesToSvgPath(this.bounds.xpoints, this.bounds.ypoints, this.bounds.closed !== false);
     }
     return '';
   }
@@ -125,18 +131,7 @@ export class Region {
       }
       if (this.isPolygon(bnds)) {
         shape.type = 'path';
-        let path = 'M';
-        for (let i = 0; i < bnds.npoints; i++) {
-          if (i < bnds.npoints - 1) {
-            path = `${path}${bnds.xpoints[i]},${bnds.ypoints[i]}L`;
-          } else {
-            path = `${path}${bnds.xpoints[i]},${bnds.ypoints[i]}`;
-          }
-        }
-        if (bnds.closed !== false) {
-          path += 'Z';
-        }
-        shape.path = path;
+        shape.path = verticesToSvgPath(bnds.xpoints, bnds.ypoints, bnds.closed !== false);
       }
     }
     return shape;
@@ -151,6 +146,8 @@ export class Region {
   }
 }
 
+/** An axis-aligned box in image-pixel coordinates: (`x`, `y`) is the top-left
+ *  (minimum) corner, `width`/`height` extend right/down. */
 export class Rectangle {
   x = 0;
   y = 0;
@@ -158,6 +155,15 @@ export class Rectangle {
   height = 0;
 }
 
+/**
+ * A polygon or open polyline in image-pixel coordinates, optionally with holes
+ * and smoothed into a bézier curve.
+ *
+ * The vertices are stored twice and must agree: as the parallel `xpoints` /
+ * `ypoints` arrays (length `npoints`; the Java/JIT wire shape) and as
+ * `coordinates` `[x, y]` pairs (what GeoJSON export reads). The ring is
+ * implicitly closed — the first vertex is not repeated at the end.
+ */
 export class Polygon {
   npoints = 0;
   xpoints: number[] = [];
@@ -221,6 +227,13 @@ export class MultiPolygon {
   polygons: Polygon[] = [];
 }
 
+/**
+ * A region's geometry as a host may supply it: a {@link Rectangle} or
+ * {@link Polygon} instance, or a plain object with the same fields (e.g. parsed
+ * JSON, possibly with only some of them). Image-pixel coordinates. Plain objects
+ * become class instances via {@link hydrateBounds} when they enter the store;
+ * {@link Region.bounds} itself is always an instance (or a {@link MultiPolygon}).
+ */
 export type Bounds =
   | Rectangle
   | Polygon
@@ -254,12 +267,7 @@ export type Bounds =
  * hold onto the bounds they created and mutate them in place during a drag.
  */
 export function hydrateBounds(bounds: any): Rectangle | Polygon | MultiPolygon | null | undefined {
-  if (
-    !bounds ||
-    bounds instanceof Rectangle ||
-    bounds instanceof Polygon ||
-    bounds instanceof MultiPolygon
-  ) {
+  if (!bounds || bounds instanceof Rectangle || bounds instanceof Polygon || bounds instanceof MultiPolygon) {
     return bounds;
   }
   if (Array.isArray(bounds.polygons)) {

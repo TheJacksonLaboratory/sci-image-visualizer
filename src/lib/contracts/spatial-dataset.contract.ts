@@ -100,6 +100,7 @@ export interface ContinuousColumnMeta extends SpatialColumnMetaBase {
   max?: number;
 }
 
+/** Descriptor of one per-observation column, discriminated by `kind`. */
 export type SpatialColumnMeta = CategoricalColumnMeta | ContinuousColumnMeta;
 
 /**
@@ -125,11 +126,14 @@ export interface ContinuousColumn {
   values: Float32Array;
 }
 
+/** A loaded column with its values, discriminated by `meta.kind`. */
 export type SpatialColumn = CategoricalColumn | ContinuousColumn;
 
+/** Narrow a loaded column to a categorical one. */
 export function isCategoricalColumn(c: SpatialColumn): c is CategoricalColumn {
   return c.meta.kind === 'categorical';
 }
+/** Narrow a loaded column to a continuous one. */
 export function isContinuousColumn(c: SpatialColumn): c is ContinuousColumn {
   return c.meta.kind === 'continuous';
 }
@@ -197,11 +201,6 @@ export interface SpatialImageRef {
   mppY?: number;
 }
 
-/**
- * A spatial-omics dataset: everything cheap enough to hold resident. Column and
- * feature *values*, and polygon *geometry*, are fetched through
- * {@link SpatialDataPort} as they are displayed.
- */
 /**
  * A precomputed low-dimensional embedding over the SAME observations — UMAP, t-SNE, PCA.
  *
@@ -385,7 +384,6 @@ export interface SpatialTranscriptTile {
   gene: Uint16Array;
 }
 
-/** Transcript totals for an estimate of how many markers a selection would draw. */
 /** The per-gene levels: each level's bin and tile size, on the all-gene pyramid's grid. */
 export interface SpatialTranscriptGeneBinsMeta {
   origin: [number, number];
@@ -408,6 +406,7 @@ export interface SpatialMarkerGenes {
   }[];
 }
 
+/** Transcript totals for an estimate of how many markers a selection would draw. */
 export interface SpatialTranscriptCounts {
   /** Total transcripts per requested gene, over the whole dataset. */
   counts: Record<string, number>;
@@ -424,6 +423,11 @@ export interface SpatialDensityRaster {
   values: Float32Array;
 }
 
+/**
+ * A spatial-omics dataset: everything cheap enough to hold resident. Column and
+ * feature *values*, and polygon *geometry*, are fetched through
+ * {@link SpatialDataPort} as they are displayed.
+ */
 export interface SpatialDataset {
   /** Stable id — the key the port's lazy accessors are scoped to. */
   id: string;
@@ -486,9 +490,17 @@ export interface SpatialVolumeMeta {
   voxelSize: [number, number, number];
 }
 
+/**
+ * A selection over a dataset's N observations: `mask[i] === 1` when observation `i` is
+ * selected, and `count` the number selected. Pure data, so it lives with the dataset
+ * contract; the selection logic that builds one is in `spatial/spatial-selection.ts`.
+ */
+export interface SpatialSelectionMask {
+  mask: Uint8Array;
+  count: number;
+}
+
 /** Look a column's descriptor up by name. */
-export function findColumnMeta(
-  dataset: SpatialDataset, name: string,
-): SpatialColumnMeta | undefined {
+export function findColumnMeta(dataset: SpatialDataset, name: string): SpatialColumnMeta | undefined {
   return dataset.columns.find((c) => c.name === name);
 }

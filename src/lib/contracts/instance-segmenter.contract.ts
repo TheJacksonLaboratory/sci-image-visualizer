@@ -1,6 +1,5 @@
 import { InjectionToken } from '@angular/core';
 
-
 /**
  * Port for an automatic **instance** segmenter — one that returns discrete,
  * classified objects rather than a per-pixel label map.
@@ -40,6 +39,10 @@ export interface InstanceDetection {
   className: string;
 }
 
+/**
+ * The result of one {@link IInstanceSegmenter} run: every detection, in the pixel frame of
+ * the `width × height` image that was segmented.
+ */
 export interface InstanceSegmentation {
   detections: InstanceDetection[];
   width: number;
@@ -128,6 +131,7 @@ export interface InstanceSegmentProgress {
   onStatus?: (status: string) => void;
 }
 
+/** A segmenter that returns discrete, classified, possibly overlapping instances. */
 export interface IInstanceSegmenter {
   /** Detect and outline all instances in an RGBA image. */
   segmentInstances(

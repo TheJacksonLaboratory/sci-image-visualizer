@@ -10,9 +10,10 @@
  * failed or no-op action looked like a dead button.
  *
  * These keys are owned by the library and their outlets are rendered by
- * {@link VisualizerComponent}, so the feedback works in any host. A host that
- * wants these notices somewhere else should not render an outlet with the same
- * key — two matching outlets show the message twice.
+ * {@link VisualizerComponent}, so the feedback works in any host. Both keys are
+ * exported from the package so a host can tell them apart from its own; it should
+ * not render an outlet with the same key — two matching outlets show the message
+ * twice.
  */
 
 /** General notices: save results, validation, action outcomes. Default position. */

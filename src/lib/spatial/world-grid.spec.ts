@@ -1,6 +1,4 @@
-import {
-  PIXEL_WORLD_QUANTUM, WORLD_GRID_STEPS, snapToWorldGrid, worldQuantumForExtent,
-} from './world-grid';
+import { PIXEL_WORLD_QUANTUM, WORLD_GRID_STEPS, snapToWorldGrid, worldQuantumForExtent } from './world-grid';
 
 describe('worldQuantumForExtent', () => {
   it('never goes finer than a whole unit for a large world', () => {
@@ -27,8 +25,7 @@ describe('worldQuantumForExtent', () => {
 
   it('gives at least the asked-for number of steps across the extent', () => {
     for (const span of [2, 5.07, 40, 999]) {
-      expect(span / worldQuantumForExtent(span, span))
-        .toBeGreaterThanOrEqual(WORLD_GRID_STEPS);
+      expect(span / worldQuantumForExtent(span, span)).toBeGreaterThanOrEqual(WORLD_GRID_STEPS);
     }
   });
 
@@ -81,7 +78,6 @@ describe('snapToWorldGrid', () => {
     // vertex. On the pixel grid both of these snap to -2.
     const q = worldQuantumForExtent(5.0697, 6.9842);
     expect(snapToWorldGrid(-2.5494, q)).not.toBe(snapToWorldGrid(-2.5203, q));
-    expect(snapToWorldGrid(-2.5494, PIXEL_WORLD_QUANTUM))
-      .toBe(snapToWorldGrid(-2.5203, PIXEL_WORLD_QUANTUM));
+    expect(snapToWorldGrid(-2.5494, PIXEL_WORLD_QUANTUM)).toBe(snapToWorldGrid(-2.5203, PIXEL_WORLD_QUANTUM));
   });
 });

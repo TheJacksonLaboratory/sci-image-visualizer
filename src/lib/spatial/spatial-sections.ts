@@ -37,10 +37,7 @@ export const MAX_SAMPLED_SECTIONS = 512;
  * Bails out as soon as the distinct count passes `max`, so a continuous z costs one
  * partial pass rather than a set with one entry per observation.
  */
-export function sampledSections(
-  obs: SpatialObservations,
-  max = MAX_SAMPLED_SECTIONS,
-): Float32Array | null {
+export function sampledSections(obs: SpatialObservations, max = MAX_SAMPLED_SECTIONS): Float32Array | null {
   const z = obs.z;
   if (!z || obs.count === 0) return null;
 

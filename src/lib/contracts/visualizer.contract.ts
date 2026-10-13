@@ -3,19 +3,27 @@ import { Observable } from 'rxjs';
 import { Image } from 'image-js';
 
 import { IImageInfo, IImageMetadata } from './image.contract';
-import { Region } from '../models/region';
+import { Polygon, Region } from '../models/region';
 import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
 import { IHistogram } from './channel-histogram-api.contract';
-import { ColormapNode, IWandOptions, IBrushOptions, SpatialViewState, SpatialColorBy } from './display-types';
+import {
+  CanvasToolOptions,
+  ColormapNode,
+  IWandOptions,
+  IBrushOptions,
+  SpatialViewState,
+  SpatialColorBy,
+} from './display-types';
 import {
   CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
-  SpatialMarkerGenes, SpatialTranscriptCounts,
+  SpatialMarkerGenes,
+  SpatialSelectionMask,
+  SpatialTranscriptCounts,
 } from './spatial-dataset.contract';
-import { SpatialSelectionMask } from '../spatial/spatial-selection';
 import type { PlotModeViewport } from './plot-type-contribution.contract';
 
 /**
@@ -26,10 +34,6 @@ import type { PlotModeViewport } from './plot-type-contribution.contract';
  *
  * Split into role interfaces so a consumer can depend only on the slice it
  * uses, then composed into `IVisualizer`.
- *
- * Types are intentionally permissive (`any` where the current Plotly service
- * is untyped) so `PlotlyService` satisfies the contract without a typing
- * rewrite — tightening is a follow-up, not part of standing the interface up.
  */
 
 /** Pixel readback shape returned by `getDisplayedPixelData`. */
@@ -56,37 +60,58 @@ export interface IntensityProfile {
 }
 
 /**
+ * What `IDataRenderer.load()` resolves to. Backend-specific beyond `filename`,
+ * which names the image the handle was loaded for: the host compares it with the
+ * image it asked for, to drop a handle a newer request has overtaken. Pass the
+ * handle on to `plot()` unchanged.
+ */
+export interface LoadedImage {
+  readonly filename: string | undefined;
+}
+
+/**
  * The render/viewport role: load data, render it (image or plot), and handle
  * zoom, stack navigation, and pixel readback.
  */
 export interface IDataRenderer {
-  load(imageInfo: IImageInfo, zIndex: number): Promise<any>;
-  /** `imageLoaded` is the backend-specific handle returned by `load()` —
-   *  treat it as opaque and pass it straight through. */
-  plot(plotDiv: string, imageLoaded: unknown, imageInfo: IImageInfo, screenHeight: number,
-       plotType: PlotType, inPlace?: boolean): Promise<boolean>;
+  /** Fetch what {@link plot} needs for this image/slice. `signal` aborts when the
+   *  host no longer wants the result (a newer image, Cancel, teardown); a backend
+   *  may stop its network work then. Optional, and ignored by backends that do
+   *  not support it yet. */
+  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage>;
+  /** `imageLoaded` is the {@link LoadedImage} handle returned by `load()` (or null
+   *  for a draw with no image) — pass it straight through. Resolves false when the
+   *  backend could not draw (no plot target, no WebGPU, …). */
+  plot(
+    plotDiv: string,
+    imageLoaded: unknown,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace?: boolean,
+  ): Promise<boolean>;
   /** @deprecated Plotly-specific re-render; the OSD backend no-ops it. The host
    *  re-drives `plot()` from its image stream instead. */
   reloadAndPlot(): void;
   reset(): void;
   relayout(trueImageSize?: number[]): void;
-  /** @deprecated Plotly-specific (axis reset); the OSD backend no-ops it. Gate
-   *  on {@link ViewerCapabilities} before calling. */
+  /**
+   * Fit the whole image (or scene) into the view — every backend does: Plotly
+   * autoranges its axes, OpenSeadragon goes home, napari-js fits its camera. The
+   * backend then emits on {@link getAutoscaleEvent}.
+   */
+  fitToView(): void;
+  /** Reset the view to the image extent. Same intent as {@link fitToView}; kept for
+   *  callers of the original name. */
   resetAxes(): void;
-  /** @deprecated Plotly-specific (autoscale); the OSD backend no-ops it. Gate
-   *  on {@link ViewerCapabilities} before calling. */
+  /** @deprecated Use {@link fitToView} — the same operation under its backend-neutral name. */
   autoscale(): void;
   zoomIn(): void;
   zoomOut(): void;
   setDragMode(mode: string | false): void;
-  /** Show/hide the overview navigator (the minimap). OpenSeadragon only — Plotly
-   *  no-ops it (it has no navigator). Applied when the viewer is (re)created, and
-   *  toggled live when one is already mounted. */
+  /** @deprecated Use `getOsdViewOptions().setNavigatorVisible()` on `IVisualizer`. */
   setNavigatorVisible(visible: boolean): void;
-  /** Image smoothing (bilinear interpolation). `false` = nearest-neighbour, so
-   *  zooming past 1:1 shows crisp pixel blocks (pixel-level inspection).
-   *  OpenSeadragon only — Plotly no-ops it. Applied at viewer creation and live
-   *  (with a redraw) when one is mounted. */
+  /** @deprecated Use `getOsdViewOptions().setImageSmoothingEnabled()` on `IVisualizer`. */
   setImageSmoothingEnabled(enabled: boolean): void;
 
   setShowStack(showstack: boolean): void;
@@ -109,7 +134,7 @@ export interface IDataRenderer {
    * the crop's origin + extent; when zoomed out/panned beyond the edges, the
    * rectangle may extend outside the image bounds (matching the pixel readback
    * canvas). Lets a consumer map displayed-pixel coordinates back to the original
-   * image via `origin + displayedPx * (extent / displayedDim)`. 
+   * image via `origin + displayedPx * (extent / displayedDim)`.
    *
    * Returns `null` when the viewport isn't laid out yet or the backend can't
    * report it — callers should then fall back to the full-image scale (treat
@@ -119,18 +144,18 @@ export interface IDataRenderer {
   downloadImage(): void;
 
   setPlotType(plotType: PlotType): void;
-  /** Set the napari 3D decimate factor (1 = full … 8 = ⅛). Optional — only the napari-js WebGPU
-   *  backend honors it; changing it re-loads the current 3D plot at the coarser/finer sampling. */
+  /** @deprecated Use `getVolumeResolution()?.set()` on `IVisualizer`. */
   setResolutionScale?(scale: number): void;
-  /** The current napari 3D decimate factor (to initialize the Resolution control). Optional. */
+  /** @deprecated Use `getVolumeResolution()?.get()` on `IVisualizer` (this returns 1 without one). */
   getResolutionScale?(): number;
-  /** @deprecated Use `getSurface3dControls()` — 3D scene controls only exist on
-   *  a backend that renders 3D plot types; this method silently no-ops on OSD. */
+  /** @deprecated Use `getSurface3dControls()?.setSurfaceDragMode()` — 3D scene controls
+   *  only exist on a backend that renders 3D plot types; this silently no-ops on OSD. */
   setSurfaceDragMode(mode: string): void;
   /** @deprecated Use `getSurface3dControls()` — see {@link setSurfaceDragMode}. */
   resetSurfaceCamera(): void;
 
-  getAutoscaleEvent(): Observable<any>;
+  /** Emits whenever the backend fits the view ({@link fitToView}). */
+  getAutoscaleEvent(): Observable<unknown>;
 
   /** Plot types this backend advertises (drives the UI selector). */
   getPlotTypeDescriptors(): PlotTypeDescriptor[];
@@ -147,12 +172,19 @@ export interface IDataRenderer {
 
 /** Region/shape state: CRUD, selection, classification colours, GeoJSON I/O. */
 export interface IRegionStore {
-  setRegions(regions: Region[], showRegionLabel?: boolean, isRegionSaveOn?: boolean,
-             fillColor?: string, append?: boolean): void;
+  setRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+    append?: boolean,
+  ): void;
   /** Framework-neutral accessor — the canonical way to read current regions. */
   getRegions(): Region[];
-  getRegionPolygons(): any[];
-  getRegionUpdateEvent(): Observable<any[]>;
+  /** The current regions as polygons (rectangles expanded), for server requests. */
+  getRegionPolygons(): Polygon[];
+  /** Emits the region set whenever it changes. */
+  getRegionUpdateEvent(): Observable<Region[]>;
 
   setSelectedShapeIndices(indices: number[]): void;
   getSelectedShapeIndices$(): Observable<number[]>;
@@ -167,10 +199,6 @@ export interface IRegionStore {
   getFillColor(): string;
   getClassificationColors(): Map<string, string>;
   setClassificationColor(label: string, color: string): void;
-
-  plotPreviousShapes(): void;
-  setPreviousShapes(shapes: any[]): void;
-  getPreviousShapes(): any[];
 
   /** Undo the most recent region action (jit-ui#85). Restores the region set to
    *  the state before that action; up to a small fixed depth (10) is retained,
@@ -203,8 +231,11 @@ export interface IRegionStore {
    *  slice persist. `saveLayout` records how the stack persists — `combined`
    *  (one z-indexed geojson, single-file z-stack) or `per-slice-file` (folder
    *  stack). See {@link setDisplaySlice}, {@link getSliceRegions}. */
-  enterStackMode(slices: Map<number, Region[]>, initialZ?: number,
-                 saveLayout?: 'combined' | 'per-slice-file'): void;
+  enterStackMode(
+    slices: Map<number, Region[]>,
+    initialZ?: number,
+    saveLayout?: 'combined' | 'per-slice-file',
+  ): void;
   /** End the per-slice session (single-plane image, or the stack was closed). */
   exitStackMode(): void;
   /** True while a per-slice z-stack session is active. */
@@ -223,16 +254,29 @@ export interface IRegionStore {
   getStackSaveSlices(): Map<number, Region[]>;
 }
 
-/** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box). */
+/** On-canvas tool modes (wand, brush, vertex eraser, zoom-to-box, SAM point). */
 export interface IToolController {
+  /**
+   * Arm one on-canvas tool (`CanvasToolId`) with its options — the wand's
+   * {@link IWandOptions}, the brush's {@link IBrushOptions} (`size` is the
+   * matrix-pixel diameter of the painted disc), the eraser's `{ radius }` —
+   * and disarm the one that was armed. `null`, or any id that is not a canvas
+   * tool (a region draw mode such as `'drawrect'`, `'pan'`), disarms only.
+   * Arming the armed tool again applies the options and keeps its work in
+   * progress.
+   */
+  setActiveTool(id: string | null, options?: CanvasToolOptions): void;
+  /** @deprecated Use `setActiveTool('wand', options)` / `setActiveTool(null)`. */
   setWandMode(active: boolean, options?: IWandOptions): void;
   setWandOptions(options: IWandOptions): void;
   clearActiveWandRegion(): void;
-  /** Brush region tool. `size` (matrix-pixel diameter) sizes the painted disc. */
+  /** @deprecated Use `setActiveTool('brush', options)` / `setActiveTool(null)`. */
   setBrushMode(active: boolean, options?: IBrushOptions): void;
   setBrushOptions(options: IBrushOptions): void;
+  /** @deprecated Use `setActiveTool('eraseVertex', { radius })` / `setActiveTool(null)`. */
   setVertexEraserMode(active: boolean): void;
   setVertexEraserRadius(radius: number): void;
+  /** @deprecated Use `setActiveTool('zoomToBox')` / `setActiveTool(null)`. */
   setZoomToBoxMode(active: boolean): void;
   /** Box-prompted SAM segmentation: segment every rectangle region into masks.
    *  Returns the number of mask regions added. (jit-ui#90) */
@@ -242,7 +286,8 @@ export interface IToolController {
   segmentRectanglesCellpose(): Promise<number>;
   /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
   setSamModel(id: string): void;
-  /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -). */
+  /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -).
+   *  @deprecated Use `setActiveTool('samPoint')` / `setActiveTool(null)`. */
   setSamPointMode(active: boolean): void;
   /** Finalise / discard the in-progress SAM point object. */
   commitSamPoints(): void;
@@ -420,36 +465,73 @@ export interface IDisplayOptions {
   setColormap(colormap: ColormapNode): void;
   getColormapOptions(): ColormapNode[];
   getReverseScale(): Observable<boolean>;
-  setReverseScale(reverscale: any): void;
-  setImageMeta(imageMeta: IImageMetadata[]): void;
+  setReverseScale(reverse: boolean): void;
+  /** Publish the current image's metadata. `imageKey` (its file name) lets the
+   *  channel state survive a re-plot of the same image but not a switch to another. */
+  setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void;
   getImageMeta(): Observable<IImageMetadata[]>;
 }
 
 /**
- * Intensity-profile sampling (PlotType.LINE). The sampling *source* lives in the
- * Plotly backend (it owns pixel readback); OpenSeadragon contributes only the
- * viewport-change signal that drives re-sampling at the current zoom. Each
- * backend implements the part it owns and no-ops the rest — mirroring the
- * deprecated no-op pattern on {@link IDataRenderer} — so the contract is uniform
- * and a consumer can depend on `IVisualizer` alone (no concrete-type reach-in).
+ * The part of intensity sampling a rendering backend owns: where its view settled.
+ * What `IViewerBackend.getIntensitySampling()` returns.
  */
-export interface IIntensitySampling {
-  /** Populate the intensity-sampling cache for the current image/slice so the
-   *  line-ROI profiles have pixel data. Real on Plotly; no-op on OSD. */
-  ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
-  /** Re-sample the profiles from a fresh crop of the given image-pixel ROI at
-   *  display resolution. Real on Plotly; no-op on OSD. */
-  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number,
-                                 zIndex: number): void;
+export interface IIntensityViewportSource {
   /** Visible-region changes (image-pixel coords), emitted when the view settles,
-   *  so the inset can re-sample at the current zoom. Real on OSD; empty on Plotly
-   *  (its high-def zoom updates the sampling cache inline instead). */
+   *  so the inset can re-sample at the current zoom. */
   getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
 }
 
-/** Composite contract a visualization backend implements. */
-export interface IVisualizer extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions,
-  IIntensitySampling {
+/**
+ * Intensity-profile sampling (the line ROIs' inset), from `IVisualizer.getIntensitySampling()`.
+ * The sampling itself is backend-neutral (the library's IntensityProfileService
+ * samples whatever image is on screen); the viewport-change signal comes from the
+ * backend that draws the image (OpenSeadragon and napari-js report it; Plotly
+ * re-samples its high-def zoom crops inline instead).
+ */
+export interface IIntensitySampling extends IIntensityViewportSource {
+  /** Load the current image/slice's pixels so the line-ROI profiles have data
+   *  (a backend with no frames of its own: OpenSeadragon, napari-js). */
+  ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
+  /** Re-sample the profiles from a fresh crop of the given image-pixel ROI at
+   *  display resolution. */
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void;
+}
+
+/**
+ * The 2D view options of a tiled image viewer: the overview navigator and image
+ * smoothing. OpenSeadragon's, mirrored by napari-js's 2D views; Plotly has neither.
+ * Capability-gated: `IViewerBackend.getOsdViewOptions()` is null on a backend
+ * without them.
+ */
+export interface IOsdViewOptions {
+  /** Show/hide the overview navigator (the minimap). Applied when the viewer is
+   *  (re)created, and toggled live when one is already mounted. */
+  setNavigatorVisible(visible: boolean): void;
+  /** Image smoothing (bilinear interpolation). `false` = nearest-neighbour, so
+   *  zooming past 1:1 shows crisp pixel blocks (pixel-level inspection). Applied
+   *  at viewer creation and live (with a redraw) when one is mounted. */
+  setImageSmoothingEnabled(enabled: boolean): void;
+}
+
+/**
+ * The 3D decimate factor of a volume renderer (napari-js WebGPU): 1 = full
+ * resolution … 8 = ⅛ per axis. Capability-gated: null on a backend without one.
+ */
+export interface IVolumeResolution {
+  /** The current factor (to initialize the Resolution control). */
+  get(): number;
+  /** Set the factor (rounded, at least 1). Takes effect on the next (re)load —
+   *  the host re-plots after calling it, since it changes the fetched data. */
+  set(scale: number): void;
+}
+
+/**
+ * The host-facing composite contract, implemented by the router (`VISUALIZER`). A
+ * rendering backend implements {@link IViewerBackend} instead.
+ */
+export interface IVisualizer
+  extends IDataRenderer, IRegionStore, IToolController, IDisplayOptions, IIntensitySampling {
   readonly capabilities: ViewerCapabilities;
   /** This backend's region renderer. May be null until a plot is mounted
    *  (OpenSeadragon). Drives region draw/select modes uniformly. */
@@ -464,6 +546,21 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
    *  the capability-gated replacement for the deprecated top-level
    *  `setSurfaceDragMode`/`resetSurfaceCamera`. */
   getSurface3dControls(): ISurface3dControls | null;
+  /** The navigator / image-smoothing options. Never null on the router: a setting
+   *  applies to every backend that has them (OpenSeadragon, napari-js), so it can
+   *  be set before the first render and survives a backend switch. */
+  getOsdViewOptions(): IOsdViewOptions;
+  /** The 3D decimate factor of the backend on screen, or null when it has none
+   *  (only napari-js renders volumes). */
+  getVolumeResolution(): IVolumeResolution | null;
+  /** Intensity-profile sampling, whichever backend is on screen. */
+  getIntensitySampling(): IIntensitySampling;
+  /** @deprecated Use `getIntensitySampling().ensureIntensitySampling()`. */
+  ensureIntensitySampling(imageInfo: IImageInfo, zIndex: number): Promise<void>;
+  /** @deprecated Use `getIntensitySampling().refreshIntensitySamplingForRoi()`. */
+  refreshIntensitySamplingForRoi(x: number, y: number, width: number, height: number, zIndex: number): void;
+  /** @deprecated Use `getIntensitySampling().getViewportChange$()`. */
+  getViewportChange$(): Observable<{ x: number; y: number; width: number; height: number }>;
   /** Spatial-omics controls when a `SPATIAL_DATA_PORT` is bound, else null.
    *  Optional: only the routing service implements it, since the state is shared
    *  rather than owned by any one backend. */
@@ -485,7 +582,106 @@ export interface IVisualizer extends IDataRenderer, IRegionStore, IToolControlle
   /** Export the underlying image data as a data-preserving multi-band TIFF
    *  (native bit depth). No-op on backends that can't provide it. */
   exportData(): void;
+  /**
+   * The view is going away (the `<visualizer>` is destroyed): drop what is bound to
+   * it — the on-screen viewer, its render loop and view subscriptions — so nothing
+   * outlives the view. Service-lifetime state (stores, the backends' own store
+   * subscriptions) is untouched, so a later view on the same chain renders normally.
+   */
+  detach(): void;
+  /** @deprecated Use {@link detach}, which this delegates to. */
   unsubscribe(): void;
+}
+
+/**
+ * What a rendering backend implements (Plotly, OpenSeadragon, napari-js): rendering,
+ * the viewport, pixel readback, export, loading state and its on-canvas tools, plus
+ * capability-gated getters for what only some backends have.
+ *
+ * It is the backend-facing half of {@link IVisualizer}. Region and display state are
+ * not here: they live in the shared `RegionStore` / `VisualizerStore`, which the router
+ * serves to hosts directly; a backend draws them by subscribing to the stores' events.
+ * Hosts keep depending on `IVisualizer` (the router's composite), never on a backend.
+ */
+export interface IViewerBackend extends IToolController {
+  readonly capabilities: ViewerCapabilities;
+
+  // ── render lifecycle ──────────────────────────────────────────────────
+  load(imageInfo: IImageInfo, zIndex: number, signal?: AbortSignal): Promise<LoadedImage>;
+  plot(
+    plotDiv: string,
+    imageLoaded: unknown,
+    imageInfo: IImageInfo,
+    screenHeight: number,
+    plotType: PlotType,
+    inPlace?: boolean,
+  ): Promise<boolean>;
+  reset(): void;
+  relayout(trueImageSize?: number[]): void;
+  /** The view is going away: release what is bound to it. */
+  detach(): void;
+  /** Stop streaming frames (volume assembly / surface preload). Optional: only
+   *  backends that stream a z-stack do work here. */
+  cancelLoading?(): void;
+
+  // ── viewport ─────────────────────────────────────────────────────────
+  zoomIn(): void;
+  zoomOut(): void;
+  setDragMode(mode: string | false): void;
+  fitToView(): void;
+  /** @see IDataRenderer.resetAxes */
+  resetAxes(): void;
+  setZIndex(zIndex: number): void;
+  setShowStack(showstack: boolean): void;
+  /** Emits whenever the backend fits the view. */
+  getAutoscaleEvent(): Observable<unknown>;
+  isStackLoading(): Observable<boolean>;
+  getStackLoadingProgress(): Observable<number>;
+
+  // ── pixels, histogram, export ─────────────────────────────────────────
+  getTrueImageSize(): { width: number; height: number } | null;
+  getCurrentImage(): Promise<Image | null>;
+  getDisplayedPixelData(): PixelData | null;
+  getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null;
+  getHistogram(channelIndex: number, bins: number): IHistogram | null;
+  getHistogram$(channelIndex: number, bins: number): Observable<IHistogram | null>;
+  downloadImage(): void;
+  exportComposite(): void;
+  exportData(): void;
+
+  // ── capability-gated surfaces (null / absent where the backend lacks the feature) ──
+  getRegionOverlay(): IRegionOverlay | null;
+  getIsosurfaceControls(): IIsosurfaceControls | null;
+  getSurface3dControls(): ISurface3dControls | null;
+  getIntensityControls(): IIntensityControls | null;
+  getPlotModeViewport?(): PlotModeViewport | null;
+  /** Navigator / image smoothing, or null when the backend has neither (Plotly). */
+  getOsdViewOptions(): IOsdViewOptions | null;
+  /** The 3D decimate factor, or null when the backend renders no volumes. */
+  getVolumeResolution(): IVolumeResolution | null;
+  /** Where the view settled, for the intensity inset's re-sampling; null when the
+   *  backend re-samples on its own (Plotly's high-def zoom). The sampling itself is
+   *  the router's (IntensityProfileService). */
+  getIntensitySampling(): IIntensityViewportSource | null;
+}
+
+/**
+ * What a mounted `<visualizer>` hands its host through
+ * `ImageStatePort.setDiagram()` — a small, typed surface rather than the component
+ * itself, whose every public member would otherwise be de-facto API. Cleared
+ * (`setDiagram(null)`) when the visualizer is destroyed. Hosts that can inject
+ * {@link VISUALIZER} / `REGION_EDITOR_API` directly need not use it at all.
+ */
+export interface VisualizerHandle {
+  /** The visualizer chain this `<visualizer>` renders through. */
+  readonly visualizer: IVisualizer;
+  /** @deprecated Use {@link visualizer}. Kept for hosts that read the component's
+   *  former `plotService` field off the registered object. */
+  readonly plotService: IVisualizer;
+  /** Whether any region (annotation or intensity line) exists on the current image. */
+  hasRegions(): boolean;
+  /** The current regions as polygons, for a server request (crop / processing). */
+  getRegionPolygons(): Polygon[];
 }
 
 /**

@@ -40,6 +40,7 @@ export interface HeatmapGroups {
   categories: readonly string[];
 }
 
+/** Options for {@link heatmapMatrix}: the observations, scaling and size limits. */
 export interface HeatmapMatrixOptions {
   /** Observations to include; every one when absent (an ROI selection). */
   indices?: Uint32Array;
@@ -68,6 +69,7 @@ export interface HeatmapMatrixOptions {
   maxCols?: number;
 }
 
+/** Mean expression of genes (rows) per group (columns), ready for a heatmap trace. */
 export interface HeatmapMatrix {
   /** Gene names, one per row, in the order given. */
   rows: string[];
@@ -166,8 +168,11 @@ export function heatmapMatrix(
       return { c, peak };
     });
     // Strongest first, then original order for ties, so the choice is stable.
-    strength.sort((a, b) => (b.peak - a.peak) || (a.c - b.c));
-    const picked = strength.slice(0, opts.maxCols).map((s) => s.c).sort((a, b) => a - b);
+    strength.sort((a, b) => b.peak - a.peak || a.c - b.c);
+    const picked = strength
+      .slice(0, opts.maxCols)
+      .map((s) => s.c)
+      .sort((a, b) => a - b);
     hiddenCols = cols.length - picked.length;
     outCols = picked.map((c) => cols[c]);
     outCounts = Uint32Array.from(picked, (c) => counts[c]);

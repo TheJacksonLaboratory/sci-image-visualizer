@@ -1,79 +1,62 @@
-import type { Viewer } from 'napari-js';
+import { Viewer, mapScalarRGBA, pointSymbolCode, pointSymbolDistance } from 'napari-js';
+import type { ImageLayer, PointsLayer, ShapesLayer } from 'napari-js';
+import { INFERNO_LUT } from 'napari-js/colormaps';
+import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
+import type { TranscriptGlyphName } from '../../contracts/display-types';
 import type { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import {
-  NO_OBSERVATION, SpatialDataset, SpatialDensityRaster, SpatialPolygonTile, SpatialTranscriptTile,
+  SpatialDataset,
+  SpatialPolygonTile,
+  SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
+import { densityAutoRange } from '../../spatial/density-raster';
+import { TRANSCRIPT_GLYPHS, glyphOutline } from '../../spatial/glyphs';
+import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { emptySelection } from '../../spatial/spatial-selection';
-import {
-  NapariSpatialTileLayers, SpatialTileHost, clusterMarkers, mergePolygonTiles, mergeTranscriptTiles, pickNearest,
-} from './napari-spatial-tiles';
+import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
+import { GLYPH_SYMBOLS } from './spatial-tiles/transcript-layers';
 
-const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
-  count: xs.length,
-  aggregated: weight > 1,
-  x: Float32Array.from(xs),
-  y: Float32Array.from(ys),
-  z: new Float32Array(xs.length),
-  weight: new Uint32Array(xs.length).fill(weight),
-  observation: Uint32Array.from(xs.map((_v, i) => i)),
-  gene: new Uint16Array(xs.length),
-});
+/** A minimal valid continuous LUT: napari-js's colormapFromLut rejects fewer than two rows. */
+const LUT: [number, number, number][] = [
+  [0, 0, 0],
+  [255, 255, 255],
+];
 
-describe('pickNearest (transcript hover)', () => {
-  const drawn = (t: SpatialTranscriptTile, r: number) => ({
-    merged: t, radius: new Float32Array(t.count).fill(r), grid: null,
-  });
+/** What the transcript layer last drew, as the hover holds it (private; read by the specs). */
+function drawnOf<T = { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile }>(
+  tiles: NapariSpatialTileLayers,
+): T {
+  return (tiles as unknown as { hover: { drawn: T } }).hover.drawn;
+}
 
-  it('finds the marker under the cursor, within its radius', () => {
-    const d = drawn(tile([0, 10, 20], [0, 0, 0]), 2);
-    expect(pickNearest(d, 10.5, 0.5, 0.1)).toBe(1);
-    expect(pickNearest(d, 15, 0, 0.1)).toBe(-1); // between markers
-  });
+/** The transcript job planner (private; its density-grid cache is poked by the specs). */
+function jobsOf(tiles: NapariSpatialTileLayers) {
+  return (
+    tiles as unknown as {
+      jobs: { port: unknown; densityFor(d: string, g: string[], b: number): Promise<unknown> };
+    }
+  ).jobs;
+}
 
-  it('uses the pointer tolerance for markers smaller than it', () => {
-    const d = drawn(tile([0, 10], [0, 0]), 0.1);
-    expect(pickNearest(d, 1, 0, 1.5)).toBe(0);
-  });
+/** The transcript layers (private; their colouring and count source are read by the specs). */
+function transcriptsOf<T>(tiles: NapariSpatialTileLayers): T {
+  return (tiles as unknown as { transcripts: T }).transcripts;
+}
 
-  it('prefers the closest of overlapping markers', () => {
-    const d = drawn(tile([0, 1.5], [0, 0]), 2);
-    expect(pickNearest(d, 1.2, 0, 0.1)).toBe(1);
-  });
-
-  it('builds its grid once and reuses it', () => {
-    const d = drawn(tile([0, 100, -100], [0, 50, -50]), 1);
-    expect(pickNearest(d, 100, 50, 0.1)).toBe(1);
-    const grid = d.grid;
-    expect(grid).not.toBeNull();
-    expect(pickNearest(d, -100, -50, 0.1)).toBe(2);
-    expect(d.grid).toBe(grid);
-  });
-});
-
-describe('tile merging', () => {
-  it('concatenates transcript tiles and stops at the limit', () => {
-    const m = mergeTranscriptTiles([tile([1, 2], [3, 4]), tile([5], [6])], 2);
-    expect(m.count).toBe(2);
-    expect(Array.from(m.x)).toEqual([1, 2]);
-  });
-
-  it('drops a ring listed by two tiles', () => {
-    const t = (obs: number[]) => ({
-      count: obs.length, observation: Uint32Array.from(obs),
-      offsets: Uint32Array.from(obs.map((_o, i) => i * 3).concat(obs.length * 3)),
-      coords: new Float32Array(obs.length * 6).map((_v, i) => i),
-    });
-    const m = mergePolygonTiles([t([7, 8]), t([8, 9])]);
-    expect(Array.from(m.observation)).toEqual([7, 8, 9]);
-    expect(m.offsets[m.count]).toBe(9);
-  });
-});
+/** A headless viewer looking at `center`, `zoom` CSS px per world unit. */
+function viewerAt(center: [number, number], zoom: number): Viewer {
+  const viewer = new Viewer({ canvas: document.createElement('canvas') });
+  viewer.camera.set(center, zoom);
+  return viewer;
+}
 
 describe('NapariSpatialTileLayers: a tile that fails to load', () => {
   const ring = (): SpatialPolygonTile => ({
-    count: 1, coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
-    offsets: new Uint32Array([0, 4]), observation: new Uint32Array([0]),
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
   });
 
   function setup(failFirst: number) {
@@ -84,10 +67,14 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     });
     const port = { getPolygonTile } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
       polygonTiles: {
-        bounds: [0, 0, 100, 100], sets: [{ name: 'cell', label: 'Cell' }], defaultSet: 'cell',
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
         levels: [{ tileSize: 200 }], // the whole view is one tile
       },
     } as unknown as SpatialDataset;
@@ -95,30 +82,17 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
       canvasSize: () => [400, 400],
-      continuousLut: () => [],
+      continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
     };
-    const listeners: (() => void)[] = [];
-    const items: unknown[] = [];
-    const layer = () => { const l = { values: null }; return l; };
-    const viewer = {
-      camera: {
-        center: [50, 50], zoom: 4,
-        changed: { connect: (f: () => void) => { listeners.push(f); return () => undefined; } },
-      },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addShapes: jest.fn(() => { const l = layer(); items.push(l); return l; }),
-      addPoints: jest.fn(() => { const l = layer(); items.push(l); return l; }),
-      addImage: jest.fn(() => { const l = layer(); items.push(l); return l; }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 4);
     const tiles = new NapariSpatialTileLayers(port, host);
     tiles.attach(viewer);
-    return { tiles, getPolygonTile, moveCamera: () => listeners.forEach((f) => f()) };
+    return {
+      tiles,
+      getPolygonTile,
+      moveCamera: () => viewer.camera.set(viewer.camera.center, viewer.camera.zoom),
+    };
   }
 
   /** Let the debounce and every awaited fetch settle. */
@@ -144,7 +118,7 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
     moveCamera();
     await settle(200);
     expect(getPolygonTile).toHaveBeenCalledTimes(1); // failed
-    await settle(1200);                               // the retry
+    await settle(1200); // the retry
     expect(getPolygonTile).toHaveBeenCalledTimes(2);
     // Complete now: a pan over the same tiles is a no-op, and no further retries run.
     moveCamera();
@@ -164,9 +138,14 @@ describe('NapariSpatialTileLayers: a tile that fails to load', () => {
 
 describe('NapariSpatialTileLayers: every gene at once', () => {
   const tile = (n: number): SpatialTranscriptTile => ({
-    count: n, aggregated: false,
-    x: new Float32Array(n).fill(5), y: new Float32Array(n).fill(5), z: new Float32Array(n),
-    weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: new Uint16Array(n),
+    count: n,
+    aggregated: false,
+    x: new Float32Array(n).fill(5),
+    y: new Float32Array(n).fill(5),
+    z: new Float32Array(n),
+    weight: new Uint32Array(n).fill(1),
+    observation: new Uint32Array(n),
+    gene: new Uint16Array(n),
   });
 
   function setup(individualCount: number, colorBy: 'cellType' | 'gene') {
@@ -175,38 +154,37 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const port = { getTranscriptTile, getTranscriptBins } as unknown as SpatialDataPort;
     // Sparse on average (10 transcripts over the bounds), so the plan starts individual.
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
       transcriptBins: {
-        bounds: [0, 0, 100, 100], origin: [0, 0], count: 10, levels: [{ binSize: 25, tileSize: 200 }],
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 10,
+        levels: [{ binSize: 25, tileSize: 200 }],
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptAllGenes: true,
-      transcriptGenes: [], transcriptBudget: 1000, transcriptColorBy: colorBy,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'circles' as const,
+      transcriptAllGenes: true,
+      transcriptGenes: [],
+      transcriptBudget: 1000,
+      transcriptColorBy: colorBy,
     };
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [50, 50], zoom: 4, changed: { connect: () => () => undefined } },
-      layers: {
-        items,
-        add: (l: unknown) => items.push(l),
-        remove: (l: unknown) => items.splice(items.indexOf(l), 1),
-      },
-      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addShapes: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addImage: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 4);
     const tiles = new NapariSpatialTileLayers(port, host);
     tiles.attach(viewer);
     type WithColors = { transcriptColors: (...a: unknown[]) => unknown };
-    const colors = jest.spyOn(tiles as unknown as WithColors, 'transcriptColors');
+    const colors = jest.spyOn(transcriptsOf<WithColors>(tiles), 'transcriptColors');
     return { tiles, getTranscriptTile, getTranscriptBins, colors };
   }
 
@@ -214,7 +192,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const { tiles, getTranscriptBins } = setup(100, 'cellType');
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     expect(getTranscriptBins).not.toHaveBeenCalled();
-    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('individual');
+    expect(drawnOf(tiles).kind).toBe('individual');
     tiles.detach();
   });
 
@@ -222,7 +200,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const { tiles, getTranscriptBins } = setup(5000, 'cellType'); // over 1.5 × the budget
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     expect(getTranscriptBins).toHaveBeenCalled();
-    expect((tiles as unknown as { drawn: { kind: string } }).drawn.kind).toBe('bins');
+    expect(drawnOf(tiles).kind).toBe('bins');
     tiles.detach();
   });
 
@@ -242,17 +220,24 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
 });
 
 describe('NapariSpatialTileLayers: per-gene counts in view', () => {
-  it('counts each gene\'s transcripts inside the view, weighting aggregates', () => {
+  it("counts each gene's transcripts inside the view, weighting aggregates", () => {
     const tiles = new NapariSpatialTileLayers({} as SpatialDataPort, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      latest: () => null,
+      canvasSize: () => [0, 0],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toBeNull();
-    (tiles as unknown as { countSource: unknown }).countSource = {
+    transcriptsOf<{ countSource: unknown }>(tiles).countSource = {
       genes: ['CD163', 'MRC1', 'CHIT1'],
       merged: {
-        count: 4, aggregated: true,
-        x: new Float32Array([1, 2, 50, 3]), y: new Float32Array([1, 2, 50, 3]), z: new Float32Array(4),
-        weight: new Uint32Array([5, 1, 9, 2]), observation: new Uint32Array(4),
+        count: 4,
+        aggregated: true,
+        x: new Float32Array([1, 2, 50, 3]),
+        y: new Float32Array([1, 2, 50, 3]),
+        z: new Float32Array(4),
+        weight: new Uint32Array([5, 1, 9, 2]),
+        observation: new Uint32Array(4),
         gene: new Uint16Array([0, 1, 0, 0]),
       },
     };
@@ -266,45 +251,57 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     const n = 400;
     const x = new Float32Array(n);
     const y = new Float32Array(n);
-    for (let i = 0; i < n; i++) { x[i] = (i % 20) * 0.5; y[i] = Math.floor(i / 20) * 0.5; }
+    for (let i = 0; i < n; i++) {
+      x[i] = (i % 20) * 0.5;
+      y[i] = Math.floor(i / 20) * 0.5;
+    }
     // With several clusters, transcript i belongs to gene i % clusters, each gene its own cluster.
     const gene = Uint16Array.from({ length: n }, (_v, i) => i % clusters);
     const tile: SpatialTranscriptTile = {
-      count: n, aggregated: false, x, y, z: new Float32Array(n),
-      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene,
+      count: n,
+      aggregated: false,
+      x,
+      y,
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1),
+      observation: new Uint32Array(n),
+      gene,
     };
     const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: n, levels: [{ tileSize: 200 }] },
       transcriptBins: {
-        bounds: [0, 0, 100, 100], origin: [0, 0], count: n,
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: n,
         levels: [1, 2, 4, 8].map((k) => ({ binSize: k, tileSize: 200 })),
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: mode,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: mode,
       transcriptGenes: Array.from({ length: clusters }, (_v, i) => `G${i}`),
-      transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({ name: `Cluster ${i}`, genes: [`G${i}`] })),
+      transcriptGeneGroups: Array.from({ length: clusters }, (_v, i) => ({
+        name: `Cluster ${i}`,
+        genes: [`G${i}`],
+      })),
       transcriptBudget: budget,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [5, 5], zoom, changed: { connect: () => () => undefined } },
-      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => { const l = {}; items.push(l); return l; }),
-      addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})), requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([5, 5], zoom);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return tiles;
   }
-  const drawn = (t: NapariSpatialTileLayers) =>
-    (t as unknown as { drawn: { kind: string; bin?: { size: number }; merged: SpatialTranscriptTile } }).drawn;
+  const drawn = (t: NapariSpatialTileLayers) => drawnOf(t);
 
   it('groups each gene into the pyramid bin the zoom calls for', async () => {
     const tiles = setup(2); // 2 px per unit: the 8-unit bin is the first 14 px apart
@@ -329,7 +326,10 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
     const tiles = setup(20, 'glyphs', 4, 50);
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     const d = drawn(tiles) as unknown as {
-      bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array; groupNames: string[];
+      bin?: { size: number };
+      merged: SpatialTranscriptTile;
+      entryGroup: Int32Array;
+      groupNames: string[];
     };
     expect(d.bin).toBeDefined();
     expect(d.merged.count).toBeLessThanOrEqual(50);
@@ -348,21 +348,89 @@ describe('NapariSpatialTileLayers: a gene selection follows the zoom', () => {
   });
 });
 
-describe('clusterMarkers (a zoomed-out selection, from density grids)', () => {
-  it('sums each cluster\'s grid cells per square, at their count-weighted centre', () => {
-    const raster = (values: number[]): SpatialDensityRaster => ({
-      meta: { gridSize: [10, 10], origin: [0, 0], rows: 2, cols: 2 }, genes: [], values: Float32Array.from(values),
+describe('NapariSpatialTileLayers: transcript icons', () => {
+  /** Four transcripts, genes G0 (star) and G1 (square), drawn as icons at `zoom` px per unit. */
+  async function drawIcons(zoom: number, patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const tile: SpatialTranscriptTile = {
+      count: 4,
+      aggregated: false,
+      x: Float32Array.of(1, 2, 3, 4),
+      y: Float32Array.of(1, 1, 1, 1),
+      z: new Float32Array(4),
+      weight: new Uint32Array(4).fill(1),
+      observation: new Uint32Array(4),
+      gene: Uint16Array.of(0, 1, 0, 1),
+    };
+    const port = { getTranscriptTile: jest.fn(async () => tile) } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
+      transcriptTiles: { bounds: [0, 0, 10, 10], count: 4, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'glyphs' as const,
+      transcriptGenes: ['G0', 'G1'],
+      transcriptGlyphs: { G0: 'star', G1: 'square' } as Record<string, TranscriptGlyphName>,
+      ...patch,
+    };
+    const viewer = viewerAt([2, 1], zoom);
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
-    // One 20-unit square holds all four cells. Cluster 0 is mostly in the top-left cell.
-    const { tile, group } = clusterMarkers([raster([3, 1, 0, 0]), raster([0, 0, 0, 2])], [5, 7], 20,
-      { x0: 0, y0: 0, x1: 20, y1: 20 });
-    expect(tile.count).toBe(2);
-    expect(Array.from(group)).toEqual([0, 1]);
-    expect(Array.from(tile.weight)).toEqual([4, 2]);
-    expect(tile.x[0]).toBeCloseTo((3 * 5 + 1 * 15) / 4); // pulled toward the busier cell
-    expect(tile.x[1]).toBeCloseTo(15);
-    expect(Array.from(tile.gene)).toEqual([5, 7]); // each cluster's icon gene
-    expect(tile.observation[0]).toBe(NO_OBSERVATION);
+    tiles.attach(viewer);
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    const layers = [...viewer.layers.items];
+    tiles.detach();
+    return layers;
+  }
+
+  it('draws every icon in one points layer, as per-point napari symbols', async () => {
+    // It was a shapes layer of polygons expanded on the CPU, plus a second outline layer.
+    const layers = await drawIcons(20);
+    expect(layers.map((l) => l.kind)).toEqual(['points']);
+    const points = layers[0] as PointsLayer;
+    expect(points.name).toBe('transcripts');
+    const [star, square] = [pointSymbolCode('star'), pointSymbolCode('square')];
+    expect(Array.from(points.symbols!)).toEqual([star, square, star, square]);
+    // napari's square fills the marker box; the icon was 0.8 of it.
+    expect(points.sizeAt(1) / points.sizeAt(0)).toBeCloseTo(0.8, 6);
+  });
+
+  it('gives every gene one icon when all genes are drawn', async () => {
+    const layers = await drawIcons(20, { transcriptAllGenes: true, transcriptGlyphs: { [ALL_GENES]: 'x' } });
+    const points = layers[0] as PointsLayer;
+    expect(new Set(points.symbols)).toEqual(new Set([pointSymbolCode('x')]));
+  });
+
+  it('rims a few large icons one screen pixel wide, and leaves small ones unrimmed', async () => {
+    // Markers 3 × 4 px across: over the 8 px a rim needs. Its width is in data units.
+    const big = (await drawIcons(20, { transcriptScale: 3 }))[0] as PointsLayer;
+    expect(big.borderWidth).toBeCloseTo(1 / 20, 6);
+    // At the 4 px minimum, a rim would be most of the marker.
+    const small = (await drawIcons(20))[0] as PointsLayer;
+    expect(small.borderWidth).toBe(0);
+  });
+
+  it('maps each icon onto the napari symbol of the same outline', () => {
+    // The panel previews `glyphOutline`; the canvas draws the symbol. Every vertex of the
+    // preview (scaled like the marker) lies on the symbol's edge, so the two read the same.
+    for (const glyph of TRANSCRIPT_GLYPHS) {
+      const code = pointSymbolCode(GLYPH_SYMBOLS[glyph]);
+      const scale = glyph === 'square' ? 0.8 : 1;
+      const o = glyphOutline(glyph);
+      for (let i = 0; i < o.length; i += 2) {
+        expect([glyph, pointSymbolDistance(code, o[i] / scale, o[i + 1] / scale)]).toEqual([
+          glyph,
+          expect.closeTo(1, 1),
+        ]);
+      }
+    }
   });
 });
 
@@ -376,52 +444,79 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
       const genes: number[] = [];
       for (let y = 0; y < 100; y += bin) {
         for (let x = 0; x < 100; x += bin) {
-          for (const g of [0, 1]) { xs.push(x + bin / 2); ys.push(y + bin / 2); genes.push(g); }
+          for (const g of [0, 1]) {
+            xs.push(x + bin / 2);
+            ys.push(y + bin / 2);
+            genes.push(g);
+          }
         }
       }
       const n = xs.length;
       return {
-        count: n, aggregated: true, x: Float32Array.from(xs), y: Float32Array.from(ys), z: new Float32Array(n),
-        weight: new Uint32Array(n).fill(bin * bin), observation: new Uint32Array(n).fill(3),
+        count: n,
+        aggregated: true,
+        x: Float32Array.from(xs),
+        y: Float32Array.from(ys),
+        z: new Float32Array(n),
+        weight: new Uint32Array(n).fill(bin * bin),
+        observation: new Uint32Array(n).fill(3),
         gene: Uint16Array.from(genes),
       } as SpatialTranscriptTile;
     });
-    const getTranscriptTile = jest.fn(async () => ({
-      count: 0, aggregated: false, x: new Float32Array(0), y: new Float32Array(0), z: new Float32Array(0),
-      weight: new Uint32Array(0), observation: new Uint32Array(0), gene: new Uint16Array(0),
-    } as SpatialTranscriptTile));
-    const port = { getTranscriptGeneBins, ...(quality === 'all' ? { getTranscriptTile } : {}) } as unknown as SpatialDataPort;
+    const getTranscriptTile = jest.fn(
+      async () =>
+        ({
+          count: 0,
+          aggregated: false,
+          x: new Float32Array(0),
+          y: new Float32Array(0),
+          z: new Float32Array(0),
+          weight: new Uint32Array(0),
+          observation: new Uint32Array(0),
+          gene: new Uint16Array(0),
+        }) as SpatialTranscriptTile,
+    );
+    const port = {
+      getTranscriptGeneBins,
+      ...(quality === 'all' ? { getTranscriptTile } : {}),
+    } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [],
+      id: 'd',
+      name: 'd',
+      columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 1000 }] },
-      transcriptBins: { bounds: [0, 0, 100, 100], origin: [0, 0], count: 1,
-        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })) },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 1,
+        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
+      },
       transcriptGeneBins: {
-        origin: [0, 0], levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
+        origin: [0, 0],
+        levels: [1, 2, 4, 8, 16].map((k) => ({ binSize: k, tileSize: 1000 })),
       },
     } as unknown as SpatialDataset;
     const view = {
-      ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'glyphs' as const, transcriptGenes: ['A', 'B'],
-      transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }], transcriptBudget: budget,
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'glyphs' as const,
+      transcriptGenes: ['A', 'B'],
+      transcriptGeneGroups: [{ name: 'Cluster 1', genes: ['A', 'B'] }],
+      transcriptBudget: budget,
       transcriptQuality: quality,
     };
-    const items: unknown[] = [];
-    const viewer = {
-      camera: { center: [50, 50], zoom, changed: { connect: () => () => undefined } },
-      layers: { items, add: (l: unknown) => items.push(l), remove: () => undefined },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], zoom);
     const tiles = new NapariSpatialTileLayers(port, {
       latest: () => [dataset, view, emptySelection(1)],
-      canvasSize: () => [400, 400], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     tiles.attach(viewer);
     return { tiles, getTranscriptGeneBins, getTranscriptTile };
   }
   type Drawn = { bin?: { size: number }; merged: SpatialTranscriptTile; entryGroup: Int32Array };
-  const drawn = (t: NapariSpatialTileLayers) => (t as unknown as { drawn: Drawn }).drawn;
+  const drawn = (t: NapariSpatialTileLayers) => drawnOf<Drawn>(t);
 
   it('reads the level the zoom calls for, one marker per cluster per bin, cells kept', async () => {
     const { tiles, getTranscriptGeneBins } = setup(4, 100_000); // 4 px per unit: 4-unit bins
@@ -441,15 +536,39 @@ describe('NapariSpatialTileLayers: a gene selection from the per-gene pyramid le
     tiles.detach();
   });
 
-  it('keeps each dataset\'s density grids apart, though their genes and bins match', async () => {
+  it("keeps each dataset's density grids apart, though their genes and bins match", async () => {
     const { tiles } = setup(4, 100_000);
     const getDensity = jest.fn(async () => ({}));
-    (tiles as unknown as { port: unknown }).port = { getDensity };
-    const densityFor = (id: string) =>
-      (tiles as unknown as { densityFor(d: string, g: string[], b: number): Promise<unknown> }).densityFor(id, ['A'], 8);
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = (id: string) => jobsOf(tiles).densityFor(id, ['A'], 8);
     await densityFor('one');
     await densityFor('two');
     await densityFor('one');
+    expect(getDensity).toHaveBeenCalledTimes(2);
+    tiles.detach();
+  });
+
+  it('keeps a density grid that is still in use when the cache is full (LRU, not FIFO)', async () => {
+    const { tiles } = setup(4, 100_000);
+    const getDensity = jest.fn(async () => ({}));
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = (gene: string) => jobsOf(tiles).densityFor('d', [gene], 8);
+    await densityFor('first');
+    for (let i = 0; i < 300; i++) {
+      await densityFor(`g${i}`);
+      await densityFor('first'); // in view the whole time
+    }
+    expect(getDensity.mock.calls.filter((c) => (c as unknown[])[0]?.toString() === 'first')).toHaveLength(1);
+    tiles.detach();
+  });
+
+  it('asks again for a density grid whose request failed', async () => {
+    const { tiles } = setup(4, 100_000);
+    const getDensity = jest.fn().mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValue({});
+    jobsOf(tiles).port = { getDensity };
+    const densityFor = () => jobsOf(tiles).densityFor('d', ['A'], 8);
+    await expect(densityFor()).rejects.toThrow('HTTP 503');
+    await densityFor();
     expect(getDensity).toHaveBeenCalledTimes(2);
     tiles.detach();
   });
@@ -468,31 +587,50 @@ describe('NapariSpatialTileLayers: colouring transcripts by cluster', () => {
   const tile = (genes: number[]): SpatialTranscriptTile => {
     const n = genes.length;
     return {
-      count: n, aggregated: false, x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n),
-      weight: new Uint32Array(n).fill(1), observation: new Uint32Array(n), gene: Uint16Array.from(genes),
+      count: n,
+      aggregated: false,
+      x: new Float32Array(n),
+      y: new Float32Array(n),
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(1),
+      observation: new Uint32Array(n),
+      gene: Uint16Array.from(genes),
     };
   };
-  type Colors = (d: unknown, v: unknown, t: SpatialTranscriptTile, c?: (i: number) => string | null) =>
-    Promise<{ rgba: number[][] }>;
+  type Colors = (
+    d: unknown,
+    v: unknown,
+    t: SpatialTranscriptTile,
+    c?: (i: number) => string | null,
+  ) => Promise<Float32Array>;
 
   it('gives a cluster one colour, the colour of the cell group of the same name', async () => {
-    const meta = { kind: 'categorical', name: 'graphclust', categories: ['Cluster 1', 'Cluster 2'],
-      colors: ['#ff0000', '#00ff00'] };
+    const meta = {
+      kind: 'categorical',
+      name: 'graphclust',
+      categories: ['Cluster 1', 'Cluster 2'],
+      colors: ['#ff0000', '#00ff00'],
+    };
     const port = {
       getColumn: async () => ({ meta, codes: new Uint16Array(1) }),
     } as unknown as SpatialDataPort;
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => null, canvasSize: () => [0, 0], continuousLut: () => [], polygonsShownChanged: () => undefined,
+      latest: () => null,
+      canvasSize: () => [0, 0],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
     });
     const dataset = { id: 'd', columns: [meta] } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptColorBy: 'cluster' as const, cellTypeColumn: 'graphclust' };
     const clusters = ['Cluster 2', 'Cluster 2', 'Cluster 1', 'Mine'];
-    const colors = (tiles as unknown as { transcriptColors: Colors }).transcriptColors.bind(tiles);
-    const { rgba } = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
-    expect(rgba[0]).toEqual(rgba[1]);           // genes 0 and 1: one cluster, one colour
-    expect(rgba[0]).toEqual([0, 1, 0, 1]);      // Cluster 2's cells are green
-    expect(rgba[2]).toEqual([1, 0, 0, 1]);      // Cluster 1's are red
-    expect(rgba[3]).not.toEqual(rgba[0]);       // a cluster no cell group names: a palette colour
+    const transcripts = transcriptsOf<{ transcriptColors: Colors }>(tiles);
+    const colors = transcripts.transcriptColors.bind(transcripts);
+    const packed = await colors(dataset, view, tile([0, 1, 2, 3]), (i) => clusters[i]);
+    const rgba = (i: number) => Array.from(packed.subarray(i * 4, i * 4 + 4));
+    expect(rgba(0)).toEqual(rgba(1)); // genes 0 and 1: one cluster, one colour
+    expect(rgba(0)).toEqual([0, 1, 0, 1]); // Cluster 2's cells are green
+    expect(rgba(2)).toEqual([1, 0, 0, 1]); // Cluster 1's are red
+    expect(rgba(3)).not.toEqual(rgba(0)); // a cluster no cell group names: a palette colour
   });
 });
 
@@ -500,26 +638,40 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
   it('reports "Transcripts" while a selection loads, and nothing once it is drawn', async () => {
     const reports: string[][] = [];
     let release!: () => void;
-    const gate = new Promise<void>((r) => { release = r; });
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
     const tile: SpatialTranscriptTile = {
-      count: 1, aggregated: false, x: Float32Array.of(5), y: Float32Array.of(5), z: new Float32Array(1),
-      weight: Uint32Array.of(1), observation: new Uint32Array(1), gene: new Uint16Array(1),
+      count: 1,
+      aggregated: false,
+      x: Float32Array.of(5),
+      y: Float32Array.of(5),
+      z: new Float32Array(1),
+      weight: Uint32Array.of(1),
+      observation: new Uint32Array(1),
+      gene: new Uint16Array(1),
     };
-    const port = { getTranscriptTile: async () => { await gate; return tile; } } as unknown as SpatialDataPort;
+    const port = {
+      getTranscriptTile: async () => {
+        await gate;
+        return tile;
+      },
+    } as unknown as SpatialDataPort;
     const dataset = {
-      id: 'd', name: 'd', columns: [], observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
       transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
     } as unknown as SpatialDataset;
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, transcriptGenes: ['A'] };
-    const viewer = {
-      camera: { center: [50, 50], zoom: 40, changed: { connect: () => () => undefined } },
-      layers: { items: [] as unknown[], add: () => undefined, remove: () => undefined },
-      addPoints: jest.fn(() => ({})), addShapes: jest.fn(() => ({})), addImage: jest.fn(() => ({})),
-      requestRender: () => undefined,
-    } as unknown as Viewer;
+    const viewer = viewerAt([50, 50], 40);
     const tiles = new NapariSpatialTileLayers(port, {
-      latest: () => [dataset, view, emptySelection(1)], canvasSize: () => [400, 400], continuousLut: () => [],
-      polygonsShownChanged: () => undefined, loadingChanged: (l) => reports.push(l),
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+      loadingChanged: (l) => reports.push(l),
     });
     tiles.attach(viewer);
     const planned = (tiles as unknown as { plan(): Promise<void> }).plan();
@@ -528,6 +680,959 @@ describe('NapariSpatialTileLayers: reporting loads for the canvas badge', () => 
     release();
     await planned;
     expect(reports.at(-1)).toEqual([]);
+    tiles.detach();
+  });
+});
+
+/**
+ * A column, feature-vector or density request that fails must not escape `plan()`: it was an
+ * unhandled rejection that also skipped the bounded retry, so one transient error left the
+ * cells stale until the camera moved (review NAPARI-BOUNDARY-8).
+ */
+describe('NapariSpatialTileLayers: a column request that fails', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
+  });
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['A'] };
+
+  function setup() {
+    let columnCalls = 0;
+    const getColumn = jest.fn(async () => {
+      if (++columnCalls === 1) throw new Error('HTTP 503');
+      return { meta, codes: new Uint16Array(1) };
+    });
+    const port = { getPolygonTile: jest.fn(async () => ring()), getColumn } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [meta],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    const geneCounts = jest.fn();
+    const host: SpatialTileHost = {
+      latest: () => [dataset, DEFAULT_SPATIAL_VIEW, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+      geneCountsChanged: geneCounts,
+    };
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    const tiles = new NapariSpatialTileLayers(port, host);
+    tiles.attach(viewer);
+    return { tiles, viewer, getColumn, geneCounts };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('resolves the plan, still reports the counts, and retries the view', async () => {
+    const { tiles, viewer, getColumn, geneCounts } = setup();
+    await expect((tiles as unknown as { plan(): Promise<void> }).plan()).resolves.toBeUndefined();
+    expect(getColumn).toHaveBeenCalledTimes(1);
+    expect(geneCounts).toHaveBeenCalled();
+    // The bounded retry runs and draws the cells this time.
+    for (let i = 0; i < 40; i++) {
+      for (let j = 0; j < 4; j++) await Promise.resolve();
+      jest.advanceTimersByTime(50);
+    }
+    expect(getColumn).toHaveBeenCalledTimes(2);
+    expect(viewer.layers.items.some((l) => tiles.owns(l))).toBe(true);
+    tiles.detach();
+  });
+});
+
+/**
+ * Whether a plan is complete belongs to that plan: a tile of a superseded plan that fails
+ * while a newer plan runs must not stop the newer one caching its (complete) tiles, nor
+ * schedule a retry of it (review NAPARI-BOUNDARY-9).
+ */
+describe('NapariSpatialTileLayers: overlapping plans', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it("a stale plan's failed tile does not mark the current plan incomplete", async () => {
+    const pending: { resolve(t: SpatialPolygonTile): void; reject(e: Error): void }[] = [];
+    const getPolygonTile = jest.fn(
+      () =>
+        new Promise<SpatialPolygonTile>((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }),
+    );
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [{ name: 'cell', label: 'Cell' }],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const };
+    const tiles = new NapariSpatialTileLayers({ getPolygonTile } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    tiles.attach(viewer);
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+
+    const stale = plan();
+    await flush();
+    const current = plan(); // supersedes the first
+    await flush();
+    expect(pending).toHaveLength(2);
+    pending[0].reject(new Error('tile server hiccup')); // the stale plan's tile fails…
+    await stale;
+    pending[1].resolve(ring()); // …and the current plan's tile arrives
+    await current;
+
+    jest.advanceTimersByTime(10_000); // no retry is scheduled…
+    await flush();
+    expect(getPolygonTile).toHaveBeenCalledTimes(2);
+    // …because it was cached as complete.
+    const cells = (tiles as unknown as { cells: { cellGeometryKey: string | null } }).cells;
+    expect(cells.cellGeometryKey).not.toBeNull();
+    tiles.detach();
+  });
+});
+
+/**
+ * napari-js 0.14's LayerList cannot move a layer, so order is restored by remove + re-add,
+ * and every removal disposes the layer's GPU visual (re-uploaded on the next frame). A plan
+ * that replaces several groups restores the order ONCE, instead of re-adding the groups above
+ * each replaced one every time (review NAPARI-BOUNDARY-11).
+ */
+describe('NapariSpatialTileLayers: layer order', () => {
+  const ring = (): SpatialPolygonTile => ({
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
+  });
+  const transcripts: SpatialTranscriptTile = {
+    count: 1,
+    aggregated: false,
+    x: Float32Array.of(5),
+    y: Float32Array.of(5),
+    z: new Float32Array(1),
+    weight: Uint32Array.of(1),
+    observation: new Uint32Array(1),
+    gene: new Uint16Array(1),
+  };
+
+  function setup() {
+    const port = {
+      getPolygonTile: jest.fn(async () => ring()),
+      getTranscriptTile: jest.fn(async () => transcripts),
+    } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [
+          { name: 'cell', label: 'Cell' },
+          { name: 'nucleus', label: 'Nucleus' },
+        ],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    let view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      cellColorMode: 'single' as const,
+      cellDraw: 'both' as const,
+      cellSet: 'cell',
+      transcriptMode: 'circles' as const,
+      transcriptGenes: ['A'],
+    };
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 40);
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (patch: Partial<typeof view>) => {
+      view = { ...view, ...patch };
+    };
+    return { tiles, viewer, plan, setView };
+  }
+  const names = (viewer: Viewer) => viewer.layers.items.map((l) => l.name);
+
+  it('moves the transcripts back on top once when the cells are rebuilt under them', async () => {
+    const { tiles, viewer, plan, setView } = setup();
+    await plan();
+    expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
+    const transcriptLayer = viewer.layers.items[2];
+    const removals: unknown[] = [];
+    const moves: unknown[] = [];
+    viewer.layers.removed.connect((l) => removals.push(l));
+    viewer.layers.moved.connect((m) => moves.push(m.layer));
+
+    setView({ cellSet: 'nucleus' }); // new cell geometry; the transcripts are unchanged
+    await plan();
+
+    expect(names(viewer)).toEqual(['cells', 'cell outlines', 'transcripts']);
+    expect(viewer.layers.items[2]).toBe(transcriptLayer);
+    // Restacked, never removed: its GPU visual is kept (NAPARI-BOUNDARY-11).
+    expect(moves.filter((l) => l === transcriptLayer)).toHaveLength(1);
+    expect(removals).not.toContain(transcriptLayer);
+    tiles.detach();
+  });
+
+  it('puts every overlay back above re-added markers, and leaves a correct order alone', async () => {
+    const { tiles, viewer, plan } = setup();
+    await plan();
+    const before = [...viewer.layers.items];
+    const events: unknown[] = [];
+    viewer.layers.removed.connect((l) => events.push(l));
+    viewer.layers.moved.connect((m) => events.push(m.layer));
+    tiles.afterObservations(); // nothing was added since: already in order
+    expect(events).toHaveLength(0);
+    viewer.addPoints(new Float32Array(2), { name: 'markers' });
+    const removals: unknown[] = [];
+    viewer.layers.removed.connect((l) => removals.push(l));
+    tiles.afterObservations();
+    expect(names(viewer)).toEqual(['markers', 'cells', 'cell outlines', 'transcripts']);
+    expect(viewer.layers.items.slice(1)).toEqual(before);
+    expect(removals).toHaveLength(0); // moved over the markers, not re-added
+    tiles.detach();
+  });
+});
+
+/**
+ * What hovering a transcript marker says, for each kind of marker the plan can draw: an
+ * individual transcript of "all genes", an all-gene bin, a selected gene's transcript (alone
+ * or aggregated), and a gene selection grouped by cluster. The server's details arrive once
+ * the pointer rests on a marker, and are cached.
+ */
+describe('NapariSpatialTileLayers: hovering a transcript', () => {
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell'] };
+  const entries = (o: { x: number[]; weight?: number; gene?: number[]; aggregated?: boolean }) => {
+    const n = o.x.length;
+    return {
+      count: n,
+      aggregated: !!o.aggregated,
+      x: Float32Array.from(o.x),
+      y: new Float32Array(n).fill(5),
+      z: new Float32Array(n),
+      weight: new Uint32Array(n).fill(o.weight ?? 1),
+      observation: Uint32Array.from({ length: n }, (_v, i) => i),
+      gene: o.gene ? Uint16Array.from(o.gene) : new Uint16Array(n),
+    } as SpatialTranscriptTile;
+  };
+
+  function setup(o: {
+    view: Partial<typeof DEFAULT_SPATIAL_VIEW>;
+    zoom: number;
+    tile: SpatialTranscriptTile;
+    bins?: SpatialTranscriptTile;
+    allGenes?: boolean;
+    summary?: boolean;
+  }) {
+    const getTranscriptSummary = jest.fn(async () => ({
+      transcripts: 4,
+      genes: 3,
+      cells: 1,
+      unassigned: 0,
+      topGenes: [
+        { name: 'CD3E', count: 2 },
+        { name: 'MS4A1', count: 1 },
+      ],
+      cellIds: { 0: 'cell-0' },
+    }));
+    const port = {
+      getTranscriptTile: jest.fn(async () => o.tile),
+      ...(o.bins ? { getTranscriptBins: jest.fn(async () => o.bins) } : {}),
+      getColumn: jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1, 0, 1) })),
+      ...(o.summary === false ? {} : { getTranscriptSummary }),
+    } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [meta],
+      observations: { count: 4, x: new Float32Array(4), y: new Float32Array(4) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
+      transcriptBins: {
+        bounds: [0, 0, 100, 100],
+        origin: [0, 0],
+        count: 10,
+        levels: (o.allGenes ? [25] : [1, 2, 4, 8]).map((k) => ({ binSize: k, tileSize: 200 })),
+      },
+    } as unknown as SpatialDataset;
+    const view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'circles' as const, ...o.view };
+    const viewer = viewerAt([5, 5], o.zoom);
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(4)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    return { tiles, plan, getTranscriptSummary, viewer };
+  }
+
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it('says nothing before anything is drawn, or away from every marker', async () => {
+    const { tiles, plan } = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7] }) });
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
+    await plan();
+    expect(tiles.hoverAt(50, 50, 0.1, () => undefined)).toBeNull();
+    tiles.detach();
+  });
+
+  it('names an individual transcript of every gene, then its gene and cell from the server', async () => {
+    const { tiles, plan, getTranscriptSummary } = setup({
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 },
+      zoom: 4,
+      allGenes: true,
+      tile: entries({ x: [5, 7] }),
+    });
+    await plan();
+    const details = jest.fn();
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual(['Transcript', 'in cell #0 · T cell', 'loading details…']);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(getTranscriptSummary).toHaveBeenCalledWith({ box: [4.98, 4.98, 5.02, 5.02], cells: [0] });
+    expect(details).toHaveBeenCalledWith(['CD3E transcript', 'in cell cell-0 · T cell']);
+    // Cached: the next hover of the same marker answers at once.
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual(['CD3E transcript', 'in cell cell-0 · T cell']);
+    tiles.detach();
+  });
+
+  it('describes an all-gene bin by its count and area, then its genes and cells', async () => {
+    const { tiles, plan, getTranscriptSummary } = setup({
+      view: { transcriptAllGenes: true, transcriptBudget: 1000 },
+      zoom: 4,
+      allGenes: true,
+      tile: entries({ x: Array.from({ length: 5000 }, () => 5) }),
+      bins: entries({ x: [5, 30], weight: 4, aggregated: true }),
+    });
+    await plan();
+    const details = jest.fn();
+    expect(tiles.hoverAt(5, 5, 0.1, details)).toEqual([
+      '4 transcripts · all genes',
+      '25.0 × 25.0 µm area',
+      'mostly cell #0 · T cell',
+      'loading details…',
+    ]);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(getTranscriptSummary).toHaveBeenCalledWith({ box: [0, 0, 25, 25], cells: [0] });
+    expect(details).toHaveBeenCalledWith([
+      '4 transcripts · all genes',
+      '25.0 × 25.0 µm area',
+      '3 distinct genes · 1 cell',
+      'top genes: CD3E 2, MS4A1 1',
+      'mostly cell cell-0 · T cell',
+    ]);
+    tiles.detach();
+  });
+
+  it("names a selected gene's transcript, alone or aggregated (the server adds only the cell id)", async () => {
+    const one = setup({ view: { transcriptGenes: ['G0'] }, zoom: 20, tile: entries({ x: [5, 7] }) });
+    await one.plan();
+    expect(one.tiles.hoverAt(7, 5, 0.1, () => undefined)).toEqual(['G0 transcript', 'in cell #1 · B cell']);
+    jest.advanceTimersByTime(150);
+    await flush();
+    expect(one.getTranscriptSummary).toHaveBeenCalledWith({ cells: [1] });
+    one.tiles.detach();
+
+    const many = setup({
+      view: { transcriptGenes: ['G0'] },
+      zoom: 20,
+      tile: entries({ x: [5, 7], weight: 3, aggregated: true }),
+      summary: false,
+    });
+    await many.plan();
+    expect(many.tiles.hoverAt(5, 5, 0.1, () => undefined)).toEqual([
+      'G0 · 3 transcripts',
+      'grouped: zoom in to split',
+      'near cell #0 · T cell',
+    ]);
+    many.tiles.detach();
+  });
+
+  it('names a grouped selection marker by its cluster, area and dominant gene', async () => {
+    // Zoomed out (2 px per unit): one marker per cluster per 8-unit bin.
+    const { tiles, plan } = setup({
+      view: { transcriptGenes: ['G0'], transcriptGeneGroups: [{ name: 'Cluster 0', genes: ['G0'] }] },
+      zoom: 2,
+      tile: entries({ x: [5, 6, 7] }),
+      summary: false,
+    });
+    await plan();
+    expect(tiles.hoverAt(6, 5, 0.1, () => undefined)).toEqual([
+      'Cluster 0 · 3 transcripts',
+      'mostly G0',
+      '8.0 × 8.0 µm area · zoom in to split',
+      'mostly cell #0 · T cell',
+    ]);
+    tiles.detach();
+  });
+
+  it('says nothing once the transcript layer is gone from the viewer', async () => {
+    const { tiles, plan, viewer } = setup({
+      view: { transcriptGenes: ['G0'] },
+      zoom: 20,
+      tile: entries({ x: [5] }),
+    });
+    await plan();
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).not.toBeNull();
+    for (const layer of [...viewer.layers.items]) viewer.layers.remove(layer);
+    expect(tiles.hoverAt(5, 5, 0.1, () => undefined)).toBeNull();
+    tiles.detach();
+  });
+});
+
+/** The transcript density layer: one image per (genes, bin, window, colormap), and its window. */
+describe('NapariSpatialTileLayers: the transcript density', () => {
+  function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    // 2 × 2 grid cells of 2 × 2 units: per unit area 0, 1, 2 and 10.
+    const getDensity = jest.fn(async () => ({
+      meta: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
+      genes: ['A'],
+      values: Float32Array.of(0, 4, 8, 40),
+    }));
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
+      density: { gridSize: [2, 2], origin: [0, 0], rows: 2, cols: 2 },
+    } as unknown as SpatialDataset;
+    let view = { ...DEFAULT_SPATIAL_VIEW, transcriptMode: 'density' as const, transcriptGenes: ['A'], ...patch };
+    const viewer = viewerAt([2, 2], 40);
+    const densityChanged = jest.fn();
+    const tiles = new NapariSpatialTileLayers({ getDensity } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+      densityChanged,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (p: Partial<typeof view>) => {
+      view = { ...view, ...p };
+    };
+    return { tiles, plan, setView, getDensity, viewer, densityChanged };
+  }
+
+  it('draws once, and an unchanged plan neither refetches nor redraws', async () => {
+    const { tiles, plan, setView, getDensity, viewer } = setup();
+    const addImage = jest.spyOn(viewer, 'addImage');
+    await plan();
+    await plan();
+    expect(getDensity).toHaveBeenCalledTimes(1);
+    expect(addImage).toHaveBeenCalledTimes(1);
+    setView({ densityBin: 8 }); // a different raster
+    await plan();
+    expect(getDensity).toHaveBeenCalledTimes(2);
+    expect(addImage).toHaveBeenCalledTimes(2);
+    tiles.detach();
+  });
+
+  it('hands napari the scalar raster, windowed on the GPU with the low end transparent', async () => {
+    const { tiles, plan, viewer } = setup({ densityRange: [0.5, 5], densityOpacity: 0.7 });
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    expect(layer.source).toMatchObject({ kind: 'typed', channels: 1, dtype: 'float32' });
+    expect(Array.from((layer.source as { data: Float32Array }).data)).toEqual([0, 1, 2, 10]); // per unit area
+    expect(layer.transparentBelow).toBe(true);
+    expect(layer.contrastLimits).toEqual([0.5, 5]);
+    expect(layer.opacity).toBe(0.7);
+    const opts = { climLo: 0.5, climHi: 5, gamma: 1, invert: false, transparentBelow: true };
+    // What the shader draws for each bin: at or below the low end, nothing.
+    const drawn = [0, 1, 2, 10].map((v) => mapScalarRGBA(v, { ...opts, colormap: layer.colormap! })[3]);
+    expect(drawn).toEqual([0, 1, 1, 1]);
+    tiles.detach();
+  });
+
+  it("colours the density in matplotlib's exact inferno by default", async () => {
+    const { tiles, plan, viewer } = setup();
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    for (const i of [0, 64, 128, 200, 255]) {
+      const rgb = layer.colormap!.sample(i / 255).map((v) => Math.round(v * 255));
+      expect(rgb).toEqual([INFERNO_LUT[i * 3], INFERNO_LUT[i * 3 + 1], INFERNO_LUT[i * 3 + 2]]);
+    }
+    tiles.detach();
+  });
+
+  it('moves the window, colour and opacity as uniforms: no refetch, no new layer, no re-upload', async () => {
+    // A threshold slider move used to recolour the raster on the CPU and upload a new RGBA image.
+    const { tiles, plan, setView, getDensity, viewer, densityChanged } = setup();
+    await plan();
+    const [layer] = viewer.layers.items as ImageLayer[];
+    const source = layer.source;
+    const added = jest.fn();
+    const removed = jest.fn();
+    viewer.layers.added.connect(added);
+    viewer.layers.removed.connect(removed);
+
+    setView({ densityRange: [1.5, 8], densityOpacity: 0.4 });
+    await plan();
+    expect(viewer.layers.items).toEqual([layer]);
+    expect(layer.source).toBe(source);
+    expect(layer.contrastLimits).toEqual([1.5, 8]);
+    expect(layer.opacity).toBe(0.4);
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo: 1.5, hi: 8, max: 10 });
+
+    const lutVersion = layer.colormapVersion;
+    setView({ densityColormap: 'Viridis' });
+    await plan();
+    expect(layer.colormapVersion).toBe(lutVersion + 1); // a LUT, not the texture
+    setView({ densityOpacity: 0.5 });
+    await plan();
+    expect(layer.colormapVersion).toBe(lutVersion + 1); // an unchanged colormap is left alone
+
+    expect(getDensity).toHaveBeenCalledTimes(1);
+    expect(added).not.toHaveBeenCalled();
+    expect(removed).not.toHaveBeenCalled();
+    tiles.detach();
+  });
+
+  it('draws again once an image render has cleared it from the viewer', async () => {
+    // A stitched slice re-render empties the layer list; the key alone said "already drawn".
+    const { tiles, plan, viewer } = setup();
+    await plan();
+    viewer.layers.clear();
+    await plan();
+    expect(viewer.layers.items.map((l) => l.name)).toEqual([expect.stringMatching(/^density/)]);
+    tiles.detach();
+  });
+
+  it('derives the window from the bins per unit area, and reports it with the densest bin', async () => {
+    const { tiles, plan, densityChanged } = setup();
+    await plan();
+    const [lo, hi] = densityAutoRange(Float32Array.of(0, 1, 2, 10));
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo, hi, max: 10 });
+    expect(tiles.densityStats).toEqual({ lo, hi, max: 10 });
+    tiles.detach();
+  });
+
+  it('keeps a window the user set', async () => {
+    const { tiles, plan, densityChanged } = setup({ densityRange: [0.5, 5] });
+    await plan();
+    expect(densityChanged).toHaveBeenLastCalledWith({ lo: 0.5, hi: 5, max: 10 });
+    tiles.detach();
+  });
+
+  it('drops the layer and its window when the view stops drawing density', async () => {
+    const { tiles, plan, setView, viewer } = setup();
+    await plan();
+    setView({ transcriptMode: 'circles' });
+    await plan();
+    expect(viewer.layers.items).toHaveLength(0);
+    expect(tiles.densityStats).toBeNull();
+    tiles.detach();
+  });
+});
+
+/** Xenium Explorer's "Estimated Transcript Points": each visible gene's total × the share in view. */
+describe('NapariSpatialTileLayers: the transcripts-in-view estimate', () => {
+  function setup(zoom: number, patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const getTranscriptCounts = jest.fn(async () => ({
+      counts: { A: 400, B: 100 },
+      total: 1000,
+      bounds: [0, 0, 100, 100] as [number, number, number, number],
+    }));
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1000, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'density' as const,
+      transcriptGenes: ['A', 'B'],
+      transcriptHiddenGenes: ['B'],
+      ...patch,
+    };
+    const viewer = viewerAt([50, 50], zoom);
+    const estimateChanged = jest.fn();
+    const tiles = new NapariSpatialTileLayers({ getTranscriptCounts } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+      estimateChanged,
+    });
+    tiles.attach(viewer);
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    return { tiles, plan, getTranscriptCounts, estimateChanged };
+  }
+  const settled = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
+  it("scales the visible genes' totals by the share of the tissue on screen", async () => {
+    const whole = setup(4); // the view is exactly the 100 × 100 tissue
+    await whole.plan();
+    await settled();
+    expect(whole.getTranscriptCounts).toHaveBeenCalledWith(['A']); // B is hidden
+    expect(whole.estimateChanged).toHaveBeenLastCalledWith({ points: 400, max: 100_000 });
+    whole.tiles.detach();
+
+    const quarter = setup(8); // 50 × 50 of it
+    await quarter.plan();
+    await settled();
+    expect(quarter.estimateChanged).toHaveBeenLastCalledWith({ points: 100, max: 100_000 });
+    quarter.tiles.detach();
+  });
+
+  it('counts every gene for "all genes", and asks for the totals once per gene set', async () => {
+    const { tiles, plan, getTranscriptCounts, estimateChanged } = setup(4, { transcriptAllGenes: true });
+    await plan();
+    await settled();
+    await plan();
+    await settled();
+    expect(getTranscriptCounts).toHaveBeenCalledTimes(1);
+    expect(getTranscriptCounts).toHaveBeenCalledWith([]);
+    expect(estimateChanged).toHaveBeenLastCalledWith({ points: 1000, max: 100_000 });
+    tiles.detach();
+  });
+
+  it('reports no estimate while transcripts are off', async () => {
+    const { tiles, plan, estimateChanged } = setup(4, { transcriptMode: 'off' });
+    await plan();
+    expect(estimateChanged).toHaveBeenLastCalledWith(null);
+    tiles.detach();
+  });
+});
+
+/**
+ * The cell layers: fill, outline or both (with nuclei over them), coloured by the view, with
+ * switched-off groups left out of the geometry, and a colour-only change restyling in place.
+ */
+describe('NapariSpatialTileLayers: drawing cells', () => {
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell', 'B cell'] };
+  // Two cells (observations 0 and 1), side by side.
+  const rings = (): SpatialPolygonTile => ({
+    count: 2,
+    observation: Uint32Array.of(0, 1),
+    offsets: Uint32Array.of(0, 4, 8),
+    coords: Float32Array.of(0, 0, 10, 0, 10, 10, 0, 10, 20, 0, 30, 0, 30, 10, 20, 10),
+  });
+
+  const count = (l: ShapesLayer) => l.offsets!.length - 1;
+  /** Group `code`'s colour as the layer is handed it: the column's own palette, 0..1 RGBA. */
+  const rgbaOf = (m: object, code: number) => {
+    const [r, g, b] = spatialEncoding.parseHex(
+      spatialEncoding.resolveCategoryColors(m as Parameters<typeof spatialEncoding.resolveCategoryColors>[0])[
+        code
+      ],
+    );
+    return Float32Array.of(r / 255, g / 255, b / 255, 1);
+  };
+
+  function setup(patch: Partial<typeof DEFAULT_SPATIAL_VIEW> = {}) {
+    const getPolygonTile = jest.fn(async () => rings());
+    const getColumn = jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1) }));
+    // One expression value per cell; replaced to stand for a new gene vector.
+    let expression = Float32Array.of(3, 40);
+    const getFeatureVector = jest.fn(async () => expression);
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [meta],
+      observations: { count: 2, x: Float32Array.of(5, 25), y: Float32Array.of(5, 5), radius: 5 },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [
+          { name: 'cell', label: 'Cell' },
+          { name: 'nucleus', label: 'Nucleus' },
+        ],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    let view = { ...DEFAULT_SPATIAL_VIEW, ...patch };
+    const shown = jest.fn();
+    const port = { getPolygonTile, getColumn, getFeatureVector } as unknown as SpatialDataPort;
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(2)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: shown,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 4);
+    tiles.attach(viewer);
+    const addShapes = jest.spyOn(viewer, 'addShapes');
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const setView = (p: Partial<typeof view>) => {
+      view = { ...view, ...p };
+    };
+    const layers = () => viewer.layers.items as unknown as ShapesLayer[];
+    const setExpression = (v: Float32Array) => {
+      expression = v;
+    };
+    return { tiles, viewer, plan, setView, setExpression, addShapes, layers, getPolygonTile, getColumn, shown };
+  }
+
+  it('fills the cells by group by default, and reports the outlines shown', async () => {
+    const { tiles, plan, layers, shown } = setup();
+    await plan();
+    expect(layers().map((l) => [l.name, l.draw])).toEqual([['cells', 'fill']]);
+    expect(count(layers()[0])).toBe(2);
+    // One RGBA per cell, its group's colour.
+    expect(layers()[0].colorMode()).toBe('faceColor');
+    expect(layers()[0].colorAt(1)).toEqual([...rgbaOf(meta, 1)]);
+    expect(shown).toHaveBeenLastCalledWith(true);
+    expect(tiles.outlinesShown).toBe(true);
+    tiles.detach();
+  });
+
+  it("draws outlines alone in the cells' colours, or dark over a fill, and nuclei over the cells", async () => {
+    const outline = setup({ cellDraw: 'outline' });
+    await outline.plan();
+    expect(outline.layers().map((l) => [l.name, l.draw])).toEqual([['cell outlines', 'outline']]);
+    expect(outline.layers()[0].colorMode()).toBe('faceColor');
+    outline.tiles.detach();
+
+    const both = setup({ cellDraw: 'both' });
+    await both.plan();
+    expect(both.layers().map((l) => l.name)).toEqual(['cells', 'cell outlines']);
+    expect(both.layers()[1].values).toBeNull(); // a flat dark outline separates neighbours
+    both.tiles.detach();
+
+    const nuclei = setup({ cellSet: 'both' });
+    await nuclei.plan();
+    expect(nuclei.layers().map((l) => l.name)).toEqual(['cells', 'nucleus outlines']);
+    expect(nuclei.getPolygonTile.mock.calls.map((c) => (c as unknown[])[0])).toEqual(['cell', 'nucleus']);
+    nuclei.tiles.detach();
+  });
+
+  it('gives each of hundreds of groups its own colour (NAPARI-BOUNDARY-27)', async () => {
+    // Regression: a band per group in a 256-entry colormap LUT collided past ~127 groups, so
+    // neighbouring groups drew in one colour. Now every cell carries its own RGBA.
+    const n = 300;
+    const many = {
+      kind: 'categorical',
+      name: 'cluster',
+      categories: Array.from({ length: n }, (_v, i) => `c${i}`),
+      colors: Array.from({ length: n }, (_v, i) => `#${(0x203040 + i * 97).toString(16)}`),
+    };
+    const { tiles, plan, layers, getPolygonTile, getColumn, viewer } = setup();
+    getPolygonTile.mockResolvedValue({
+      count: n,
+      observation: Uint32Array.from({ length: n }, (_v, i) => i),
+      offsets: Uint32Array.from({ length: n + 1 }, (_v, i) => i * 4),
+      coords: Float32Array.from({ length: n * 8 }, (_v, k) => {
+        const i = k >> 3;
+        const corner = (k >> 1) & 3;
+        return k & 1 ? (corner >> 1) * 0.5 : i + (corner === 1 || corner === 2 ? 0.5 : 0);
+      }),
+    });
+    getColumn.mockResolvedValue({ meta: many, codes: Uint16Array.from({ length: n }, (_v, i) => i) } as never);
+    viewer.camera.set([150, 0], 4);
+    await plan();
+    const [fill] = layers();
+    expect(fill.colorMode()).toBe('faceColor');
+    const drawn = Array.from({ length: n }, (_v, i) => fill.colorAt(i).join());
+    expect(new Set(drawn).size).toBe(n);
+    expect(fill.colorAt(299)).toEqual([...rgbaOf(many, 299)]);
+    tiles.detach();
+  });
+
+  it("leaves a switched-off group's cells out of the geometry", async () => {
+    const { tiles, plan, layers } = setup({ hiddenGroups: ['B cell'] });
+    await plan();
+    expect(count(layers()[0])).toBe(1);
+    tiles.detach();
+  });
+
+  it('restyles in place on a colour-only change, with no new layer or fetch', async () => {
+    const { tiles, plan, setView, addShapes, layers, getPolygonTile } = setup();
+    await plan();
+    const [fill] = layers();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    setView({ cellOpacity: 0.2, cellColorMode: 'single', cellSingleColor: '#ff0000' });
+    await plan();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    expect(getPolygonTile).toHaveBeenCalledTimes(1);
+    expect(layers()[0]).toBe(fill);
+    expect(fill.opacity).toBe(0.2);
+    expect(fill.colorMode()).toBe('flat'); // flat colour now: per-shape colours and values cleared
+    expect(fill.faceColor).toBeNull();
+    expect(fill.values).toBeNull();
+    expect(Array.from(fill.color)).toEqual([1, 0, 0, 1]);
+    // An unchanged plan touches nothing.
+    await plan();
+    expect(addShapes).toHaveBeenCalledTimes(1);
+    tiles.detach();
+  });
+
+  it("computes a gene colouring's contrast window once per (vector, clip, log) (SPATIAL-12)", async () => {
+    const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
+    const { tiles, plan, setView, setExpression, layers } = setup({ cellColorMode: 'gene', cellColorGene: 'G' });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(1);
+    // The window is taken on the log1p values (gene expression is log-scaled).
+    const window = spatialEncoding.contrastWindow(Float32Array.of(Math.log1p(3), Math.log1p(40)), 0.01, 0.99);
+    expect(layers()[0].contrastLimits).toEqual(window);
+    sort.mockClear();
+
+    setView({ cellOpacity: 0.3 }); // a restyle with the same vector: the cached window
+    await plan();
+    expect(layers()[0].opacity).toBe(0.3);
+    expect(sort).not.toHaveBeenCalled();
+
+    setView({ percentileClip: [0.05, 0.95] }); // a new clip: a new window
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(1);
+
+    setExpression(Float32Array.of(3, 40)); // a new vector (same values): computed afresh
+    setView({ cellOpacity: 0.4 });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(2);
+
+    setView({ percentileClip: [0.01, 0.99], cellOpacity: 0.5 }); // back to a clip seen for this vector
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(3); // the new vector had not been windowed at this clip
+    setView({ percentileClip: [0.05, 0.95], cellOpacity: 0.6 });
+    await plan();
+    expect(sort).toHaveBeenCalledTimes(3); // ...but it had at this one
+    sort.mockRestore();
+    tiles.detach();
+  });
+
+  it('drops the cells and hands the markers back when cells are switched off', async () => {
+    const { tiles, plan, setView, layers, shown } = setup();
+    await plan();
+    setView({ showCells: false });
+    await plan();
+    expect(layers()).toHaveLength(0);
+    expect(shown).toHaveBeenLastCalledWith(false);
+    tiles.detach();
+  });
+});
+
+/**
+ * A transcript plan superseded while it looks up the cell-type column for the hover must not
+ * leave its key (or its markers, for the hover) behind: the newer plan of the same view would
+ * take the old layer for its own and skip drawing.
+ */
+describe('NapariSpatialTileLayers: a transcript plan superseded at its last step', () => {
+  it('lets the newer plan of the same view draw it', async () => {
+    const meta = { kind: 'categorical', name: 'cluster', categories: ['T cell'] };
+    const tile: SpatialTranscriptTile = {
+      count: 1,
+      aggregated: false,
+      x: Float32Array.of(5),
+      y: Float32Array.of(5),
+      z: new Float32Array(1),
+      weight: Uint32Array.of(1),
+      observation: new Uint32Array(1),
+      gene: new Uint16Array(1),
+    };
+    let gate: Promise<void> | null = null;
+    const getColumn = jest.fn(async () => {
+      if (gate) await gate;
+      return { meta, codes: new Uint16Array(1) };
+    });
+    const port = { getTranscriptTile: jest.fn(async () => tile), getColumn } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [meta],
+      observations: { count: 1, x: Float32Array.of(5), y: Float32Array.of(5) },
+      transcriptTiles: { bounds: [0, 0, 100, 100], count: 1, levels: [{ tileSize: 200 }] },
+    } as unknown as SpatialDataset;
+    let view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'circles' as const,
+      transcriptGenes: ['A'],
+      transcriptColorBy: 'gene' as const,
+    };
+    const tiles = new NapariSpatialTileLayers(port, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    const viewer = new Viewer({ canvas: document.createElement('canvas') });
+    viewer.camera.set([50, 50], 40);
+    tiles.attach(viewer);
+    const addPoints = jest.spyOn(viewer, 'addPoints');
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    await plan(); // view A drawn
+    expect(addPoints).toHaveBeenCalledTimes(1);
+    view = { ...view, transcriptGenes: ['A', 'B'] }; // view B
+    let release!: () => void;
+    gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const stale = plan(); // reaches the cell-type lookup and waits there…
+    await flush();
+    gate = null;
+    const current = plan(); // …while the same view is planned again
+    await current;
+    release();
+    await stale;
+
+    expect(addPoints).toHaveBeenCalledTimes(2); // view B was drawn
+    expect(drawnOf<{ genes: string[] }>(tiles).genes).toEqual(['A', 'B']);
     tiles.detach();
   });
 });

@@ -12,8 +12,13 @@ export interface CropImageOptions {
 
 /** Copy a clamped rectangle of an RGBA source into a fresh, tightly-packed buffer. */
 function cropRgba(
-  src: Uint8ClampedArray, srcWidth: number, srcHeight: number,
-  x: number, y: number, w: number, h: number,
+  src: Uint8ClampedArray,
+  srcWidth: number,
+  srcHeight: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
 ): { data: Uint8ClampedArray; width: number; height: number } {
   // Clamp the rectangle to the image so bad params snap to the valid region
   // instead of reading out of bounds.
@@ -28,7 +33,7 @@ function cropRgba(
     for (let col = 0; col < width; col++) {
       const si = (srcRow + col) * 4;
       const di = (dstRow + col) * 4;
-      out[di]     = src[si]     as number;
+      out[di] = src[si] as number;
       out[di + 1] = src[si + 1] as number;
       out[di + 2] = src[si + 2] as number;
       out[di + 3] = src[si + 3] as number;
@@ -39,7 +44,10 @@ function cropRgba(
 
 /** Nearest-neighbour downsample by an integer factor (≥1). factor=1 is a no-op. */
 function downsampleRgba(
-  src: Uint8ClampedArray, srcWidth: number, srcHeight: number, factor: number,
+  src: Uint8ClampedArray,
+  srcWidth: number,
+  srcHeight: number,
+  factor: number,
 ): { data: Uint8ClampedArray; width: number; height: number } {
   if (factor <= 1) return { data: src, width: srcWidth, height: srcHeight };
   const width = Math.max(1, Math.floor(srcWidth / factor));
@@ -51,7 +59,7 @@ function downsampleRgba(
       const sx = Math.min(srcWidth - 1, col * factor);
       const si = (sy * srcWidth + sx) * 4;
       const di = (row * width + col) * 4;
-      out[di]     = src[si]     as number;
+      out[di] = src[si] as number;
       out[di + 1] = src[si + 1] as number;
       out[di + 2] = src[si + 2] as number;
       out[di + 3] = src[si + 3] as number;
@@ -71,9 +79,13 @@ export function cropImage(image: ProcessingImage, opts: CropImageOptions = {}): 
   // Work on RGBA so the crop is channel-count agnostic.
   const src = image.channels === 4 ? image.data : image.toImageData().data;
   const cropped = cropRgba(
-    src, image.width, image.height,
-    Number(opts.x ?? 0), Number(opts.y ?? 0),
-    Number(opts.width ?? image.width), Number(opts.height ?? image.height),
+    src,
+    image.width,
+    image.height,
+    Number(opts.x ?? 0),
+    Number(opts.y ?? 0),
+    Number(opts.width ?? image.width),
+    Number(opts.height ?? image.height),
   );
   const level = Math.max(0, Math.floor(Number(opts.level ?? 0)));
   const factor = level > 0 ? 2 ** level : 1;

@@ -29,14 +29,6 @@ if (existsSync(libAssets)) {
   mkdirSync(publicPlotting, { recursive: true });
   cpSync(libAssets, publicPlotting, { recursive: true });
   console.log('stage-lib: library assets -> public/assets/plotting');
-  // region-editor references assets/icons/{polyline,wand}.svg (host-provided in
-  // jit-ui); the library bundles those at the assets ROOT. Serve the flat asset
-  // files at /assets/icons too so they resolve (the icons/ subfolder is colormaps).
-  const publicIcons = root + 'examples/browser-image/public/assets/icons';
-  mkdirSync(publicIcons, { recursive: true });
-  for (const e of readdirSync(libAssets, { withFileTypes: true }))
-    if (e.isFile()) cpSync(libAssets + '/' + e.name, publicIcons + '/' + e.name);
-  console.log('stage-lib: flat library icons -> public/assets/icons');
 }
 
 // SAM/cellpose run onnxruntime-web, which loads its WASM backend from

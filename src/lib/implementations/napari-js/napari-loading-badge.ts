@@ -12,7 +12,7 @@ export class NapariLoadingBadge {
   private names: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly host: HTMLElement) {
+  constructor(host: HTMLElement) {
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     this.el = document.createElement('div');
     this.el.className = 'napari-loading-badge';
@@ -55,7 +55,7 @@ export class NapariLoadingBadge {
 
   /** The text currently set (shown or about to be). */
   get text(): string {
-    return this.names.length ? this.el.textContent ?? '' : '';
+    return this.names.length ? (this.el.textContent ?? '') : '';
   }
 
   destroy(): void {
@@ -64,7 +64,7 @@ export class NapariLoadingBadge {
   }
 }
 
-/** "A", "A and B", "A, B and C" — the first capitalised, the rest as they are. */
+/** "A", "A and b", "A, b and c": the first as given, the rest with a lower-cased initial. */
 function listOf(names: string[]): string {
   const [first, ...rest] = names;
   const lower = rest.map((n) => n.charAt(0).toLowerCase() + n.slice(1));

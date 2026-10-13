@@ -56,9 +56,7 @@ describe('SimpleSliceAccessService', () => {
     });
 
     it('passes a data: URL through unchanged, with no HTTP request', async () => {
-      expect(await service.fetchAsBlobUrl('data:image/png;base64,AA==')).toBe(
-        'data:image/png;base64,AA==',
-      );
+      expect(await service.fetchAsBlobUrl('data:image/png;base64,AA==')).toBe('data:image/png;base64,AA==');
     });
 
     it('caches by raw URL — a second fetch of the same slice does not re-request it', async () => {
@@ -70,6 +68,43 @@ describe('SimpleSliceAccessService', () => {
       const second = await service.fetchAsBlobUrl('/api/preview?info=abc');
       expect(second).toBe('blob:mock');
       http.verify(); // no second outstanding request
+    });
+  });
+
+  describe('fetchAsBlobUrl in-flight dedupe (OSD-PLOTLY-32)', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('shares one request between concurrent calls for the same URL', async () => {
+      let n = 0;
+      jest.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:mock-${++n}`);
+      const a = service.fetchAsBlobUrl('/api/preview?info=abc');
+      const b = service.fetchAsBlobUrl('/api/preview?info=abc');
+      http.expectOne('/api/preview?info=abc').flush(new Blob());
+      expect(await a).toBe('blob:mock-1');
+      expect(await b).toBe('blob:mock-1'); // no second, never-revoked blob URL
+    });
+
+    it('forgets a failed fetch so the next call retries', async () => {
+      jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+      const failed = service.fetchAsBlobUrl('/api/preview?info=abc');
+      http.expectOne('/api/preview?info=abc').error(new ProgressEvent('error'));
+      await expect(failed).rejects.toBeTruthy();
+      const retry = service.fetchAsBlobUrl('/api/preview?info=abc');
+      http.expectOne('/api/preview?info=abc').flush(new Blob());
+      expect(await retry).toBe('blob:mock');
+    });
+
+    it('an unnamed load does not forget the active file, so the next switch still evicts', async () => {
+      jest.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+      const revoke = jest.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      service.noteActiveFile('a.dcm');
+      const fetched = service.fetchAsBlobUrl('/api/preview?info=a');
+      http.expectOne('/api/preview?info=a').flush(new Blob());
+      await fetched;
+      service.noteActiveFile(undefined);
+      service.noteActiveFile('b.dcm');
+      await Promise.resolve(); // revocation runs once the cached fetch settles
+      expect(revoke).toHaveBeenCalledWith('blob:mock');
     });
   });
 

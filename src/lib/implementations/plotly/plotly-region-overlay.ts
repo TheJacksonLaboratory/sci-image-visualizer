@@ -13,25 +13,33 @@ import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.c
  * same shared `IRegionStore`, each onto its own backend's canvas.
  */
 export class PlotlyRegionOverlay implements IRegionOverlay {
-
   constructor(private plotly: PlotlyService) {}
 
   setMode(mode: RegionToolMode): void {
     // 'select' is a neutral mode for Plotly (no drag mode); region selection is
     // driven by the table / active-shape sampling, so just clear the drag mode.
     const dragMode =
-      mode === 'drawrect' ? 'drawrect' :
-      mode === 'drawclosedpath' ? 'drawclosedpath' :
-      mode === 'drawopenpath' ? 'drawopenpath' :
-      false;
+      mode === 'drawrect'
+        ? 'drawrect'
+        : mode === 'drawclosedpath'
+          ? 'drawclosedpath'
+          : mode === 'drawopenpath'
+            ? 'drawopenpath'
+            : false;
     this.plotly.setDragMode(dragMode);
   }
 
-  redraw(): void { /* Plotly re-renders its shapes natively on relayout */ }
+  redraw(): void {
+    /* Plotly re-renders its shapes natively on relayout */
+  }
 
-  /** Bezier regions are an OpenSeadragon-only feature (Plotly has no native
-   *  curved-shape rendering), so this is a no-op here. */
-  setSelectedBezier(_bezier: boolean): void { /* OSD-only */ }
+  /** Bezier regions are drawn by the SVG overlays (OpenSeadragon, napari-js);
+   *  Plotly has no native curved-shape rendering, so this is a no-op here. */
+  setSelectedBezier(_bezier: boolean): void {
+    /* not rendered by Plotly */
+  }
 
-  destroy(): void { /* nothing to tear down — shapes live in the Plotly layout */ }
+  destroy(): void {
+    /* nothing to tear down — shapes live in the Plotly layout */
+  }
 }

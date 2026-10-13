@@ -8,7 +8,10 @@ import { IImageInfo } from '../contracts/image.contract';
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const rect = new Rectangle();
-  rect.x = x; rect.y = y; rect.width = w; rect.height = h;
+  rect.x = x;
+  rect.y = y;
+  rect.width = w;
+  rect.height = h;
   r.bounds = rect;
   return r;
 }
@@ -26,7 +29,7 @@ function polyRegion(xs: number[], ys: number[], closed = true): Region {
 }
 
 function imageInfo(url: string): IImageInfo {
-  const info = ({} as IImageInfo);
+  const info = {} as IImageInfo;
   info.urls = [url];
   return info;
 }
@@ -43,8 +46,8 @@ describe('RegionStore', () => {
     it('mints an id, selects the new region, and emits the full list', () => {
       const emitted: Region[][] = [];
       const selected: number[][] = [];
-      store.getRegionUpdateEvent().subscribe(rs => emitted.push(rs as Region[]));
-      store.getSelectedShapeIndices$().subscribe(s => selected.push(s));
+      store.getRegionUpdateEvent().subscribe((rs) => emitted.push(rs as Region[]));
+      store.getSelectedShapeIndices$().subscribe((s) => selected.push(s));
 
       const id = store.addRegion(rectRegion(0, 0, 10, 10));
 
@@ -138,7 +141,7 @@ describe('RegionStore', () => {
 
     it('does not store transient regions when isRegionSaveOn is false', () => {
       const emitted: Region[][] = [];
-      store.getRegionUpdateEvent().subscribe(rs => emitted.push(rs as Region[]));
+      store.getRegionUpdateEvent().subscribe((rs) => emitted.push(rs as Region[]));
       store.setRegions([rectRegion(0, 0, 1, 1)], undefined, false);
       expect(store.getRegions().length).toBe(0);
       expect(emitted[emitted.length - 1].length).toBe(1); // emitted transiently
@@ -177,14 +180,14 @@ describe('RegionStore', () => {
     it('deleteVertex refuses to drop a closed polygon below 3 vertices', () => {
       const triId = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
       store.deleteVertex(triId, 0);
-      const poly = store.getRegions().find(r => r.id === triId)!.bounds as Polygon;
+      const poly = store.getRegions().find((r) => r.id === triId)!.bounds as Polygon;
       expect(poly.xpoints.length).toBe(3);
     });
 
     it('vertex edits are no-ops on rectangles', () => {
       const rectId = store.addRegion(rectRegion(0, 0, 10, 10));
       store.moveVertex(rectId, 0, 5, 5);
-      const b = store.getRegions().find(r => r.id === rectId)!.bounds as Rectangle;
+      const b = store.getRegions().find((r) => r.id === rectId)!.bounds as Rectangle;
       expect(b.x).toBe(0);
     });
   });
@@ -263,7 +266,7 @@ describe('RegionStore', () => {
       store.setSelectedShapeIndices([1]); // select b
 
       let latest: number[] = [];
-      store.getSelectedShapeIndices$().subscribe(s => latest = s);
+      store.getSelectedShapeIndices$().subscribe((s) => (latest = s));
       expect(latest).toEqual([1]);
 
       store.removeRegion(a); // shifts b from index 1 -> 0
@@ -278,7 +281,7 @@ describe('RegionStore', () => {
       store.deleteActiveShape();
       expect(store.getRegions().length).toBe(1);
       let latest: number[] = [-1];
-      store.getSelectedShapeIndices$().subscribe(s => latest = s);
+      store.getSelectedShapeIndices$().subscribe((s) => (latest = s));
       expect(latest).toEqual([]);
     });
 
@@ -290,7 +293,42 @@ describe('RegionStore', () => {
       });
       store.setSelectedShapeIndices([0, 2]); // out of order on purpose
       store.deleteActiveShape();
-      expect(store.getRegions().map(r => r.name)).toEqual(['s1', 's3']);
+      expect(store.getRegions().map((r) => r.name)).toEqual(['s1', 's3']);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+
+    it('drops out-of-range and duplicate indices, keeping the given order', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      store.addRegion(rectRegion(4, 4, 1, 1));
+      store.setSelectedShapeIndices([2, -1, 0, 2, 9, NaN]);
+      expect(store.getSelectedShapeIndices()).toEqual([2, 0]);
+    });
+
+    it('emits only when the projected index set changes', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      const seen: number[][] = [];
+      store.getSelectedShapeIndices$().subscribe((s) => seen.push(s));
+      store.setSelectedShapeIndices([0]);
+      store.setSelectedShapeIndices([0]);
+      store.moveRegion(store.getRegions()[0].id, 1, 1); // an edit keeps the same projection
+      store.setSelectedShapeIndices([1, 0]);
+      expect(seen).toEqual([[1], [0], [1, 0]]);
+    });
+
+    it('selectRegion ignores a region the store does not hold', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      const stranger = rectRegion(9, 9, 1, 1);
+      stranger.id = 999;
+      store.selectRegion(stranger);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+    });
+
+    it('undo drops selected ids the restored set no longer contains', () => {
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      store.addRegion(rectRegion(2, 2, 1, 1)); // selected (index 1)
+      store.undo();
       expect(store.getSelectedShapeIndices()).toEqual([]);
     });
   });
@@ -319,13 +357,29 @@ describe('RegionStore', () => {
     // idle timer (UNDO_COALESCE_MS). Fake timers let us close a burst
     // deterministically between distinct "actions".
     beforeEach(() => jest.useFakeTimers());
-    afterEach(() => { jest.runOnlyPendingTimers(); jest.useRealTimers(); });
+    afterEach(() => {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    });
 
     /** Advance past the coalescing window so the next edit opens a new entry. */
     const settle = () => jest.advanceTimersByTime(500);
 
     it('starts with nothing to undo', () => {
       expect(store.canUndo()).toBe(false);
+    });
+
+    it('signals a replaced region set on every undo, redo and slice switch, not on an edit', () => {
+      let replaced = 0;
+      store.getRegionSetReplaced$().subscribe(() => replaced++);
+      store.addRegion(rectRegion(0, 0, 10, 10));
+      expect(replaced).toBe(0);
+      store.undo();
+      store.redo();
+      store.undo();
+      store.undo(); // nothing left to undo: still signalled (tool work is dropped either way)
+      store.setDisplaySlice(3); // outside stack mode too
+      expect(replaced).toBe(5);
     });
 
     it('undoes a single add, restoring the prior (empty) state', () => {
@@ -340,7 +394,10 @@ describe('RegionStore', () => {
 
     it('retains at most 10 steps, then greys out', () => {
       // 12 distinct add actions -> only the last 10 are undoable.
-      for (let i = 0; i < 12; i++) { store.addRegion(rectRegion(i, i, 1, 1)); settle(); }
+      for (let i = 0; i < 12; i++) {
+        store.addRegion(rectRegion(i, i, 1, 1));
+        settle();
+      }
       expect(store.getRegions().length).toBe(12);
 
       // Undo the full retained depth (10): the two oldest adds can't be reverted.
@@ -357,7 +414,7 @@ describe('RegionStore', () => {
 
     it('emits canUndo state changes', () => {
       const states: boolean[] = [];
-      store.getCanUndo$().subscribe(s => states.push(s));
+      store.getCanUndo$().subscribe((s) => states.push(s));
       expect(states).toEqual([false]);
 
       store.addRegion(rectRegion(0, 0, 1, 1));
@@ -368,7 +425,8 @@ describe('RegionStore', () => {
     });
 
     it('undoes a delete, bringing the region back', () => {
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
       store.setSelectedShapeIndices([0]);
       store.deleteActiveShape();
       expect(store.getRegions().length).toBe(0);
@@ -378,7 +436,8 @@ describe('RegionStore', () => {
     });
 
     it('coalesces a rapid burst (a drag) into a single undo entry', () => {
-      const id = store.addRegion(rectRegion(0, 0, 1, 1)); settle(); // entry 1
+      const id = store.addRegion(rectRegion(0, 0, 1, 1));
+      settle(); // entry 1
       // Simulate a wand/brush drag: many commits within the coalescing window.
       store.moveRegion(id, 1, 0);
       store.moveRegion(id, 1, 0);
@@ -390,15 +449,79 @@ describe('RegionStore', () => {
       expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
     });
 
+    describe('gesture-based coalescing (RT-12)', () => {
+      it('keeps a gesture with a long pause as one undo step', () => {
+        const id = store.addRegion(rectRegion(0, 0, 1, 1));
+        settle();
+        store.beginGesture();
+        store.moveRegion(id, 1, 0);
+        jest.advanceTimersByTime(1000); // the user pauses mid-drag
+        store.moveRegion(id, 1, 0);
+        store.endGesture();
+
+        store.undo();
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
+      });
+
+      it('never merges two gestures, however close together', () => {
+        store.beginGesture();
+        store.addRegion(rectRegion(0, 0, 1, 1));
+        store.endGesture();
+        store.beginGesture();
+        store.addRegion(rectRegion(5, 5, 1, 1));
+        store.endGesture();
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+      });
+
+      it('starts a new step when a gesture follows a commit within the timer window', () => {
+        store.addRegion(rectRegion(0, 0, 1, 1)); // no settle(): the timed burst is still open
+        store.beginGesture();
+        store.addRegion(rectRegion(5, 5, 1, 1));
+        store.endGesture();
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+      });
+
+      it('treats a batched drag (beginBatch/endBatch) as one gesture', () => {
+        const id = store.addRegion(rectRegion(0, 0, 1, 1));
+        settle();
+        store.beginBatch();
+        store.moveRegion(id, 1, 0);
+        jest.advanceTimersByTime(1000);
+        store.moveRegion(id, 1, 0);
+        store.endBatch();
+        store.addRegion(rectRegion(5, 5, 1, 1)); // right after the drag: its own step
+
+        store.undo();
+        expect(store.getRegions().length).toBe(1);
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(2);
+        store.undo();
+        expect((store.getRegions()[0].bounds as Rectangle).x).toBe(0);
+      });
+
+      it('an unbalanced endGesture is harmless', () => {
+        store.endGesture();
+        store.addRegion(rectRegion(0, 0, 1, 1));
+        store.undo();
+        expect(store.getRegions().length).toBe(0);
+      });
+    });
+
     it('does not alias the live region — an edit after undo is independent', () => {
-      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10])); settle();
-      store.moveVertex(id, 0, 99, 99); settle();
+      const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      settle();
+      store.moveVertex(id, 0, 99, 99);
+      settle();
       store.undo(); // restore pre-move vertices
       const poly = store.getRegions()[0].bounds as Polygon;
       expect(poly.xpoints[0]).toBe(0);
 
       // Mutating again must not corrupt any retained snapshot.
-      store.moveVertex(id, 1, 50, 50); settle();
+      store.moveVertex(id, 1, 50, 50);
+      settle();
       expect((store.getRegions()[0].bounds as Polygon).xpoints[1]).toBe(50);
     });
 
@@ -410,8 +533,10 @@ describe('RegionStore', () => {
     });
 
     it('clears undo history on image switch', () => {
-      store.setActiveImage(imageInfo('a.tif')); settle();
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.setActiveImage(imageInfo('a.tif'));
+      settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
       expect(store.canUndo()).toBe(true);
 
       store.setActiveImage(imageInfo('b.tif'));
@@ -424,7 +549,8 @@ describe('RegionStore', () => {
     });
 
     it('redo re-applies an undone action', () => {
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
       expect(store.canRedo()).toBe(false);
 
       store.undo();
@@ -438,11 +564,15 @@ describe('RegionStore', () => {
     });
 
     it('redoes the full undone chain in order', () => {
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
-      store.addRegion(rectRegion(2, 2, 1, 1)); settle();
-      store.addRegion(rectRegion(4, 4, 1, 1)); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      settle();
+      store.addRegion(rectRegion(4, 4, 1, 1));
+      settle();
 
-      store.undo(); store.undo();
+      store.undo();
+      store.undo();
       expect(store.getRegions().length).toBe(1);
 
       store.redo();
@@ -456,19 +586,23 @@ describe('RegionStore', () => {
     });
 
     it('a new action after undo clears the redo future', () => {
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
-      store.addRegion(rectRegion(2, 2, 1, 1)); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
+      store.addRegion(rectRegion(2, 2, 1, 1));
+      settle();
       store.undo();
       expect(store.canRedo()).toBe(true);
 
-      store.addRegion(rectRegion(9, 9, 1, 1)); settle(); // diverge
+      store.addRegion(rectRegion(9, 9, 1, 1));
+      settle(); // diverge
       expect(store.canRedo()).toBe(false);
       store.redo(); // no-op — the old redo future is gone
-      expect(store.getRegions().map(r => (r.bounds as Rectangle).x)).toEqual([0, 9]);
+      expect(store.getRegions().map((r) => (r.bounds as Rectangle).x)).toEqual([0, 9]);
     });
 
     it('resetUndoHistory clears redo too', () => {
-      store.addRegion(rectRegion(0, 0, 1, 1)); settle();
+      store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
       store.undo();
       expect(store.canRedo()).toBe(true);
       store.resetUndoHistory();
@@ -477,7 +611,7 @@ describe('RegionStore', () => {
 
     it('emits canRedo state changes', () => {
       const states: boolean[] = [];
-      store.getCanRedo$().subscribe(s => states.push(s));
+      store.getCanRedo$().subscribe((s) => states.push(s));
       expect(states).toEqual([false]);
 
       store.addRegion(rectRegion(0, 0, 1, 1));
@@ -485,6 +619,133 @@ describe('RegionStore', () => {
       expect(states[states.length - 1]).toBe(true);
       store.redo();
       expect(states[states.length - 1]).toBe(false);
+    });
+  });
+
+  /**
+   * Copy-on-write (review RT-13): an edit replaces the region it changes and never touches an
+   * instance a caller (or an undo snapshot) holds, so history can share every untouched region
+   * instead of deep-cloning the whole set per step.
+   */
+  describe('copy-on-write (RT-13)', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+    });
+    const settle = () => jest.advanceTimersByTime(500);
+
+    function donut(): Region {
+      const r = polyRegion([0, 20, 20, 0], [0, 0, 20, 20]);
+      (r.bounds as Polygon).holes = [
+        [
+          [7, 7],
+          [13, 7],
+          [13, 13],
+          [7, 13],
+        ],
+      ];
+      return r;
+    }
+
+    const edits: Array<[string, (s: RegionStore, id: number) => void]> = [
+      ['updateBounds', (s, id) => s.updateBounds(id, rectRegion(1, 1, 1, 1).bounds as Rectangle)],
+      ['moveRegion', (s, id) => s.moveRegion(id, 5, 5)],
+      ['moveVertex', (s, id) => s.moveVertex(id, 0, 1, 1)],
+      ['addVertex', (s, id) => s.addVertex(id, 0, 10, 0)],
+      ['deleteVertex', (s, id) => s.deleteVertex(id, 0)],
+      ['moveHoleVertex', (s, id) => s.moveHoleVertex(id, 0, 0, 8, 8)],
+      ['addHoleVertex', (s, id) => s.addHoleVertex(id, 0, 0, 10, 7)],
+      ['deleteHoleVertex', (s, id) => s.deleteHoleVertex(id, 0, 0)],
+      ['setBezier', (s, id) => s.setBezier(id, true)],
+      [
+        'moveBezierHandle',
+        (s, id) => {
+          s.setBezier(id, true);
+          s.moveBezierHandle(id, 0, 'out', 3, 3);
+        },
+      ],
+      [
+        'moveHoleBezierHandle',
+        (s, id) => {
+          s.setBezier(id, true);
+          s.moveHoleBezierHandle(id, 0, 0, 'in', 3, 3);
+        },
+      ],
+    ];
+    it.each(edits)('%s replaces the region and leaves the instance a caller holds untouched', (_name, apply) => {
+      const id = store.addRegion(donut());
+      const held = store.getRegions()[0];
+      const before = JSON.stringify(held);
+      apply(store, id);
+      const after = store.getRegions()[0];
+      expect(after).not.toBe(held);
+      expect(after.id).toBe(id);
+      expect(JSON.stringify(held)).toBe(before);
+      expect(JSON.stringify(after)).not.toBe(before);
+    });
+
+    it('an undo step shares the regions the action did not touch', () => {
+      const a = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
+      store.addRegion(rectRegion(50, 50, 5, 5));
+      settle();
+      const [, untouched] = store.getRegions();
+      store.moveVertex(a, 0, 3, 3);
+      settle();
+      store.undo();
+      const [restored, b] = store.getRegions();
+      expect(b).toBe(untouched); // shared, not a clone
+      expect((restored.bounds as Polygon).xpoints[0]).toBe(0);
+      store.redo();
+      expect(store.getRegions()[1]).toBe(untouched);
+      expect((store.getRegions()[0].bounds as Polygon).xpoints[0]).toBe(3);
+    });
+
+    it('re-colouring a stored region on setRegions copies it rather than changing the snapshot', () => {
+      const r = rectRegion(0, 0, 1, 1);
+      r.label = 'Tumor';
+      store.setRegions([r]);
+      settle();
+      const stored = store.getRegions()[0];
+      const colour = stored.color;
+      TestBed.inject(VisualizerStore).upsertClass({ name: 'Tumor', color: '#123456', source: 'user' });
+      store.setRegions(store.getRegions());
+      expect(store.getRegions()[0].color).toBe('#123456');
+      expect(stored.color).toBe(colour); // the instance the undo snapshot holds is unchanged
+      store.undo();
+      expect(store.getRegions()[0].color).toBe(colour);
+    });
+
+    it('removeRegions drops several regions in one undo step', () => {
+      const a = store.addRegion(rectRegion(0, 0, 1, 1));
+      const b = store.addRegion(rectRegion(5, 5, 1, 1));
+      store.addRegion(rectRegion(9, 9, 1, 1));
+      settle();
+      store.removeRegions([a, b]);
+      expect(store.getRegions()).toHaveLength(1);
+      store.undo();
+      expect(store.getRegions()).toHaveLength(3);
+    });
+
+    it('removeRegions with recordUndo: false takes no undo step (NAPARI-SVC-11)', () => {
+      const keep = store.addRegion(rectRegion(0, 0, 1, 1));
+      settle();
+      const lasso = store.addRegion(rectRegion(5, 5, 1, 1));
+      settle();
+      const emitted: number[] = [];
+      store.getRegionUpdateEvent().subscribe((rs) => emitted.push(rs.length));
+      store.removeRegions([lasso], { recordUndo: false });
+      expect(store.getRegions().map((r) => r.id)).toEqual([keep]);
+      expect(emitted).toEqual([1]);
+      // The newest step is still "add the lasso": undo goes back past it to [keep]; had the
+      // removal been recorded, undo would have brought the lasso back instead.
+      store.undo();
+      expect(store.getRegions().map((r) => r.id)).toEqual([keep]);
+      store.undo();
+      expect(store.getRegions()).toEqual([]);
+      emitted.length = 0;
+      store.removeRegions([12345], { recordUndo: false }); // nothing to remove: no emit
+      expect(emitted).toEqual([]);
     });
   });
 
@@ -514,20 +775,29 @@ describe('RegionStore', () => {
     });
 
     it('keys by URL so the same basename in different folders does not collide', () => {
-      const a = ({} as IImageInfo); a.urls = ['s3://bkt/folderA/img.tif']; a.fileName = 'img.tif';
-      const b = ({} as IImageInfo); b.urls = ['s3://bkt/folderB/img.tif']; b.fileName = 'img.tif';
+      const a = {} as IImageInfo;
+      a.urls = ['s3://bkt/folderA/img.tif'];
+      a.fileName = 'img.tif';
+      const b = {} as IImageInfo;
+      b.urls = ['s3://bkt/folderB/img.tif'];
+      b.fileName = 'img.tif';
 
       store.setActiveImage(a);
-      const ra = rectRegion(0, 0, 1, 1); ra.name = 'A-only'; store.addRegion(ra);
+      const ra = rectRegion(0, 0, 1, 1);
+      ra.name = 'A-only';
+      store.addRegion(ra);
       store.setActiveImage(b);
-      const rb = rectRegion(2, 2, 1, 1); rb.name = 'B-only'; store.addRegion(rb);
+      const rb = rectRegion(2, 2, 1, 1);
+      rb.name = 'B-only';
+      store.addRegion(rb);
 
       store.setActiveImage(a);
-      expect(store.getRegions().map(r => r.name)).toEqual(['A-only']);
+      expect(store.getRegions().map((r) => r.name)).toEqual(['A-only']);
     });
 
     it('falls back to fileName as the key when no URL is present', () => {
-      const a = ({} as IImageInfo); a.fileName = 'only-name.tif';
+      const a = {} as IImageInfo;
+      a.fileName = 'only-name.tif';
       store.setActiveImage(a);
       store.addRegion(rectRegion(0, 0, 1, 1));
       store.setActiveImage(imageInfo('b.tif'));
@@ -535,20 +805,19 @@ describe('RegionStore', () => {
       store.setActiveImage(a);
       expect(store.getRegions().length).toBe(1);
     });
-
-    it('clearRegionsByImageKey wipes the cache', () => {
-      store.setActiveImage(imageInfo('a.tif'));
-      store.addRegion(rectRegion(0, 0, 1, 1));
-      store.clearRegionsByImageKey();
-      store.setActiveImage(imageInfo('a.tif'));
-      expect(store.getRegions().length).toBe(0);
-    });
   });
 
   describe('holes (jit-ui#85)', () => {
     const holedPoly = () => {
       const r = polyRegion([0, 20, 20, 0], [0, 0, 20, 20]);
-      (r.bounds as Polygon).holes = [[[5, 5], [10, 5], [10, 10], [5, 10]]];
+      (r.bounds as Polygon).holes = [
+        [
+          [5, 5],
+          [10, 5],
+          [10, 10],
+          [5, 10],
+        ],
+      ];
       return r;
     };
 
@@ -556,7 +825,12 @@ describe('RegionStore', () => {
       const id = store.addRegion(holedPoly());
       store.moveRegion(id, 100, 0);
       const b = store.getRegions()[0].bounds as Polygon;
-      expect(b.holes![0]).toEqual([[105, 5], [110, 5], [110, 10], [105, 10]]);
+      expect(b.holes![0]).toEqual([
+        [105, 5],
+        [110, 5],
+        [110, 10],
+        [105, 10],
+      ]);
     });
 
     it('moveHoleVertex moves a single hole vertex, leaving others + exterior intact', () => {
@@ -564,8 +838,8 @@ describe('RegionStore', () => {
       store.moveHoleVertex(id, 0, 1, 99, 88);
       const b = store.getRegions()[0].bounds as Polygon;
       expect(b.holes![0][1]).toEqual([99, 88]);
-      expect(b.holes![0][0]).toEqual([5, 5]);     // sibling untouched
-      expect(b.xpoints).toEqual([0, 20, 20, 0]);  // exterior untouched
+      expect(b.holes![0][0]).toEqual([5, 5]); // sibling untouched
+      expect(b.xpoints).toEqual([0, 20, 20, 0]); // exterior untouched
     });
 
     it('moveHoleVertex is a no-op for an out-of-range hole or vertex index', () => {
@@ -597,8 +871,7 @@ describe('RegionStore', () => {
       store.setRegions([holedPoly()], undefined, undefined, undefined, true); // identical → deduped
       expect(store.getRegions().length).toBe(1);
       // Same exterior, no holes → a different region → appended.
-      store.setRegions([polyRegion([0, 20, 20, 0], [0, 0, 20, 20])],
-        undefined, undefined, undefined, true);
+      store.setRegions([polyRegion([0, 20, 20, 0], [0, 0, 20, 20])], undefined, undefined, undefined, true);
       expect(store.getRegions().length).toBe(2);
     });
 
@@ -624,8 +897,10 @@ describe('RegionStore', () => {
     const multi = () => {
       const r = new Region();
       const mp = new MultiPolygon();
-      mp.polygons = [polyRegion([0, 10, 10, 0], [0, 0, 10, 10]).bounds as Polygon,
-                     polyRegion([20, 30, 30, 20], [0, 0, 10, 10]).bounds as Polygon];
+      mp.polygons = [
+        polyRegion([0, 10, 10, 0], [0, 0, 10, 10]).bounds as Polygon,
+        polyRegion([20, 30, 30, 20], [0, 0, 10, 10]).bounds as Polygon,
+      ];
       r.bounds = mp;
       return r;
     };
@@ -652,8 +927,7 @@ describe('RegionStore', () => {
         store.moveRegion(id, 100, 0);
         jest.advanceTimersByTime(500);
         store.undo();
-        expect((store.getRegions()[0].bounds as MultiPolygon).polygons[0].xpoints)
-          .toEqual([0, 10, 10, 0]);
+        expect((store.getRegions()[0].bounds as MultiPolygon).polygons[0].xpoints).toEqual([0, 10, 10, 0]);
       } finally {
         jest.runOnlyPendingTimers();
         jest.useRealTimers();
@@ -674,6 +948,58 @@ describe('RegionStore', () => {
       const polys = store.getRegionPolygons();
       expect(polys.length).toBe(1);
       expect(polys[0].closed).toBe(true);
+    });
+
+    it('projects a rectangle to its four corners (RT-15)', () => {
+      store.addRegion(rectRegion(10, 20, 30, 40));
+      const [p] = store.getRegionPolygons();
+      expect(p.xpoints).toEqual([10, 40, 40, 10]);
+      expect(p.ypoints).toEqual([60, 60, 20, 20]);
+    });
+
+    it('returns one polygon per part of a multi-part region (RT-15)', () => {
+      const r = new Region();
+      const mp = new MultiPolygon();
+      mp.polygons = [
+        polyRegion([0, 10, 5], [0, 0, 10]).bounds as Polygon,
+        polyRegion([50, 60, 55], [0, 0, 10]).bounds as Polygon,
+      ];
+      r.bounds = mp;
+      store.addRegion(r);
+      const polys = store.getRegionPolygons();
+      expect(polys.length).toBe(2);
+      expect(polys[1].xpoints).toEqual([50, 60, 55]);
+    });
+
+    it("keeps a donut's holes (RT-15)", () => {
+      const r = polyRegion([0, 40, 40, 0], [0, 0, 40, 40]);
+      (r.bounds as Polygon).holes = [
+        [
+          [10, 10],
+          [20, 10],
+          [20, 20],
+          [10, 20],
+        ],
+      ];
+      store.addRegion(r);
+      const [p] = store.getRegionPolygons();
+      expect(p.holes).toEqual([
+        [
+          [10, 10],
+          [20, 10],
+          [20, 20],
+          [10, 20],
+        ],
+      ]);
+    });
+
+    it("sends a bézier region's curve, not its anchors (RT-15)", () => {
+      const r = polyRegion([0, 40, 40, 0], [0, 0, 40, 40]);
+      store.addRegion(r);
+      store.setBezier(store.getRegions()[0].id, true);
+      const [p] = store.getRegionPolygons();
+      expect(p.xpoints.length).toBeGreaterThan(4);
+      expect(p.bezier).toBe(false); // a plain polygon: the flattened curve
     });
   });
 
@@ -704,29 +1030,16 @@ describe('RegionStore', () => {
   });
 
   describe('colour / label + previous-shapes accessors', () => {
-    it('round-trips the show-label, shape-colour and fill-colour toggles', () => {
-      store.setShowShapeLabel(true);
-      store.setShapeColor('#abcdef');
-      store.setFillColor('#fedcba');
+    it('takes the show-label and fill-colour defaults from setRegions', () => {
+      store.setRegions([], true, true, '#fedcba');
       expect(store.getShowShapeLabel()).toBe(true);
-      expect(store.getShapeColor()).toBe('#abcdef');
+      expect(store.getShapeColor()).toBe('#00FFFF');
       expect(store.getFillColor()).toBe('#fedcba');
     });
 
     it('exposes classification colours from the shared store', () => {
       store.setClassificationColor('Tumor', '#112233');
       expect(store.getClassificationColors().get('Tumor')).toBe('#112233');
-    });
-
-    it('buffers and replays the previous-shapes snapshot without touching stored regions', () => {
-      store.setPreviousShapes([polyRegion([0, 1, 2], [0, 1, 2])]);
-      expect(store.getPreviousShapes().length).toBe(1);
-
-      const replayed: Region[][] = [];
-      store.getRegionUpdateEvent().subscribe(rs => replayed.push(rs as Region[]));
-      store.plotPreviousShapes();
-      expect(replayed[replayed.length - 1].length).toBe(1);
-      expect(store.getRegions().length).toBe(0); // stored state untouched
     });
   });
 
@@ -742,23 +1055,46 @@ describe('RegionStore', () => {
     it('deep-clones a Bézier polygon including its handles', () => {
       const id = store.addRegion(polyRegion([0, 10, 5], [0, 0, 10]));
       const poly = new Polygon();
-      poly.npoints = 3; poly.xpoints = [1, 2, 3]; poly.ypoints = [4, 5, 6];
-      poly.coordinates = [[1, 4], [2, 5], [3, 6]];
-      poly.closed = true; poly.bezier = true;
-      poly.handlesIn = [[0, 0], [0, 0], [0, 0]];
-      poly.handlesOut = [[1, 1], [1, 1], [1, 1]];
+      poly.npoints = 3;
+      poly.xpoints = [1, 2, 3];
+      poly.ypoints = [4, 5, 6];
+      poly.coordinates = [
+        [1, 4],
+        [2, 5],
+        [3, 6],
+      ];
+      poly.closed = true;
+      poly.bezier = true;
+      poly.handlesIn = [
+        [0, 0],
+        [0, 0],
+        [0, 0],
+      ];
+      poly.handlesOut = [
+        [1, 1],
+        [1, 1],
+        [1, 1],
+      ];
       store.updateBounds(id, poly);
 
       const stored = store.getRegions()[0].bounds as Polygon;
-      expect(stored).not.toBe(poly);               // cloned, not aliased
+      expect(stored).not.toBe(poly); // cloned, not aliased
       expect(stored.xpoints).toEqual([1, 2, 3]);
-      expect(stored.handlesOut).toEqual([[1, 1], [1, 1], [1, 1]]);
+      expect(stored.handlesOut).toEqual([
+        [1, 1],
+        [1, 1],
+        [1, 1],
+      ]);
       expect(stored.handlesOut).not.toBe(poly.handlesOut);
     });
 
     it('clones a Rectangle bounds', () => {
       const id = store.addRegion(rectRegion(0, 0, 5, 5));
-      const rect = new Rectangle(); rect.x = 1; rect.y = 2; rect.width = 3; rect.height = 4;
+      const rect = new Rectangle();
+      rect.x = 1;
+      rect.y = 2;
+      rect.width = 3;
+      rect.height = 4;
       store.updateBounds(id, rect);
       const stored = store.getRegions()[0].bounds as Rectangle;
       expect(stored).not.toBe(rect);
@@ -833,9 +1169,9 @@ describe('RegionStore', () => {
 
       expect(store.isStackMode()).toBe(true);
       expect(store.getDisplaySlice()).toBe(0);
-      expect(store.getRegions().length).toBe(1);            // only slice 0 is live
+      expect(store.getRegions().length).toBe(1); // only slice 0 is live
       const all = store.getSliceRegions();
-      expect(all.length).toBe(3);                            // every slice, for save
+      expect(all.length).toBe(3); // every slice, for save
       expect(all.filter((r) => r.z === 0).length).toBe(1);
       expect(all.filter((r) => r.z === 2).length).toBe(2);
     });
@@ -862,7 +1198,13 @@ describe('RegionStore', () => {
     });
 
     it('setDisplaySlice re-emits regionUpdate on a real slice change only', () => {
-      store.enterStackMode(new Map<number, Region[]>([[0, []], [5, []]]), 0);
+      store.enterStackMode(
+        new Map<number, Region[]>([
+          [0, []],
+          [5, []],
+        ]),
+        0,
+      );
       let emissions = 0;
       store.getRegionUpdateEvent().subscribe(() => emissions++);
       const before = emissions;
@@ -913,7 +1255,10 @@ describe('RegionStore', () => {
 
     it('exitStackMode resets to single-plane behaviour', () => {
       store.enterStackMode(
-        new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]], [1, [rectRegion(1, 1, 5, 5)]]]),
+        new Map<number, Region[]>([
+          [0, [rectRegion(0, 0, 5, 5)]],
+          [1, [rectRegion(1, 1, 5, 5)]],
+        ]),
         0,
       );
       expect(store.isStackMode()).toBe(true);
@@ -923,6 +1268,69 @@ describe('RegionStore', () => {
       // Live set is whatever slice was current (slice 0); getSliceRegions no
       // longer flattens other slices.
       expect(store.getSliceRegions().length).toBe(store.getRegions().length);
+    });
+
+    // Characterization (§6 RegionStore split): pins the scope cache's coupling
+    // to history, selection and the per-image cache before it moves.
+    it('setDisplaySlice resets the undo history and clears the selection', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      expect(store.canUndo()).toBe(true);
+      expect(store.getSelectedShapeIndices()).toEqual([1]);
+      store.setDisplaySlice(1);
+      expect(store.canUndo()).toBe(false);
+      expect(store.canRedo()).toBe(false);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+
+    it('enterStackMode resets the undo history and clears the selection', () => {
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      expect(store.canUndo()).toBe(true);
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      expect(store.canUndo()).toBe(false);
+      expect(store.getSelectedShapeIndices()).toEqual([]);
+    });
+
+    it('setDisplaySlice to the current slice keeps history and selection', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, []]]), 0);
+      store.addRegion(rectRegion(1, 1, 5, 5));
+      store.setDisplaySlice(0);
+      expect(store.canUndo()).toBe(true);
+      expect(store.getSelectedShapeIndices()).toEqual([0]);
+    });
+
+    it('enterStackMode tags imported regions with their slice and mints ids', () => {
+      const a = rectRegion(0, 0, 5, 5);
+      store.enterStackMode(new Map<number, Region[]>([[3, [a]]]), 3);
+      const [live] = store.getRegions();
+      expect(live.z).toBe(3);
+      expect(live.id).toEqual(expect.any(Number));
+      expect(live.name).toBe(`shape${live.id}`);
+    });
+
+    it('an image switch ends stack mode; the outgoing live slice is cached under the old image', () => {
+      store.setActiveImage(imageInfo('a.tif'));
+      store.enterStackMode(
+        new Map<number, Region[]>([
+          [0, [rectRegion(0, 0, 5, 5)]],
+          [1, []],
+        ]),
+        0,
+      );
+      store.setActiveImage(imageInfo('b.tif'));
+      expect(store.isStackMode()).toBe(false);
+      expect(store.getRegions()).toEqual([]);
+      store.setActiveImage(imageInfo('a.tif'));
+      // Only the live slice was cached for the image (the loader re-enters stack mode).
+      expect(store.getRegions().length).toBe(1);
+    });
+
+    it('getSliceRegions does not change the stored instances it tags', () => {
+      store.enterStackMode(new Map<number, Region[]>([[0, [rectRegion(0, 0, 5, 5)]]]), 0);
+      const live = store.getRegions()[0];
+      const before = live.z;
+      store.getSliceRegions();
+      expect(live.z).toBe(before);
     });
   });
 });

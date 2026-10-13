@@ -1,26 +1,15 @@
 {
   "root": true,
-  "ignorePatterns": [
-    "dist/**",
-    "coverage/**",
-    "node_modules/**",
-    "*.config.ts",
-    "examples/browser-image/**"
-  ],
+  "ignorePatterns": ["dist/**", "coverage/**", "node_modules/**", "*.config.ts", "examples/browser-image/**"],
   "overrides": [
     {
-      "files": [
-        "*.ts"
-      ],
+      "files": ["*.ts"],
       "parser": "@typescript-eslint/parser",
       "parserOptions": {
         "ecmaVersion": 2022,
         "sourceType": "module"
       },
-      "plugins": [
-        "@typescript-eslint",
-        "@angular-eslint"
-      ],
+      "plugins": ["@typescript-eslint", "@angular-eslint"],
       "extends": [
         "eslint:recommended",
         "plugin:@typescript-eslint/recommended",
@@ -53,10 +42,7 @@
             "caughtErrors": "none"
           }
         ],
-        "object-curly-spacing": [
-          "error",
-          "always"
-        ],
+        "object-curly-spacing": ["error", "always"],
         "quotes": [
           "error",
           "single",
@@ -73,26 +59,52 @@
             "ignoreTemplateLiterals": true,
             "ignoreRegExpLiterals": true
           }
+        ],
+        "no-console": [
+          "warn",
+          {
+            "allow": ["warn", "error"]
+          }
         ]
       }
     },
     {
-      "files": [
-        "*.html"
-      ],
+      "files": ["src/lib/contracts/**/*.ts"],
+      "excludedFiles": ["*.spec.ts", "src/lib/contracts/cell-segmenter.contract.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/implementations/**",
+                  "**/spatial/**",
+                  "**/spatial-controls/**",
+                  "**/toolbar/**",
+                  "**/store/**",
+                  "**/region-editor/**",
+                  "**/channel-histogram/**",
+                  "**/plot-mode/**",
+                  "**/*.component",
+                  "**/*.service"
+                ],
+                "message": "contracts/ is the backend-neutral layer: depend on contracts/ and models/ only. (cell-segmenter.contract.ts is exempt for its default factory.)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["*.html"],
       "parser": "@angular-eslint/template-parser",
-      "plugins": [
-        "@angular-eslint/template"
-      ],
-      "extends": [
-        "plugin:@angular-eslint/template/recommended"
-      ],
+      "plugins": ["@angular-eslint/template"],
+      "extends": ["plugin:@angular-eslint/template/recommended"],
       "rules": {}
     },
     {
-      "files": [
-        "examples/tile-server/**/*.mjs"
-      ],
+      "files": ["examples/tile-server/**/*.mjs"],
       "env": {
         "node": true,
         "es2022": true
@@ -101,14 +113,9 @@
         "ecmaVersion": 2022,
         "sourceType": "module"
       },
-      "extends": [
-        "eslint:recommended"
-      ],
+      "extends": ["eslint:recommended"],
       "rules": {
-        "object-curly-spacing": [
-          "error",
-          "always"
-        ],
+        "object-curly-spacing": ["error", "always"],
         "quotes": [
           "error",
           "single",

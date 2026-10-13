@@ -1,17 +1,25 @@
-<p-dialog header="Channels &amp; Histogram"
-          [visible]="visible" (visibleChange)="onVisibleChange($event)"
-          [modal]="false" [resizable]="true" [draggable]="true"
-          [style]="{ width: '30rem' }"
-          [breakpoints]="{ '960px': '90vw' }"
-          styleClass="channel-histogram-dialog"
-          (onShow)="onShow()">
-
+<p-dialog
+  header="Channels &amp; Histogram"
+  [visible]="visible"
+  (visibleChange)="onVisibleChange($event)"
+  [modal]="false"
+  [resizable]="true"
+  [draggable]="true"
+  [style]="{ width: '30rem' }"
+  [breakpoints]="{ '960px': '90vw' }"
+  styleClass="channel-histogram-dialog"
+  (onShow)="onShow()"
+>
   <div class="ch-body">
-
     <!-- Channels -->
-    <p-table [value]="channels" selectionMode="single" [(selection)]="selected"
-             dataKey="index" (onRowSelect)="selectChannel($event.data)"
-             styleClass="ch-table p-datatable-sm">
+    <p-table
+      [value]="channels"
+      selectionMode="single"
+      [(selection)]="selected"
+      dataKey="index"
+      (onRowSelect)="selectChannel($event.data)"
+      styleClass="ch-table p-datatable-sm"
+    >
       <ng-template pTemplate="header">
         <tr>
           <th style="width: 2.5rem"></th>
@@ -22,13 +30,19 @@
       <ng-template pTemplate="body" let-ch>
         <tr [pSelectableRow]="ch">
           <td>
-            <hex-color-picker *ngIf="multichannel" [color]="ch.color"
-                              (colorChange)="onColorChange(ch, $event)"></hex-color-picker>
+            <hex-color-picker
+              *ngIf="multichannel"
+              [color]="ch.color"
+              (colorChange)="onColorChange(ch, $event)"
+            ></hex-color-picker>
           </td>
           <td>{{ ch.name }}</td>
           <td style="text-align: center">
-            <p-checkbox [binary]="true" [ngModel]="ch.visible"
-                        (onChange)="onVisibleToggle(ch, $event.checked)"></p-checkbox>
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="ch.visible"
+              (onChange)="onVisibleToggle(ch, $event.checked)"
+            ></p-checkbox>
           </td>
         </tr>
       </ng-template>
@@ -38,16 +52,26 @@
          grayscale uses the colormap below). -->
     <div class="ch-presets" *ngIf="multichannel && selected">
       <span class="ch-presets-lbl">{{ selected.name }} LUT</span>
-      <button *ngFor="let p of lutColors" type="button" class="ch-preset"
-              [style.background]="p.color" [pTooltip]="p.name" tooltipPosition="top"
-              (click)="setPreset(selected, p.color)"></button>
+      <button
+        *ngFor="let p of lutColors"
+        type="button"
+        class="ch-preset"
+        [style.background]="p.color"
+        [pTooltip]="p.name"
+        tooltipPosition="top"
+        (click)="setPreset(selected, p.color)"
+      ></button>
     </div>
 
     <!-- Histogram -->
     <div class="ch-hist-head">
       <span>Histogram{{ selected ? ' — ' + selected.name : '' }}</span>
-      <p-checkbox [binary]="true" [(ngModel)]="logScale"
-                  (onChange)="toggleLog($event.checked)" label="Log"></p-checkbox>
+      <p-checkbox
+        [binary]="true"
+        [(ngModel)]="logScale"
+        (onChange)="toggleLog($event.checked)"
+        label="Log"
+      ></p-checkbox>
     </div>
     <div [id]="histogramDiv" class="ch-hist-plot"></div>
 
@@ -58,31 +82,71 @@
            native getters; the handlers map back to the 8-bit display window. -->
       <div class="ch-row">
         <span class="ch-lbl">Min</span>
-        <p-slider [ngModel]="minNative" [min]="sliderMin" [max]="sliderMax" [step]="sliderStep"
-                  (onChange)="onMinChange($event.value)" styleClass="ch-slider"></p-slider>
-        <p-inputNumber [ngModel]="minNative" [min]="sliderMin" [max]="sliderMax" [showButtons]="false"
-                       (onInput)="onMinChange($event.value)" styleClass="ch-num"></p-inputNumber>
-        <span class="ch-busy"><i *ngIf="activeAdjust === 'min'" class="pi pi-spin pi-spinner"
-                                 aria-label="updating"></i></span>
+        <p-slider
+          [ngModel]="minNative"
+          [min]="sliderMin"
+          [max]="sliderMax"
+          [step]="sliderStep"
+          (onChange)="onMinChange($event.value)"
+          styleClass="ch-slider"
+        ></p-slider>
+        <p-inputNumber
+          [ngModel]="minNative"
+          [min]="sliderMin"
+          [max]="sliderMax"
+          [showButtons]="false"
+          (onInput)="onMinChange($event.value)"
+          styleClass="ch-num"
+        ></p-inputNumber>
+        <span class="ch-busy"
+          ><i *ngIf="activeAdjust === 'min'" class="pi pi-spin pi-spinner" aria-label="updating"></i
+        ></span>
       </div>
       <div class="ch-row">
         <span class="ch-lbl">Max</span>
-        <p-slider [ngModel]="maxNative" [min]="sliderMin" [max]="sliderMax" [step]="sliderStep"
-                  (onChange)="onMaxChange($event.value)" styleClass="ch-slider"></p-slider>
-        <p-inputNumber [ngModel]="maxNative" [min]="sliderMin" [max]="sliderMax" [showButtons]="false"
-                       (onInput)="onMaxChange($event.value)" styleClass="ch-num"></p-inputNumber>
-        <span class="ch-busy"><i *ngIf="activeAdjust === 'max'" class="pi pi-spin pi-spinner"
-                                 aria-label="updating"></i></span>
+        <p-slider
+          [ngModel]="maxNative"
+          [min]="sliderMin"
+          [max]="sliderMax"
+          [step]="sliderStep"
+          (onChange)="onMaxChange($event.value)"
+          styleClass="ch-slider"
+        ></p-slider>
+        <p-inputNumber
+          [ngModel]="maxNative"
+          [min]="sliderMin"
+          [max]="sliderMax"
+          [showButtons]="false"
+          (onInput)="onMaxChange($event.value)"
+          styleClass="ch-num"
+        ></p-inputNumber>
+        <span class="ch-busy"
+          ><i *ngIf="activeAdjust === 'max'" class="pi pi-spin pi-spinner" aria-label="updating"></i
+        ></span>
       </div>
       <div class="ch-row">
         <span class="ch-lbl">Gamma</span>
-        <p-slider [(ngModel)]="selected.gamma" [min]="0.1" [max]="5" [step]="0.01"
-                  (onChange)="onGammaChange($event.value)" styleClass="ch-slider"></p-slider>
-        <p-inputNumber [(ngModel)]="selected.gamma" [min]="0.1" [max]="5" [minFractionDigits]="2"
-                       [maxFractionDigits]="2" [showButtons]="false"
-                       (onInput)="onGammaChange($event.value)" styleClass="ch-num"></p-inputNumber>
-        <span class="ch-busy"><i *ngIf="activeAdjust === 'gamma'" class="pi pi-spin pi-spinner"
-                                 aria-label="updating"></i></span>
+        <p-slider
+          [(ngModel)]="selected.gamma"
+          [min]="0.1"
+          [max]="5"
+          [step]="0.01"
+          (onChange)="onGammaChange($event.value)"
+          styleClass="ch-slider"
+        ></p-slider>
+        <p-inputNumber
+          [(ngModel)]="selected.gamma"
+          [min]="0.1"
+          [max]="5"
+          [minFractionDigits]="2"
+          [maxFractionDigits]="2"
+          [showButtons]="false"
+          (onInput)="onGammaChange($event.value)"
+          styleClass="ch-num"
+        ></p-inputNumber>
+        <span class="ch-busy"
+          ><i *ngIf="activeAdjust === 'gamma'" class="pi pi-spin pi-spinner" aria-label="updating"></i
+        ></span>
       </div>
       <div class="ch-btns">
         <p-button label="Auto" size="small" (onClick)="auto()"></p-button>
@@ -94,11 +158,17 @@
          colour, so it only applies to grayscale; RGB/multichannel use the
          per-channel pseudo-colour presets above. -->
     <div class="ch-display">
-      <p-treeSelect *ngIf="!multichannel"
-                    [options]="colormapOptions" [(ngModel)]="selectedColormap"
-                    [selectionMode]="'single'" placeholder="Colormap" [scrollHeight]="'300px'"
-                    pTooltip="Color Lookup Tables" tooltipPosition="bottom"
-                    (onNodeSelect)="onColormap($event.node)">
+      <p-treeSelect
+        *ngIf="!multichannel"
+        [options]="colormapOptions"
+        [(ngModel)]="selectedColormap"
+        [selectionMode]="'single'"
+        placeholder="Colormap"
+        [scrollHeight]="'300px'"
+        pTooltip="Color Lookup Tables"
+        tooltipPosition="bottom"
+        (onNodeSelect)="onColormap($event.node)"
+      >
         <ng-template let-node pTemplate="default">
           <div class="flex align-items-center gap-2">
             <img *ngIf="!node.children" [src]="node.data?.src" class="colormap" />
@@ -106,19 +176,33 @@
           </div>
         </ng-template>
       </p-treeSelect>
-      <p-checkbox [binary]="true" [(ngModel)]="invert"
-                  (onChange)="onInvert($event.checked)" label="Invert"></p-checkbox>
+      <p-checkbox
+        [binary]="true"
+        [(ngModel)]="invert"
+        (onChange)="onInvert($event.checked)"
+        label="Invert"
+      ></p-checkbox>
     </div>
 
     <!-- Exports: an 8-bit publication composite (always), plus a true-16-bit
          data-preserving TIFF when the image carries >8-bit pixels. -->
     <div class="ch-export">
-      <p-button label="Export composite (PNG)" icon="pi pi-download" size="small"
-                (onClick)="exportComposite()"></p-button>
-      <p-button *ngIf="is16bit" label="Export 16-bit TIFF" icon="pi pi-download" size="small"
-                [outlined]="true" pTooltip="Data-preserving multi-band TIFF (visible channels, native bit depth)"
-                tooltipPosition="top" (onClick)="exportData()"></p-button>
+      <p-button
+        label="Export composite (PNG)"
+        icon="pi pi-download"
+        size="small"
+        (onClick)="exportComposite()"
+      ></p-button>
+      <p-button
+        *ngIf="is16bit"
+        label="Export 16-bit TIFF"
+        icon="pi pi-download"
+        size="small"
+        [outlined]="true"
+        pTooltip="Data-preserving multi-band TIFF (visible channels, native bit depth)"
+        tooltipPosition="top"
+        (onClick)="exportData()"
+      ></p-button>
     </div>
-
   </div>
 </p-dialog>

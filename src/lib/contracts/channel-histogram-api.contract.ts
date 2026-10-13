@@ -116,4 +116,8 @@ export interface IChannelHistogramApi {
   exportData(): void;
 }
 
+/**
+ * DI token for the Channels & Histogram pane's API. The library binds it to its router
+ * (VisualizationModule / provideVisualization); hosts inject it, they do not provide it.
+ */
 export const CHANNEL_HISTOGRAM_API = new InjectionToken<IChannelHistogramApi>('CHANNEL_HISTOGRAM_API');

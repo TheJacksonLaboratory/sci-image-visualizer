@@ -9,6 +9,275 @@ file was added.
 
 ## [Unreleased]
 
+Implements the 0.8.3 code review ([#45](https://github.com/TheJacksonLaboratory/sci-image-visualizer/issues/45)):
+its critical fixes and warnings, the shared cross-backend modules, and the god-class splits. Review IDs (e.g.
+CORE-1) refer to the review document attached to #45.
+
+### Fixed
+
+- **Plotly views stopped recolouring** and the intensity inset stopped updating after the
+  visualizer was destroyed and recreated (CORE-1).
+- **Cmd/Ctrl+D deleted the selected region**, and Ctrl+S/F/P/L/W toggled tools; modified keys
+  no longer trigger the bare-key shortcuts, and shortcuts act only on the viewer under focus or
+  pointer (CORE-2).
+- **A tiled OSD image showed the previous serverless multichannel image** on any channel change
+  (OSD-PLOTLY-1).
+- **Plotly wand, brush and SAM sampled the wrong pixels** after a high-def zoom (OSD-PLOTLY-2).
+- **Merged MultiPolygon regions were invisible and unclickable** in the napari view
+  (NAPARI-BOUNDARY-1).
+- **Undo did nothing for Region Editor edits**, and a cancelled label edit was kept
+  (RT-1, RT-18).
+- **Wand/brush brought back an undone or deleted region** on the next click (RT-2).
+- **Gamma brightened under OSD and darkened under napari-js**; one convention (ImageJ's
+  `t^(1/γ)`) and one order (window → invert → gamma) on both backends (NAPARI-BOUNDARY-2).
+- **napari re-plots dropped the gene maps and density volumes**; a previous image's tile
+  descriptor leaked into the next (wrong scale bar, world box, histogram bit depth); `/tiles/info`
+  polled for minutes on any non-202 (NAPARI-SVC-1/2/3).
+- **napari**: surface height used the red channel of RGB images; 3D clicks selected the marker
+  behind the one the tooltip named; the Images toggle hid the gene map; region-centroid points
+  vanished after a slice change; a surface channel switch could cache the old channel; zoom
+  buttons did nothing in 3D; the navigator ignored channel tints; an orbit wiped every region
+  and recorded an undo step (NAPARI-SVC-4…13).
+- **napari region overlay**: handle-less Bézier regions drew straight; clicks in a donut's hole or
+  an open polyline's interior selected it; the click-sized marquee was measured in world units; a
+  cancelled drag left the region store batched; the 3D lasso was offset off the page origin
+  (NAPARI-BOUNDARY-3…7).
+- **Spatial tiles**: a failed column/density request turned off retries; an overlapping plan
+  could mark the current one incomplete; a superseded transcript plan could leave stale markers
+  (NAPARI-BOUNDARY-8/9).
+- **OSD/Plotly**: async histogram samples and Plotly loads landed on the next image; `load()`
+  changed the mounted image before `plot()`; serverless-multichannel scrubs raced; Plotly relayout
+  handlers piled up (two zoom fetches per drag); composite export ignored per-channel rendering;
+  a torn-down overlay left the store batched (OSD-PLOTLY-4…10).
+- **Visualizer**: four subscriptions leaked per recreate; Autoscale left the backend tool armed;
+  `provideVisualization()` shared SAM and spatial-selection state between viewers; a destroyed
+  visualizer left the WebGPU viewer running; same-channel-count images kept the old channel
+  names/tints; fixed DOM ids collided between viewers; `plot() === false` rendered a blank canvas;
+  host image-info objects were mutated (CORE-3…13).
+- **Spatial**: charts showed the previous dataset's data; one token cancelled unrelated loads;
+  recolouring forced the Counts tab; a t-SNE terminate during worker start-up was lost; gene-map
+  windows counted unmeasured zeros; wire decoders now validate offsets, indices and sizes
+  (SPATIAL-1…8).
+- **Tools**: the wand filled donut holes and dropped the smaller half of a split; hole rings were
+  clamped; tool commits lost `colorOverridden`/`kind` (the eraser turned profile lines into
+  annotations); SAM/Cellpose committed stale region snapshots, leaked sessions, never settled
+  disposed calls, reverted model switches, and cached a failed Cellpose load; six tools used the X
+  ratio for Y; undo coalesced by a 250 ms timer instead of by gesture (RT-3…14).
+- **Regions**: `getRegionPolygons()` dropped multi-part regions, holes and Bézier curves from
+  server requests; extension-less files saved as `.geojson`; the editor painted fallback colours
+  onto store regions (RT-15, RT-19, RT-1).
+- **Heatmap shapes did not redraw after undo/redo** or Region Editor edits; Plotly now follows
+  the region store like the OSD and napari overlays.
+- **OSD multichannel images ignored invert**; invert is now applied per channel before the
+  additive merge, as napari-js does.
+- **napari 3D views inverted after gamma**: the volume, surface, 3D scatter and spatial density
+  volumes faked invert by reversing the colormap, which applies it after gamma. They now use the
+  layers' own `invert` (napari-js 0.15), in the 2D image's and OSD's order (window → invert →
+  gamma); the ramp changes wherever gamma ≠ 1 (NAPARI-SVC-18).
+- **napari 2D spatial: a stitched slice re-render dropped the gene map**, and the cell,
+  transcript and density overlays until the camera next moved; they now come back with the
+  markers.
+- **napari 3D spatial: the density volumes ignored the invert setting**: they read it without
+  following it, so they took whatever the previous scene left and a toggle never reached them.
+- **napari 2D cells coloured by a grouping of more than ~127 groups** drew neighbouring groups in
+  one colour (a band per group in a 256-entry colormap); each cell now carries its own colour,
+  napari-js 0.15's per-shape `faceColor` (NAPARI-BOUNDARY-27).
+- **Wand and brush regions lost a row each time they were picked up again**: the tracer outlined
+  the boundary pixels' top-left corners and the rasterizer sampled rows at pixel centres, so after
+  a zoom, pan, tool switch or undo the re-adopted region was one row shorter (a box's bottom went
+  50 → 49 → 48). Merge, inverse and the mask export lost the same row. Tracing and rasterizing
+  are now napari-js's `traceContours` and `rasterizePolygon` (pixel edges, pixel-centre rule), and
+  a trace → rasterize round trip gives back exactly the same pixels.
+- **The mask export wrapped a region overhanging the image's left or right edge** into the
+  neighbouring row; only the part inside the image is painted now.
+- **A hole could be given to a shape that does not enclose it**: a background area closed off
+  only by two shapes together (touching at a corner) became a hole of one of them. Each shape's
+  holes are now its own interior outlines.
+- **The wand grew from the wrong pixel on OSD and napari**: it rounded the click to the nearest
+  pixel corner, so a click on the right or bottom half of a pixel seeded its neighbour. Every
+  backend now floors the click to the pixel under it, and the intensity profile samples the pixel
+  a point falls in the same way.
+- **Plotly drew the image half a pixel up and left of the other backends**: it centred cell i on
+  i, so a region drawn on Plotly sat half a pixel off on OSD, napari and in GeoJSON. Cell i now
+  covers `[i, i + 1)`, as on OSD and napari, and the wand, brush, SAM and Cellpose outlines run
+  along its edges.
+- **The vertex eraser cut a sparse outline's corner to the next corners**: erasing the corner of
+  a four-vertex box left a triangle. The outline is now rejoined where it crosses the eraser's
+  edge, so only the part under the eraser goes (as it did on densely sampled outlines); a Bézier
+  region still loses the anchors outright.
+- **Spatial tiles: a view ending exactly on a tile boundary fetched the tile beyond it**, which
+  has no area on screen; the view's far edge is open. The dataset bounds' far edge stays closed
+  (an observation sits on it).
+- **napari drew a serverless multichannel stack grey and ignored the Channels & Histogram
+  dialog**: with no tile descriptor it drew the host's composite as one RGB image. It now draws
+  one tinted layer per channel from the slice's own `channelUrls` planes, with each channel's
+  window, gamma, tint, visibility and invert, and each channel's own histogram; the navigator
+  composites the channels too (#46 browser testing).
+- **napari RGB images ignored the channel window, gamma, invert, tints and visibility**: while
+  the channel states change the picture, the R, G and B bands draw as three additive layers, as
+  OSD recolours an RGB tile; at the defaults the RGB layer draws as before. A tiled image's three
+  bands share one `/tile` request per tile. Each channel's histogram is its raw band (it was the
+  recoloured screen).
+- **napari multichannel images had grey blacks**: the additive channel layers added onto the
+  viewer's dark-grey background; they now merge onto black, as on OSD and Plotly.
+- **A napari 2D plot replaced while its image was still loading kept running**: once the image
+  arrived it installed its region overlay, subscriptions and spatial tiles over the plot that
+  replaced it. The 2D image, region-centroid scatter and spatial scenes now stop there.
+- **Switching from an image-less spatial dataset to one with an image could leave the viewer
+  blank** ("the renderer could not draw the image"): clearing the old dataset changed the plot
+  type while the new image loaded, and the image loaded for the old type's backend went to the
+  new one's. The image is now loaded again for the new type.
+- **Cancelling a multichannel napari volume kept loading the next channel**: Cancel aborted the
+  channel in progress, but each channel took the loading signal afresh, so the next one was
+  fetched in full and drawn nowhere (switching resolution mid-load did the same). A load now stops
+  at the Cancel.
+- **The Plotly heatmap of a multichannel or RGB image ignored the Channels & Histogram dialog**
+  (it applied only the first channel's window, which an RGB `image` trace has no use for). It is
+  now composited per channel by OSD's display pipeline from the raw pixels — a serverless stack
+  from its `channelUrls` planes, with each channel's own histogram — and drawn as a PNG `source`
+  (~60 ms per edit for a 1-megapixel slice; Plotly paints a `z` image pixel by pixel, ~0.7 s).
+  The pixel tools, profiles and histograms keep reading the raw pixels. A tiled multichannel
+  image's heatmap is still the server's flat composite preview.
+- **The Plotly heatmap drew 16-bit RGB images as saturated colour blocks**; each sample now keeps
+  its high byte, as the browser decodes the image for OSD and napari.
+- **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
+  was recoloured again as an RGB image, so an inverted stack drew black.
+- **Clicking Save again while a folder stack's regions uploaded wrote every slice twice**, and
+  closing the editor could no longer cancel the first save; that Save is now ignored.
+- **A canvas tool armed when the visualizer was destroyed did nothing in the next one**: its
+  overlay (and its ResizeObserver) stayed on the old view's plot div, so re-arming it in a
+  recreated visualizer drew no overlay. Detaching a backend now disarms its armed tool.
+
+### Changed
+
+- **Performance**: global listeners and the napari render loop run outside the Angular zone;
+  region overlays draw in world space and move only a transform on camera change; per-point
+  `RGBA[]` tuples and nested per-pixel readback arrays are gone (packed RGBA frames); Cellpose
+  tracing is bounding-box local; undo keeps shallow, structurally shared snapshots; spatial caches
+  are bounded by bytes; spatial field/density/heatmap math runs in a worker; 2-D picking uses a
+  grid index; contrast windows are cached and sampled.
+- **OSD `/tiles/info`** now gives up on any status other than 202 (it used to retry 5xx for up to
+  10 minutes), matching napari; loads accept an `AbortSignal`.
+- **`IDataRenderer.load(info, z, signal?)`** takes an optional `AbortSignal`; superseded loads are
+  aborted. `IViewerBackend` is the backend contract; `IVisualizer` stays the host-facing
+  composite. `fitToView()` replaces `autoscale()`, `detach()` replaces `unsubscribe()` (the old
+  names remain as deprecated aliases). `IToolController.setActiveTool(id, options)` replaces the
+  per-tool mode setters (deprecated, still working).
+- **Host handle**: the host now receives a typed `VisualizerHandle` (`visualizer`, `hasRegions`,
+  `getRegionPolygons`, deprecated `plotService`) via `setDiagram()`, and `null` on destroy.
+- **Canvas tools** are plain classes managed per backend by a `CanvasToolManager` instead of
+  root singletons re-bound by every backend; one `CanvasToolHost`.
+- **Standalone components**: every component and directive is `standalone: true` and
+  `OnPush`, with `DestroyRef` teardown and signals for view state; template-only members are
+  `protected`. Import the components directly and add `provideVisualization()`.
+  `VisualizationModule` is kept as a re-export shim and is **deprecated** (removed in a future
+  minor release).
+- **Capability getters on `IViewerBackend`**: `getOsdViewOptions()`, `getVolumeResolution()` and
+  `getIntensitySampling()` (null where unsupported) replace always-on backend extras, which stay
+  as deprecated delegations. The router serves every region read and write from `RegionStore`
+  and routes intensity profiles to `IntensityProfileService`; image smoothing now reaches napari,
+  and napari viewport changes re-sample the intensity inset.
+- **Region GeoJSON export** on OSD and napari is named after the image (it was `rois.geojson`).
+- **Region store** is copy-on-write: mutators replace edited regions instead of mutating them.
+- `@jax-js/jax` moved to devDependencies (it is bundled into the t-SNE worker);
+  `@types/plotly.js-dist-min` replaced by local v3 typings; `primeicons`/`primeflex` are optional
+  peers (`primeflex` 3.3 or 4: the templates use only classes both have); global icon styles ship
+  as `styles/viz-icons.scss`.
+- **napari-js 0.15.0** (was 0.14): a volume opens framed to fit the canvas (a little further
+  out than before), and viridis and magma are matplotlib's exact tables.
+- **The colormap tables ship in the bundle**: matplotlib's tables come from
+  `napari-js/colormaps` (the same bytes), so the store no longer fetches the 633 KB
+  `colormap-luts.json` and every colormap works from the first render. Hosts no longer need to
+  serve it; it is gone from `src/lib/assets` (NAPARI-BOUNDARY-23).
+- **napari markers take packed colours**: per-point colours go to napari-js as the flat
+  `Float32Array` the encoders build, with no tuple per point. `toRgbaTuples` is removed from the
+  public API (NAPARI-BOUNDARY-12, SPATIAL-11).
+- **The 3D cloud colours any number of categories**: a categorical colouring is one RGBA per
+  point (`Points3DLayer.colors`) instead of a stepped 256-entry LUT, which kept at most 95
+  categories apart and drew a wider column (e.g. `subclass`, 338) flat. The panel's "too many
+  categories" note is gone with the limit (NAPARI-SVC-18, SPATIAL-11).
+- **Transcript icons are napari-js point symbols**: one points layer with a symbol per point and
+  its border as the rim, instead of polygons triangulated on the CPU (up to 400k × 3–12
+  vertices) plus a second outline layer. The same ten shapes; the circle is a true disc, the rim
+  is drawn inside the icon, and an icon outside any cell type takes the circles' translucent grey
+  (NAPARI-BOUNDARY-25).
+- **A 2D marker is hoverable and clickable across its whole disc**: the hit area was 10 px around
+  its centre whatever its size, so the rim of a large spot named nothing. It is now the drawn
+  disc, or the 10 px slack for a marker smaller than that, as for the transcripts.
+- **The 2D transcript density is windowed on the GPU**: the raster goes to napari-js as scalars
+  with `transparentBelow`, so a threshold, colormap or opacity change updates the layer's
+  uniforms or LUT instead of recolouring the raster on the CPU and uploading it again
+  (NAPARI-BOUNDARY-28).
+- **napari volumes, surfaces and overviews read whole slices with napari-js** (`readLevel`,
+  `assembleVolume`, from the same `TiledSource` the 2D view draws): a slice is read at the
+  coarsest pyramid level that covers the target size and area-averaged down, not at the finest
+  level within the tile budget and scaled by the canvas (a ¼ volume of a 4096² slide reads one
+  tile per slice, not four). A Cancel or a new plot now aborts the tile requests in flight
+  (NAPARI-SVC-16).
+- **The density map's default inferno is matplotlib's exact table** (napari-js/colormaps), on the
+  canvas and the colour bar. It was a 9-stop approximation whose stops were inferno's ninths
+  placed at eighths, so the ramp ran dark (the middle drew #a52c60 for #bb3754). `INFERNO_SCALE` is removed; `lutFor` also takes a 256-entry RGB table
+  (NAPARI-BOUNDARY-23).
+- **Traced outlines run along pixel edges** (wand, brush, SAM, Cellpose, merge/inverse): an
+  outline now covers its pixels' full extent, one pixel further right and down than before, and a
+  straight run is a single edge instead of a vertex per pixel. Region areas equal the pixel count.
+
+### Refactored
+
+- Shared modules: `implementations/tile-server/` (jit-service client),
+  `region-overlay/` (region geometry, hit tests, `SvgRegionRenderer`), `geometry/` (raster,
+  contour, rings), `models/{polygon-factory,polygon-edit,region-geojson,region-clone,svg-path}`,
+  `store/{region-history,region-selection,region-scope-cache}`, `toolbar/tool-kit/`,
+  `contracts/color.ts`, `spatial/stats.ts`, `util/supersede.ts`, `workers/spatial-math`.
+- God classes split into collaborators: `NapariVisualizerService` 4,924 → ~660 lines (scenes,
+  tile client, display state, tool bridge, hover), `VisualizerComponent` 2,639 → ~1,070,
+  `OpenSeadragonVisualizerService` 2,010 → ~790, `PlotlyService` 2,090 → ~1,000,
+  `NapariSpatialTileLayers` 1,706 → ~230, `SpatialControlsComponent` 1,605 → ~340,
+  `SpatialChartsComponent` 1,362 → ~760, `RegionEditorComponent`/`ToolbarComponent` templates
+  split into OnPush children, `RegionStore` → façade, `WandService` → pure modules.
+- Removed dead code: the previous-shapes contract trio, spec-only exports, unread component state,
+  20 unused assets, debug logging.
+- napari-js 0.15 replaces SIV workarounds: layer restacks use `LayerList.move` (no GPU re-upload,
+  NAPARI-BOUNDARY-11); the 3D scale bar reads `Camera3D.worldPerPixel` (NAPARI-BOUNDARY-26);
+  `bt601Luminance` is napari-js's `luminance8` (NAPARI-BOUNDARY-30); `buildColormapLut` samples a
+  napari-js `Colormap` (NAPARI-BOUNDARY-23); the transcript-summary and SAM caches are `LruCache`s
+  and now evict by use (NAPARI-BOUNDARY-19); the volume scene's dead slice step is gone; the
+  wand's flood fill is `floodFill`, and contour tracing and polygon rasterizing are
+  `traceContours` and `rasterizePolygon` (`napari-js/geometry`, Appendix F); tile planes decode with `bitmapToScalar`; the spatial view
+  rect is `worldViewport` (NAPARI-BOUNDARY-31).
+- Spatial picking is napari-js's: the 2D hover and click and the transcript hover pick on the
+  layer they name (`PointsLayer.pick`, a grid built once per layer), the 3D cloud through
+  `PointPicker` (lazy re-projection, reused buffers, screen index). `nearestObservation`,
+  `PointGridIndex`, the transcripts' `pickNearest` grid and the hover's six fields of projection
+  bookkeeping are gone. The nearest centre still wins in 2D and the front-most in 3D; an exact tie
+  between transcripts now goes to the one drawn on top (NAPARI-BOUNDARY-24, NAPARI-SVC-17,
+  SPATIAL-14).
+- The napari overlay chrome is napari-js's (`napari-js/overlays`): the 2D and 3D scale bars are
+  `ScaleBarOverlay`, the minimap `NavigatorOverlay` and the 3D axis text `AxesLabelsOverlay`, with
+  the same look, class names and gestures. The OSD scale bar takes its length and unit from the
+  same `scaleBarFor`/`formatLength`, so both backends' bars agree. `napari-scale-bar`,
+  `napari-navigator`, `napari-axes-labels` and `overlays/scale-bar-core` are gone. A 3D axis
+  length that rounds to a whole number prints as the scale bar does, "4 mm" rather than "4.0 mm"
+  (NAPARI-BOUNDARY-32).
+- The napari region overlay takes its world → screen matrix from napari-js's
+  `Viewer.canvasTransform()`: a camera frame and a region redraw read no layout (they read the
+  canvas and svg rects three and one times); only a pointer event reads the svg's position. The
+  3D lasso's screen-space viewer draws with the identity (NAPARI-BOUNDARY-10).
+
+### Docs
+
+- README host setup, `CONTRIBUTING.md`, `docs/ARCHITECTURE.md`, `docs/guides/`, `docs/design/`
+  with accurate status lines, historical material in `docs/history/`, current architecture
+  diagrams in `docs/diagrams/`; JSDoc on every public export.
+
+### Tooling
+
+- Jest coverage floor and ts-jest transform config; ESLint `no-console` and a contracts import
+  boundary; Prettier enforced in CI; `noUnusedLocals`.
+- Jest runs the real napari-js through its GPU-free `napari-js/testing` entry
+  (`HeadlessViewer`); the hand-written stub, its conformance spec and the specs' fake viewers
+  are gone (NAPARI-SVC-19, NAPARI-BOUNDARY-20, REPO-18).
+
 ## [0.8.3] — 2026-10-08
 
 The napari canvas says when the tissue image is fetching new tiles.
@@ -147,7 +416,7 @@ jit-service serves the same wire format.
   - Reads Xenium bundles in place (`lib/spatial-xenium.mjs`), with `prepare-xenium` for the
     tissue image and the all-gene transcript pyramid.
   - Group import is off by default: `GROUP_IMPORT_TOKEN`, or `GROUP_IMPORT=open` locally.
-  - See its README and `docs/omics-preprocessing-jit.md`.
+  - See its README and `docs/design/omics-preprocessing-jit.md`.
 
 ### Changed
 
@@ -166,7 +435,7 @@ positive and negative strokes with the brush in blue and red.
 
 - **`TOOLBAR_TOOLS` is typed `readonly ToolbarContribution[]`**, the union of the
   run tools (`ToolbarToolContribution`, unchanged) and the new dialog tools.
-  Providing tools is unaffected. Code that *injects* the token and reads run-tool
+  Providing tools is unaffected. Code that _injects_ the token and reads run-tool
   members directly must narrow first, for example with `visibleToolContributions()`
   or `isDialogToolContribution()`. That is a type-level break, so this is a minor
   bump under 0.x.
@@ -240,7 +509,7 @@ contributions sees no change.
   - **Isolation:** nothing a contribution throws or rejects escapes. Failing to
     start (`activate`, `mount`, a panel component throwing as it is first
     rendered) falls back to the base type with a warning toast. So does failing
-    to clean up (throw *or* async rejection) while the same mode is being
+    to clean up (throw _or_ async rejection) while the same mode is being
     re-activated. An explicit re-selection in the dropdown retries it.
 - **A viewport to draw over, on the OpenSeadragon backend.**
   - `dataToClient` (image px to client px) alongside `clientToData`.
@@ -942,7 +1211,7 @@ renders with true physical anisotropy.
   tissue image's pixel space, each with categorical and continuous annotations
   and a lazily-fetched feature (gene) matrix. This is the data layer only; the
   plot mode that renders it is designed but not built
-  ([docs/spatial-omics-plot-mode-design.md](docs/spatial-omics-plot-mode-design.md)).
+  ([docs/design/spatial-omics-plot-mode-design.md](docs/design/spatial-omics-plot-mode-design.md)).
 
   - `SpatialDataset` and friends (`contracts/spatial-dataset.contract.ts`):
     struct-of-arrays observations, `CategoricalColumnMeta` /

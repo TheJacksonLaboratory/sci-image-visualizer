@@ -1,0 +1,11 @@
+.manage-dialog .manage-class-row hex-color-picker,
+.manage-dialog .fallback-palette hex-color-picker {
+  flex: 0 0 auto;
+}
+.manage-dialog .fallback-palette .icon-hover {
+  cursor: pointer;
+  color: var(--text-color-secondary);
+}
+.manage-dialog .fallback-palette .icon-hover:hover {
+  color: var(--primary-color);
+}

@@ -32,10 +32,14 @@ export interface IRegionEditorApi {
   getAnnotationRegions(): Region[];
   /** Replace the annotation regions. Intensity-profile lines in the store are
    *  preserved (the editor must not be able to drop them). */
-  setAnnotationRegions(regions: Region[], showRegionLabel?: boolean,
-                       isRegionSaveOn?: boolean, fillColor?: string): void;
+  setAnnotationRegions(
+    regions: Region[],
+    showRegionLabel?: boolean,
+    isRegionSaveOn?: boolean,
+    fillColor?: string,
+  ): void;
   /** Change signal — fires whenever regions change on any backend. */
-  getRegionUpdateEvent(): Observable<any[]>;
+  getRegionUpdateEvent(): Observable<Region[]>;
 
   // ── selection (by region identity; index space stays internal) ────────
   /** The currently-selected annotation regions (profile lines never appear). */

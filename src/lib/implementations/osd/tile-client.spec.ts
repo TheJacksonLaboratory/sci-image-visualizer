@@ -5,22 +5,25 @@ import { buildTileUrl, fetchTileBitmap, fetchTileRgba } from './tile-client';
 describe('tile-client', () => {
   describe('buildTileUrl', () => {
     it('builds the composited-tile URL with the exact param order the server caches on', () => {
-      expect(buildTileUrl('https://api/', 'B64', { res: 2, col: 3, row: 4, z: 5, tileSize: 512 }))
-        .toBe('https://api/tile?info=B64&res=2&col=3&row=4&z=5&tileSize=512');
+      expect(buildTileUrl('https://api/', 'B64', { res: 2, col: 3, row: 4, z: 5, tileSize: 512 })).toBe(
+        'https://api/tile?info=B64&res=2&col=3&row=4&z=5&tileSize=512',
+      );
     });
 
     it('appends the channel param when set — including channel 0', () => {
-      expect(buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256, channel: 0 }))
-        .toBe('a/tile?info=I&res=0&col=0&row=0&z=0&tileSize=256&channel=0');
-      expect(buildTileUrl('a/', 'I', { res: 0, col: 1, row: 2, z: 3, tileSize: 256, channel: 4 }))
-        .toContain('&channel=4');
+      expect(buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256, channel: 0 })).toBe(
+        'a/tile?info=I&res=0&col=0&row=0&z=0&tileSize=256&channel=0',
+      );
+      expect(buildTileUrl('a/', 'I', { res: 0, col: 1, row: 2, z: 3, tileSize: 256, channel: 4 })).toContain(
+        '&channel=4',
+      );
     });
 
     it('omits the channel param for null/undefined (server-composited tile)', () => {
-      expect(buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256, channel: null }))
-        .not.toContain('channel');
-      expect(buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256 }))
-        .not.toContain('channel');
+      expect(
+        buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256, channel: null }),
+      ).not.toContain('channel');
+      expect(buildTileUrl('a/', 'I', { res: 0, col: 0, row: 0, z: 0, tileSize: 256 })).not.toContain('channel');
     });
   });
 

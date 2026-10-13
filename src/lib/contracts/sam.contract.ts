@@ -19,6 +19,13 @@ export interface SamModelDef {
   encoderUrl: string;
   /** Decoder ONNX URL (embedding + prompts → mask). Empty until hosted. */
   decoderUrl: string;
+  /**
+   * Revision of the hosted ONNX files. Downloaded models are cached by URL AND revision,
+   * and hosted URLs are typically mutable (`.../resolve/main/...`), so bump this when the
+   * files are re-exported under the same URLs: browsers then fetch the new files once and
+   * drop their older copies. Absent means the URL alone is the cache key.
+   */
+  revision?: string;
   /** Decoder I/O family — SAM v1 vs v2/v3 differ in mask output size + names. */
   variant: 'sam1' | 'sam2' | 'sam3';
   /** Encoder input side length (1024 for SAM v1). */

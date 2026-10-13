@@ -87,8 +87,10 @@ export function normalizeContributions(
       continue;
     }
     if (!SUPPORTED_CONTRIBUTION_BASE_TYPES.includes(d.baseType)) {
-      log.warn(`${TAG} '${id}' ignored: baseType '${String(d.baseType)}' is not supported `
-        + `(supported: ${SUPPORTED_CONTRIBUTION_BASE_TYPES.join(', ')}).`);
+      log.warn(
+        `${TAG} '${id}' ignored: baseType '${String(d.baseType)}' is not supported ` +
+          `(supported: ${SUPPORTED_CONTRIBUTION_BASE_TYPES.join(', ')}).`,
+      );
       continue;
     }
     seen.add(id);
@@ -186,7 +188,10 @@ export class PlotModeController {
         }
         if (isThenable(result)) {
           result.then(
-            (session) => { this.start(contribution, ctx, session, gen); resolve(); },
+            (session) => {
+              this.start(contribution, ctx, session, gen);
+              resolve();
+            },
             (err) => {
               if (gen === this.generation) this.fail(contribution, err);
               resolve();
@@ -234,8 +239,12 @@ export class PlotModeController {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  private start(contribution: PlotTypeContribution, ctx: PlotModeContext,
-                session: PlotModeSession, gen: number): void {
+  private start(
+    contribution: PlotTypeContribution,
+    ctx: PlotModeContext,
+    session: PlotModeSession,
+    gen: number,
+  ): void {
     const id = contribution.descriptor.type;
     if (!session || typeof session.deactivate !== 'function') {
       if (gen === this.generation) {
@@ -290,8 +299,11 @@ export class PlotModeController {
 
   private fail(contribution: PlotTypeContribution, err: unknown): void {
     this.pendingId = null;
-    this.log.error(`${TAG} '${contribution.descriptor.type}' failed to activate — `
-      + `falling back to '${contribution.descriptor.baseType}'.`, err);
+    this.log.error(
+      `${TAG} '${contribution.descriptor.type}' failed to activate — ` +
+        `falling back to '${contribution.descriptor.baseType}'.`,
+      err,
+    );
     try {
       this.hooks.onFailed(contribution, err);
     } catch (hookErr) {
@@ -350,7 +362,11 @@ export class PlotModeController {
    *  animation frame), or `cb(false)` after {@link MAX_READY_FRAMES}. */
   private whenReady(ctx: PlotModeContext, gen: number, cb: (ready: boolean) => void): void {
     const isReady = () => {
-      try { return ctx.viewport.isReady(); } catch { return false; }
+      try {
+        return ctx.viewport.isReady();
+      } catch {
+        return false;
+      }
     };
     if (isReady()) return cb(true);
     let frames = 0;

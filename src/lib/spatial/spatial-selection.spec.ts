@@ -26,7 +26,10 @@ function obs(...points: [number, number][]): SpatialObservations {
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const b = new Rectangle();
-  b.x = x; b.y = y; b.width = w; b.height = h;
+  b.x = x;
+  b.y = y;
+  b.width = w;
+  b.height = h;
   r.bounds = b;
   return r;
 }
@@ -34,7 +37,9 @@ function rectRegion(x: number, y: number, w: number, h: number): Region {
 function polyRegion(xs: number[], ys: number[], over: Partial<Polygon> = {}): Region {
   const r = new Region();
   const p = new Polygon();
-  p.xpoints = xs; p.ypoints = ys; p.npoints = xs.length;
+  p.xpoints = xs;
+  p.ypoints = ys;
+  p.npoints = xs.length;
   Object.assign(p, over);
   r.bounds = p;
   return r;
@@ -60,8 +65,8 @@ describe('spatial-selection', () => {
       // A "C" shape opening to the right.
       const xs = [0, 10, 10, 4, 4, 10, 10, 0];
       const ys = [0, 0, 3, 3, 7, 7, 10, 10];
-      expect(pointInRing(xs, ys, 2, 5)).toBe(true);   // in the spine
-      expect(pointInRing(xs, ys, 7, 5)).toBe(false);  // in the notch
+      expect(pointInRing(xs, ys, 2, 5)).toBe(true); // in the spine
+      expect(pointInRing(xs, ys, 7, 5)).toBe(false); // in the notch
     });
   });
 
@@ -73,10 +78,9 @@ describe('spatial-selection', () => {
     });
 
     it('ignores shapes that enclose no area', () => {
-      expect(regionShapes(rectRegion(0, 0, 0, 10))).toEqual([]);        // zero width
-      expect(regionShapes(polyRegion([0, 5], [0, 5]))).toEqual([]);     // 2 points
-      expect(regionShapes(polyRegion([0, 5, 5], [0, 0, 5], { closed: false })))
-        .toEqual([]);                                                   // open polyline
+      expect(regionShapes(rectRegion(0, 0, 0, 10))).toEqual([]); // zero width
+      expect(regionShapes(polyRegion([0, 5], [0, 5]))).toEqual([]); // 2 points
+      expect(regionShapes(polyRegion([0, 5, 5], [0, 0, 5], { closed: false }))).toEqual([]); // open polyline
     });
 
     it('ignores intensity-profile line ROIs (they belong to another tool)', () => {
@@ -87,10 +91,17 @@ describe('spatial-selection', () => {
 
     it('treats a hole as outside the region', () => {
       const donut = polyRegion([0, 20, 20, 0], [0, 0, 20, 20], {
-        holes: [[[5, 5], [15, 5], [15, 15], [5, 15]]],
+        holes: [
+          [
+            [5, 5],
+            [15, 5],
+            [15, 15],
+            [5, 15],
+          ],
+        ],
       } as Partial<Polygon>);
       const [shape] = regionShapes(donut);
-      expect(shape.hit(2, 2)).toBe(true);    // in the ring
+      expect(shape.hit(2, 2)).toBe(true); // in the ring
       expect(shape.hit(10, 10)).toBe(false); // in the hole
     });
 
@@ -98,9 +109,11 @@ describe('spatial-selection', () => {
       const r = new Region();
       const mp = new MultiPolygon();
       const a = new Polygon();
-      a.xpoints = [0, 5, 5, 0]; a.ypoints = [0, 0, 5, 5];
+      a.xpoints = [0, 5, 5, 0];
+      a.ypoints = [0, 0, 5, 5];
       const b = new Polygon();
-      b.xpoints = [10, 15, 15, 10]; b.ypoints = [10, 10, 15, 15];
+      b.xpoints = [10, 15, 15, 10];
+      b.ypoints = [10, 10, 15, 15];
       mp.polygons = [a, b];
       r.bounds = mp;
       expect(regionShapes(r)).toHaveLength(2);
@@ -109,18 +122,16 @@ describe('spatial-selection', () => {
 
   describe('selectInRegions', () => {
     it('selects the observations inside a rectangle', () => {
-      const selection = selectInRegions(
-        obs([1, 1], [5, 5], [50, 50]), undefined, [rectRegion(0, 0, 10, 10)],
-      );
+      const selection = selectInRegions(obs([1, 1], [5, 5], [50, 50]), undefined, [rectRegion(0, 0, 10, 10)]);
       expect(Array.from(selection.mask)).toEqual([1, 1, 0]);
       expect(selection.count).toBe(2);
     });
 
     it('unions multiple regions rather than intersecting them', () => {
-      const selection = selectInRegions(
-        obs([1, 1], [50, 50], [200, 200]), undefined,
-        [rectRegion(0, 0, 10, 10), rectRegion(40, 40, 20, 20)],
-      );
+      const selection = selectInRegions(obs([1, 1], [50, 50], [200, 200]), undefined, [
+        rectRegion(0, 0, 10, 10),
+        rectRegion(40, 40, 20, 20),
+      ]);
       expect(Array.from(selection.mask)).toEqual([1, 1, 0]);
     });
 
@@ -134,9 +145,9 @@ describe('spatial-selection', () => {
     });
 
     it('honours a translate as well as a scale', () => {
-      expect(selectInRegions(
-        obs([0, 0]), { scale: [1, 1], translate: [50, 50] }, [rectRegion(40, 40, 20, 20)],
-      ).count).toBe(1);
+      expect(
+        selectInRegions(obs([0, 0]), { scale: [1, 1], translate: [50, 50] }, [rectRegion(40, 40, 20, 20)]).count,
+      ).toBe(1);
     });
 
     it('restricts the test to the candidate indices, keeping the mask observation-indexed', () => {
@@ -154,7 +165,10 @@ describe('spatial-selection', () => {
 
     it('selects nothing when every candidate is outside the region', () => {
       const selection = selectInRegions(
-        obs([1, 1], [50, 50]), undefined, [rectRegion(0, 0, 10, 10)], new Uint32Array([1]),
+        obs([1, 1], [50, 50]),
+        undefined,
+        [rectRegion(0, 0, 10, 10)],
+        new Uint32Array([1]),
       );
       expect(selection.count).toBe(0);
     });
@@ -171,13 +185,10 @@ describe('spatial-selection', () => {
 
   describe('selectInRegionsProjected', () => {
     /** Screen positions as the renderer hands them over: [x0, y0, x1, y1, …]. */
-    const screen = (...pts: [number, number][]) =>
-      Float32Array.from(pts.flatMap(([x, y]) => [x, y]));
+    const screen = (...pts: [number, number][]) => Float32Array.from(pts.flatMap(([x, y]) => [x, y]));
 
     it('selects points whose SCREEN position falls inside the region', () => {
-      const selection = selectInRegionsProjected(
-        screen([5, 5], [50, 50], [8, 2]), 3, [rectRegion(0, 0, 10, 10)],
-      );
+      const selection = selectInRegionsProjected(screen([5, 5], [50, 50], [8, 2]), 3, [rectRegion(0, 0, 10, 10)]);
       expect(selection.count).toBe(2);
       expect(Array.from(maskToIndices(selection.mask))).toEqual([0, 2]);
     });
@@ -191,17 +202,14 @@ describe('spatial-selection', () => {
       expect(selectInRegionsProjected(pts, 1, [rectRegion(0, 0, 10, 10)]).count).toBe(1);
       // Same numbers via the 2D path with a 0.5 scale would MISS this rectangle,
       // which is what makes the two paths genuinely different.
-      expect(selectInRegions(obs([5, 5]), { scale: [10, 10] }, [rectRegion(0, 0, 10, 10)]).count)
-        .toBe(0);
+      expect(selectInRegions(obs([5, 5]), { scale: [10, 10] }, [rectRegion(0, 0, 10, 10)]).count).toBe(0);
     });
 
     it('never selects a point the camera puts behind the eye', () => {
       // The projector writes NaN for a non-positive w rather than a wild
       // coordinate; without the finite check those wrap into the region and a
       // lasso would grab points behind the viewer.
-      const selection = selectInRegionsProjected(
-        screen([NaN, NaN], [5, 5]), 2, [rectRegion(0, 0, 10, 10)],
-      );
+      const selection = selectInRegionsProjected(screen([NaN, NaN], [5, 5]), 2, [rectRegion(0, 0, 10, 10)]);
       expect(selection.count).toBe(1);
       expect(Array.from(maskToIndices(selection.mask))).toEqual([1]);
     });
@@ -211,18 +219,17 @@ describe('spatial-selection', () => {
     });
 
     it('takes the union across regions, counting a point once', () => {
-      const selection = selectInRegionsProjected(
-        screen([5, 5]), 1, [rectRegion(0, 0, 10, 10), rectRegion(4, 4, 10, 10)],
-      );
+      const selection = selectInRegionsProjected(screen([5, 5]), 1, [
+        rectRegion(0, 0, 10, 10),
+        rectRegion(4, 4, 10, 10),
+      ]);
       expect(selection.count).toBe(1);
     });
 
     it('works with a polygon lasso, not just a rectangle', () => {
       // Freehand and polygon are the tools people actually reach for on a cloud.
       const triangle = polyRegion([0, 10, 0], [0, 0, 10]);
-      const selection = selectInRegionsProjected(
-        screen([1, 1], [9, 9]), 2, [triangle],
-      );
+      const selection = selectInRegionsProjected(screen([1, 1], [9, 9]), 2, [triangle]);
       expect(Array.from(maskToIndices(selection.mask))).toEqual([0]);
     });
   });

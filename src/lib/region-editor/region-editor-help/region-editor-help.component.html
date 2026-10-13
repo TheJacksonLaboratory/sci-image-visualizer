@@ -1,0 +1,165 @@
+<p-dialog
+  header="Region editor help"
+  [visible]="visible"
+  (visibleChange)="visibleChange.emit($event)"
+  [style]="{ width: '50vw' }"
+  [maximizable]="true"
+  [draggable]="true"
+  appendTo="body"
+>
+  <p>
+    The Region Editor lists every region drawn on the currently displayed image. Open it with the
+    <img src="assets/plotting/region-editor.svg" width="14" height="14" alt="Region Editor" />
+    button in the diagram toolbar: it opens as a floating dialog you can drag, resize, and leave open while you
+    draw on the image. Regions are tracked <b>per image</b>: switching to another image hides these and shows that
+    image's regions; switching back restores them. Edits in the table apply <b>live</b> to the diagram — there is
+    no save or cancel.
+  </p>
+
+  <h3>Creating regions</h3>
+  <p>
+    Use the diagram toolbar tools to draw new regions:
+    <i class="pi pi-stop"></i> rectangle,
+    <img src="assets/plotting/polyline.svg" width="14" height="14" alt="" /> polyline,
+    <i class="pi pi-pencil"></i> freeform path, brush, or
+    <img src="assets/plotting/wand.svg" width="14" height="14" alt="" /> wand. Anything you draw appears
+    immediately in the table, with the class name "<b>Region</b>" by default.
+  </p>
+
+  <h3>The table columns</h3>
+  <ul>
+    <li>
+      <b>Class</b> — the region's class. Pick a class from the dropdown (its colour follows), or use the
+      <i class="pi pi-pencil"></i> for a free-form name.
+    </li>
+    <li>
+      <b>Surface</b> — the region's area, in µm²/mm² when the image carries a physical pixel size, otherwise in
+      px². Holes (donuts) and multi-part regions are accounted for.
+    </li>
+    <li>The trash icon at the end of a row deletes that one region.</li>
+    <li>Use "<b>x512</b>" to round all rectangle widths/heights to the nearest multiple of 512.</li>
+  </ul>
+  <p>
+    Region geometry is edited on the diagram itself (drag vertices, the vertex tools, brush/wand, and the
+    right-click region actions), not in this table.
+  </p>
+
+  <h3>Selecting rows</h3>
+  <ul>
+    <li>
+      Click a row to select it. The corresponding region is highlighted in the diagram (Plotly shows its edit
+      handles; the OpenSeadragon image view highlights it and shows its handles in select mode).
+    </li>
+    <li>
+      <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+click to add or remove a row from the selection. <kbd>Shift</kbd>+click to
+      extend the selection in a range.
+    </li>
+    <li>Selecting a region in the diagram highlights the matching row in the table.</li>
+    <li>
+      Clicks on the colour picker, the trash icon, or the active class-edit input do not change the selection —
+      that's standard PrimeNG behaviour.
+    </li>
+  </ul>
+
+  <h3>Bulk actions on the selected rows</h3>
+  <ul>
+    <li>
+      <i class="pi pi-check-square"></i> Select every region in the table at once (also a right-click action on the
+      image).
+    </li>
+    <li><i class="pi pi-tags"></i> Edit the label on every selected row at once.</li>
+    <li><i class="pi pi-trash"></i> Delete every selected region — both from the table and the diagram.</li>
+    <li><i class="pi pi-times-circle"></i> Delete every region on this image.</li>
+  </ul>
+
+  <h3>Annotation classes &amp; colours (presets)</h3>
+  <p>
+    Preset a class once — a <b>name</b> and a <b>colour</b> — and every region with that class name is drawn in
+    that colour, <b>including regions loaded from a GeoJSON later</b>. The preset colour is the source of truth: on
+    load it <b>overrides the colour stored in the file</b>, so a given annotation type always looks the same across
+    images and sessions.
+  </p>
+  <p>Set up your classes in the annotation-class manager — <i class="pi pi-cog"></i> <b>Manage</b>:</p>
+  <ol>
+    <li>
+      <b>Add class</b>, then type the class <b>name exactly as it appears in your data</b> (e.g.
+      <code>Tumor</code>) and pick its <b>colour</b> from the swatch. Repeat for each class.
+    </li>
+    <li>
+      Optionally: edit the <b>fallback palette</b> (colours given to classes that aren't in your list), toggle
+      <b>auto-add</b> (adds unmatched classes found on load), and choose <b>exact</b> vs. <b>normalized</b> name
+      matching — normalized ignores case and surrounding spaces, so <code>tumor</code> matches <code>Tumor</code>.
+    </li>
+    <li>
+      <b>Apply.</b> Presets are saved <b>per user</b> on the server, so they follow you across images and sessions.
+      You can also <b>reset to defaults</b> or <b>import / export</b> the set as JSON to share it.
+    </li>
+  </ol>
+  <p>
+    Next time you open or <i class="pi pi-upload"></i> import a GeoJSON whose regions carry those class names, each
+    region is shown in its preset colour automatically — no re-colouring needed. A class that isn't in your list
+    instead gets a stable colour from the fallback palette.
+  </p>
+  <p>Day to day:</p>
+  <ul>
+    <li>
+      The <b>class strip</b> above the table lists your presets with their colours. Click a class to make it
+      <b>active</b> (new regions inherit it); with rows selected, clicking a class re-classifies them.
+    </li>
+    <li>
+      The <b>Class</b> column dropdown re-classifies one region to a preset (its colour follows), or use the
+      <i class="pi pi-pencil"></i> for a free-form name.
+    </li>
+    <li>
+      Recolour a class from its swatch (class strip or Manage) and every region of that class updates at once.
+    </li>
+    <li>Deleting a class reassigns its regions to the default <b>Region</b> class.</li>
+    <li>
+      A colour you set on a <b>single</b> region (<i class="pi pi-palette"></i> Selected regions) is kept and is
+      not overridden by its class.
+    </li>
+  </ul>
+
+  <h3>Region actions (right-click the diagram)</h3>
+  <p>
+    Right-click a region — or the current multi-selection — on the diagram for the "Selected region(s)" actions:
+  </p>
+  <ul>
+    <li>
+      <b>Merge / group</b> — combine 2+ selected regions into one (it may end up multi-part if the pieces don't
+      touch).
+    </li>
+    <li><b>Ungroup</b> — split a multi-part region back into separate regions.</li>
+    <li>
+      <b>Inverse</b> — replace the selection with everything outside it (the regions become holes in the image
+      rectangle).
+    </li>
+    <li>
+      <b>Simplify</b> — reduce the vertex count (Douglas–Peucker) by a pixel threshold; pick a preset or a custom
+      value.
+    </li>
+    <li><b>Convert to Bézier / to polygon</b> and <b>Delete</b>.</li>
+  </ul>
+
+  <h3>Display options</h3>
+  <ul>
+    <li>
+      <i class="pi pi-tag"></i> Toggle showing class labels on every region in the diagram (slower with many
+      regions).
+    </li>
+  </ul>
+
+  <h3>Import / export</h3>
+  <ul>
+    <li><i class="pi pi-upload"></i> Import regions from a GeoJSON file.</li>
+    <li>
+      <i class="pi pi-download"></i> Export the current image's regions to a GeoJSON file. (The per-image cache is
+      in-memory only — exporting is how you persist regions across sessions.)
+    </li>
+  </ul>
+
+  <ng-template pTemplate="footer">
+    <p-button icon="pi pi-check" (click)="visibleChange.emit(false)" label="Ok" styleClass="p-button-text">
+    </p-button>
+  </ng-template>
+</p-dialog>

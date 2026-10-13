@@ -1,0 +1,70 @@
+<span class="toolbar-separator"></span>
+<!-- Live views: scrub z-slices (the renderer swaps slices in place). -->
+<ng-container *ngIf="liveScrubber">
+  <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
+  <p-slider
+    [ngModel]="zIndex"
+    [min]="0"
+    [max]="maxIndex"
+    ariaLabel="Slice"
+    (onChange)="zScrub.emit($event.value)"
+    (onSlideEnd)="zSlide.emit($event.value)"
+    pTooltip="Slice through the stack (← / → keys)"
+    tooltipPosition="bottom"
+    [style]="{ width: '16rem' }"
+    styleClass="wand-sensitivity-slider"
+  ></p-slider>
+  <span class="flex align-items-center mx-1 toolbar-text">{{ zIndex }} of {{ maxIndex }}</span>
+</ng-container>
+<!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
+     hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
+     spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
+     image, and these modes draw observations, not one of its slices. -->
+<ng-container *ngIf="stackToggle">
+  <p-button
+    icon="pi pi-image"
+    size="small"
+    ariaLabel="Single image mode"
+    [text]="showStack"
+    pTooltip="Single image mode: enables high-def zoom"
+    tooltipPosition="bottom"
+    (onClick)="selectStackOption.emit(stackOptions[0])"
+  >
+  </p-button>
+  <p-button
+    icon="pi pi-images"
+    size="small"
+    ariaLabel="Stack mode"
+    [text]="!showStack"
+    pTooltip="Stack mode, enables slicing through image frames"
+    tooltipPosition="bottom"
+    (onClick)="selectStackOption.emit(stackOptions[1])"
+  >
+  </p-button>
+  <ng-container *ngIf="!showStack">
+    <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
+    <div class="p-inputgroup" style="width: auto">
+      <p-inputNumber
+        styleClass="w-3rem toolbar-input"
+        ariaLabel="Slice number"
+        pTooltip="View image in stack (&#x23CE;)"
+        [ngModel]="zIndex"
+        [min]="0"
+        [max]="maxIndex"
+        (onInput)="onSliceInput($event.value)"
+        (keydown.enter)="reloadAndPlot.emit()"
+      />
+      <p-button
+        icon="pi pi-refresh"
+        size="small"
+        [text]="true"
+        ariaLabel="Plot this slice"
+        (onClick)="reloadAndPlot.emit()"
+        pTooltip="Plot this slice"
+        tooltipPosition="bottom"
+      >
+      </p-button>
+    </div>
+    <span class="flex align-items-center mx-1 toolbar-text">of {{ maxIndex }}</span>
+  </ng-container>
+</ng-container>

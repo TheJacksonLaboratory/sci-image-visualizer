@@ -1,6 +1,4 @@
-import {
-  MAX_SAMPLED_SECTIONS, observationsInSection, sampledSections, sectionsOf,
-} from './spatial-sections';
+import { MAX_SAMPLED_SECTIONS, observationsInSection, sampledSections, sectionsOf } from './spatial-sections';
 import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 /**
@@ -35,9 +33,7 @@ describe('sampledSections', () => {
     const many = Array.from({ length: MAX_SAMPLED_SECTIONS + 1 }, (_, i) => i * 0.5);
     expect(sampledSections(obs(many))).toBeNull();
     // The cap is honoured exactly at the boundary.
-    expect(sampledSections(obs(many.slice(0, MAX_SAMPLED_SECTIONS)))).toHaveLength(
-      MAX_SAMPLED_SECTIONS,
-    );
+    expect(sampledSections(obs(many.slice(0, MAX_SAMPLED_SECTIONS)))).toHaveLength(MAX_SAMPLED_SECTIONS);
     // …and a caller can lower it.
     expect(sampledSections(obs([1, 2, 3]), 2)).toBeNull();
   });
@@ -70,10 +66,7 @@ describe('observationsInSection', () => {
     // The contract between the two functions: every observation with a finite z
     // belongs to exactly one reported section, so the parts sum to the whole.
     const o = obs([6.6, 1.1, 3.3, 1.1, 6.6, 3.3, 1.1]);
-    const total = Array.from(sampledSections(o)!).reduce(
-      (n, z) => n + observationsInSection(o, z).length,
-      0,
-    );
+    const total = Array.from(sampledSections(o)!).reduce((n, z) => n + observationsInSection(o, z).length, 0);
     expect(total).toBe(o.count);
   });
 

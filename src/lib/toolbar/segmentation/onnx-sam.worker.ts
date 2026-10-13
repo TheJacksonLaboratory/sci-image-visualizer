@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { LruCache } from 'napari-js';
 import * as ort from 'onnxruntime-web';
 
 import { fetchModel, runEncoder, runDecoder, type CoreEmbedding } from './sam-onnx-core';
@@ -22,7 +23,8 @@ let encoder: ort.InferenceSession | null = null;
 let decoder: ort.InferenceSession | null = null;
 let inputSize = 1024;
 let nextToken = 1;
-const embeddings = new Map<number, CoreEmbedding>();
+/** The few most recently used embeddings, by token (one per recently viewed image). */
+const embeddings = new LruCache<CoreEmbedding, number>(3);
 
 function post(msg: any, transfer: Transferable[] = []): void {
   (self as unknown as Worker).postMessage(msg, transfer);
@@ -32,11 +34,18 @@ async function onLoad(msg: any): Promise<void> {
   ort.env.wasm.wasmPaths = msg.wasmPaths;
   inputSize = msg.inputSize || 1024;
   const hasGpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
-  const eps: string[] = (msg.encoderProviders && msg.encoderProviders.length)
-    ? msg.encoderProviders
-    : (hasGpu ? ['webgpu', 'wasm'] : ['wasm']);
-  const encBuf = await fetchModel(msg.encoderUrl, (f) => post({ id: msg.id, type: 'progress', fraction: f }));
-  const decBuf = await fetchModel(msg.decoderUrl);
+  const eps: string[] =
+    msg.encoderProviders && msg.encoderProviders.length
+      ? msg.encoderProviders
+      : hasGpu
+        ? ['webgpu', 'wasm']
+        : ['wasm'];
+  const encBuf = await fetchModel(
+    msg.encoderUrl,
+    (f) => post({ id: msg.id, type: 'progress', fraction: f }),
+    msg.revision,
+  );
+  const decBuf = await fetchModel(msg.decoderUrl, undefined, msg.revision);
   encoder = await ort.InferenceSession.create(encBuf, { executionProviders: eps });
   decoder = await ort.InferenceSession.create(decBuf, { executionProviders: ['wasm'] });
   post({ id: msg.id, type: 'loaded' });
@@ -48,9 +57,15 @@ async function onEmbed(msg: any): Promise<void> {
   const e = await runEncoder(encoder, data, msg.width, msg.height, inputSize);
   const token = nextToken++;
   embeddings.set(token, e);
-  // Keep only the few most-recent embeddings (one per recently-viewed image).
-  if (embeddings.size > 3) embeddings.delete(embeddings.keys().next().value as number);
-  post({ id: msg.id, type: 'embedded', token, scale: e.scale, imageWidth: e.imageWidth, imageHeight: e.imageHeight, dims: e.dims });
+  post({
+    id: msg.id,
+    type: 'embedded',
+    token,
+    scale: e.scale,
+    imageWidth: e.imageWidth,
+    imageHeight: e.imageHeight,
+    dims: e.dims,
+  });
 }
 
 async function onDecode(msg: any): Promise<void> {
@@ -58,10 +73,9 @@ async function onDecode(msg: any): Promise<void> {
   const e = embeddings.get(msg.token);
   if (!e) throw new Error('SAM embedding expired; re-encode the image.');
   const r = await runDecoder(decoder, e, msg.prompt);
-  post(
-    { id: msg.id, type: 'decoded', width: r.width, height: r.height, iou: r.iou, buffer: r.mask.buffer },
-    [r.mask.buffer],
-  );
+  post({ id: msg.id, type: 'decoded', width: r.width, height: r.height, iou: r.iou, buffer: r.mask.buffer }, [
+    r.mask.buffer,
+  ]);
 }
 
 self.onmessage = async (ev: MessageEvent): Promise<void> => {

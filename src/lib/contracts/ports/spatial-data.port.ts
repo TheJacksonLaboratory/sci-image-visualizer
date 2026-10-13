@@ -2,8 +2,16 @@ import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
-  SpatialColumn, SpatialDataset, SpatialDensityRaster, SpatialEmbedding, SpatialPolygonTile,
-  CategoricalColumnMeta, SpatialMarkerGenes, SpatialPolygons, SpatialTranscriptCounts, SpatialTranscriptSummary,
+  SpatialColumn,
+  SpatialDataset,
+  SpatialDensityRaster,
+  SpatialEmbedding,
+  SpatialPolygonTile,
+  CategoricalColumnMeta,
+  SpatialMarkerGenes,
+  SpatialPolygons,
+  SpatialTranscriptCounts,
+  SpatialTranscriptSummary,
   SpatialTranscriptTile,
 } from '../spatial-dataset.contract';
 
@@ -107,7 +115,10 @@ export interface SpatialDataPort {
    * Optional: only datasets that advertise `transcriptTiles` need it.
    */
   getTranscriptTile?(
-    level: number, gx: number, gy: number, query: TranscriptTileQuery,
+    level: number,
+    gx: number,
+    gy: number,
+    query: TranscriptTileQuery,
   ): Promise<SpatialTranscriptTile>;
 
   /**
@@ -129,7 +140,9 @@ export interface SpatialDataPort {
    * transcript markers.
    */
   getTranscriptSummary?(query: {
-    box?: [number, number, number, number]; genes?: string[]; cells?: number[];
+    box?: [number, number, number, number];
+    genes?: string[];
+    cells?: number[];
   }): Promise<SpatialTranscriptSummary>;
 
   /**
@@ -165,14 +178,10 @@ export interface SpatialDataPort {
    * mode should never pay for it.
    */
   getVolume?(): Promise<Uint8Array>;
-
-  /**
-   * Server-side "which observations fall inside this polygon", for datasets
-   * too large to hit-test client-side. Optional: without it the library
-   * point-in-polygons the resident coordinates itself, which is fine into the
-   * 10^5 range. Coordinates are in the same space as the observations.
-   */
-  queryRoi?(polygon: { x: number[]; y: number[] }): Promise<Uint32Array>;
 }
 
+/**
+ * DI token for the host's {@link SpatialDataPort}. Optional: a host that serves no
+ * spatial-omics data binds nothing, and the spatial plot types stay hidden.
+ */
 export const SPATIAL_DATA_PORT = new InjectionToken<SpatialDataPort>('SPATIAL_DATA_PORT');

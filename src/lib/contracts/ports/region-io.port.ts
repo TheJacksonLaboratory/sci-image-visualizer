@@ -25,4 +25,5 @@ export interface RegionIoPort {
   saveSliceGeoJsons(slices: { z: number; geoJsonStr: string }[]): Observable<void>;
 }
 
+/** DI token for the host's {@link RegionIoPort}. Required by the region editor. */
 export const REGION_IO_PORT = new InjectionToken<RegionIoPort>('REGION_IO_PORT');

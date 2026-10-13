@@ -9,7 +9,10 @@ const raster = (xs: number[], ys: number[], w: number, h: number, holes?: number
 function rectRegion(x: number, y: number, w: number, h: number): Region {
   const r = new Region();
   const b = new Rectangle();
-  b.x = x; b.y = y; b.width = w; b.height = h;
+  b.x = x;
+  b.y = y;
+  b.width = w;
+  b.height = h;
   r.bounds = b;
   return r;
 }
@@ -26,8 +29,17 @@ describe('mask-raster (jit-ui#95)', () => {
     it('keeps a polygon points + holes', () => {
       const r = new Region();
       const p = new Polygon();
-      p.xpoints = [0, 4, 4, 0]; p.ypoints = [0, 0, 4, 4]; p.npoints = 4;
-      p.holes = [[[1, 1], [2, 1], [2, 2], [1, 2]]];
+      p.xpoints = [0, 4, 4, 0];
+      p.ypoints = [0, 0, 4, 4];
+      p.npoints = 4;
+      p.holes = [
+        [
+          [1, 1],
+          [2, 1],
+          [2, 2],
+          [1, 2],
+        ],
+      ];
       r.bounds = p;
       const parts = regionToParts(r);
       expect(parts).toHaveLength(1);
@@ -37,8 +49,12 @@ describe('mask-raster (jit-ui#95)', () => {
     it('expands a multi-polygon into one part per polygon', () => {
       const r = new Region();
       const mp = new MultiPolygon();
-      const a = new Polygon(); a.xpoints = [0, 2, 2, 0]; a.ypoints = [0, 0, 2, 2];
-      const b = new Polygon(); b.xpoints = [5, 7, 7, 5]; b.ypoints = [5, 5, 7, 7];
+      const a = new Polygon();
+      a.xpoints = [0, 2, 2, 0];
+      a.ypoints = [0, 0, 2, 2];
+      const b = new Polygon();
+      b.xpoints = [5, 7, 7, 5];
+      b.ypoints = [5, 5, 7, 7];
       mp.polygons = [a, b];
       r.bounds = mp;
       expect(regionToParts(r)).toHaveLength(2);
@@ -57,6 +73,19 @@ describe('mask-raster (jit-ui#95)', () => {
       expect(at(mask.data, 3, 3, 8)).toBe(255);
       expect(at(mask.data, 0, 0, 8)).toBe(0);
       expect(Array.from(mask.data).every((v) => v === 0 || v === 255)).toBe(true);
+    });
+
+    it('paints exactly the pixels a rectangle covers', () => {
+      const mask = regionsToMask([regionToParts(rectRegion(2, 2, 4, 4))], 8, 8, 'binary', raster)!;
+      expect(Array.from(mask.data).filter((v) => v).length).toBe(16);
+    });
+
+    it('paints only the part of a region inside the image, without wrapping into the next row', () => {
+      // Overhangs the left and the right edge: 3 + 2 columns inside, 2 rows each.
+      const parts = [regionToParts(rectRegion(-3, 2, 6, 2)), regionToParts(rectRegion(6, 5, 5, 2))];
+      const mask = regionsToMask(parts, 8, 8, 'binary', raster)!;
+      const set = Array.from(mask.data).flatMap((v, i) => (v ? [`${i % 8},${Math.floor(i / 8)}`] : []));
+      expect(set).toEqual(['0,2', '1,2', '2,2', '0,3', '1,3', '2,3', '6,5', '7,5', '6,6', '7,6']);
     });
 
     it('multiclass mode gives each region a distinct 1-based id (8-bit for ≤255)', () => {
@@ -82,7 +111,10 @@ describe('mask-raster (jit-ui#95)', () => {
       const parts = [regionToParts(rectRegion(0, 0, 2, 2)), regionToParts(rectRegion(4, 4, 2, 2))];
       const progress: Array<[number, number]> = [];
       regionsToMask(parts, 8, 8, 'binary', raster, (done, total) => progress.push([done, total]));
-      expect(progress).toEqual([[1, 2], [2, 2]]);
+      expect(progress).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
     });
 
     it('returns null for no regions or a zero/invalid size', () => {

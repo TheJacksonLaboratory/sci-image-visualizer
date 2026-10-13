@@ -1,0 +1,75 @@
+<ng-container *ngIf="groupOptions.length">
+  <div class="sc-subhead">Groups</div>
+  <div class="sc-row sc-row-picker">
+    <p-dropdown
+      [options]="groupOptions"
+      [group]="true"
+      optionLabel="label"
+      optionValue="value"
+      optionGroupLabel="label"
+      optionGroupChildren="items"
+      [ngModel]="activeGroupEntry"
+      (ngModelChange)="onGroupEntry($event)"
+      appendTo="body"
+      styleClass="sc-full"
+    >
+      <ng-template let-group pTemplate="group">
+        <span class="sc-group-heading">{{ group.label }}</span>
+      </ng-template>
+    </p-dropdown>
+    <p-dropdown
+      *ngIf="groupVariantOptions.length"
+      [options]="groupVariantOptions"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="sc-variant"
+      [ngModel]="activeCellTypeColumn"
+      (ngModelChange)="onGroupVariant($event)"
+      appendTo="body"
+    ></p-dropdown>
+    <button
+      *ngIf="canImportGroups"
+      type="button"
+      class="sc-icon-btn"
+      [disabled]="groupImporting"
+      (click)="groupFile.click()"
+      title="Import cell groups (CSV of cell_id, group)"
+    >
+      <i
+        class="pi"
+        [class.pi-plus-circle]="!groupImporting"
+        [class.pi-spin]="groupImporting"
+        [class.pi-spinner]="groupImporting"
+      ></i>
+    </button>
+    <input #groupFile type="file" accept=".csv,.tsv,.txt" hidden (change)="onImportGroupsFile(groupFile)" />
+  </div>
+  <small class="sc-hint sc-error" *ngIf="groupImportError">{{ groupImportError }}</small>
+
+  <div class="sc-group-list" *ngIf="groupRows.length">
+    <div class="sc-group-row sc-group-all">
+      <p-checkbox
+        [binary]="true"
+        [ngModel]="allGroupsShown"
+        (onChange)="onAllGroupsShown($event.checked)"
+      ></p-checkbox>
+      <span class="sc-group-label">All groups</span>
+      <span class="sc-count">({{ groupTotal | number }})</span>
+      <button type="button" class="sc-icon-btn" (click)="groupsExpanded = !groupsExpanded">
+        <i class="pi" [class.pi-chevron-down]="groupsExpanded" [class.pi-chevron-right]="!groupsExpanded"></i>
+      </button>
+    </div>
+    <ng-container *ngIf="groupsExpanded">
+      <div class="sc-group-row" *ngFor="let row of groupRows; trackBy: trackByLabel">
+        <p-checkbox
+          [binary]="true"
+          [ngModel]="isGroupShown(row.label)"
+          (onChange)="onGroupShown(row.label, $event.checked)"
+        ></p-checkbox>
+        <span class="sc-dot" [style.background]="row.color"></span>
+        <span class="sc-group-label" [title]="row.label">{{ row.label }}</span>
+        <span class="sc-count">({{ row.count | number }})</span>
+      </div>
+    </ng-container>
+  </div>
+</ng-container>

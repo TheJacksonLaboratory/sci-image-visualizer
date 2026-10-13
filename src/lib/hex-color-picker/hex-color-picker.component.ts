@@ -1,12 +1,40 @@
 import {
-  ChangeDetectionStrategy, ChangeDetectorRef, Component, ElementRef,
-  EventEmitter, HostListener, Input, OnDestroy, Output, Renderer2, ViewChild,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ElementRef,
+  EventEmitter,
+  Input,
+  NgZone,
+  OnDestroy,
+  Output,
+  Renderer2,
+  ViewChild,
+  computed,
+  signal,
 } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 
+import { hslToHex } from '../store/class-color.util';
+import { hexToRgb, rgbToHex } from '../contracts/color';
+
+/** The hue slider's track: the full hue wheel, the same for every picker. */
+const HUE_GRADIENT = `linear-gradient(to right, ${Array.from(
+  { length: 13 },
+  (_, i) => `hsl(${i * 30}, 100%, 50%)`,
+).join(', ')})`;
+
+/**
+ * A compact colour picker: a swatch button that opens a honeycomb palette with a
+ * hex field, the system colour picker, HSL sliders and RGB fields. Bind `[color]`
+ * and listen to `(colorChange)` (committed picks) and, for a live preview,
+ * `(colorInput)` (every intermediate colour while dragging).
+ */
 @Component({
-  // Canonical prefixed selector first; the unprefixed original is kept as an
-  // alias for one release (pre-publication back-compat).
   selector: 'hex-color-picker',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
   // OnPush so the always-in-DOM (but hidden) picker panel — a ~130-cell honeycomb
@@ -15,31 +43,56 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HexColorPickerComponent implements OnDestroy {
-
   private static readonly DROPDOWN_WIDTH = 280;
 
-  private _color = '#000000';
+  /** The colour shown (the swatch, the hex field, the selected cell). */
+  private readonly current = signal('#000000');
 
+  /** The committed colour: a swatch/hex pick, or a slider/field/system-picker
+   *  edit once it is released. Hosts commit their state on this. */
   @Output() colorChange = new EventEmitter<string>();
+  /** Every intermediate colour while a slider, number field or the system picker
+   *  is being dragged — for a live preview; {@link colorChange} follows on release. */
+  @Output() colorInput = new EventEmitter<string>();
 
-  open = false;
+  /** The last colour emitted on (or received through) `color`, so a release
+   *  without a change doesn't commit again. */
+  private committed = '#000000';
+  /** Removes the document click listener; set only while the dropdown is open. */
+  private unlistenDocumentClick: (() => void) | null = null;
 
-  @ViewChild('swatchBtn') swatchBtn!: ElementRef<HTMLButtonElement>;
-  @ViewChild('dropdown') dropdownRef!: ElementRef<HTMLDivElement>;
+  /** The palette dropdown is open. */
+  protected readonly open = signal(false);
+
+  @ViewChild('swatchBtn') private swatchBtn!: ElementRef<HTMLButtonElement>;
+  @ViewChild('dropdown') private dropdownRef!: ElementRef<HTMLDivElement>;
 
   // HSL values
-  hue = 0;
-  saturation = 100;
-  lightness = 50;
+  protected readonly hue = signal(0);
+  protected readonly saturation = signal(100);
+  protected readonly lightness = signal(50);
 
   // RGB values
-  red = 0;
-  green = 0;
-  blue = 0;
+  protected readonly red = signal(0);
+  protected readonly green = signal(0);
+  protected readonly blue = signal(0);
+
+  /** Slider tracks: hue is fixed; saturation and lightness follow the other two. */
+  protected readonly hueGradient = HUE_GRADIENT;
+  protected readonly satGradient = computed(() => {
+    const h = this.hue(),
+      l = this.lightness();
+    return `linear-gradient(to right, hsl(${h}, 0%, ${l}%), hsl(${h}, 100%, ${l}%))`;
+  });
+  protected readonly lightGradient = computed(() => {
+    const h = this.hue(),
+      s = this.saturation();
+    return `linear-gradient(to right, hsl(${h}, ${s}%, 0%), hsl(${h}, ${s}%, 50%), hsl(${h}, ${s}%, 100%))`;
+  });
 
   // Honeycomb color palette
   // Honeycomb color palette from w3schools — 7 per side, 13 rows (7→13→7)
-  readonly colorRows: string[][] = [
+  protected readonly colorRows: string[][] = [
     // Row 1: 7
     ['#003366', '#336699', '#3366CC', '#003399', '#000099', '#0000CC', '#000066'],
     // Row 2: 8
@@ -49,15 +102,79 @@ export class HexColorPickerComponent implements OnDestroy {
     // Row 4: 10
     ['#339966', '#00CC99', '#00FFCC', '#00FFFF', '#33CCFF', '#3399FF', '#6699FF', '#6666FF', '#6600FF', '#6600CC'],
     // Row 5: 11
-    ['#339933', '#00CC66', '#00FF99', '#66FFCC', '#66FFFF', '#66CCFF', '#99CCFF', '#9999FF', '#9966FF', '#9933FF', '#9900FF'],
+    [
+      '#339933',
+      '#00CC66',
+      '#00FF99',
+      '#66FFCC',
+      '#66FFFF',
+      '#66CCFF',
+      '#99CCFF',
+      '#9999FF',
+      '#9966FF',
+      '#9933FF',
+      '#9900FF',
+    ],
     // Row 6: 12
-    ['#006600', '#00CC00', '#00FF00', '#66FF99', '#99FFCC', '#CCFFFF', '#CCCCFF', '#CC99FF', '#CC66FF', '#CC33FF', '#CC00FF', '#9900CC'],
+    [
+      '#006600',
+      '#00CC00',
+      '#00FF00',
+      '#66FF99',
+      '#99FFCC',
+      '#CCFFFF',
+      '#CCCCFF',
+      '#CC99FF',
+      '#CC66FF',
+      '#CC33FF',
+      '#CC00FF',
+      '#9900CC',
+    ],
     // Row 7: 13 (center)
-    ['#003300', '#009933', '#33CC33', '#66FF66', '#99FF99', '#CCFFCC', '#FFFFFF', '#FFCCFF', '#FF99FF', '#FF66FF', '#FF00FF', '#CC00CC', '#660066'],
+    [
+      '#003300',
+      '#009933',
+      '#33CC33',
+      '#66FF66',
+      '#99FF99',
+      '#CCFFCC',
+      '#FFFFFF',
+      '#FFCCFF',
+      '#FF99FF',
+      '#FF66FF',
+      '#FF00FF',
+      '#CC00CC',
+      '#660066',
+    ],
     // Row 8: 12
-    ['#336600', '#009900', '#66FF33', '#99FF66', '#CCFF99', '#FFFFCC', '#FFCCCC', '#FF99CC', '#FF66CC', '#FF33CC', '#CC0099', '#993399'],
+    [
+      '#336600',
+      '#009900',
+      '#66FF33',
+      '#99FF66',
+      '#CCFF99',
+      '#FFFFCC',
+      '#FFCCCC',
+      '#FF99CC',
+      '#FF66CC',
+      '#FF33CC',
+      '#CC0099',
+      '#993399',
+    ],
     // Row 9: 11
-    ['#333300', '#669900', '#99FF33', '#CCFF66', '#FFFF99', '#FFCC99', '#FF9999', '#FF6699', '#FF3399', '#CC3399', '#990099'],
+    [
+      '#333300',
+      '#669900',
+      '#99FF33',
+      '#CCFF66',
+      '#FFFF99',
+      '#FFCC99',
+      '#FF9999',
+      '#FF6699',
+      '#FF3399',
+      '#CC3399',
+      '#990099',
+    ],
     // Row 10: 10
     ['#666633', '#99CC00', '#CCFF33', '#FFFF66', '#FFCC66', '#FF9966', '#FF6666', '#FF0066', '#CC6699', '#993366'],
     // Row 11: 9
@@ -72,31 +189,60 @@ export class HexColorPickerComponent implements OnDestroy {
     return val ? val.toUpperCase() : val;
   }
 
+  /** The colour (`#RRGGBB`) to show; upper-cased on the way in. */
   @Input()
   get color(): string {
-    return this._color;
+    return this.current();
   }
   set color(val: string) {
     const normalizedColor = this.normalizeHexColor(val);
-    this._color = normalizedColor;
+    this.current.set(normalizedColor);
+    this.committed = normalizedColor;
     this.syncFromHex(normalizedColor);
   }
 
-  constructor(private elRef: ElementRef, private renderer: Renderer2, private cdr: ChangeDetectorRef) {}
+  constructor(
+    private elRef: ElementRef,
+    private renderer: Renderer2,
+    private cdr: ChangeDetectorRef,
+    private ngZone: NgZone,
+  ) {}
 
   ngOnDestroy() {
+    this.stopListeningForOutsideClicks();
     this.removeDropdownFromBody();
   }
 
-  toggle() {
-    this.open = !this.open;
-    if (this.open) {
+  protected toggle() {
+    this.open.update((o) => !o);
+    if (this.open()) {
       // Let Angular render the dropdown, then move it to body
       this.cdr.detectChanges();
       this.appendDropdownToBody();
+      this.listenForOutsideClicks();
     } else {
-      this.removeDropdownFromBody();
+      this.close();
     }
+  }
+
+  /**
+   * Close on a click outside the swatch and dropdown. Registered only while
+   * open and outside the Angular zone, so the many pickers on a page (one per
+   * class row and channel) don't each run app-wide change detection on every
+   * click anywhere (RT-22).
+   */
+  private listenForOutsideClicks() {
+    if (this.unlistenDocumentClick) return;
+    this.ngZone.runOutsideAngular(() => {
+      this.unlistenDocumentClick = this.renderer.listen('document', 'click', (event: Event) => {
+        if (this.isOutside(event)) this.ngZone.run(() => this.onDocumentClick(event));
+      });
+    });
+  }
+
+  private stopListeningForOutsideClicks() {
+    this.unlistenDocumentClick?.();
+    this.unlistenDocumentClick = null;
   }
 
   private appendDropdownToBody() {
@@ -128,122 +274,104 @@ export class HexColorPickerComponent implements OnDestroy {
     }
   }
 
-  selectColor(hex: string) {
-    this._color = hex;
+  protected selectColor(hex: string) {
+    this.current.set(hex);
     this.syncFromHex(hex);
-    this.colorChange.emit(hex);
+    this.commitColor();
   }
 
-  selectAndClose(hex: string) {
+  /** Live preview from the system colour picker while it is open. */
+  protected previewColor(hex: string) {
+    this.current.set(hex);
+    this.syncFromHex(hex);
+    this.colorInput.emit(hex);
+  }
+
+  /** Commit the current colour (`colorChange`) unless it was already committed. */
+  protected commitColor() {
+    const color = this.current();
+    if (color === this.committed) return;
+    this.committed = color;
+    this.colorChange.emit(color);
+  }
+
+  protected selectAndClose(hex: string) {
     this.selectColor(hex);
     this.close();
   }
 
+  /** Close the palette dropdown (no-op when closed). */
   close() {
-    this.open = false;
+    this.open.set(false);
+    this.stopListeningForOutsideClicks();
     this.removeDropdownFromBody();
   }
 
-  onHexInput(value: string) {
+  protected onHexInput(value: string) {
     if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
       this.selectColor(value);
     }
   }
 
-  onHslChange() {
-    const hex = this.hslToHex(this.hue, this.saturation, this.lightness);
-    this._color = hex;
+  protected onHslChange() {
+    const hex = hslToHex(this.hue(), this.saturation(), this.lightness());
+    this.current.set(hex);
     this.syncRgbFromHex(hex);
-    this.colorChange.emit(hex);
+    this.colorInput.emit(hex);
   }
 
-  onRgbChange() {
-    const red = Math.max(0, Math.min(255, this.red));
-    const green = Math.max(0, Math.min(255, this.green));
-    const blue = Math.max(0, Math.min(255, this.blue));
+  protected onRgbChange() {
+    const red = Math.max(0, Math.min(255, this.red()));
+    const green = Math.max(0, Math.min(255, this.green()));
+    const blue = Math.max(0, Math.min(255, this.blue()));
 
-    this.red = red;
-    this.green = green;
-    this.blue = blue;
+    this.red.set(red);
+    this.green.set(green);
+    this.blue.set(blue);
 
-    const hex = this.rgbToHex(red, green, blue);
-    this._color = hex;
+    const hex = rgbToHex([red, green, blue]).toUpperCase();
+    this.current.set(hex);
     this.syncHslFromRgb(red, green, blue);
-    this.colorChange.emit(hex);
+    this.colorInput.emit(hex);
   }
 
-  get hueGradient(): string {
-    const stops = [];
-    for (let h = 0; h <= 360; h += 30) {
-      stops.push(`hsl(${h}, 100%, 50%)`);
-    }
-    return `linear-gradient(to right, ${stops.join(', ')})`;
+  /** Close the dropdown when `event` is a click outside the picker. */
+  protected onDocumentClick(event: Event) {
+    if (!this.open()) return;
+    if (this.isOutside(event)) this.close();
   }
 
-  get satGradient(): string {
-    return `linear-gradient(to right, hsl(${this.hue}, 0%, ${this.lightness}%), hsl(${this.hue}, 100%, ${this.lightness}%))`;
-  }
-
-  get lightGradient(): string {
-    return `linear-gradient(to right, hsl(${this.hue}, ${this.saturation}%, 0%), hsl(${this.hue}, ${this.saturation}%, 50%), hsl(${this.hue}, ${this.saturation}%, 100%))`;
-  }
-
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: Event) {
-    if (!this.open) return;
+  private isOutside(event: Event): boolean {
     const target = event.target as Node;
-    const clickedInside =
-      this.elRef.nativeElement.contains(target) || this.dropdownRef?.nativeElement.contains(target);
-    if (!clickedInside) {
-      this.close();
-    }
+    return !this.elRef.nativeElement.contains(target) && !this.dropdownRef?.nativeElement.contains(target);
   }
 
   // --- Color conversion utilities ---
 
   private syncFromHex(hex: string) {
-    const rgb = this.hexToRgb(hex);
+    const rgb = hexToRgb(hex);
     if (rgb) {
-      this.red = rgb.r;
-      this.green = rgb.g;
-      this.blue = rgb.b;
-      this.syncHslFromRgb(rgb.r, rgb.g, rgb.b);
+      this.setRgb(rgb);
+      this.syncHslFromRgb(rgb[0], rgb[1], rgb[2]);
     }
   }
 
   private syncRgbFromHex(hex: string) {
-    const rgb = this.hexToRgb(hex);
-    if (rgb) {
-      this.red = rgb.r;
-      this.green = rgb.g;
-      this.blue = rgb.b;
-    }
+    const rgb = hexToRgb(hex);
+    if (rgb) this.setRgb(rgb);
+  }
+
+  private setRgb([r, g, b]: readonly number[]) {
+    this.red.set(r);
+    this.green.set(g);
+    this.blue.set(b);
   }
 
   private syncHslFromRgb(r: number, g: number, b: number) {
     const hsl = this.rgbToHsl(r, g, b);
-    this.hue = hsl.h;
-    this.saturation = hsl.s;
-    this.lightness = hsl.l;
-  }
-
-  private hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-    const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return match
-      ? {
-          r: parseInt(match[1], 16),
-          g: parseInt(match[2], 16),
-          b: parseInt(match[3], 16),
-        }
-      : null;
-  }
-
-  private rgbToHex(r: number, g: number, b: number): string {
-    const toHex = (n: number) =>
-      Math.max(0, Math.min(255, Math.round(n)))
-        .toString(16)
-        .padStart(2, '0');
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
+    this.hue.set(hsl.h);
+    this.saturation.set(hsl.s);
+    this.lightness.set(hsl.l);
   }
 
   private rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
@@ -271,17 +399,5 @@ export class HexColorPickerComponent implements OnDestroy {
       }
     }
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
-  }
-
-  private hslToHex(h: number, s: number, l: number): string {
-    s /= 100;
-    l /= 100;
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number) => {
-      const k = (n + h / 30) % 12;
-      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-      return Math.round(255 * color);
-    };
-    return this.rgbToHex(f(0), f(8), f(4));
   }
 }
