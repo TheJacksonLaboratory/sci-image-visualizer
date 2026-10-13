@@ -37,6 +37,20 @@ export class Region {
    * through the store, so the marker has to travel with the data.
    */
   source?: string;
+  /**
+   * The id of the GeoJSON feature this region was read from (the feature's `id`, else
+   * `properties.id`; for a tiled region source, else its position in the file). Written back
+   * as the feature's `id` on export, so a region keeps its identity through a save. A region
+   * taken out of a region source for editing carries it, and the source stops drawing that
+   * feature while it does.
+   */
+  sourceId?: string;
+  /**
+   * The feature's other GeoJSON properties (everything but the ones SIV reads and writes:
+   * `classification`, `id` and the bézier fields), carried through untouched so a save keeps
+   * them, e.g. an atlas structure's acronym and id.
+   */
+  properties?: Readonly<Record<string, unknown>>;
   color?: string; // hex string, e.g. '#RRGGBB' (the historical "[r, g, b]" note is stale)
   // class label
   label?: string;
