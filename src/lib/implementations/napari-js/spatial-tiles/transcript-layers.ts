@@ -18,8 +18,8 @@ import { filterTranscripts, hiddenGeneSlots, median } from '../../../spatial/spa
 import type { CategoricalLookup } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
-import type { TranscriptHover } from './transcript-hover';
-import { type TranscriptJobPlanner, groupSelection } from './transcript-jobs';
+import type { TranscriptHover, TranscriptKind } from './transcript-hover';
+import { type TranscriptJob, type TranscriptJobPlanner, groupSelection } from './transcript-jobs';
 
 /** Icons get a dark rim only while there are at most this many, at least this big (px). */
 const GLYPH_OUTLINE_MAX = 20_000;
@@ -51,6 +51,43 @@ export const GLYPH_SYMBOLS: Readonly<Record<TranscriptGlyph, PointSymbol>> = {
  * whole box, where the icon it replaces had a 0.8 half-side, as heavy as the other icons.
  */
 const GLYPH_SIZE: Readonly<Partial<Record<TranscriptGlyph, number>>> = { square: 0.8 };
+
+/**
+ * What a transcript plan draws, as a key: an unchanged one is a no-op. Marker sizes follow the
+ * zoom, so the zoom is part of it; a pan that keeps the same tiles on screen changes nothing.
+ */
+function transcriptPlanKey(
+  dataset: SpatialDataset,
+  view: SpatialViewState,
+  job: TranscriptJob,
+  pxPerUnit: number,
+): string {
+  return [
+    dataset.id,
+    view.transcriptMode,
+    job.key,
+    view.transcriptColorBy,
+    cellTypeColumnFor(dataset, view),
+    view.transcriptScale,
+    view.transcriptOpacity,
+    JSON.stringify(view.transcriptGlyphs),
+    pxPerUnit.toPrecision(4),
+    view.hiddenGroups.join('\u0001'),
+    view.transcriptHiddenGenes.join(','),
+    JSON.stringify(view.transcriptGeneColors),
+    JSON.stringify(view.transcriptGeneGroups),
+  ].join('|');
+}
+
+/** The view the markers are coloured by, for what was loaded. */
+function colorViewFor(view: SpatialViewState, kind: TranscriptKind, clustered: boolean): SpatialViewState {
+  // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
+  // by gene: colour it by its dominant cell's type until individual transcripts show.
+  if (kind === 'bins' && view.transcriptColorBy !== 'cellType') return { ...view, transcriptColorBy: 'cellType' };
+  // Density-grid markers have no cell to take a type from: they take their cluster's colour.
+  if (clustered && view.transcriptColorBy === 'cellType') return { ...view, transcriptColorBy: 'cluster' };
+  return view;
+}
 
 /** Where a layer sits in world space: the dataset's affine onto its tissue image. */
 interface Placement {
@@ -119,23 +156,7 @@ export class TranscriptLayers {
       this.countSource = null;
       return;
     }
-    // Marker sizes follow the zoom, so the zoom is part of the key; a pan that keeps
-    // the same tiles on screen changes nothing.
-    const planKey = [
-      dataset.id,
-      mode,
-      job.key,
-      view.transcriptColorBy,
-      cellTypeColumnFor(dataset, view),
-      view.transcriptScale,
-      view.transcriptOpacity,
-      JSON.stringify(view.transcriptGlyphs),
-      pxPerUnit.toPrecision(4),
-      view.hiddenGroups.join('\u0001'),
-      view.transcriptHiddenGenes.join(','),
-      JSON.stringify(view.transcriptGeneColors),
-      JSON.stringify(view.transcriptGeneGroups),
-    ].join('|');
+    const planKey = transcriptPlanKey(dataset, view, job, pxPerUnit);
     if (planKey === this.groups.key('transcripts') && this.groups.shown('transcripts')) {
       return;
     }
@@ -167,16 +188,8 @@ export class TranscriptLayers {
       const g = groupSelection(merged, view, loaded.ladder, pxPerUnit);
       if (g) ({ merged, px, bin: selectionBin, group: entryGroup, names: groupNames } = g);
     }
-    // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
-    // by gene: colour it by its dominant cell's type until individual transcripts show.
     const kind = loaded.kind ?? job.kind;
-    const colorView =
-      kind === 'bins' && view.transcriptColorBy !== 'cellType'
-        ? { ...view, transcriptColorBy: 'cellType' as const }
-        : // Density-grid markers have no cell to take a type from: they take their cluster's colour.
-          loaded.clustered && view.transcriptColorBy === 'cellType'
-          ? { ...view, transcriptColorBy: 'cluster' as const }
-          : view;
+    const colorView = colorViewFor(view, kind, !!loaded.clustered);
     // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
     const geneCluster = view.transcriptGenes.map(
       (g) => view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g,
