@@ -220,21 +220,10 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     if (!task()) return;
 
     if (!dataset || dataset.observations.count === 0) {
-      if (this.points) {
-        viewer.layers.remove(this.points);
-        this.points = null;
-        this.layerKey = null;
-        this.drawn = null;
-      }
-      if (this.geneMapLayer) {
-        viewer.layers.remove(this.geneMapLayer);
-        this.geneMapLayer = null;
-        this.geneMapKey = null;
-      }
+      this.removeLayers(viewer);
       return;
     }
 
-    const obs = dataset.observations;
     // A dataset whose image IS its volume shows ONE PLANE at a time, so the
     // markers are the observations in the displayed plane, drawn in that plane's
     // pixel grid. Without the filter the specimen's whole depth piles onto one
@@ -244,6 +233,36 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // The gene map goes UNDER the cells, so it is settled before they are added.
     await this.ensureGeneMap(viewer, dataset, view, selection, slab);
     if (!task()) return;
+    this.drawMarkers(viewer, dataset, view, faceColor, slab);
+  }
+
+  /** Nothing to draw: drop the markers and the gene map. */
+  private removeLayers(viewer: Viewer): void {
+    if (this.points) {
+      viewer.layers.remove(this.points);
+      this.points = null;
+      this.layerKey = null;
+      this.drawn = null;
+    }
+    if (this.geneMapLayer) {
+      viewer.layers.remove(this.geneMapLayer);
+      this.geneMapLayer = null;
+      this.geneMapKey = null;
+    }
+  }
+
+  /**
+   * Draw the observation markers over the image (and the gene map): restyled in place for a
+   * display-only change, else a new layer.
+   */
+  private drawMarkers(
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    faceColor: PointColors,
+    slab: Slab | null,
+  ): void {
+    const obs = dataset.observations;
     const ref = slab?.ref ?? dataset.imageRef;
     const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
     const scale = view.pointScale > 0 ? view.pointScale : 1;
