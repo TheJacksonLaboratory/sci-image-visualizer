@@ -5,11 +5,25 @@ import { IRegionDataHost } from '../../contracts/coordinate-transform.contract';
 import { Polygon, Region } from '../../models/region';
 import { makePolygon, replaceBounds } from '../../models/polygon-factory';
 import { MatrixFrame } from './matrix-frame';
+import type { CachedImageData, CanvasToolHost } from './canvas-tool';
 
 /** The readback size the stroke is painted against (the rasterizer's clip window). */
 export interface StrokeImage {
   width: number;
   height: number;
+}
+
+/** Where a wand or brush pointer tick lands (see {@link MaskStrokeEditor.beginTick}). */
+export interface StrokeTick {
+  /** The host's readback. */
+  cached: CachedImageData;
+  /** The current regions, mutated by the tick and committed once. */
+  regions: Region[];
+  /** The readback's data↔matrix frame. */
+  frame: MatrixFrame;
+  /** The matrix point under the pointer, inside the readback. */
+  mx: number;
+  my: number;
 }
 
 /** How a commit turns traced pieces into regions. */
@@ -62,6 +76,33 @@ export class MaskStrokeEditor {
     this.extraIds = [];
     this.lastCommitted = [];
     this.template = null;
+  }
+
+  /**
+   * Start a wand or brush tick at pointer `e`: read the host's readback and
+   * regions, drop a stale stroke ({@link invalidateIfStale}) or one from another
+   * view ({@link syncFrame}), and map the pointer into the readback's matrix.
+   * Null when there is no readback or ready transform, or the pointer is off it.
+   */
+  beginTick(host: CanvasToolHost, e: { clientX: number; clientY: number }): StrokeTick | null {
+    const cached = host.getCachedImageData();
+    if (!cached || cached.frames.length === 0) return null;
+
+    const regions = host.getRegions();
+    this.invalidateIfStale(regions);
+
+    const transform = host.getCoordinateTransform();
+    if (!transform.isReady()) return null;
+    const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
+    if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return null;
+
+    const frame = MatrixFrame.from(cached);
+    this.syncFrame(frame);
+    const mx = frame.toMatrixX(dataX);
+    const my = frame.toMatrixY(dataY);
+    if (mx < 0 || mx >= cached.width) return null;
+    if (my < 0 || my >= cached.height) return null;
+    return { cached, regions, frame, mx, my };
   }
 
   /** Drop a stroke whose regions were undone, deleted or replaced outside the

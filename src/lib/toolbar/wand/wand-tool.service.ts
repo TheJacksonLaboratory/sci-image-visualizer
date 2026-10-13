@@ -1,10 +1,9 @@
-import { WandImage, WandOptions, WandService } from './wand.service';
+import { WandImage, WandOptions, WandPatchMask, WandService } from './wand.service';
 import { BBoxMask } from '../../geometry/raster';
-import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
 import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
-import { CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
+import { CachedImageData, CanvasToolHost, ICanvasTool } from '../tool-kit/canvas-tool';
 import { Region } from '../../models/region';
 
 // The readback type lives with the tool contract now; re-exported for the
@@ -129,34 +128,13 @@ export class WandTool implements ICanvasTool<WandOptions> {
    */
   private applyAtClient(e: PointerEvent, isStart = false) {
     if (!this.overlay.attached) return;
-    const cached = this.host.getCachedImageData();
-    if (!cached || cached.frames.length === 0) return;
-
-    // The current regions (neutral model). Mutated locally across this tick and
+    // The current regions (neutral model) are mutated locally across this tick and
     // committed once via host.setRegions().
-    const regions = this.host.getRegions();
     const editor = this.editor;
-    editor.invalidateIfStale(regions);
+    const tick = editor.beginTick(this.host, e);
+    if (!tick) return;
+    const { cached, regions, frame, mx: matrixX, my: matrixY } = tick;
 
-    const transform = this.host.getCoordinateTransform();
-    if (!transform.isReady()) return;
-    const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
-    if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
-
-    const frame = MatrixFrame.from(cached);
-    editor.syncFrame(frame);
-    const matrixX = frame.toMatrixX(dataX);
-    const matrixY = frame.toMatrixY(dataY);
-    if (matrixX < 0 || matrixX >= cached.width) return;
-    if (matrixY < 0 || matrixY >= cached.height) return;
-
-    const frameIdx = this.host.getActiveFrameIndex();
-    const wandImage: WandImage = {
-      data: cached.frames[frameIdx] ?? cached.frames[0],
-      width: cached.width,
-      height: cached.height,
-      isGrayscale: cached.isGrayscale,
-    };
     // Shift = erase (subtract pixels from an existing region).
     // Cmd/Ctrl alone = simple flood fill (no smoothing/threshold).
     const erase = e.shiftKey;
@@ -172,14 +150,8 @@ export class WandTool implements ICanvasTool<WandOptions> {
       editor.reset();
     }
 
-    const patch = this.wandService.computePatchMask(wandImage, matrixX, matrixY, opts);
+    const patch = this.wandService.computePatchMask(this.wandImage(cached), matrixX, matrixY, opts);
     if (!patch) return;
-
-    const W = patch.size;
-    const half = (W - 1) / 2;
-    // The patch is centred on the clicked pixel (`computePatchMask` floors the same way).
-    const px0 = Math.floor(matrixX) - half;
-    const py0 = Math.floor(matrixY) - half;
 
     // With no active region, a click on an existing region adopts it so this
     // stroke extends (or erases from) it.
@@ -189,6 +161,56 @@ export class WandTool implements ICanvasTool<WandOptions> {
     // no-op — we don't create a region only to immediately delete from it.
     if (erase && !editor.stroke) return;
 
+    if (!this.stampPatch(patch, matrixX, matrixY, erase, cached)) return;
+
+    // Growing into other regions folds them in (QuPath's merge-on-touch).
+    if (!erase) editor.mergeTouching(regions, frame, cached);
+
+    editor.commit(regions, frame, this.host, {
+      erase,
+      defaultLabel: 'Region',
+      newRegion: (bounds) => {
+        const region = new Region();
+        region.bounds = bounds;
+        region.color = this.host.getShapeColor();
+        // Default class/annotation name, matching the overlay-drawn regions and the
+        // Region Editor's "Add" actions so a wand region isn't left unlabeled.
+        region.label = 'Region';
+        return region;
+      },
+    });
+  }
+
+  /** The visible frame of the readback, as the region grow reads it. */
+  private wandImage(cached: CachedImageData): WandImage {
+    const frameIdx = this.host.getActiveFrameIndex();
+    return {
+      data: cached.frames[frameIdx] ?? cached.frames[0],
+      width: cached.width,
+      height: cached.height,
+      isGrayscale: cached.isGrayscale,
+    };
+  }
+
+  /**
+   * OR (add) or AND-NOT (erase) the patch mask, centred on matrix point
+   * (cx, cy), into the stroke, growing the stroke to cover it first when
+   * adding. False when a fresh stroke has nothing inside the readback.
+   */
+  private stampPatch(
+    patch: WandPatchMask,
+    cx: number,
+    cy: number,
+    erase: boolean,
+    cached: CachedImageData,
+  ): boolean {
+    const editor = this.editor;
+    const W = patch.size;
+    const half = (W - 1) / 2;
+    // The patch is centred on the clicked pixel (`computePatchMask` floors the same way).
+    const px0 = Math.floor(cx) - half;
+    const py0 = Math.floor(cy) - half;
+
     if (!editor.stroke) {
       // A fresh stroke starts at the patch, clipped to the readback.
       const ok = editor.ensureCovers(
@@ -197,7 +219,7 @@ export class WandTool implements ICanvasTool<WandOptions> {
         Math.min(cached.width, px0 + W),
         Math.min(cached.height, py0 + W),
       );
-      if (!ok) return;
+      if (!ok) return false;
     } else if (!erase) {
       // Don't clamp a growing stroke to the viewport: an adopted region may extend
       // off-screen, and clamping would discard that part (jit-ui#102). Erasing never
@@ -219,22 +241,6 @@ export class WandTool implements ICanvasTool<WandOptions> {
         stroke.mask[dstRow + mx] = erase ? 0 : 1;
       }
     }
-
-    // Growing into other regions folds them in (QuPath's merge-on-touch).
-    if (!erase) editor.mergeTouching(regions, frame, cached);
-
-    editor.commit(regions, frame, this.host, {
-      erase,
-      defaultLabel: 'Region',
-      newRegion: (bounds) => {
-        const region = new Region();
-        region.bounds = bounds;
-        region.color = this.host.getShapeColor();
-        // Default class/annotation name, matching the overlay-drawn regions and the
-        // Region Editor's "Add" actions so a wand region isn't left unlabeled.
-        region.label = 'Region';
-        return region;
-      },
-    });
+    return true;
   }
 }

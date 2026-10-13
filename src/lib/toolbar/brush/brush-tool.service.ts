@@ -1,4 +1,3 @@
-import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { MaskStrokeEditor } from '../tool-kit/mask-stroke-editor';
 import { UndoGesture, UndoGestureTarget } from '../tool-kit/undo-gesture';
 import { ToolOverlayCanvas } from '../tool-kit/tool-overlay';
@@ -172,24 +171,10 @@ export class BrushTool implements ICanvasTool<BrushOptions> {
    */
   private applyAtClient(e: PointerEvent, isStart: boolean) {
     if (!this.overlay.attached) return;
-    const cached = this.host.getCachedImageData();
-    if (!cached || cached.frames.length === 0) return;
-
-    const regions = this.host.getRegions();
     const editor = this.editor;
-    editor.invalidateIfStale(regions);
-
-    const transform = this.host.getCoordinateTransform();
-    if (!transform.isReady()) return;
-    const { x: dataX, y: dataY } = transform.clientToData(e.clientX, e.clientY);
-    if (!Number.isFinite(dataX) || !Number.isFinite(dataY)) return;
-
-    const frame = MatrixFrame.from(cached);
-    editor.syncFrame(frame);
-    const matrixX = frame.toMatrixX(dataX);
-    const matrixY = frame.toMatrixY(dataY);
-    if (matrixX < 0 || matrixX >= cached.width) return;
-    if (matrixY < 0 || matrixY >= cached.height) return;
+    const tick = editor.beginTick(this.host, e);
+    if (!tick) return;
+    const { cached, regions, frame, mx: matrixX, my: matrixY } = tick;
 
     const erase = e.shiftKey;
     const radius = Math.max(0.5, this.size / 2);
