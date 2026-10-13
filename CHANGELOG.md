@@ -128,6 +128,8 @@ CORE-1) refer to the review document attached to #45.
   its high byte, as the browser decodes the image for OSD and napari.
 - **OSD applied a serverless multichannel stack's window, gamma and invert twice**: the composite
   was recoloured again as an RGB image, so an inverted stack drew black.
+- **Clicking Save again while a folder stack's regions uploaded wrote every slice twice**, and
+  closing the editor could no longer cancel the first save; that Save is now ignored.
 
 ### Changed
 

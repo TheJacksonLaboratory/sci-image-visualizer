@@ -933,6 +933,26 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
+  it("ignores a folder stack's Save while its save is still uploading, and destroy cancels that one", () => {
+    // The toolbar Save stays enabled during a stack save (there is no dialog);
+    // a second click must not start a duplicate write and orphan the first.
+    const s0 = new Region();
+    s0.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 });
+    mockVisualizer.isStackMode = jest.fn(() => true);
+    mockVisualizer.getStackSaveLayout = jest.fn(() => 'per-slice-file');
+    mockVisualizer.getStackSaveAnnotationSlices = jest.fn(() => new Map([[0, [s0]]]));
+    const upload = new Subject<void>();
+    (mockRegionIo.saveSliceGeoJsons as jest.Mock).mockReturnValue(upload);
+
+    component['persistRegions']();
+    component['persistRegions']();
+
+    expect(mockRegionIo.saveSliceGeoJsons).toHaveBeenCalledTimes(1);
+    expect(upload.observed).toBe(true);
+    component.ngOnDestroy();
+    expect(upload.observed).toBe(false);
+  });
+
   it('should show error toast when save fails', fakeAsync(() => {
     (mockRegionIo.saveGeoJson as jest.Mock).mockReturnValue(throwError(() => new Error('Server error')));
     component['saveAsFilename'] = 'regions.geojson';

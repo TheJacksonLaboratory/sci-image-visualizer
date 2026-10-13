@@ -908,8 +908,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.saveAsCheck$.next(this.saveAsFilename);
   }
 
-  /** Save a folder stack's regions as one geojson per slice-file (jit-ui#93). */
+  /** Save a folder stack's regions as one geojson per slice-file (jit-ui#93).
+   *  No dialog covers the toolbar meanwhile, so a Save while one is uploading
+   *  is ignored rather than starting a second write (and orphaning the first). */
   private saveStackSlices() {
+    if (this.saveAsBusy) return;
     const slices = this.persistence.sliceGeoJsons();
     if (!slices.length) return;
     this.saveAsBusy = true;
