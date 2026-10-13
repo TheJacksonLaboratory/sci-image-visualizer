@@ -9,6 +9,7 @@ import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import { IIsosurfaceControls, ISurface3dControls } from '../../contracts/visualizer.contract';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { AssembledVolume } from './napari-tile-client';
+import { TileDescriptor } from '../tile-server';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import {
   SCATTER3D_MAX_POINTS,
@@ -86,13 +87,64 @@ export class VolumeScene implements NapariScene {
     const simpleMc = isServerlessMultichannel(ctx.tiles.isSimple(info), info);
     const channelCount = simpleMc ? info!.imageMeta![0].channelCount : (desc?.channels ?? 1);
     const multichannel = simpleMc || (!!desc?.multichannel && channelCount > 1);
-    const res = volumeResolutionFor(ctx.settings.resolutionScale);
-    const states = ctx.store.currentChannelStates();
 
     this.channelData.clear();
     this.multichannel = multichannel;
     const view = new MultiChannelVolumeView(ctx.viewer);
     this.view = view;
+    const { dims, channels } = await this.assembleChannels(desc, channelCount);
+    if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
+
+    const world = this.worldBox(dims);
+    // Base box (Z-scale = 1) + the sampled depth drive the live Z-height handle below; the persisted
+    // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
+    this.worldBase = world;
+    this.sampledDepth = Math.max(1, dims.depth);
+    const worldZ = world.depth * ctx.settings.volumeZScale;
+    const voxelSize: [number, number, number] = [
+      world.width / dims.width,
+      world.height / dims.height,
+      worldZ / this.sampledDepth,
+    ];
+    for (const ch of channels) ch.voxelSize = voxelSize;
+
+    view.render(this.multichannel ? 'multichannel' : 'grayscale', channels, { rendering: this.rendering });
+    ctx.setImageSize(dims.width, dims.height);
+    this.dims = dims;
+
+    // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
+    // the rendered proportions. Physical scale text still comes from the FULL image extent.
+    const box = { width: world.width, height: world.height, depth: worldZ };
+    this.gizmo = new Axes3dGizmo(ctx.viewer, ctx.host, box, this.axesLabels(box), {
+      visible: ctx.settings.axesVisible,
+    });
+    // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
+    // "Z" axis + label live), so it reads as the Z-height control. Floated a little past the axis
+    // tip (×1.12) so the grip clears the "Z · …" label. Drag ↕ to restretch Z live.
+    this.zHandle = new NapariVolumeZHandle(ctx.host, ctx.viewer.camera3d, {
+      topAnchor: () => [
+        -this.worldBase!.width / 2,
+        -this.worldBase!.height / 2,
+        ((this.worldBase!.depth * ctx.settings.volumeZScale) / 2) * 1.12,
+      ],
+      getScale: () => ctx.settings.volumeZScale,
+      setScale: (s) => this.setZScale(s),
+    });
+    this.followDisplayState();
+  }
+
+  /**
+   * Assemble each channel's volume from the server tiles (or the single grayscale volume) under
+   * the stack progress bar, with the display settings it is drawn with. `dims` is null when
+   * nothing was assembled (a Cancel, a new plot, or no slices).
+   */
+  private async assembleChannels(
+    desc: TileDescriptor | null,
+    channelCount: number,
+  ): Promise<{ dims: Box3 | null; channels: VolumeChannel[] }> {
+    const { ctx, info } = this;
+    const res = volumeResolutionFor(ctx.settings.resolutionScale);
+    const states = ctx.store.currentChannelStates();
 
     // Assemble per-channel scalar volumes from the server tiles (jit-specific); the napari-js view
     // owns the layer orchestration (one additive tinted volume per channel, or a single grayscale
@@ -102,7 +154,7 @@ export class VolumeScene implements NapariScene {
     ctx.stack.loading(true);
     ctx.stack.progress(0);
     try {
-      if (multichannel) {
+      if (this.multichannel) {
         for (let c = 0; c < channelCount; c++) {
           const vol = await assemble(ctx, info, res, c);
           if (!vol) continue;
@@ -144,9 +196,12 @@ export class VolumeScene implements NapariScene {
       ctx.stack.loading(false);
       ctx.stack.progress(0);
     }
+    return { dims, channels };
+  }
 
-    if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
-
+  /** The volume's world box for the assembled `dims`, independent of the decimate factor. */
+  private worldBox(dims: Box3): Box3 {
+    const { ctx } = this;
     // Resolution-invariant world box; the per-axis `voxelSize` (napari `scale`) maps the sampled
     // grid onto it.
     //
@@ -171,56 +226,19 @@ export class VolumeScene implements NapariScene {
     const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
     const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
     const fullD = stackDepth(ctx.info()) || dims.depth;
-    let world: Box3;
     if (mppXYZ) {
-      world = {
+      return {
         width: fullW * mppXYZ[0],
         height: fullH * mppXYZ[1],
         depth: fullD * mppXYZ[2],
       };
-    } else {
-      const fullLong = Math.max(1, fullW, fullH);
-      world = {
-        width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
-        height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
-        depth: fullD,
-      };
     }
-    // Base box (Z-scale = 1) + the sampled depth drive the live Z-height handle below; the persisted
-    // `volumeZScale` (user drag) applies on top so changing resolution keeps the chosen height.
-    this.worldBase = world;
-    this.sampledDepth = Math.max(1, dims.depth);
-    const worldZ = world.depth * ctx.settings.volumeZScale;
-    const voxelSize: [number, number, number] = [
-      world.width / dims.width,
-      world.height / dims.height,
-      worldZ / this.sampledDepth,
-    ];
-    for (const ch of channels) ch.voxelSize = voxelSize;
-
-    view.render(this.multichannel ? 'multichannel' : 'grayscale', channels, { rendering: this.rendering });
-    ctx.setImageSize(dims.width, dims.height);
-    this.dims = dims;
-
-    // 3D coordinate-axes / scale gizmo + labels, sharing the volume's world box so the gizmo tracks
-    // the rendered proportions. Physical scale text still comes from the FULL image extent.
-    const box = { width: world.width, height: world.height, depth: worldZ };
-    this.gizmo = new Axes3dGizmo(ctx.viewer, ctx.host, box, this.axesLabels(box), {
-      visible: ctx.settings.axesVisible,
-    });
-    // In-view drag handle at the TOP END OF THE Z AXIS (the box's min-XY corner, where the blue
-    // "Z" axis + label live), so it reads as the Z-height control. Floated a little past the axis
-    // tip (×1.12) so the grip clears the "Z · …" label. Drag ↕ to restretch Z live.
-    this.zHandle = new NapariVolumeZHandle(ctx.host, ctx.viewer.camera3d, {
-      topAnchor: () => [
-        -this.worldBase!.width / 2,
-        -this.worldBase!.height / 2,
-        ((this.worldBase!.depth * ctx.settings.volumeZScale) / 2) * 1.12,
-      ],
-      getScale: () => ctx.settings.volumeZScale,
-      setScale: (s) => this.setZScale(s),
-    });
-    this.followDisplayState();
+    const fullLong = Math.max(1, fullW, fullH);
+    return {
+      width: (fullW * VOLUME_WORLD_INPLANE_REF) / fullLong,
+      height: (fullH * VOLUME_WORLD_INPLANE_REF) / fullLong,
+      depth: fullD,
+    };
   }
 
   /**
