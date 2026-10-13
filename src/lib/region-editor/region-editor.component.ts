@@ -726,7 +726,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.commit();
   }
   protected exportPresets(): void {
-    const json = JSON.stringify(this.regionApi.getPresetSet(), null, 2);
+    const json = JSON.stringify(this.clonePresetSet(this.regionApi.getPresetSet()), null, 2);
     saveAs(new Blob([json], { type: 'application/json' }), 'annotation-classes.json');
   }
   protected importPresets(event: Event): void {

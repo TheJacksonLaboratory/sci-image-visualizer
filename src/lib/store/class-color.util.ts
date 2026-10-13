@@ -75,10 +75,14 @@ export function fallbackColorFor(label: string, palette: string[]): string {
   return hslToHex(hue, 65, 50);
 }
 
-/** Resolve a colour for `label`: a matching preset's colour, else the deterministic fallback. */
+/**
+ * Resolve a colour for `label`: a matching preset's colour, else the colour an imported file
+ * gave the class, else the deterministic fallback.
+ */
 export function colorForLabel(label: string, set: PresetSet): string {
   const preset = findPreset(label, set);
-  return preset ? preset.color : fallbackColorFor(label, set.fallbackPalette);
+  if (preset) return preset.color;
+  return set.importedColors?.[presetKey(set, label)] ?? fallbackColorFor(label, set.fallbackPalette);
 }
 
 /** Options for {@link applyPresetColors}. */
@@ -99,8 +103,8 @@ export interface ApplyPresetColorsOptions {
 /**
  * Resolve each labelled region's colour from the preset set (jit-ui#70). The
  * presets are the source of truth: a matching preset gives the class colour,
- * an unknown class its deterministic fallback, **overriding any colour already
- * on the region** (e.g. embedded in imported GeoJSON). Unlabelled regions and
+ * an unknown class the colour an imported file gave it (`importedColors`) or else
+ * its deterministic fallback, **overriding any colour already on the region**. Unlabelled regions and
  * ones the user recoloured (`colorOverridden`) are left untouched. Unknown
  * classes are reported through `onPromote` when `autoPromote` is on.
  *

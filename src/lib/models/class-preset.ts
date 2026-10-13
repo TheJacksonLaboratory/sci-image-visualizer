@@ -42,6 +42,13 @@ export interface PresetSet {
   autoPromote: boolean;
   /** Label matching against `Region.label` (default `'exact'`). */
   matchMode: MatchMode;
+  /**
+   * Class colours that imported GeoJSON carried for classes with no preset, keyed by the
+   * match mode's key (see `presetKey`). They come before the fallback palette, so an imported
+   * file keeps its own colours. Session-only: never persisted, and absent from a set a caller
+   * saves or exports.
+   */
+  importedColors?: Readonly<Record<string, string>>;
 }
 
 /**

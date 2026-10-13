@@ -459,8 +459,16 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   // ── IRegionStore: GeoJSON I/O (models/region-geojson) ──────────────────
 
+  /** Parse GeoJSON into regions, remembering the class colours the file carries so they are
+   *  kept for classes with no preset (see VisualizerStore.rememberImportedClassColors). */
   importRegions(geoJsonStr: string): Region[] {
-    return regionsFromGeoJson(geoJsonStr);
+    const regions = regionsFromGeoJson(geoJsonStr);
+    const colors = new Map<string, string>();
+    for (const r of regions) {
+      if (r.label && r.color && !colors.has(r.label)) colors.set(r.label, r.color);
+    }
+    if (colors.size) this.store.rememberImportedClassColors(colors);
+    return regions;
   }
   /** Download `regions` as GeoJSON, named after `fileName` (extension
    *  replaced by `.geojson`) or `rois.geojson` without one. */

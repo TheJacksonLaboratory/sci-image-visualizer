@@ -1049,6 +1049,51 @@ describe('RegionStore', () => {
       expect(typeof json).toBe('string');
       expect(store.importRegions(json).length).toBeGreaterThan(0);
     });
+
+    describe("an imported file's class colours", () => {
+      const feature = (name: string, color: number[]) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [0, 0],
+              [10, 0],
+              [5, 10],
+              [0, 0],
+            ],
+          ],
+        },
+        properties: { classification: { name, color } },
+      });
+      const file = (...features: object[]) => JSON.stringify({ type: 'FeatureCollection', features });
+
+      it('are kept for classes with no preset, and preset colours still win', () => {
+        store.setClassificationColor('Tumor', '#123456');
+        store.setRegions(store.importRegions(file(feature('root', [255, 255, 255]), feature('Tumor', [0, 0, 0]))));
+        const byLabel = new Map(store.getRegions().map((r) => [r.label, r.color]));
+        expect(byLabel.get('root')).toBe('#ffffff');
+        expect(byLabel.get('Tumor')).toBe('#123456');
+      });
+
+      it('apply to regions of that class added later, and give way to a class colour set afterwards', () => {
+        store.setRegions(store.importRegions(file(feature('CA1', [120, 0, 0]))));
+        const r = polyRegion([0, 10, 5], [0, 0, 10]);
+        r.label = 'CA1';
+        store.addRegion(r);
+        expect(store.getRegions().map((x) => x.color)).toEqual(['#780000', '#780000']);
+        store.setClassificationColor('CA1', '#00FF00');
+        store.setRegions(store.getRegions());
+        expect(store.getRegions().every((x) => x.color === '#00FF00')).toBe(true);
+      });
+
+      it('are not persisted or exported with the preset set', () => {
+        const vis = TestBed.inject(VisualizerStore);
+        store.importRegions(file(feature('root', [255, 255, 255])));
+        expect(vis.getPresetSet().importedColors).toEqual({ root: '#ffffff' });
+        expect(vis.getPresetSet().classes.map((c) => c.name)).not.toContain('root');
+      });
+    });
   });
 
   describe('updateBounds clones the incoming bounds (no aliasing)', () => {

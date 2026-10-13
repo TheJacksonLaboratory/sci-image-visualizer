@@ -76,6 +76,13 @@ describe('class-color.util (jit-ui#70 colour engine)', () => {
       expect(set.fallbackPalette).toContain(unknown);
       expect(colorForLabel('Mitosis', set)).toBe(unknown); // stable across calls
     });
+
+    it("uses an imported file's colour for a class with no preset, never over a preset", () => {
+      const set: PresetSet = { ...baseSet(), importedColors: { Mitosis: '#ABCDEF', Tumor: '#000000' } };
+      expect(colorForLabel('Mitosis', set)).toBe('#ABCDEF');
+      expect(colorForLabel('Tumor', set)).toBe('#FF4444');
+      expect(set.fallbackPalette).toContain(colorForLabel('Necrosis', set));
+    });
   });
 
   describe('defaultPresetSet', () => {

@@ -152,6 +152,10 @@ CORE-1) refer to the review document attached to #45.
 
 ### Changed
 
+- **Imported GeoJSON keeps its class colours**: a class with no preset is drawn in the colour the
+  file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
+  preset colour, and a class colour set later recolours the class as before. The imported colours
+  last for the session and are never saved with the presets.
 - **Performance**: global listeners and the napari render loop run outside the Angular zone;
   region overlays draw in world space and move only a transform on camera change; per-point
   `RGBA[]` tuples and nested per-pixel readback arrays are gone (packed RGBA frames); Cellpose
