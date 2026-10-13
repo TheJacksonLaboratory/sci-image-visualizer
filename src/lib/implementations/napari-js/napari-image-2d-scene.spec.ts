@@ -2,7 +2,9 @@ import { ImageLayer, additiveComposite, mapScalar, tintColormap } from 'napari-j
 import type { RGB, TiledSource, Viewer } from 'napari-js';
 import { HeadlessViewer } from 'napari-js/testing';
 
-import { Image2dScene } from './napari-image-2d-scene';
+import { Subject } from 'rxjs';
+
+import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { NapariDisplayState } from './napari-display-state';
 import { NapariTileClient } from './napari-tile-client';
 import type { SceneContext } from './napari-scene';
@@ -65,10 +67,14 @@ interface Rig {
   viewer: Viewer;
   store: VisualizerStore;
   tiles: Record<string, jest.Mock>;
+  ctx: SceneContext;
   imageLayers(): ImageLayer[];
 }
 
-function rig(info: IImageInfo, opts: { desc?: TileDescriptor | null; z?: number } = {}): Rig {
+function rig(
+  info: IImageInfo,
+  opts: { desc?: TileDescriptor | null; z?: number; signal?: AbortSignal; regionStore?: object } = {},
+): Rig {
   const viewer = new HeadlessViewer() as unknown as Viewer;
   const store = new VisualizerStore();
   store.setImageMeta(info.imageMeta ?? [], info.fileName);
@@ -103,7 +109,7 @@ function rig(info: IImageInfo, opts: { desc?: TileDescriptor | null; z?: number 
     viewer,
     host: document.createElement('div'),
     canvas: document.createElement('canvas'),
-    signal: new AbortController().signal,
+    signal: opts.signal ?? new AbortController().signal,
     loading: () => new AbortController().signal,
     info: () => info,
     z: () => opts.z ?? 0,
@@ -112,7 +118,7 @@ function rig(info: IImageInfo, opts: { desc?: TileDescriptor | null; z?: number 
     badge: { begin: () => () => undefined },
     tools: { install2dInteraction: jest.fn(), scheduleReadback: jest.fn() },
     store,
-    regionStore: {},
+    regionStore: opts.regionStore ?? {},
     settings: { navigatorVisible: false, imageSmoothing: false },
     stack: { loading: () => undefined, progress: () => undefined },
     imageSize: () => size,
@@ -123,7 +129,7 @@ function rig(info: IImageInfo, opts: { desc?: TileDescriptor | null; z?: number 
   } as unknown as SceneContext;
   const scene = new Image2dScene(ctx);
   const imageLayers = () => viewer.layers.items.filter((l): l is ImageLayer => l instanceof ImageLayer);
-  return { scene, viewer, store, tiles, imageLayers };
+  return { scene, viewer, store, tiles, ctx, imageLayers };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -395,6 +401,59 @@ describe('Image2dScene channel display', () => {
     store.setChannelState(0, { max: 100 });
     expect(imageLayers()).toHaveLength(1);
     expect(imageLayers()[0].contrastLimits).toEqual([0, 100]);
+  });
+});
+
+describe('a 2D scene reset while it mounts', () => {
+  /** A rig whose descriptor request waits for `release`, over a lifetime the test aborts. */
+  function slowRig() {
+    const lifetime = new AbortController();
+    const regionUpdates = new Subject<void>();
+    const r = rig(serverlessMc(), {
+      signal: lifetime.signal,
+      regionStore: { getRegionUpdateEvent: () => regionUpdates, getRegions: () => [] },
+    });
+    let release!: (desc: null) => void;
+    r.tiles['ensureDescriptor'].mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    // What the service's reset does to the scene it replaces: abort its lifetime, then dispose it.
+    const reset = (scene: { dispose(): void }) => {
+      lifetime.abort();
+      scene.dispose();
+    };
+    return { ...r, regionUpdates, reset, release: () => release(null) };
+  }
+
+  it('Image2dScene installs no interaction or display subscription after the reset', async () => {
+    const { scene, ctx, reset, release } = slowRig();
+    const watch = jest.spyOn(ctx.display, 'watch');
+    const mounting = scene.mount();
+    reset(scene);
+    release();
+    await mounting;
+    // The tool bridge is shared with the next scene: a late install would replace its overlay.
+    expect(ctx.tools.install2dInteraction).not.toHaveBeenCalled();
+    expect(watch).not.toHaveBeenCalled();
+  });
+
+  it('ScatterRegionsScene does not subscribe to region updates after the reset', async () => {
+    const { ctx, regionUpdates, reset, release } = slowRig();
+    const scene = new ScatterRegionsScene(ctx);
+    const mounting = scene.mount();
+    reset(scene);
+    release();
+    await mounting;
+    expect(regionUpdates.observed).toBe(false);
+  });
+
+  it('ScatterRegionsScene follows the regions once mounted, and lets go on dispose', async () => {
+    const { ctx, regionUpdates, reset, release } = slowRig();
+    const scene = new ScatterRegionsScene(ctx);
+    const mounting = scene.mount();
+    release();
+    await mounting;
+    expect(regionUpdates.observed).toBe(true);
+    reset(scene);
+    expect(regionUpdates.observed).toBe(false);
   });
 });
 

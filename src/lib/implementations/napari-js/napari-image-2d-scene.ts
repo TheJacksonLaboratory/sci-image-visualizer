@@ -99,6 +99,9 @@ export class Image2dScene implements NapariScene {
     const { ctx } = this;
     const z = ctx.z();
     if (this.hasImage) await this.render(z);
+    // Reset into a newer scene while the image loaded: this scene is already disposed, and the
+    // tool bridge is the next scene's — install nothing more.
+    if (ctx.signal.aborted) return;
     if (this.opts.fit ? this.opts.fit() : this.hasImage) ctx.fitCameraSoon();
     this.followDisplayState();
     // The scale bar and navigator describe an image; with none loaded, whatever they would
@@ -615,6 +618,8 @@ export class ScatterRegionsScene implements NapariScene {
 
   async mount(): Promise<void> {
     await this.image.mount();
+    // Disposed while the image loaded: a subscription now would outlive the scene.
+    if (this.ctx.signal.aborted) return;
     this.rebuildPoints();
     this.regionSub = this.ctx.regionStore.getRegionUpdateEvent().subscribe(() => this.rebuildPoints());
     this.ctx.tools.scheduleReadback();

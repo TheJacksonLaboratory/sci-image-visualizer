@@ -101,6 +101,9 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   async mount(): Promise<void> {
     const { ctx } = this;
     await this.image.mount();
+    // Disposed while the image loaded: claiming the tiles now would take them from the next scene,
+    // and the spatial subscription would outlive this one.
+    if (ctx.signal.aborted) return;
     this.hover.install(ctx.host);
     this.session.claimTiles(this)?.attach(ctx.viewer);
     this.subscribeSpatial();

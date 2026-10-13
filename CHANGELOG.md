@@ -117,6 +117,9 @@ CORE-1) refer to the review document attached to #45.
   recoloured screen).
 - **napari multichannel images had grey blacks**: the additive channel layers added onto the
   viewer's dark-grey background; they now merge onto black, as on OSD and Plotly.
+- **A napari 2D plot replaced while its image was still loading kept running**: once the image
+  arrived it installed its region overlay, subscriptions and spatial tiles over the plot that
+  replaced it. The 2D image, region-centroid scatter and spatial scenes now stop there.
 - **The Plotly heatmap of a multichannel or RGB image ignored the Channels & Histogram dialog**
   (it applied only the first channel's window, which an RGB `image` trace has no use for). It is
   now composited per channel by OSD's display pipeline from the raw pixels — a serverless stack
