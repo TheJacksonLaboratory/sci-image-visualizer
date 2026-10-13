@@ -306,29 +306,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const scalars = scalar?.values ?? new Float32Array(obs.count);
     const colormap = scalar?.colormap ?? spatialFlatColormap();
     const contrastLimits: [number, number] = scalar?.contrastLimits ?? [0, 1];
-
-    // One imaged section, or the whole stack. The subset IS the geometry, so it
-    // belongs in the geometry key rather than being re-derived per frame — and an
-    // out-of-range index is clamped rather than dropping the cloud, because the
-    // section count changes with the dataset while the view state persists.
-    const sections = sectionsOf(obs);
-    const section =
-      view.pointSection != null && sections && sections.length > 0
-        ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
-        : null;
-    const shown = section != null ? observationsInSection(obs, section) : null;
-
-    const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
-    // Track the scalars' identity separately from the geometry's (`colorBy` plus the
-    // transforms feeding the encoding): a new colour source swaps `values` in place
-    // (napari-js ≥ 0.14), while a new geometry needs a new layer.
-    const clip = view.percentileClip ?? [0.01, 0.99];
-    const scalarKey = [
-      key,
-      view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
-      view.logScale ? 'log' : 'lin',
-      clip.join(','),
-    ].join('|');
+    const { shown, key, scalarKey } = cloudSubset(dataset, view);
 
     if (key !== this.layerKey) {
       // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
@@ -842,4 +820,36 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.session.contrastWindows,
     );
   }
+}
+
+/**
+ * The observations the cloud draws, and the keys of its geometry and of its colour source.
+ *
+ * One imaged section, or the whole stack (`shown` null). The subset IS the geometry, so it
+ * belongs in the geometry key rather than being re-derived per frame — and an out-of-range
+ * index is clamped rather than dropping the cloud, because the section count changes with the
+ * dataset while the view state persists. The scalars' identity is tracked separately from the
+ * geometry's (`colorBy` plus the transforms feeding the encoding): a new colour source swaps
+ * `values` in place (napari-js ≥ 0.14), while a new geometry needs a new layer.
+ */
+function cloudSubset(
+  dataset: SpatialDataset,
+  view: SpatialViewState,
+): { shown: Uint32Array | null; key: string; scalarKey: string } {
+  const obs = dataset.observations;
+  const sections = sectionsOf(obs);
+  const section =
+    view.pointSection != null && sections && sections.length > 0
+      ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
+      : null;
+  const shown = section != null ? observationsInSection(obs, section) : null;
+  const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
+  const clip = view.percentileClip ?? [0.01, 0.99];
+  const scalarKey = [
+    key,
+    view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    view.logScale ? 'log' : 'lin',
+    clip.join(','),
+  ].join('|');
+  return { shown, key, scalarKey };
 }

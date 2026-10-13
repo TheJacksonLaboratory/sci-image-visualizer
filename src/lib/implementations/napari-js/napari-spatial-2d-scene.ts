@@ -6,6 +6,7 @@ import {
   SpatialColumn,
   SpatialDataset,
   SpatialImageRef,
+  SpatialObservations,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
@@ -229,7 +230,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // pixel grid. Without the filter the specimen's whole depth piles onto one
     // section and reads as a smear; without the affine the coordinates are read
     // as pixels and land off the slice entirely.
-    const slab = this.slab(dataset);
+    const slab = slabAt(dataset, this.ctx.z());
     // The gene map goes UNDER the cells, so it is settled before they are added.
     await this.ensureGeneMap(viewer, dataset, view, selection, slab);
     if (!task()) return;
@@ -264,14 +265,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   ): void {
     const obs = dataset.observations;
     const ref = slab?.ref ?? dataset.imageRef;
-    const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
-    const scale = view.pointScale > 0 ? view.pointScale : 1;
-    const floor = slab?.minDiameter ?? 0;
-    const sizeOf = (i: number) => Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
-    const size: number | Float32Array =
-      typeof base === 'number' && !slab
-        ? Math.max(base, floor) * scale
-        : Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) => sizeOf(slab ? slab.indices[i] : i));
+    const size = markerSizes(obs, view, slab);
 
     // napari's image view CLEARS the whole layer list on every render, so the
     // markers go with it whenever the image is re-rendered — a scrub, a contrast
@@ -306,13 +300,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     }
 
     const drawn = slab?.indices;
-    const count = drawn ? drawn.length : obs.count;
-    const positions = new Float32Array(count * 2);
-    for (let i = 0; i < count; i++) {
-      const o = drawn ? drawn[i] : i;
-      positions[i * 2] = obs.x[o];
-      positions[i * 2 + 1] = obs.y[o];
-    }
+    const positions = observationPositions(obs, drawn);
     this.layerKey = key;
     this.drawn = drawn ?? null;
     this.points = viewer.addPoints(positions, {
@@ -588,26 +576,6 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   }
 
   /**
-   * The plane a volume-backed dataset is currently showing: its pixel affine, the
-   * observations that fall in it, and the marker floor that grid needs.
-   *
-   * Null for a dataset with a real `imageRef` (its coordinates are already the
-   * image's pixels and every observation belongs to the one section) and for one
-   * with no volume at all — both of which draw exactly as before.
-   */
-  private slab(dataset: SpatialDataset): Slab | null {
-    const volume = dataset.volume;
-    if (dataset.imageRef || !volume) return null;
-    const slice = this.ctx.z();
-    return {
-      ref: volumeImageRef(volume, dataset.micronsPerUnit),
-      indices: observationsInSlice(dataset.observations, volume, slice),
-      slice,
-      minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
-    };
-  }
-
-  /**
    * Per-observation colours for the current view state, or a single flat colour when nothing is
    * selected to colour by. Categorical columns use the column's own palette; continuous columns
    * and gene vectors go through the active colormap with a percentile-clipped window.
@@ -678,4 +646,46 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       muted,
     );
   }
+}
+
+/** The markers' diameters: each observation's own (or the fallback), at least the slab's floor,
+ *  times the view's point scale; one number when every marker is drawn at the same size. */
+function markerSizes(obs: SpatialObservations, view: SpatialViewState, slab: Slab | null): number | Float32Array {
+  const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
+  const scale = view.pointScale > 0 ? view.pointScale : 1;
+  const floor = slab?.minDiameter ?? 0;
+  if (typeof base === 'number' && !slab) return Math.max(base, floor) * scale;
+  const sizeOf = (i: number) => Math.max(typeof base === 'number' ? base : base[i], floor) * scale;
+  return Float32Array.from(slab?.indices ?? { length: obs.count }, (_v, i) => sizeOf(slab ? slab.indices[i] : i));
+}
+
+/** Interleaved x,y of the `drawn` observations (undefined: all of them). */
+function observationPositions(obs: SpatialObservations, drawn: Uint32Array | undefined): Float32Array {
+  const count = drawn ? drawn.length : obs.count;
+  const positions = new Float32Array(count * 2);
+  for (let i = 0; i < count; i++) {
+    const o = drawn ? drawn[i] : i;
+    positions[i * 2] = obs.x[o];
+    positions[i * 2 + 1] = obs.y[o];
+  }
+  return positions;
+}
+
+/**
+ * The plane `slice` of a volume-backed dataset: its pixel affine, the observations that fall in
+ * it, and the marker floor that grid needs.
+ *
+ * Null for a dataset with a real `imageRef` (its coordinates are already the image's pixels and
+ * every observation belongs to the one section) and for one with no volume at all — both of
+ * which draw exactly as before.
+ */
+function slabAt(dataset: SpatialDataset, slice: number): Slab | null {
+  const volume = dataset.volume;
+  if (dataset.imageRef || !volume) return null;
+  return {
+    ref: volumeImageRef(volume, dataset.micronsPerUnit),
+    indices: observationsInSlice(dataset.observations, volume, slice),
+    slice,
+    minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
+  };
 }
