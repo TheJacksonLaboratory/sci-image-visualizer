@@ -230,6 +230,82 @@ describe('Region GeoJSON round trip (characterization)', () => {
     expect(plotly.importRegions(expected)).toEqual(store.importRegions(expected));
   });
 
+  it('reads every classification form, and a one-ring rectangle only without holes', () => {
+    const ring = (pts: number[][]) => [...pts, pts[0]];
+    const square = ring([
+      [0, 0],
+      [4, 0],
+      [4, 4],
+      [0, 4],
+    ]);
+    const hole = ring([
+      [1, 1],
+      [2, 1],
+      [2, 2],
+    ]);
+    const feature = (properties: unknown, coordinates: number[][][]) => ({
+      type: 'Feature',
+      properties,
+      geometry: { type: 'Polygon', coordinates },
+    });
+    const back = regionsFromGeoJson(
+      JSON.stringify({
+        features: [
+          feature(undefined, [square]),
+          feature({ classification: 'Tumor' }, [square]),
+          feature({ classification: { name: 'Stroma' } }, [square, hole]),
+          feature({ classification: { name: 'Immune', color: [255, 128, 0] } }, [square]),
+        ],
+      }),
+    );
+    expect(back.map((r) => [r.name, r.label, r.color, r.bounds?.constructor.name])).toEqual([
+      ['shape0', 'Cell', new Region().color, 'Rectangle'],
+      ['shape1', 'Tumor', new Region().color, 'Rectangle'],
+      ['shape2', 'Stroma', new Region().color, 'Polygon'],
+      ['shape3', 'Immune', '#ff8000', 'Rectangle'],
+    ]);
+    expect((back[2].bounds as Polygon).holes).toEqual([
+      [
+        [1, 1],
+        [2, 1],
+        [2, 2],
+      ],
+    ]);
+  });
+
+  it('writes a bezier donut as its flattened curves, its anchors and handles in properties', () => {
+    const donut = poly([0, 10, 5], [0, 0, 10], {
+      bezier: true,
+      holes: [
+        [
+          [4, 2],
+          [6, 2],
+          [5, 4],
+        ],
+      ],
+    });
+    const [f] = JSON.parse(regionsToGeoJson([region(donut)])).features;
+    expect(f.geometry.type).toBe('Polygon');
+    expect(f.geometry.coordinates).toHaveLength(2);
+    expect(f.geometry.coordinates.every((r: number[][]) => r.length > 3)).toBe(true);
+    expect(f.properties).toEqual({
+      classification: { name: 'Tumor', color: [255, 128, 0] },
+      isBezier: true,
+      bezierAnchors: donut.coordinates,
+      holes: donut.holes,
+    });
+    const back = regionsFromGeoJson(regionsToGeoJson([region(donut)]))[0].bounds as Polygon;
+    expect([back.bezier, back.closed, back.xpoints, back.holes]).toEqual([true, true, [0, 10, 5], donut.holes]);
+  });
+
+  it('rejects input it cannot read', () => {
+    expect(() => regionsFromGeoJson('{')).toThrow('Error parsing json string');
+    expect(() => regionsFromGeoJson('{}')).toThrow("must contain the 'features' key");
+    expect(() => regionsFromGeoJson(JSON.stringify({ features: [{ geometry: {} }] }))).toThrow(
+      "must contain the 'coordinates' key",
+    );
+  });
+
   it('RegionStore.exportRegions names the download after the given file', () => {
     const store = new RegionStore(new VisualizerStore());
     const save = saveAs as unknown as jest.Mock;
