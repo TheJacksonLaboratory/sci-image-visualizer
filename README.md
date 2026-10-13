@@ -33,16 +33,16 @@ npm install @angular/animations @angular/router primeng primeicons primeflex \
 
 ### Peer dependencies
 
-| Package                                                        | Range               | Notes                                                                                                                    |
-| -------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0`           | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
-| `rxjs`                                                         | `^7.8.0`            |                                                                                                                          |
-| `primeng`                                                      | `^17.18.0`          | toolbar / dialogs / table / dropdown UI                                                                                  |
-| `primeicons` · `primeflex`                                     | `^7.0.0` · `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup))     |
-| `image-js`                                                     | `^0.35.6`           | client-side image processing                                                                                             |
-| `file-saver`                                                   | `^2.0.5`            | GeoJSON / mask export                                                                                                    |
-| `buffer`                                                       | `^5.7.1`            | Node `Buffer` polyfill for the Plotly backend                                                                            |
-| `onnxruntime-web`                                              | `~1.26.0`           | browser SAM / cellpose inference (WebGPU/WASM)                                                                           |
+| Package                                                        | Range                           | Notes                                                                                                                    |
+| -------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0`                       | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
+| `rxjs`                                                         | `^7.8.0`                        |                                                                                                                          |
+| `primeng`                                                      | `^17.18.0`                      | toolbar / dialogs / table / dropdown UI                                                                                  |
+| `primeicons` · `primeflex`                                     | `^7.0.0` · `^3.3.0` or `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup))     |
+| `image-js`                                                     | `^0.35.6`                       | client-side image processing                                                                                             |
+| `file-saver`                                                   | `^2.0.5`                        | GeoJSON / mask export                                                                                                    |
+| `buffer`                                                       | `^5.7.1`                        | Node `Buffer` polyfill for the Plotly backend                                                                            |
+| `onnxruntime-web`                                              | `~1.26.0`                       | browser SAM / cellpose inference (WebGPU/WASM)                                                                           |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
 `napari-js`, `cellpose-js`, `fast-png`, and `tslib` — are declared as regular
