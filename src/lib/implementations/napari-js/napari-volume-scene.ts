@@ -31,16 +31,18 @@ function channelHistogram(data: Map<number, Uint8Array>, channel: number, bins: 
   return plane ? toIHistogram(histogramScalar(plane, bins, 0, 255)) : null;
 }
 
-/** Assemble `info`'s stack into a uint8 volume under the stack progress bar; null on a Cancel or a
- *  new plot. The caller owns the loading flag (a multichannel volume assembles channels in turn). */
+/** Assemble `info`'s stack into a uint8 volume under the stack progress bar; null once `loading`
+ *  aborts (a Cancel or a new plot). The caller owns the loading flag and takes `loading` once per
+ *  load: a Cancel replaces `ctx.loading()`, and a multichannel volume assembles channels in turn. */
 function assemble(
   ctx: SceneContext,
   info: IImageInfo | undefined,
   opts: { maxSlice?: number; sliceStep?: number },
+  loading: AbortSignal,
   channel?: number,
 ): Promise<AssembledVolume | null> {
   return ctx.tiles.assembleVolume(info, opts, channel, {
-    signal: ctx.loading(), // bail on a Cancel / new plot while we fetch
+    signal: loading,
     progress: (p) => ctx.stack.progress(p),
   });
 }
@@ -92,7 +94,7 @@ export class VolumeScene implements NapariScene {
     this.multichannel = multichannel;
     const view = new MultiChannelVolumeView(ctx.viewer);
     this.view = view;
-    const { dims, channels } = await this.assembleChannels(desc, channelCount);
+    const { dims, channels } = await this.assembleChannels(desc, channelCount, loading);
     if (!dims || !channels.length || loading.aborted) return; // cancelled → don't render
 
     const world = this.worldBox(dims);
@@ -141,6 +143,7 @@ export class VolumeScene implements NapariScene {
   private async assembleChannels(
     desc: TileDescriptor | null,
     channelCount: number,
+    loading: AbortSignal,
   ): Promise<{ dims: Box3 | null; channels: VolumeChannel[] }> {
     const { ctx, info } = this;
     const res = volumeResolutionFor(ctx.settings.resolutionScale);
@@ -156,7 +159,8 @@ export class VolumeScene implements NapariScene {
     try {
       if (this.multichannel) {
         for (let c = 0; c < channelCount; c++) {
-          const vol = await assemble(ctx, info, res, c);
+          const vol = await assemble(ctx, info, res, loading, c);
+          if (loading.aborted) break; // a Cancel / new plot: fetch no further channel
           if (!vol) continue;
           dims = vol;
           this.channelData.set(c, vol.data);
@@ -175,7 +179,7 @@ export class VolumeScene implements NapariScene {
           });
         }
       } else {
-        const vol = await assemble(ctx, info, res);
+        const vol = await assemble(ctx, info, res, loading);
         if (vol) {
           dims = vol;
           this.channelData.set(0, vol.data);
@@ -415,10 +419,12 @@ export class Scatter3dScene implements NapariScene {
     ctx.stack.progress(0);
     let vol: AssembledVolume | null = null;
     try {
-      vol = await assemble(ctx, this.info, {
-        maxSlice: Math.min(res.maxSlice, SCATTER3D_MAX_XY),
-        sliceStep: res.sliceStep,
-      });
+      vol = await assemble(
+        ctx,
+        this.info,
+        { maxSlice: Math.min(res.maxSlice, SCATTER3D_MAX_XY), sliceStep: res.sliceStep },
+        ctx.loading(),
+      );
     } finally {
       ctx.stack.loading(false);
       ctx.stack.progress(0);

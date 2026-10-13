@@ -123,6 +123,10 @@ CORE-1) refer to the review document attached to #45.
 - **A napari 2D plot replaced while its image was still loading kept running**: once the image
   arrived it installed its region overlay, subscriptions and spatial tiles over the plot that
   replaced it. The 2D image, region-centroid scatter and spatial scenes now stop there.
+- **Cancelling a multichannel napari volume kept loading the next channel**: Cancel aborted the
+  channel in progress, but each channel took the loading signal afresh, so the next one was
+  fetched in full and drawn nowhere (switching resolution mid-load did the same). A load now stops
+  at the Cancel.
 - **The Plotly heatmap of a multichannel or RGB image ignored the Channels & Histogram dialog**
   (it applied only the first channel's window, which an RGB `image` trace has no use for). It is
   now composited per channel by OSD's display pipeline from the raw pixels — a serverless stack

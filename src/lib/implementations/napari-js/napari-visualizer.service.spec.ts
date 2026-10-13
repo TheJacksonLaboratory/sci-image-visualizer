@@ -1732,6 +1732,58 @@ describe('NapariVisualizerService', () => {
     document.body.removeChild(div);
   });
 
+  it('a Cancel during a multichannel volume fetches no further channel', async () => {
+    // Regression: each channel took the loading signal afresh, and a Cancel replaces it, so the
+    // next channel was fetched in full (and drawn nowhere) after the Cancel.
+    let afterCancel = 0;
+    let cancelled = false;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let tileFetches = 0;
+    (globalThis.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('tiles/info')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () =>
+            Promise.resolve({
+              width: 64,
+              height: 48,
+              tileSize: 512,
+              z: 3,
+              channels: 2,
+              multichannel: true,
+              realLevels: 1,
+              levels: [{ res: 0, width: 64, height: 48 }],
+            }),
+        });
+      }
+      tileFetches++;
+      if (cancelled) afterCancel++;
+      return held.then(() => ({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) }));
+    });
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    addVolume.mockClear();
+    const div = document.createElement('div');
+    div.id = 'vol-mc-cancel-host';
+    document.body.appendChild(div);
+
+    const loaded = await service.load(imageInfo(), 0);
+    const plotted = service.plot('vol-mc-cancel-host', loaded, imageInfo(), 600, PlotType.NAPARI_VOLUME);
+    for (let i = 0; i < 50 && tileFetches === 0; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(tileFetches).toBeGreaterThan(0); // channel 0 is loading
+    service.cancelLoading();
+    cancelled = true;
+    release();
+    await plotted;
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(afterCancel).toBe(0);
+    expect(addVolume).not.toHaveBeenCalled();
+
+    service.unsubscribe();
+    document.body.removeChild(div);
+  });
+
   it('renders the volume at a decimate factor (subsampled), histogram still resolves', async () => {
     const div = document.createElement('div');
     div.id = 'vol-decimate-host';
