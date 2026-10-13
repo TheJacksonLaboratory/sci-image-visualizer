@@ -62,4 +62,53 @@ describe('TranscriptJobPlanner', () => {
     expect(key({ x0: 1, y0: 1, x1: 101, y1: 101 })).toBe(key(rect));
     expect(key(rect, { ...view, transcriptGenes: ['A', 'B'] })).not.toBe(key(rect));
   });
+
+  describe('a gene selection zoomed out', () => {
+    // Pans of a quarter view re-clip; smaller ones keep the job's key.
+    const panned = (d: number) => ({ x0: d, y0: d, x1: 100 + d, y1: 100 + d });
+
+    it('reads the per-gene pyramid levels, keyed by the clip window', async () => {
+      const getTranscriptGeneBins = jest.fn(async () => tile(2));
+      const jobs = new TranscriptJobPlanner({ ...port, getTranscriptGeneBins } as unknown as SpatialDataPort);
+      const ds = {
+        ...dataset(10),
+        transcriptGeneBins: { origin: [0, 0], levels: [{ binSize: 25, tileSize: 200 }] },
+      } as SpatialDataset;
+      // 0.1 px per unit: zoomed out to the pyramid's bins.
+      const job = (r: typeof rect) => jobs.jobFor(ds, view, r, 0.1)!;
+      expect(job(rect).key).toMatch(/^gene-bins\|/);
+      expect(job(panned(1)).key).toBe(job(rect).key);
+      expect(job(panned(30)).key).not.toBe(job(rect).key);
+      // The clip window reaches a quarter view past each edge: four 200-unit tiles of two each.
+      expect((await job(rect).load(ctx())).merged.count).toBe(8);
+      expect(getTranscriptGeneBins).toHaveBeenCalledTimes(4);
+    });
+
+    it('draws one marker per cluster per bin from the density grids, inside the clip window', async () => {
+      // Grid cells of 20 units: one inside the view, one 90 units past its far edge.
+      const values = new Float32Array(100);
+      values[0] = 3;
+      values[9] = 5;
+      const getDensity = jest.fn(async () => ({
+        meta: { gridSize: [20, 20], origin: [0, 0], rows: 10, cols: 10 },
+        genes: ['A'],
+        values,
+      }));
+      const jobs = new TranscriptJobPlanner({ ...port, getDensity } as unknown as SpatialDataPort);
+      const ds = {
+        ...dataset(10),
+        density: { gridSize: [20, 20], origin: [0, 0], rows: 10, cols: 10 },
+      } as SpatialDataset;
+      // 0.1 px per unit: the 25-unit bins are as wide as the grid, so the grids serve.
+      const job = (r: typeof rect) => jobs.jobFor(ds, view, r, 0.1)!;
+      expect(job(rect).key).toMatch(/^clusters\|/);
+      expect(job(panned(1)).key).toBe(job(rect).key);
+      expect(job(panned(30)).key).not.toBe(job(rect).key);
+      const loaded = await job(rect).load(ctx());
+      expect(getDensity).toHaveBeenCalledWith(['A'], 20);
+      expect(loaded.merged.count).toBe(1);
+      expect(Array.from(loaded.merged.weight)).toEqual([3]);
+      expect(loaded.clustered).toMatchObject({ names: ['A'], genes: [['A']], bin: 40 });
+    });
+  });
 });

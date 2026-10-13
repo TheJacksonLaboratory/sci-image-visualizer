@@ -108,9 +108,7 @@ export class TranscriptJobPlanner {
     const keysAt = (l: number) => tilesInRect(rect, l, meta.levels, meta.bounds, MAX_TRANSCRIPT_TILES);
     const query = { genes, quality: view.transcriptQuality };
     const pxPerMicron = pxPerMicronOf(dataset, pxPerUnit);
-    const mx = (rect.x1 - rect.x0) * 0.25;
-    const my = (rect.y1 - rect.y0) * 0.25;
-    const around: DataRect = { x0: rect.x0 - mx, y0: rect.y0 - my, x1: rect.x1 + mx, y1: rect.y1 + my };
+    const clip = clipWindow(rect);
     // Zoomed out, each gene's transcripts are grouped on the all-gene pyramid's bin ladder,
     // so a gene selection reads like "all genes" does: one marker per gene per area, sized
     // by how many it holds; zoomed in far enough, every transcript is its own marker.
@@ -129,18 +127,18 @@ export class TranscriptJobPlanner {
     const geneBins = dataset.transcriptGeneBins;
     const fromGeneBins = highOnly && geneBins && this.port.getTranscriptGeneBins;
     if (fromGeneBins && (bin !== null || !this.port.getTranscriptTile)) {
-      return this.geneBinsJob(dataset, view, around, geneBins, bin ?? geneBins.levels[0].binSize, mx, my, rect);
+      return this.geneBinsJob(dataset, view, clip, geneBins, bin ?? geneBins.levels[0].binSize);
     }
     const grid = dataset.density?.gridSize[0] ?? 0;
     if (highOnly && bin !== null && grid > 0 && this.port.getDensity && bin >= grid * 0.75) {
-      return this.clusterDensityJob(dataset, view, around, pxPerUnit, Math.max(bin, grid), mx, my, rect);
+      return this.clusterDensityJob(dataset, view, clip, pxPerUnit, Math.max(bin, grid));
     }
     return {
       kind: 'genes',
       // The clip window, in quarter-view steps: a pan past the margin re-clips.
       key:
         `genes|${genes.join(',')}|${view.transcriptQuality}|${view.transcriptBudget}|${bin ?? 'each'}|` +
-        `${clipKey(rect, mx, my)}|${keysAt(first).map(tileId)}`,
+        `${clip.key}|${keysAt(first).map(tileId)}`,
       load: async (ctx) => {
         // The zoom's own level only: over the budget, the transcripts are combined into
         // larger markers (groupSelection), never fetched from slower coarse levels.
@@ -150,7 +148,7 @@ export class TranscriptJobPlanner {
         // Only what is on screen (and a margin, so a small pan needs nothing new) counts
         // against the budget and the cap; a tile reaches far past the view.
         const merged = mergeTranscriptTiles(
-          tiles.map((t) => clipTranscripts(t, around)),
+          tiles.map((t) => clipTranscripts(t, clip.around)),
           MAX_TRANSCRIPTS,
         );
         const px = Float32Array.from(merged.weight, (w) =>
@@ -172,12 +170,9 @@ export class TranscriptJobPlanner {
   private geneBinsJob(
     dataset: SpatialDataset,
     view: SpatialViewState,
-    around: DataRect,
+    clip: ClipWindow,
     meta: NonNullable<SpatialDataset['transcriptGeneBins']>,
     startBin: number,
-    mx: number,
-    my: number,
-    rect: DataRect,
   ): TranscriptJob {
     const genes = view.transcriptGenes;
     const levels = meta.levels;
@@ -191,7 +186,7 @@ export class TranscriptJobPlanner {
     const keysAt = (m: number) =>
       tilesInRectFrom(
         meta.origin,
-        around,
+        clip.around,
         m,
         levels.map((l) => ({ tileSize: l.tileSize })),
         null,
@@ -200,15 +195,14 @@ export class TranscriptJobPlanner {
     return {
       kind: 'genes',
       key:
-        `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|` +
-        clipKey(rect, mx, my),
+        `gene-bins|${genes.join(',')}|${budget}|${first}|${JSON.stringify(view.transcriptGeneGroups)}|` + clip.key,
       load: async (ctx) => {
         let m = first;
         for (;;) {
           const tiles = await ctx.fetchAll(keysAt(m), (k) =>
             this.port.getTranscriptGeneBins!(k.level, k.gx, k.gy, genes),
           );
-          const clipped = tiles.map((t) => clipTranscripts(t, around));
+          const clipped = tiles.map((t) => clipTranscripts(t, clip.around));
           // Past the cap a merge would drop whole genes (the tail of every tile): go coarser.
           if (clipped.reduce((n, t) => n + t.count, 0) > MAX_TRANSCRIPTS && m < levels.length - 1) {
             m++;
@@ -279,12 +273,9 @@ export class TranscriptJobPlanner {
   private clusterDensityJob(
     dataset: SpatialDataset,
     view: SpatialViewState,
-    around: DataRect,
+    clip: ClipWindow,
     pxPerUnit: number,
     startBin: number,
-    mx: number,
-    my: number,
-    rect: DataRect,
   ): TranscriptJob {
     const grid = dataset.density!.gridSize[0];
     const clusters = this.selectionClusters(view);
@@ -295,7 +286,7 @@ export class TranscriptJobPlanner {
       kind: 'genes',
       key:
         `clusters|${clusters.map((c) => `${c.name}:${c.genes.join('+')}`).join(';')}|${budget}|${first}|` +
-        clipKey(rect, mx, my),
+        clip.key,
       load: async () => {
         let bin = first;
         for (;;) {
@@ -306,7 +297,7 @@ export class TranscriptJobPlanner {
             rasters,
             clusters.map((c) => c.slot),
             bin,
-            around,
+            clip.around,
           );
           if (out.tile.count <= budget || bin >= grid * 2 ** 12) {
             const px = groupedSizes(out.tile.weight, bin * pxPerUnit, view.transcriptScale);
@@ -482,9 +473,21 @@ function groupedSizes(weight: Uint32Array, binPx: number, scale: number): Float3
   return Float32Array.from(weight, (w) => groupedMarkerPx(w, refCount, binPx, scale));
 }
 
-/** The clip window in quarter-view steps, for a job key: a pan past the margin re-clips. */
-function clipKey(rect: DataRect, mx: number, my: number): string {
-  return `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`;
+/** What a gene selection's job fetches and clips to: the view and a quarter-view margin each side,
+ *  so a small pan needs nothing new. */
+interface ClipWindow {
+  around: DataRect;
+  /** The window in quarter-view steps, for a job key: a pan past the margin re-clips. */
+  key: string;
+}
+
+function clipWindow(rect: DataRect): ClipWindow {
+  const mx = (rect.x1 - rect.x0) * 0.25;
+  const my = (rect.y1 - rect.y0) * 0.25;
+  return {
+    around: { x0: rect.x0 - mx, y0: rect.y0 - my, x1: rect.x1 + mx, y1: rect.y1 + my },
+    key: `${Math.floor(rect.x0 / (mx || 1))},${Math.floor(rect.y0 / (my || 1))}`,
+  };
 }
 
 /** Physical marker size needs µm; undefined when the dataset's unit is unknown. */
