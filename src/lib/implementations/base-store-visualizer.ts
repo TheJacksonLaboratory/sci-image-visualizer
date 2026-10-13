@@ -228,8 +228,11 @@ export abstract class BaseStoreVisualizer implements IRegionStore, IDisplayOptio
   /** Drop what is bound to the view (each backend's own teardown). */
   abstract unsubscribe(): void;
 
-  /** The view is going away: release what is bound to it (`IViewerBackend.detach`). */
+  /** The view is going away: release what is bound to it (`IViewerBackend.detach`) —
+   *  first the armed tool, whose overlay canvas and ResizeObserver sit on the view's
+   *  container (the backend outlives the view). */
   detach(): void {
+    this.canvasTools.deactivate();
     this.unsubscribe();
   }
 

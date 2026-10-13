@@ -133,6 +133,9 @@ CORE-1) refer to the review document attached to #45.
   was recoloured again as an RGB image, so an inverted stack drew black.
 - **Clicking Save again while a folder stack's regions uploaded wrote every slice twice**, and
   closing the editor could no longer cancel the first save; that Save is now ignored.
+- **A canvas tool armed when the visualizer was destroyed did nothing in the next one**: its
+  overlay (and its ResizeObserver) stayed on the old view's plot div, so re-arming it in a
+  recreated visualizer drew no overlay. Detaching a backend now disarms its armed tool.
 
 ### Changed
 

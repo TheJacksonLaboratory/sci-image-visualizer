@@ -83,6 +83,28 @@ describe('canvas tools per backend (RT-21)', () => {
     }
   });
 
+  // Backends outlive the view (root or chain scoped): an overlay left armed at detach kept its
+  // canvas and ResizeObserver on the old view's container, and re-arming the same tool in the
+  // next view was a no-op on that stale canvas.
+  it('disarms the armed tool when the view detaches, releasing its overlay', () => {
+    for (const b of backends) {
+      for (const id of ['wand', 'zoomToBox'] as const) {
+        const [oldView, newView] = [document.createElement('div'), document.createElement('div')];
+        const container = jest.spyOn(host(b), 'getOverlayContainer').mockReturnValue(oldView);
+        tools(b).activate(id);
+        expect(oldView.querySelector('canvas')).not.toBeNull();
+        b.detach();
+        expect(tools(b).activeId).toBeNull();
+        expect(oldView.querySelector('canvas')).toBeNull();
+        // The next view arms the same tool over its own container.
+        container.mockReturnValue(newView);
+        tools(b).activate(id);
+        expect(newView.querySelector('canvas')).not.toBeNull();
+        tools(b).deactivate();
+      }
+    }
+  });
+
   // The router writes undo/redo/slice switches straight to the store (IVisualizer split (d)),
   // so the resets must come from the store's event, not from the backend's own members.
   it("resets every backend's tools on a store undo, redo or slice switch — not on an ordinary edit", () => {
