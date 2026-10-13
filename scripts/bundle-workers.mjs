@@ -49,6 +49,7 @@ const workers = [
   { in: 'src/lib/region-editor/mask.worker.ts',            out: 'dist/fesm2022/mask.worker.js' },
   { in: 'src/lib/toolbar/segmentation/onnx-sam.worker.ts', out: 'dist/fesm2022/onnx-sam.worker.js' },
   { in: 'src/lib/workers/spatial-math.worker.ts',          out: 'dist/fesm2022/spatial-math.worker.js' },
+  { in: 'src/lib/region-source/region-source.worker.ts',   out: 'dist/fesm2022/region-source.worker.js' },
   {
     in: 'src/lib/spatial/tsne.worker.ts',
     out: 'dist/fesm2022/tsne.worker.js',
