@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-13
+
 Implements the 0.8.3 code review ([#45](https://github.com/TheJacksonLaboratory/sci-image-visualizer/issues/45)):
 its critical fixes and warnings, the shared cross-backend modules, and the god-class splits. Review IDs (e.g.
 CORE-1) refer to the review document attached to #45.
@@ -2181,7 +2183,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.0...v0.8.1
