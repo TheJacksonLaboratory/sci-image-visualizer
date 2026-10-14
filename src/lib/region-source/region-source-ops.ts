@@ -5,7 +5,10 @@
  *
  * Protocol: `{ id, op, ...args }` → `{ id, ok: true, result }` | `{ id, ok: false, error }`.
  */
+import { ReconstructOptions, SliceOutlines, reconstruct } from '../geometry/reconstruct';
+import type { Mesh } from '../geometry/surface-nets';
 import {
+  ClassOutlines,
   RegionFeatureTable,
   RegionIndexPage,
   RegionIndexQuery,
@@ -20,6 +23,8 @@ export type RegionSourceRequest =
   | { op: 'features'; handle: number; ids: readonly string[] }
   | { op: 'index'; handle: number; z: number; query: RegionIndexQuery }
   | { op: 'classes'; handle: number; z: number; exclude?: readonly string[] }
+  | { op: 'outlines'; handle: number; classes: readonly string[]; level: number; exclude?: readonly string[] }
+  | { op: 'mesh'; slices: readonly SliceOutlines[]; options?: ReconstructOptions }
   | { op: 'export'; handle: number; exclude: readonly string[]; extra: readonly object[] }
   | { op: 'close'; handle: number };
 
@@ -29,6 +34,8 @@ export interface RegionSourceResults {
   features: SourceFeature[];
   index: RegionIndexPage;
   classes: Record<string, number>;
+  outlines: ClassOutlines[];
+  mesh: Mesh;
   export: string;
   close: null;
 }
@@ -63,6 +70,10 @@ export class RegionSourceTables {
         return this.table(r.handle).index(r.z, r.query);
       case 'classes':
         return this.table(r.handle).classCounts(r.z, r.exclude);
+      case 'outlines':
+        return this.table(r.handle).classOutlines(r.classes, r.level, r.exclude);
+      case 'mesh':
+        return reconstruct(r.slices, r.options);
       case 'export':
         return this.table(r.handle).exportGeoJson(r.exclude, r.extra);
       case 'close':

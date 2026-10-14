@@ -99,6 +99,12 @@ export interface TileFeature {
   labels?: Float32Array;
 }
 
+/** A class's outlines on one plane: rings as interleaved `x, y` image px (holes included). */
+export interface ClassOutlines {
+  z: number;
+  rings: Float32Array[];
+}
+
 /** One tile of one level of one plane. */
 export interface RegionTile {
   z: number;
@@ -457,6 +463,26 @@ export class RegionFeatureTable {
   describe(hierarchy?: unknown, style?: unknown): void {
     this.hierarchy = readHierarchy(hierarchy) ?? this.hierarchy;
     this.style = readStyle(style) ?? this.style;
+  }
+
+  /**
+   * The outlines of every feature of these classes, plane by plane, simplified for `level` (what a
+   * 3D reconstruction of the classes stacks), without the `exclude`d ids. Planes without one are
+   * left out.
+   */
+  classOutlines(classes: readonly string[], level: number, exclude: readonly string[] = []): ClassOutlines[] {
+    const wanted = new Set(classes);
+    const skip = new Set(exclude);
+    const byPlane = new Map<number, Float32Array[]>();
+    for (let i = 0; i < this.ids.length; i++) {
+      if (this.open[i] || !wanted.has(this.labels[i] ?? '') || skip.has(this.ids[i])) continue;
+      const rings = this.ringsAt(i, level);
+      if (!rings.length) continue;
+      const list = byPlane.get(this.planes[i]);
+      if (list) list.push(...rings);
+      else byPlane.set(this.planes[i], [...rings]);
+    }
+    return Array.from(byPlane, ([z, rings]) => ({ z, rings })).sort((a, b) => a.z - b.z);
   }
 
   /** Features per class on plane `z`, without the `exclude`d ids. */

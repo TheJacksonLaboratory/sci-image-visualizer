@@ -7,6 +7,7 @@
  * for a server that serves the same tiles (`openHttpRegionSource`).
  */
 import type {
+  ClassOutlines,
   GeoJsonFeatureLike,
   RegionIndexPage,
   RegionIndexQuery,
@@ -33,6 +34,15 @@ export interface RegionSource {
   getFeatures(ids: readonly string[]): Promise<SourceFeature[]>;
   /** A page of plane `z`'s feature index. */
   getIndex(z: number, query: RegionIndexQuery): Promise<RegionIndexPage>;
+  /**
+   * Every plane's outlines of the features of these classes, simplified for `level`, without the
+   * `exclude`d ids: what a 3D reconstruction of the classes stacks.
+   */
+  getClassOutlines(
+    classes: readonly string[],
+    level: number,
+    exclude?: readonly string[],
+  ): Promise<ClassOutlines[]>;
   /** How many features of each class plane `z` has, without the `exclude`d ids. */
   getClassCounts(z: number, exclude?: readonly string[]): Promise<Record<string, number>>;
   /**

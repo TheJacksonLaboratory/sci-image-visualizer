@@ -79,7 +79,10 @@ export async function openRegionSet(dir, id) {
   if (await isFile(file)) set = new FileRegionSet(file);
   else if (await isDir(folder)) {
     const files = (await readdir(folder)).filter((f) => f.endsWith('.geojson')).sort();
-    set = new FolderRegionSet(folder, files.map((f) => path.join(folder, f)));
+    set = new FolderRegionSet(
+      folder,
+      files.map((f) => path.join(folder, f)),
+    );
   }
   if (set) sets.set(key, set);
   return set;
@@ -156,6 +159,10 @@ class FileRegionSet {
     return (await this.table()).classCounts(z, exclude);
   }
 
+  async outlines(classes, level, exclude) {
+    return wireOutlines((await this.table()).classOutlines(classes, level, exclude));
+  }
+
   async export(exclude, extra) {
     return (await this.table()).exportGeoJson(exclude, extra);
   }
@@ -210,11 +217,11 @@ class FolderRegionSet {
         if (b) {
           bounds = bounds
             ? [
-              Math.min(bounds[0], b[0]),
-              Math.min(bounds[1], b[1]),
-              Math.max(bounds[2], b[2]),
-              Math.max(bounds[3], b[3]),
-            ]
+                Math.min(bounds[0], b[0]),
+                Math.min(bounds[1], b[1]),
+                Math.max(bounds[2], b[2]),
+                Math.max(bounds[3], b[3]),
+              ]
             : b;
         }
       }
@@ -263,17 +270,37 @@ class FolderRegionSet {
     return out.sort((a, b) => at.get(a.id) - at.get(b.id));
   }
 
+  /** Every slice's outlines of these classes: each file in turn (they are slices of a stack). */
+  async outlines(classes, level, exclude) {
+    const slices = [];
+    for (let z = 0; z < this.files.length; z++) {
+      const entry = await this.table(z);
+      if (!entry) continue;
+      const own = exclude.map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
+      for (const s of entry.table.classOutlines(classes, level, own)) {
+        if (s.z === entry.plane) slices.push({ z, rings: s.rings });
+      }
+    }
+    return wireOutlines(slices);
+  }
+
   async classes(z, exclude) {
     const entry = await this.table(z);
     if (!entry) return {};
-    const own = exclude.map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
+    const own = exclude
+      .map(splitId)
+      .filter(([qz]) => qz === z)
+      .map(([, id]) => id);
     return entry.table.classCounts(entry.plane, own);
   }
 
   async index(z, query) {
     const entry = await this.table(z);
     if (!entry) return { total: 0, rows: [] };
-    const exclude = (query.exclude ?? []).map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
+    const exclude = (query.exclude ?? [])
+      .map(splitId)
+      .filter(([qz]) => qz === z)
+      .map(([, id]) => id);
     const page = entry.table.index(entry.plane, { ...query, exclude });
     return { total: page.total, rows: page.rows.map((r) => ({ ...r, id: `${z}:${r.id}` })) };
   }
@@ -295,6 +322,12 @@ class FolderRegionSet {
     for (const f of extra) parts.push(JSON.stringify(f));
     return `{"type":"FeatureCollection","features":[${parts.join(',')}]}`;
   }
+}
+
+/** Outlines on the wire: rings as plain arrays. */
+function wireOutlines(slices) {
+  const round = (r) => Array.from(r, (v) => Math.round(v * 100) / 100);
+  return { slices: slices.map((s) => ({ z: s.z, rings: s.rings.map(round) })) };
 }
 
 /** `<z>:<id>` → [z, id]; [null, id] for an id without a slice. */

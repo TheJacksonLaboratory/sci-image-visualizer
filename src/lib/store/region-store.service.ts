@@ -16,6 +16,9 @@ import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.contract';
 import { applyPresetColors, colorForLabel } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
+import type { Mesh } from '../geometry/surface-nets';
+import type { SliceOutlines } from '../geometry/reconstruct';
+import { reconstructInWorker } from '../region-source/worker-region-source';
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
 import { RegionHistory } from './region-history';
@@ -830,6 +833,65 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.selection.replace(additive ? [...new Set([...this.selection.ids, ...ids])] : ids);
     this.emitSelection();
     return ids;
+  }
+
+  /**
+   * The 3D reconstruction of each group of classes over every slice of the stack (an atlas
+   * structure with its substructures, say): the outlines of the regions of those classes on every
+   * slice — the region sources' and those drawn or taken — stacked and meshed in a worker. Meshes
+   * are in image px (x, y) and slice indices (z). `pixelStep` is the in-plane voxel size (image
+   * px); the outlines are read at the matching level of detail. A group with no outline gets an
+   * empty mesh.
+   */
+  async reconstructClasses(
+    groups: ReadonlyArray<{ key: string; classes: readonly string[] }>,
+    pixelStep = 1,
+  ): Promise<Array<{ key: string; mesh: Mesh }>> {
+    const level = Math.max(0, Math.floor(Math.log2(Math.max(1, pixelStep))));
+    const out: Array<{ key: string; mesh: Mesh }> = [];
+    for (const group of groups) {
+      const slices = await this.classOutlines(group.classes, level);
+      out.push({ key: group.key, mesh: await reconstructInWorker(slices, { pixelStep }) });
+    }
+    return out;
+  }
+
+  /** Every slice's outlines of these classes: the region sources', then the regions'. */
+  private async classOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
+    const wanted = new Set(classes);
+    const byZ = new Map<number, ArrayLike<number>[]>();
+    const add = (z: number, rings: ArrayLike<number>[]) => {
+      if (!rings.length) return;
+      const list = byZ.get(z);
+      if (list) list.push(...rings);
+      else byZ.set(z, [...rings]);
+    };
+    const image = this.scope.activeImage;
+    if (this.sources.hasPlanesSource(image)) {
+      const binding = await this.sources.binding(image, this.sourceSlice);
+      const outlines = await binding?.source.getClassOutlines(classes, level, this.sources.allTaken(image));
+      for (const s of outlines ?? []) add(s.z, s.rings);
+    }
+    for (const z of this.sources.slicesWithSource(image)) {
+      const binding = await this.sources.binding(image, z);
+      if (!binding) continue;
+      const outlines = await binding.source.getClassOutlines(
+        classes,
+        level,
+        Array.from(this.sources.taken(image, z)),
+      );
+      for (const s of outlines) if (s.z === binding.plane) add(z, s.rings);
+    }
+    for (const r of this.scope.stackMode ? this.getSliceRegions() : this.regions) {
+      if (r.isProfile?.() || !r.label || !wanted.has(r.label)) continue;
+      const rings: Float64Array[] = [];
+      for (const p of regionPolygons(r)) {
+        rings.push(Float64Array.from(p.xpoints.flatMap((x, i) => [x, p.ypoints[i]])));
+        for (const hole of p.holes ?? []) rings.push(Float64Array.from(hole.flat()));
+      }
+      add(r.z ?? 0, rings);
+    }
+    return Array.from(byZ, ([z, rings]) => ({ z, rings })).sort((a, b) => a.z - b.z);
   }
 
   /** Delete source features without taking them (one undo step). */

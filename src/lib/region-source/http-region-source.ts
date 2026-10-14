@@ -7,6 +7,7 @@
  *  - `POST features` `{ ids }`         → `{ features: SourceFeature[] }`
  *  - `POST index` `{ z, ...query }`    → {@link RegionIndexPage}
  *  - `POST classes` `{ z, exclude }`    → features per class on plane z
+ *  - `POST outlines` `{ classes, level, exclude }` → `{ slices: [{ z, rings }] }`
  *  - `POST export` `{ exclude, extra }`→ a GeoJSON FeatureCollection
  *
  * Tile rings travel as flat `[x, y, x, y, …]` arrays, label points as flat `[x, y, room, …]`.
@@ -14,6 +15,7 @@
 import { RegionSource, RegionTileCache, SourceFeature, abortable } from './region-source';
 import type {
   Bbox,
+  ClassOutlines,
   RegionIndexPage,
   RegionIndexQuery,
   RegionSourceInfo,
@@ -109,6 +111,19 @@ class HttpRegionSource implements RegionSource {
 
   getIndex(z: number, query: RegionIndexQuery): Promise<RegionIndexPage> {
     return this.http.json<RegionIndexPage>('index', { z, ...query });
+  }
+
+  async getClassOutlines(
+    classes: readonly string[],
+    level: number,
+    exclude: readonly string[] = [],
+  ): Promise<ClassOutlines[]> {
+    const wire = await this.http.json<{ slices: Array<{ z: number; rings: number[][] }> }>('outlines', {
+      classes,
+      level,
+      exclude,
+    });
+    return wire.slices.map((s) => ({ z: s.z, rings: s.rings.map((r) => Float32Array.from(r)) }));
   }
 
   getClassCounts(z: number, exclude: readonly string[] = []): Promise<Record<string, number>> {

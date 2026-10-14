@@ -26,6 +26,7 @@
 //   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
 //   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
+//   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings }] }
 //   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
@@ -693,6 +694,12 @@ app.post('/regions/:id/classes', (req, res) => {
   if (!Number.isFinite(z) || z < 0) return res.status(400).json({ error: 'bad plane' });
   const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
   return withRegionSet(req, res, (set) => set.classes(z, exclude));
+});
+app.post('/regions/:id/outlines', (req, res) => {
+  const classes = Array.isArray(req.body?.classes) ? req.body.classes.map(String) : [];
+  const level = Math.max(0, intParam(req.body?.level, 0));
+  const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
+  return withRegionSet(req, res, (set) => set.outlines(classes, level, exclude));
 });
 app.post('/regions/:id/export', (req, res) => {
   const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];

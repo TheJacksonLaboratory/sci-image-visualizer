@@ -39,6 +39,8 @@ function tableSource(features: object[]): RegionSource & { disposed: boolean; as
     },
     getIndex: async (z: number, q: never) => table.index(z, q),
     getClassCounts: async (z: number, exclude?: readonly string[]) => table.classCounts(z, exclude),
+    getClassOutlines: async (c: readonly string[], level: number, ex?: readonly string[]) =>
+      table.classOutlines(c, level, ex),
     exportGeoJson: async (exclude: readonly string[], extra: readonly object[]) =>
       table.exportGeoJson(exclude, extra),
     dispose: () => {
@@ -314,5 +316,39 @@ describe('RegionStore region sources', () => {
     store.setActiveImage(image('b.tif'));
     await flush();
     expect(store.getRegionStyle()).toEqual({ fillOpacity: 0, stroke: null, strokeWidth: null, highlight: null });
+  });
+
+  it('reconstructs classes in 3D across the slices of a z-indexed source and the drawn regions', async () => {
+    const big = (id: string, z: number, label = 'A') => ({
+      type: 'Feature',
+      id,
+      properties: { classification: { name: label } },
+      geometry: { type: 'Polygon', coordinates: [square(0, 0, 40).map(([x, y]) => [x * 1, y * 1])], plane: { z } },
+    });
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(tableSource([big('a0', 0), big('a1', 1), big('b1', 1, 'B')]), 'planes');
+    await flush();
+    store.setDisplaySlice(2);
+    await flush();
+    store.addRegion(
+      Object.assign(new Region(), {
+        label: 'A',
+        bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 40, height: 40 }),
+      }),
+    );
+    const [a, b] = await store.reconstructClasses(
+      [
+        { key: 'a', classes: ['A'] },
+        { key: 'none', classes: ['Z'] },
+      ],
+      4,
+    );
+    expect(a.key).toBe('a');
+    expect(a.mesh.faces.length).toBeGreaterThan(0);
+    const zs = Array.from(a.mesh.vertices.filter((_, i) => i % 3 === 2));
+    expect(Math.min(...zs)).toBeGreaterThanOrEqual(-0.5);
+    expect(Math.max(...zs)).toBeLessThanOrEqual(2.5);
+    expect(Math.max(...zs)).toBeGreaterThan(1.5); // slice 2's drawn region is part of it
+    expect(b.mesh.faces.length).toBe(0);
   });
 });

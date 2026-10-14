@@ -14,12 +14,15 @@ import {
   RegionSourceTables,
 } from './region-source-ops';
 import type {
+  ClassOutlines,
   RegionIndexPage,
   RegionIndexQuery,
   RegionSourceInfo,
   RegionTile,
   RegionTileKey,
 } from './region-tiles';
+import type { ReconstructOptions, SliceOutlines } from '../geometry/reconstruct';
+import type { Mesh } from '../geometry/surface-nets';
 
 /** Makes the worker; may be async, as the default one is (it imports the factory on demand). */
 export type RegionSourceWorkerFactory = () => Worker | Promise<Worker>;
@@ -152,6 +155,18 @@ export async function openGeoJsonRegionSource(
   return new WorkerRegionSource(client, text, handle, info);
 }
 
+/**
+ * The 3D reconstruction of a region from its outlines on a stack (see `geometry/reconstruct`),
+ * meshed in the region-source worker (on the main thread where there is none).
+ */
+export function reconstructInWorker(
+  slices: readonly SliceOutlines[],
+  options?: ReconstructOptions,
+  client: RegionSourceWorkerClient = sharedRegionSourceClient(),
+): Promise<Mesh> {
+  return client.call({ op: 'mesh', slices, options });
+}
+
 class WorkerRegionSource implements RegionSource {
   private readonly cache = new RegionTileCache();
   private disposed = false;
@@ -178,6 +193,14 @@ class WorkerRegionSource implements RegionSource {
 
   getIndex(z: number, query: RegionIndexQuery): Promise<RegionIndexPage> {
     return this.call((handle) => ({ op: 'index', handle, z, query }));
+  }
+
+  getClassOutlines(
+    classes: readonly string[],
+    level: number,
+    exclude?: readonly string[],
+  ): Promise<ClassOutlines[]> {
+    return this.call((handle) => ({ op: 'outlines', handle, classes, level, exclude }));
   }
 
   getClassCounts(z: number, exclude?: readonly string[]): Promise<Record<string, number>> {
