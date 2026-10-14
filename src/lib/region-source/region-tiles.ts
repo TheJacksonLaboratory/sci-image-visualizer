@@ -100,10 +100,14 @@ export interface TileFeature {
   labels?: Float32Array;
 }
 
-/** A class's outlines on one plane: rings as interleaved `x, y` image px (holes included). */
+/**
+ * A class's outlines on one plane: rings as interleaved `x, y` image px (holes included), and its
+ * open features' polylines, likewise (absent from a server that predates them).
+ */
 export interface ClassOutlines {
   z: number;
   rings: Float32Array[];
+  lines?: Float32Array[];
 }
 
 /** One tile of one level of one plane. */
@@ -473,22 +477,24 @@ export class RegionFeatureTable {
 
   /**
    * The outlines of every feature of these classes, plane by plane, simplified for `level` (what a
-   * 3D reconstruction of the classes stacks), without the `exclude`d ids. Planes without one are
-   * left out.
+   * 3D reconstruction of the classes stacks), without the `exclude`d ids: closed features' rings,
+   * open features' polylines as `lines`. Planes without one are left out.
    */
   classOutlines(classes: readonly string[], level: number, exclude: readonly string[] = []): ClassOutlines[] {
     const wanted = new Set(classes);
     const skip = new Set(exclude);
-    const byPlane = new Map<number, Float32Array[]>();
+    const byPlane = new Map<number, ClassOutlines>();
     for (let i = 0; i < this.ids.length; i++) {
-      if (this.open[i] || !wanted.has(this.labels[i] ?? '') || skip.has(this.ids[i])) continue;
+      if (!wanted.has(this.labels[i] ?? '') || skip.has(this.ids[i])) continue;
       const rings = this.ringsAt(i, level);
       if (!rings.length) continue;
-      const list = byPlane.get(this.planes[i]);
-      if (list) list.push(...rings);
-      else byPlane.set(this.planes[i], [...rings]);
+      const z = this.planes[i];
+      let plane = byPlane.get(z);
+      if (!plane) byPlane.set(z, (plane = { z, rings: [] }));
+      if (this.open[i]) (plane.lines ??= []).push(...rings);
+      else plane.rings.push(...rings);
     }
-    return Array.from(byPlane, ([z, rings]) => ({ z, rings })).sort((a, b) => a.z - b.z);
+    return Array.from(byPlane.values()).sort((a, b) => a.z - b.z);
   }
 
   /** Features per class on plane `z`, without the `exclude`d ids. */

@@ -26,7 +26,7 @@
 //   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
 //   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
-//   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings }] }
+//   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings, lines? }] }
 //   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser

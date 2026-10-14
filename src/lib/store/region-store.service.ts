@@ -15,7 +15,14 @@ import { VisualizerStore } from './visualizer-store.service';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.contract';
 import { applyPresetColors, colorForLabel, presetKey } from './class-color.util';
-import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
+import {
+  cloneBounds,
+  makePolygon,
+  rectToRing,
+  regionPolygons,
+  regionPolylines,
+  replaceBounds,
+} from '../models/polygon-factory';
 import type { Mesh } from '../geometry/surface-nets';
 import { SliceOutlines, outlinedVolume } from '../geometry/reconstruct';
 import { reconstructInWorker } from '../region-source/worker-region-source';
@@ -888,21 +895,25 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return out;
   }
 
-  /** Every slice's outlines of these classes: the region sources', then the regions'. */
+  /**
+   * Every slice's outlines of these classes, the region sources' then the regions': closed shapes'
+   * rings, and open polylines as `lines`.
+   */
   private async classOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
     const wanted = new Set(classes);
-    const byZ = new Map<number, ArrayLike<number>[]>();
-    const add = (z: number, rings: ArrayLike<number>[]) => {
-      if (!rings.length) return;
-      const list = byZ.get(z);
-      if (list) list.push(...rings);
-      else byZ.set(z, [...rings]);
+    const byZ = new Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>();
+    const add = (z: number, rings: readonly ArrayLike<number>[], lines: readonly ArrayLike<number>[] = []) => {
+      if (!rings.length && !lines.length) return;
+      let slice = byZ.get(z);
+      if (!slice) byZ.set(z, (slice = { rings: [], lines: [] }));
+      slice.rings.push(...rings);
+      slice.lines.push(...lines);
     };
     const image = this.scope.activeImage;
     if (this.sources.hasPlanesSource(image)) {
       const binding = await this.sources.binding(image, this.sourceSlice);
       const outlines = await binding?.source.getClassOutlines(classes, level, this.sources.allTaken(image));
-      for (const s of outlines ?? []) add(s.z, s.rings);
+      for (const s of outlines ?? []) add(s.z, s.rings, s.lines);
     }
     for (const z of this.sources.slicesWithSource(image)) {
       const binding = await this.sources.binding(image, z);
@@ -912,7 +923,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
         level,
         Array.from(this.sources.taken(image, z)),
       );
-      for (const s of outlines) if (s.z === binding.plane) add(z, s.rings);
+      for (const s of outlines) if (s.z === binding.plane) add(z, s.rings, s.lines);
     }
     for (const r of this.scope.stackMode ? this.getSliceRegions() : this.regions) {
       if (r.isProfile?.() || !r.label || !wanted.has(r.label)) continue;
@@ -921,9 +932,13 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
         rings.push(Float64Array.from(p.xpoints.flatMap((x, i) => [x, p.ypoints[i]])));
         for (const hole of p.holes ?? []) rings.push(Float64Array.from(hole.flat()));
       }
-      add(r.z ?? 0, rings);
+      add(r.z ?? 0, rings, regionPolylines(r));
     }
-    return Array.from(byZ, ([z, rings]) => ({ z, rings })).sort((a, b) => a.z - b.z);
+    return Array.from(byZ, ([z, s]) => ({
+      z,
+      rings: s.rings,
+      ...(s.lines.length ? { lines: s.lines } : {}),
+    })).sort((a, b) => a.z - b.z);
   }
 
   /** Delete source features without taking them (one undo step). */

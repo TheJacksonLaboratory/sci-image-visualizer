@@ -1,15 +1,21 @@
 /**
  * The 3D reconstruction of a region from its outlines on a stack of slices: each slice's outlines
- * filled (even-odd) into a voxel mask, the mask's boundary meshed by surface nets and smoothed.
+ * filled (even-odd) into a voxel mask, the mask's boundary meshed by surface nets and smoothed; and
+ * its open lines lofted into a sheet.
  *
  * Pure: usable from workers.
  */
+import { loftLines } from './loft';
 import { Mesh, smoothMesh, surfaceNets } from './surface-nets';
 
-/** A region's outlines on one slice: rings as interleaved `x, y` image pixels (holes included). */
+/**
+ * A region's outlines on one slice: rings as interleaved `x, y` image pixels (holes included), and
+ * open polylines (a layer boundary), likewise.
+ */
 export interface SliceOutlines {
   z: number;
   rings: ArrayLike<number>[];
+  lines?: ArrayLike<number>[];
 }
 
 export interface ReconstructOptions {
@@ -23,9 +29,22 @@ export interface ReconstructOptions {
 
 /**
  * The mesh of the region outlined by `slices`, in image pixels (x, y) and slice indices (z: slice
- * k's plane at z = k). Empty when no slice has an area.
+ * k's plane at z = k): the filled outlines' surface, and the sheet through the lines (see
+ * {@link loftLines}). Empty when no slice has an area and no two slices have lines.
  */
 export function reconstruct(slices: readonly SliceOutlines[], opts: ReconstructOptions = {}): Mesh {
+  const filled = fill(slices, opts);
+  const lines = slices.filter((s) => s.lines?.length);
+  if (!lines.length) return filled;
+  const sheet = loftLines(
+    lines.map((s) => ({ z: s.z, lines: s.lines ?? [] })),
+    opts.pixelStep ?? 1,
+  );
+  return mergeMeshes(filled, sheet);
+}
+
+/** The surface of the filled outlines. */
+function fill(slices: readonly SliceOutlines[], opts: ReconstructOptions): Mesh {
   let x0 = Infinity,
     y0 = Infinity,
     x1 = -Infinity,
@@ -65,6 +84,20 @@ export function reconstruct(slices: readonly SliceOutlines[], opts: ReconstructO
     v[i + 2] = z0 + v[i + 2] - 0.5;
   }
   return mesh;
+}
+
+/** `a` and `b` as one mesh. */
+function mergeMeshes(a: Mesh, b: Mesh): Mesh {
+  if (!b.faces.length) return a;
+  if (!a.faces.length) return b;
+  const vertices = new Float32Array(a.vertices.length + b.vertices.length);
+  vertices.set(a.vertices);
+  vertices.set(b.vertices, a.vertices.length);
+  const faces = new Uint32Array(a.faces.length + b.faces.length);
+  faces.set(a.faces);
+  const offset = a.vertices.length / 3;
+  for (let i = 0; i < b.faces.length; i++) faces[a.faces.length + i] = b.faces[i] + offset;
+  return { vertices, faces };
 }
 
 /** Fill one slice of the mask: even-odd over `rings`, sampled at voxel centres. */

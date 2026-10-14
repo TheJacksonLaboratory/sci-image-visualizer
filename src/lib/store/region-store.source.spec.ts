@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 
 import { IImageInfo } from '../contracts/image.contract';
+import { makePolygon } from '../models/polygon-factory';
 import { Rectangle, Region } from '../models/region';
 import { RegionSource, RegionSourceView } from '../region-source/region-source';
 import { RegionFeatureTable } from '../region-source/region-tiles';
@@ -350,5 +351,38 @@ describe('RegionStore region sources', () => {
     expect(Math.max(...zs)).toBeLessThanOrEqual(2.5);
     expect(Math.max(...zs)).toBeGreaterThan(1.5); // slice 2's drawn region is part of it
     expect(b.mesh.faces.length).toBe(0);
+  });
+
+  it('lofts a class traced as lines on each slice into a sheet (a layer boundary), with no volume', async () => {
+    const line = (id: string, z: number, y: number) => ({
+      type: 'Feature',
+      id,
+      properties: { classification: { name: 'ILM' } },
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [0, y],
+          [50, y + 5],
+          [100, y],
+        ],
+        plane: { z },
+      },
+    });
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(tableSource([line('l0', 0, 20), line('l1', 1, 22)]), 'planes');
+    await flush();
+    store.setDisplaySlice(2);
+    await flush();
+    store.addRegion(
+      Object.assign(new Region(), {
+        label: 'ILM',
+        bounds: makePolygon([0, 50, 100], [24, 29, 24], { closed: false }),
+      }),
+    );
+    const [sheet] = await store.reconstructClasses([{ key: 'ilm', classes: ['ILM'] }], 10);
+    expect(sheet.mesh.faces.length).toBeGreaterThan(0);
+    const zs = new Set(Array.from(sheet.mesh.vertices.filter((_, i) => i % 3 === 2)));
+    expect(zs).toEqual(new Set([0, 1, 2])); // the drawn line on slice 2 is part of it
+    expect((await store.classVolumes(['ILM'])).get('ILM')).toBe(0);
   });
 });

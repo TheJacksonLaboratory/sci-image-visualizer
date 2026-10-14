@@ -278,7 +278,7 @@ class FolderRegionSet {
       if (!entry) continue;
       const own = exclude.map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
       for (const s of entry.table.classOutlines(classes, level, own)) {
-        if (s.z === entry.plane) slices.push({ z, rings: s.rings });
+        if (s.z === entry.plane) slices.push({ z, rings: s.rings, lines: s.lines });
       }
     }
     return wireOutlines(slices);
@@ -327,7 +327,13 @@ class FolderRegionSet {
 /** Outlines on the wire: rings as plain arrays. */
 function wireOutlines(slices) {
   const round = (r) => Array.from(r, (v) => Math.round(v * 100) / 100);
-  return { slices: slices.map((s) => ({ z: s.z, rings: s.rings.map(round) })) };
+  return {
+    slices: slices.map((s) => ({
+      z: s.z,
+      rings: s.rings.map(round),
+      ...(s.lines?.length ? { lines: s.lines.map(round) } : {}),
+    })),
+  };
 }
 
 /** `<z>:<id>` → [z, id]; [null, id] for an id without a slice. */

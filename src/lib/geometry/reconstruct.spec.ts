@@ -110,6 +110,16 @@ describe('reconstruct', () => {
     expect(big.faces.length).toBeGreaterThan(0);
     expect(reconstruct([{ z: 0, rings: [] }]).faces.length).toBe(0);
   });
+
+  it('adds the sheet lofted through the slices’ lines to the filled outlines’ surface', () => {
+    const solid = reconstruct([{ z: 0, rings: [square(0, 0, 40)] }], { pixelStep: 4, smooth: 0 });
+    const lines = [0, 1].map((z) => ({ z, rings: [], lines: [Float32Array.of(0, 100, 40, 100)] }));
+    const sheet = reconstruct(lines, { pixelStep: 4 });
+    expect(sheet.faces.length / 3).toBe(20); // 11 points a line at a 4 px step: 10 quads
+    const both = reconstruct([{ ...lines[0], rings: [square(0, 0, 40)] }, lines[1]], { pixelStep: 4, smooth: 0 });
+    expect(both.faces.length).toBe(solid.faces.length + sheet.faces.length);
+    expect(Math.max(...both.faces)).toBe(both.vertices.length / 3 - 1);
+  });
 });
 
 describe('ringsArea / outlinedVolume', () => {

@@ -118,12 +118,15 @@ class HttpRegionSource implements RegionSource {
     level: number,
     exclude: readonly string[] = [],
   ): Promise<ClassOutlines[]> {
-    const wire = await this.http.json<{ slices: Array<{ z: number; rings: number[][] }> }>('outlines', {
-      classes,
-      level,
-      exclude,
-    });
-    return wire.slices.map((s) => ({ z: s.z, rings: s.rings.map((r) => Float32Array.from(r)) }));
+    const wire = await this.http.json<{ slices: Array<{ z: number; rings: number[][]; lines?: number[][] }> }>(
+      'outlines',
+      { classes, level, exclude },
+    );
+    return wire.slices.map((s) => ({
+      z: s.z,
+      rings: s.rings.map((r) => Float32Array.from(r)),
+      ...(s.lines?.length ? { lines: s.lines.map((l) => Float32Array.from(l)) } : {}),
+    }));
   }
 
   getClassCounts(z: number, exclude: readonly string[] = []): Promise<Record<string, number>> {
