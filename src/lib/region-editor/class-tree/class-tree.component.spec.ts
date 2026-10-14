@@ -77,4 +77,15 @@ describe('ClassTreeComponent', () => {
     expect(toggles[0].classes.sort()).toEqual(['AUD', 'CTX', 'MO']);
     expect(picks).toEqual([]);
   });
+
+  it('recolours a class from its swatch without picking it', () => {
+    const colors: Array<{ name: string; color: string }> = [];
+    fixture.componentInstance.recolor.subscribe((c) => colors.push(c));
+    const swatch = rows()[1].querySelector('.tree-swatch') as HTMLElement;
+    swatch.click();
+    expect(picks).toEqual([]);
+    const picker = fixture.debugElement.queryAll((d) => d.name === 'hex-color-picker')[1];
+    picker.componentInstance.colorChange.emit('#ff00aa');
+    expect(colors).toEqual([{ name: 'CTX', color: '#ff00aa' }]);
+  });
 });

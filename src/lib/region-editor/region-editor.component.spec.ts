@@ -1764,10 +1764,18 @@ describe('RegionEditorComponent with a region source', () => {
     labels: false,
   } as unknown as RegionSourceView;
   const settle = () => new Promise((r) => setTimeout(r));
+  let presets$: BehaviorSubject<PresetSet>;
 
   beforeEach(async () => {
     const drawn = Object.assign(new Region(), { id: 1, name: 'shape1', label: 'MB', color: '#f00' });
+    presets$ = new BehaviorSubject<PresetSet>({
+      classes: [],
+      fallbackPalette: ['#123456'],
+      autoPromote: false,
+      matchMode: 'exact',
+    });
     api = MockService(RoutingVisualizerService, {
+      getPresetSet$: () => presets$,
       getShowShapeLabel: () => false,
       getShapeColor: () => '#00FFFF',
       getFillColor: () => 'rgba(0,0,0,0)',
@@ -1857,5 +1865,20 @@ describe('RegionEditorComponent with a region source', () => {
     (component as any).toggleClass3d('grey');
     expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: expect.any(String) }]);
     expect([...(component as any).shown3dNames]).toEqual(['MB']);
+  });
+
+  it('repaints the surfaces shown in 3D when a class colour changes', async () => {
+    const show = jest.fn(async () => undefined);
+    (api as unknown as { showRegionClasses3d: typeof show }).showRegionClasses3d = show;
+    (component as any).toggleClass3d('MB');
+    expect(show).toHaveBeenCalledTimes(1);
+
+    presets$.next({ ...presets$.value, classes: [{ name: 'MB', color: '#ff00aa' }] });
+    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: '#ff00aa' }]);
+    expect((component as any).treeColor('MB')).toBe('#ff00aa');
+
+    // Another class's colour: the surface is left alone.
+    presets$.next({ ...presets$.value, classes: [...presets$.value.classes, { name: 'CTX', color: '#00aaff' }] });
+    expect(show).toHaveBeenCalledTimes(2);
   });
 });

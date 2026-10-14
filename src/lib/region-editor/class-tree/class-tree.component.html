@@ -38,7 +38,13 @@
         [attr.aria-label]="row.expanded ? 'Collapse' : 'Expand'"
         (click)="row.hasChildren && toggle(row, $event)"
       ></i>
-      <span class="tree-swatch" [style.background]="colorOf(row.name)"></span>
+      <span class="tree-swatch" (click)="$event.stopPropagation()" (keydown.enter)="$event.stopPropagation()">
+        <hex-color-picker
+          [color]="colorOf(row.name)"
+          (colorChange)="recolor.emit({ name: row.name, color: $event })"
+        >
+        </hex-color-picker>
+      </span>
       <span class="tree-name">{{ row.name }}</span>
       <span class="tree-long">{{ node(row.name)?.title }}</span>
       <span class="tree-count" *ngIf="total(row.name) > 0">{{ total(row.name) }}</span>

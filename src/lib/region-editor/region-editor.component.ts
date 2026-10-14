@@ -159,6 +159,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected volumeView = false;
   /** Classes shown in 3D in the volume view, each with the classes its surface covers. */
   protected shown3d = new Map<string, string[]>();
+  /** The colour each shown surface was last drawn in. */
+  private colors3d = new Map<string, string>();
   /** Their names, for the class lists' toggles (a new set per change, for OnPush). */
   protected shown3dNames: ReadonlySet<string> = new Set();
   /** Whether a region set's class hierarchy is shown as a tree (rather than the class list). */
@@ -167,8 +169,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected pickedClass: string | null = null;
   /** Regions per class (the regions' and the source's), for the class tree. */
   protected treeCounts = new Map<string, number>();
-  /** A class's colour, for the class tree. */
-  protected readonly treeColor = (name: string): string => colorForLabel(name, this.presetSet);
+  /** A class's colour, for the class tree: a new function per colour change, so the tree repaints. */
+  protected treeColor = (name: string): string => colorForLabel(name, this.presetSet);
   protected saveAsFilename = '';
   protected saveAsFileExists = false;
   /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
@@ -241,7 +243,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     if (presets$) {
       presets$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((set) => {
         if (set) this.presetSet = set;
+        this.treeColor = (name: string): string => colorForLabel(name, this.presetSet);
         this.updateDisplayClasses();
+        this.recolor3d();
         this.changed();
       });
     }
@@ -473,7 +477,23 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.shown3d = next;
     this.shown3dNames = new Set(next.keys());
     this.changed();
-    const groups = [...next].map(([key, cls]) => ({ key, classes: cls, color: this.treeColor(key) }));
+    this.show3d(this.groups3d());
+  }
+
+  /** The surfaces shown in 3D, in their classes' colours now. */
+  private groups3d(): Array<{ key: string; classes: string[]; color: string }> {
+    return [...this.shown3d].map(([key, classes]) => ({ key, classes, color: this.treeColor(key) }));
+  }
+
+  /** A class colour changed (its swatch, or Manage): repaint the surfaces shown in 3D whose colour it changed. */
+  private recolor3d(): void {
+    const groups = this.groups3d();
+    if (!groups.some((g) => g.color !== this.colors3d.get(g.key))) return;
+    this.show3d(groups);
+  }
+
+  private show3d(groups: Array<{ key: string; classes: string[]; color: string }>): void {
+    this.colors3d = new Map(groups.map((g) => [g.key, g.color]));
     this.regionApi.showRegionClasses3d?.(groups).catch((err) => {
       this.toast('error', 'Could not show the region in 3D', `${(err as Error)?.message ?? err}`);
     });

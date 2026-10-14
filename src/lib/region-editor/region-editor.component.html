@@ -227,6 +227,7 @@
     [volume]="volumeView"
     [shown3d]="shown3dNames"
     (pick)="pickClasses($event)"
+    (recolor)="setClassColor($event.name, $event.color)"
     (toggle3d)="toggleClass3d($event.name, $event.classes)"
   >
   </region-class-tree>
