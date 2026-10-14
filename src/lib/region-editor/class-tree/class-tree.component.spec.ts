@@ -34,6 +34,28 @@ describe('ClassTreeComponent', () => {
     expect(rows()[1].querySelector('.tree-count')!.textContent!.trim()).toBe('2');
   });
 
+  it("an eye hides a class with its subtree, and shows a partly hidden class's state", () => {
+    const toggles: Array<{ classes: string[]; hidden: boolean }> = [];
+    fixture.componentInstance.toggleHidden.subscribe((t) => toggles.push(t));
+    const eye = (i: number) => rows()[i].querySelector('.tree-eye') as HTMLElement;
+    eye(1).click();
+    expect(toggles[0].hidden).toBe(true);
+    expect(toggles[0].classes).toEqual(expect.arrayContaining(['CTX', 'MO', 'AUD']));
+    expect(picks).toEqual([]);
+
+    fixture.componentRef.setInput('hidden', new Set(['MO']));
+    fixture.detectChanges();
+    expect(eye(1).classList).toContain('partial');
+    expect(eye(1).classList).toContain('pi-eye');
+
+    fixture.componentRef.setInput('hidden', new Set(['CTX', 'MO', 'AUD']));
+    fixture.detectChanges();
+    expect(eye(1).classList).toContain('pi-eye-slash');
+    expect(rows()[1].classList).toContain('hidden-class');
+    eye(1).click();
+    expect(toggles[1].hidden).toBe(false);
+  });
+
   it('picks a class with its subtree', () => {
     rows()[1].click();
     expect(picks[0]).toEqual({

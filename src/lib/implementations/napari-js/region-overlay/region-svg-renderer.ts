@@ -47,7 +47,7 @@ export class NapariRegionSvgRenderer {
       rectElement: 'rect',
       styleShape: (el, region, selected) => this.style(el, this.strokeOf(region), selected),
       decorate: (region, _i, _selected, layer) => this.drawLabel(region, layer),
-      skip: (region) => !!region.isProfile?.(),
+      skip: (region) => !!region.isProfile?.() || store.isClassHidden(region.label),
     });
   }
 

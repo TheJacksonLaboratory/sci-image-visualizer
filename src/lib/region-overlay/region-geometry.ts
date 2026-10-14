@@ -177,11 +177,11 @@ function nearPolyline(xs: number[], ys: number[], x: number, y: number, toScreen
 }
 
 /** Index of the topmost (last) region containing (x, y), or -1. */
-export function topmostRegionAt(
-  regions: ReadonlyArray<Pick<Region, 'bounds'>>,
+export function topmostRegionAt<R extends Pick<Region, 'bounds'>>(
+  regions: ReadonlyArray<R>,
   x: number,
   y: number,
-  opts: ContainsOptions & { skip?: (r: Pick<Region, 'bounds'>) => boolean } = {},
+  opts: ContainsOptions & { skip?: (r: R) => boolean } = {},
 ): number {
   for (let i = regions.length - 1; i >= 0; i--) {
     if (opts.skip?.(regions[i])) continue;
@@ -193,7 +193,7 @@ export function topmostRegionAt(
 /**
  * Indices of every region whose bounding box intersects the world box
  * [x0,y0]–[x1,y1] (rubber-band selection). `skipProfiles` leaves out
- * intensity-profile lines.
+ * intensity-profile lines, `skip` any other region.
  */
 export function regionsInRect(
   regions: ReadonlyArray<Region>,
@@ -201,11 +201,11 @@ export function regionsInRect(
   y0: number,
   x1: number,
   y1: number,
-  opts: { skipProfiles?: boolean } = {},
+  opts: { skipProfiles?: boolean; skip?: (r: Region) => boolean } = {},
 ): number[] {
   const out: number[] = [];
   regions.forEach((r, i) => {
-    if (opts.skipProfiles && r.isProfile?.()) return;
+    if ((opts.skipProfiles && r.isProfile?.()) || opts.skip?.(r)) return;
     const bb = regionBBox(r);
     if (bb && bb.x0 <= x1 && bb.x1 >= x0 && bb.y0 <= y1 && bb.y1 >= y0) out.push(i);
   });

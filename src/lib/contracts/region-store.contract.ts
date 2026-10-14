@@ -113,4 +113,6 @@ export interface IRegionSourceApi {
   getRegionStyle(): RegionStyle;
   /** Whether a class's label is left out because a subclass of it is drawn too. */
   isLabelCovered(label: string | undefined): boolean;
+  /** Whether regions labelled `label` are hidden: not drawn, not picked. */
+  isClassHidden(label: string | null | undefined): boolean;
 }

@@ -14,7 +14,7 @@ import {
 import { VisualizerStore } from './visualizer-store.service';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.contract';
-import { applyPresetColors, colorForLabel } from './class-color.util';
+import { applyPresetColors, colorForLabel, presetKey } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
 import type { Mesh } from '../geometry/surface-nets';
 import { SliceOutlines, outlinedVolume } from '../geometry/reconstruct';
@@ -137,6 +137,11 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
 
   /** {@link classVolumes} by image and class, until the regions change. */
   private readonly volumeCache = new Map<string, Promise<number>>();
+
+  /** The classes hidden from view (names as given); every class is shown at first. */
+  private readonly hiddenClasses$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
+  /** {@link hiddenClasses$} by {@link presetKey}, as a region's label is matched. */
+  private hiddenKeys: ReadonlySet<string> = new Set();
 
   constructor(private store: VisualizerStore) {
     // A class colour change recolours the source's features as it recolours regions.
@@ -987,6 +992,45 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   }
   private coveredFor: { regions: Region[]; hierarchy: readonly object[]; covered: Set<string> } | null = null;
 
+  /** The classes hidden from view (see {@link setClassesHidden}). */
+  getHiddenClasses(): ReadonlySet<string> {
+    return this.hiddenClasses$.value;
+  }
+
+  /** {@link getHiddenClasses} and every change of it. */
+  getHiddenClasses$(): Observable<ReadonlySet<string>> {
+    return this.hiddenClasses$.asObservable();
+  }
+
+  /**
+   * Hide (or show again) these classes' regions: the overlays and the region source's layer stop
+   * drawing them, and a hidden region can be neither picked nor kept selected. The regions stay in
+   * the set (the table lists them; a save keeps them).
+   */
+  setClassesHidden(classes: readonly string[], hidden: boolean): void {
+    const cur = this.hiddenClasses$.value;
+    const next = new Set(cur);
+    for (const c of classes) {
+      if (hidden) next.add(c);
+      else next.delete(c);
+    }
+    if (next.size === cur.size && [...next].every((c) => cur.has(c))) return;
+    const set = this.store.getPresetSet();
+    this.hiddenKeys = new Set([...next].map((c) => presetKey(set, c)));
+    this.hiddenClasses$.next(next);
+    if (hidden) {
+      const shown = this.selection.indices.filter((i) => !this.isClassHidden(this.regions[i]?.label));
+      if (shown.length !== this.selection.indices.length) this.setSelectedShapeIndices(shown);
+    }
+    this.republishView();
+    this.regionUpdate$.next(this.getRegions());
+  }
+
+  /** Whether regions labelled `label` are hidden (an unlabelled region never is). */
+  isClassHidden(label: string | null | undefined): boolean {
+    return !!label && this.hiddenKeys.size > 0 && this.hiddenKeys.has(presetKey(this.store.getPresetSet(), label));
+  }
+
   /** The region look: outlines, or filled (an atlas's look); see `region-style`. */
   getRegionStyle(): RegionStyle {
     return this.regionStyle$.value;
@@ -1088,6 +1132,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
             f.label ? colorForLabel(f.label, this.store.getPresetSet()) : f.color || this.shapeColor,
           style: this.regionStyle$.value,
           labels: this.showShapeLabel,
+          isHidden: (label) => this.isClassHidden(label),
         });
         this.restyle(labelsOn);
       },

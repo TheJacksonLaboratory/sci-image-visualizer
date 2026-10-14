@@ -44,6 +44,7 @@ export class VolumeRegionMeshes {
     { mesh: RegionMesh3D; layer: SurfaceLayer; world: Float32Array; box: MeshBox }
   >();
   private highlighted: ReadonlySet<string> = new Set();
+  private hidden: ReadonlySet<string> = new Set();
   /** The meshes to show (kept while the volume has no frame yet). */
   private wanted: readonly RegionMesh3D[] = [];
   private frame: VolumeFrame | null = null;
@@ -70,6 +71,13 @@ export class VolumeRegionMeshes {
     this.viewer.requestRender();
   }
 
+  /** Hide the surfaces of these keys (they are kept, so showing them again is instant). */
+  setHidden(keys: Iterable<string>): void {
+    this.hidden = new Set(keys);
+    for (const [key, e] of this.layers) e.layer.visible = !this.hidden.has(key);
+    this.viewer.requestRender();
+  }
+
   /** The front-most surface under screen point (`x`, `y`) (canvas CSS px), or null. */
   pickAt(x: number, y: number): RegionMesh3D | null {
     if (!this.layers.size) return null;
@@ -79,7 +87,8 @@ export class VolumeRegionMeshes {
     if (!ray) return null;
     let best: RegionMesh3D | null = null;
     let bestT = Infinity;
-    for (const e of this.layers.values()) {
+    for (const [key, e] of this.layers) {
+      if (this.hidden.has(key)) continue;
       const t = rayHitMesh(ray, e.world, e.mesh.faces, e.box);
       if (t < bestT) {
         bestT = t;
@@ -123,6 +132,7 @@ export class VolumeRegionMeshes {
       blending: 'translucent',
       fit: 'never',
     });
+    layer.visible = !this.hidden.has(mesh.key);
     this.layers.set(mesh.key, { mesh, layer, world, box: meshBox(world) });
   }
 

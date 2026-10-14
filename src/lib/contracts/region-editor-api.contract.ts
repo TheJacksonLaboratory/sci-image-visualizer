@@ -141,6 +141,13 @@ export interface IRegionEditorApi {
   getRegionPicked3d$?(): Observable<{ key: string | null; additive: boolean }>;
   /** The class groups shown in 3D on the image on screen; emits [] when another image is plotted. */
   getRegionClasses3d$?(): Observable<ReadonlyArray<{ key: string; classes: readonly string[] }>>;
+  /** The classes hidden from view, and every change of them. */
+  getHiddenClasses$?(): Observable<ReadonlySet<string>>;
+  /**
+   * Hide (or show again) these classes: their regions and the region source's features are not
+   * drawn or picked, and their surfaces in the volume view are hidden.
+   */
+  setClassesHidden?(classes: readonly string[], hidden: boolean): void;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see

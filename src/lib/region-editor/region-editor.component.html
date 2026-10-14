@@ -216,6 +216,8 @@
   [volume]="volumeView"
   [shown3d]="shown3dNames"
   (toggle3d)="toggleClass3d($event)"
+  [hidden]="hiddenClasses"
+  (toggleHidden)="setClassesHidden([$event], !hiddenClasses.has($event))"
   [treeView]="classHierarchy ? classTreeView : null"
   (treeViewChange)="classTreeView = $event"
 >
@@ -232,6 +234,8 @@
     (pick)="pickClasses($event)"
     (recolor)="setClassColor($event.name, $event.color)"
     (toggle3d)="toggleClass3d($event.name, $event.classes)"
+    [hidden]="hiddenClasses"
+    (toggleHidden)="setClassesHidden($event.classes, $event.hidden)"
   >
   </region-class-tree>
 </region-classes-panel>

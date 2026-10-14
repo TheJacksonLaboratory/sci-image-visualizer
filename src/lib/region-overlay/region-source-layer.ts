@@ -255,7 +255,7 @@ export class RegionSourceLayer {
         if (!tile || used.has(regionTileId(tile))) continue;
         used.add(regionTileId(tile));
         for (const f of tile.features) {
-          if (view.taken.has(f.id)) continue;
+          if (view.taken.has(f.id) || view.isHidden?.(f.label)) continue;
           const had = level.get(f.id);
           if (had !== undefined && had <= tile.level) continue;
           drawn.set(f.id, f);

@@ -96,6 +96,10 @@ export class VolumeScene implements NapariScene {
     this.regionMeshes.setHighlight(keys);
   }
 
+  setRegionHidden(keys: readonly string[]): void {
+    this.regionMeshes.setHidden(keys);
+  }
+
   /**
    * Picking the reconstructions: with the selection tool armed, a click on one selects its class
    * (null beside them); resting over one names it, whatever the tool.

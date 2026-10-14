@@ -169,6 +169,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private colors3d = new Map<string, string>();
   /** Their names, for the class lists' toggles (a new set per change, for OnPush). */
   protected shown3dNames: ReadonlySet<string> = new Set();
+  /** The classes hidden from view (their regions, source features and surfaces). */
+  protected hiddenClasses: ReadonlySet<string> = new Set();
   /** Whether a region set's class hierarchy is shown as a tree (rather than the class list). */
   protected classTreeView = true;
   /** The class picked last in the class tree. */
@@ -320,6 +322,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.shown3dNames = new Set(this.shown3d.keys());
         this.highlighted3d = '';
         this.updateSelectionHighlight();
+        this.changed();
+      });
+
+    this.regionApi
+      .getHiddenClasses$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((hidden) => {
+        this.hiddenClasses = hidden;
         this.changed();
       });
 
@@ -499,6 +509,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.changed();
     this.show3d(this.groups3d());
     this.updateSelectionHighlight();
+  }
+
+  /** Hide (or show again) these classes' regions, wherever they are drawn. */
+  protected setClassesHidden(classes: readonly string[], hidden: boolean): void {
+    this.regionApi.setClassesHidden?.(classes, hidden);
   }
 
   /** The surfaces shown in 3D, in their classes' colours now. */

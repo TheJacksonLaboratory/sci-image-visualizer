@@ -34,7 +34,7 @@ interface ClassRow {
  * class with its colour swatch and region count. A row click picks the active
  * class (and re-classifies a selection), the swatch recolours the class, the
  * trash removes it, Manage opens the full editor; the search box filters the
- * rows by name. For a class hierarchy the editor projects a class tree in,
+ * rows by name; the eye hides a class's regions. For a class hierarchy the editor projects a class tree in,
  * shown in place of the list while {@link treeView} is on. Presentational: the
  * editor applies every action.
  */
@@ -67,6 +67,10 @@ export class ClassesPanelComponent implements OnChanges {
   @Input() volume = false;
   /** The classes shown in 3D. */
   @Input() shown3d: ReadonlySet<string> = new Set();
+  /** The classes hidden from view. */
+  @Input() hidden: ReadonlySet<string> = new Set();
+  /** A class's eye (its name): hide it, or show it again. */
+  @Output() toggleHidden = new EventEmitter<string>();
   /** A class's 3D toggle (its name). */
   @Output() toggle3d = new EventEmitter<string>();
   /** Whether the projected class tree is shown instead of the list; null: there is no tree. */

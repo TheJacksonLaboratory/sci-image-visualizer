@@ -656,6 +656,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   getRegionSourceClassCounts(): Promise<Record<string, number>> {
     return this.regionStore.getRegionSourceClassCounts();
   }
+  getHiddenClasses$(): Observable<ReadonlySet<string>> {
+    return this.regionStore.getHiddenClasses$();
+  }
+  setClassesHidden(classes: readonly string[], hidden: boolean): void {
+    this.regionStore.setClassesHidden(classes, hidden);
+    // A surface is its class's (its group key is the class name).
+    this.napari.setRegionHidden([...this.regionStore.getHiddenClasses()]);
+  }
   async selectRegionClasses(classes: readonly string[], additive?: boolean): Promise<void> {
     await this.regionStore.selectClasses(classes, additive);
   }

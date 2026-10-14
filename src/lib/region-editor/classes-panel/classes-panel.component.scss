@@ -129,3 +129,22 @@
   opacity: 1;
   color: var(--primary-color);
 }
+
+/* The eye: faint on a shown class (most are), plain on a hidden one. */
+.class-row .row-eye {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.4;
+  cursor: pointer;
+}
+.class-row .row-eye:hover {
+  opacity: 0.9;
+}
+.class-row.hidden-class .row-eye {
+  opacity: 1;
+}
+.class-row.hidden-class .row-swatch,
+.class-row.hidden-class .row-name,
+.class-row.hidden-class .row-count {
+  opacity: 0.45;
+}

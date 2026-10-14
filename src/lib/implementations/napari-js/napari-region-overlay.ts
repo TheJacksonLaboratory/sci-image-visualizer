@@ -412,6 +412,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     const regions = this.store.getRegions();
     const [wx, wy] = this.projection.toWorld(e.clientX, e.clientY);
     for (let i = regions.length - 1; i >= 0; i--) {
+      if (this.store.isClassHidden(regions[i].label)) continue;
       if (regionContains(regions[i], wx, wy, { toScreen: this.projection.toScreen, tolPx: OPEN_PATH_HIT_PX })) {
         this.store.selectRegion(regions[i]);
         this.store.beginBatch();
@@ -483,7 +484,10 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return;
     }
     const regions = this.store.getRegions();
-    this.store.setSelectedShapeIndices(regionsInRect(regions, x0, y0, x1, y1, { skipProfiles: true }));
+    this.store.setSelectedShapeIndices(regionsInRect(regions, x0, y0, x1, y1, {
+        skipProfiles: true,
+        skip: (r) => this.store.isClassHidden(r.label),
+      }));
     const features = this.sourceLayer?.featuresInRect(x0, y0, x1, y1) ?? [];
     if (features.length) {
       void this.store.selectSourceFeatures(

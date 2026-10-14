@@ -50,10 +50,21 @@
         [class.active]="activeClass === c.name"
         [class.picked]="picked === c.name"
         [class.marked]="marked.has(c.name)"
+        [class.hidden-class]="hidden.has(c.name)"
         (click)="pick.emit(c.name)"
         [pTooltip]="c.rowTooltip"
         tooltipPosition="bottom"
       >
+        <i
+          class="pi row-eye"
+          [ngClass]="hidden.has(c.name) ? 'pi-eye-slash' : 'pi-eye'"
+          role="button"
+          [attr.aria-pressed]="!hidden.has(c.name)"
+          [attr.aria-label]="(hidden.has(c.name) ? 'Show ' : 'Hide ') + c.name"
+          [pTooltip]="hidden.has(c.name) ? 'Show this class' : 'Hide this class'"
+          tooltipPosition="bottom"
+          (click)="$event.stopPropagation(); toggleHidden.emit(c.name)"
+        ></i>
         <span class="row-swatch" (click)="$event.stopPropagation()">
           <hex-color-picker [color]="c.color" (colorChange)="recolor.emit({ name: c.name, color: $event })">
           </hex-color-picker>

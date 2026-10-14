@@ -41,6 +41,8 @@ export interface NapariScene {
   setRegionMeshes?(meshes: readonly RegionMesh3D[]): void;
   /** Highlight the reconstructions of these keys (none: all as usual). */
   setRegionHighlight?(keys: readonly string[]): void;
+  /** Hide the reconstructions of these keys. */
+  setRegionHidden?(keys: readonly string[]): void;
   /** Image px per voxel of the assembled volume, in-plane (volume scenes only). */
   voxelStep?(): number | null;
   /** Remove everything the scene added; called before the viewer is disposed. */

@@ -149,6 +149,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
           drawRegionLabel(layer, region, this.store.getShapeColor(), this.store.getRegionStyle?.());
         }
       },
+      skip: (region) => this.hidden(region),
     });
     this.sourceLayer = this.store.getRegionSourceView$
       ? new RegionSourceLayer(this.svg, this.store.getRegionSourceView$())
@@ -484,7 +485,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
         y1 = Math.max(start.y, end.y);
       // Only a real drag selects; a click-sized band falls through to onClick.
       if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
-        this.store.setSelectedShapeIndices(regionsInRect(this.store.getRegions(), x0, y0, x1, y1));
+        this.store.setSelectedShapeIndices(
+          regionsInRect(this.store.getRegions(), x0, y0, x1, y1, { skip: (r) => this.hidden(r) }),
+        );
         this.selectSourceIn(x0, y0, x1, y1);
       }
       this.renderOverlay();
@@ -740,8 +743,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   /** Index of the topmost region under an image point, or -1. */
   private regionIndexAt(pt: { x: number; y: number }): number {
-    const opts = { toScreen: this.toScreen, tolPx: OPEN_PATH_TOL_PX };
+    const opts = { toScreen: this.toScreen, tolPx: OPEN_PATH_TOL_PX, skip: (r: Region) => this.hidden(r) };
     return topmostRegionAt(this.store.getRegions(), pt.x, pt.y, opts);
+  }
+
+  /** Whether a region's class is hidden (not drawn, not picked). */
+  private hidden(region: Pick<Region, 'label'>): boolean {
+    return !!this.store.isClassHidden?.(region.label);
   }
 
   /** Whether the element-pixel `position` lands on `region` (see `regionContains`). */

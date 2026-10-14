@@ -1392,4 +1392,33 @@ describe('RegionStore', () => {
       expect((await store.classVolumes(['A'])).get('A')).toBe(4);
     });
   });
+
+  describe('hidden classes', () => {
+    it('hides a class: its regions redraw hidden and drop out of the selection; showing restores', () => {
+      const a = Object.assign(rectRegion(0, 0, 10, 10), { label: 'A' });
+      const b = Object.assign(rectRegion(20, 0, 5, 4), { label: 'B' });
+      store.setRegions([a, b], false, true);
+      store.setSelectedShapeIndices([0, 1]);
+      const updates: unknown[] = [];
+      store.getRegionUpdateEvent().subscribe((r) => updates.push(r));
+
+      store.setClassesHidden(['A'], true);
+      expect(store.isClassHidden('A')).toBe(true);
+      expect(store.isClassHidden('B')).toBe(false);
+      expect(store.isClassHidden(undefined)).toBe(false);
+      expect([...store.getHiddenClasses()]).toEqual(['A']);
+      expect(store.getSelectedShapeIndices()).toEqual([1]);
+      expect(updates).toHaveLength(1);
+      // The regions stay in the set.
+      expect(store.getRegions()).toHaveLength(2);
+
+      // No change, no redraw.
+      store.setClassesHidden(['A'], true);
+      expect(updates).toHaveLength(1);
+
+      store.setClassesHidden(['A'], false);
+      expect(store.isClassHidden('A')).toBe(false);
+      expect(updates).toHaveLength(2);
+    });
+  });
 });

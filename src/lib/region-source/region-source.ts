@@ -67,6 +67,8 @@ export interface RegionSourceView {
   style: RegionStyle;
   /** Whether class labels are shown. */
   labels: boolean;
+  /** Whether a class's features are hidden (see `RegionStore.setClassesHidden`); default: none is. */
+  isHidden?(label: string | null | undefined): boolean;
 }
 
 /**

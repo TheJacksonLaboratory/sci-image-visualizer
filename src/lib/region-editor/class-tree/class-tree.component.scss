@@ -134,3 +134,33 @@
     color: var(--primary-color);
   }
 }
+
+/* The eye: faint on a shown class (most are), plain on a hidden one. */
+.tree-eye {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.4;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &.partial {
+    opacity: 0.7;
+    color: var(--primary-color);
+  }
+}
+
+.tree-row.hidden-class {
+  .tree-eye {
+    opacity: 1;
+  }
+
+  .tree-swatch,
+  .tree-name,
+  .tree-long,
+  .tree-count {
+    opacity: 0.45;
+  }
+}

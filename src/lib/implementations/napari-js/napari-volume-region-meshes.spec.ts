@@ -20,7 +20,7 @@ function fakeViewer() {
       _values: Float32Array,
       opts: Record<string, unknown>,
     ) => {
-      const layer = { name: opts['name'], opacity: opts['opacity'] };
+      const layer = { name: opts['name'], opacity: opts['opacity'], visible: true };
       items.push(layer);
       added.push({ vertices, opts });
       return layer;
@@ -112,5 +112,26 @@ describe('VolumeRegionMeshes', () => {
     // Screen x 50 of 200 is NDC -0.5 (world x -0.5): over the square; x 150 is beside it.
     expect(meshes.pickAt(50, 100)?.key).toBe('L');
     expect(meshes.pickAt(150, 100)).toBeNull();
+  });
+
+  it('hides surfaces, which then are not picked, and shows them again', () => {
+    const { viewer, items } = fakeViewer();
+    const meshes = new VolumeRegionMeshes(viewer);
+    meshes.setFrame({ size: [100, 100, 10], world: [2, 2, 2] });
+    const square = (key: string): RegionMesh3D => ({
+      key,
+      color: '#ff0000',
+      vertices: Float32Array.of(0, 0, 5, 100, 0, 5, 100, 100, 5, 0, 100, 5),
+      faces: Uint32Array.of(0, 1, 2, 0, 2, 3),
+    });
+    meshes.setHidden(['A']);
+    meshes.set([square('A')]);
+    const visible = () => (items as Array<{ visible: boolean }>).map((l) => l.visible);
+    // A surface added while its key is hidden starts hidden.
+    expect(visible()).toEqual([false]);
+    expect(meshes.pickAt(100, 100)).toBeNull();
+    meshes.setHidden([]);
+    expect(visible()).toEqual([true]);
+    expect(meshes.pickAt(100, 100)?.key).toBe('A');
   });
 });

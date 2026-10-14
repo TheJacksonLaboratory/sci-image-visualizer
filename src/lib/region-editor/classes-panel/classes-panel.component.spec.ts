@@ -61,6 +61,22 @@ describe('ClassesPanelComponent', () => {
     expect(panel['removeTooltip']('Stroma')).toBe('Remove class');
   });
 
+  it("a class's eye toggles it without picking it, and a hidden class shows dimmed", () => {
+    const toggled: string[] = [];
+    const picked: string[] = [];
+    panel.toggleHidden.subscribe((n) => toggled.push(n));
+    panel.pick.subscribe((n) => picked.push(n));
+    const eye = () => el().querySelectorAll('.class-row .row-eye')[1] as HTMLElement;
+    expect(eye().classList).toContain('pi-eye');
+    eye().click();
+    expect(toggled).toEqual(['Tumor']);
+    expect(picked).toEqual([]);
+    fixture.componentRef.setInput('hidden', new Set(['Tumor']));
+    fixture.detectChanges();
+    expect(eye().classList).toContain('pi-eye-slash');
+    expect(el().querySelectorAll('.class-row')[1].classList).toContain('hidden-class');
+  });
+
   it('a row click picks the class; the trash removes without picking', () => {
     const pick = jest.fn(),
       remove = jest.fn();

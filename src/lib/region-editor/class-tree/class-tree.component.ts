@@ -24,12 +24,15 @@ export interface ClassTreePick {
   additive: boolean;
 }
 
+/** Whether a class is shown: it and its subclasses all, none ('hidden'), or only some ('partial'). */
+export type ClassVisibility = 'shown' | 'hidden' | 'partial';
+
 /**
  * The Region Editor's classes as a hierarchy (a brain atlas's ontology), as the Allen atlas viewer
  * shows it: collapsible, each class with its colour, name and long name, and the regions it and
  * its subclasses have on this slice; a class with none is greyed. Picking a class selects all its
  * regions and its subclasses' (the editor does the selecting). Search by name or long name. A
- * class's swatch recolours it, as the class list's does.
+ * class's swatch recolours it, as the class list's does; its eye hides it and its subclasses.
  */
 @Component({
   selector: 'region-class-tree',
@@ -54,15 +57,21 @@ export class ClassTreeComponent implements OnChanges {
   @Input() volume = false;
   /** The classes shown in 3D. */
   @Input() shown3d: ReadonlySet<string> = new Set();
+  /** The classes hidden from view. */
+  @Input() hidden: ReadonlySet<string> = new Set();
 
   @Output() pick = new EventEmitter<ClassTreePick>();
   /** A class's swatch picked a new colour. */
   @Output() recolor = new EventEmitter<{ name: string; color: string }>();
   /** A class's 3D toggle: it with every class under it. */
   @Output() toggle3d = new EventEmitter<{ name: string; classes: string[] }>();
+  /** A class's eye: hide (or show) it with every class under it. */
+  @Output() toggleHidden = new EventEmitter<{ classes: string[]; hidden: boolean }>();
 
   protected tree: ClassTree = buildClassTree([], new Map());
   protected rows: ClassTreeRow[] = [];
+  /** Each row's visibility (a row absent: shown). */
+  protected visibility = new Map<string, ClassVisibility>();
   protected query = '';
   private expanded = new Set<string>();
 
@@ -100,6 +109,13 @@ export class ClassTreeComponent implements OnChanges {
     this.pick.emit({ name, classes: subtree(this.tree, name), additive: e.shiftKey || e.metaKey || e.ctrlKey });
   }
 
+  /** The eye: a class hidden (wholly) is shown again with its subclasses; otherwise they are hidden. */
+  protected flipHidden(name: string, event: Event): void {
+    event.stopPropagation();
+    const hidden = this.visibility.get(name) !== 'hidden';
+    this.toggleHidden.emit({ classes: subtree(this.tree, name), hidden });
+  }
+
   protected flip3d(name: string, event: Event): void {
     event.stopPropagation();
     this.toggle3d.emit({ name, classes: subtree(this.tree, name) });
@@ -123,6 +139,13 @@ export class ClassTreeComponent implements OnChanges {
 
   private refresh(): void {
     this.rows = visibleRows(this.tree, this.expanded, this.query);
+    this.visibility = new Map();
+    if (!this.hidden.size) return;
+    for (const row of this.rows) {
+      const classes = subtree(this.tree, row.name);
+      const off = classes.filter((c) => this.hidden.has(c)).length;
+      if (off) this.visibility.set(row.name, off === classes.length ? 'hidden' : 'partial');
+    }
   }
 }
 

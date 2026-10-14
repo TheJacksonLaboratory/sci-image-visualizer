@@ -140,6 +140,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionMeshesImage: string | undefined;
   /** The keys of the reconstructions highlighted. */
   private regionHighlight: readonly string[] = [];
+  /** The keys of the reconstructions hidden. */
+  private regionHidden: readonly string[] = [];
   /** Clicks on the reconstructions (see {@link getRegionMeshPick$}). */
   private readonly regionMeshPick$ = new Subject<{ key: string | null; additive: boolean }>();
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
@@ -353,6 +355,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
+      this.scene.setRegionHidden?.(this.regionHidden);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -426,6 +429,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   setRegionHighlight(keys: readonly string[]): void {
     this.regionHighlight = keys;
     this.scene?.setRegionHighlight?.(keys);
+  }
+
+  /** Hide the reconstructions of these keys (kept for the next volume plot). */
+  setRegionHidden(keys: readonly string[]): void {
+    this.regionHidden = keys;
+    this.scene?.setRegionHidden?.(keys);
   }
 
   /** A reconstruction clicked with the selection tool (its key), or the volume beside them (null). */
