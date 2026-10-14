@@ -180,6 +180,10 @@ class WorkerRegionSource implements RegionSource {
     return this.call((handle) => ({ op: 'index', handle, z, query }));
   }
 
+  getClassCounts(z: number): Promise<Record<string, number>> {
+    return this.call((handle) => ({ op: 'classes', handle, z }));
+  }
+
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): Promise<string> {
     return this.call((handle) => ({ op: 'export', handle, exclude, extra }));
   }

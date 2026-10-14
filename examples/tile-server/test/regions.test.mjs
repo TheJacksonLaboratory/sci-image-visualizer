@@ -51,6 +51,13 @@ before(async () => {
   await writeFile(path.join(dir, 'plates', '002.geojson'), collection([feature('997', 0, 'root'), feature('8', 200, 'grey')]));
   await writeFile(path.join(server.dir, 'secret.geojson'), collection([feature('x', 0, 'X')]));
   await symlink(path.join(dir, 'plates'), path.join(dir, 'linked'));
+  await writeFile(
+    path.join(dir, 'plates', 'regionset.json'),
+    JSON.stringify({
+      classHierarchy: [{ name: 'root', title: 'root' }, { name: 'grey', parent: 'root', color: [1, 2, 3], order: 1 }],
+      style: { fillOpacity: 1, labels: true },
+    }),
+  );
 });
 
 after(() => server.stop());
@@ -92,6 +99,12 @@ test('a folder set: one slice per file, ids qualified by slice', async () => {
   const info = (await get('/regions/plates/info')).body;
   assert.equal(info.featureCount, 3);
   assert.deepEqual(info.planes, [0, 1]);
+  assert.deepEqual(info.hierarchy[1], { name: 'grey', parent: 'root', color: '#010203', order: 1 });
+  assert.deepEqual(info.style, { fillOpacity: 1, labels: true });
+  assert.deepEqual((await get('/regions/plates/classes/1')).body, { root: 1, grey: 1 });
+  const labelled = (await get('/regions/plates/tile/1/0/0/0')).body.features[0];
+  assert.equal(labelled.labels.length, 3);
+  assert.deepEqual((await post('/regions/plates/index', { z: 1, offset: 0, limit: 9, classes: ['grey'] })).body.rows.map((r) => r.id), ['1:8']);
 
   const t1 = (await get('/regions/plates/tile/1/0/0/0')).body;
   assert.deepEqual(t1.features.map((f) => f.id), ['1:997', '1:8']);

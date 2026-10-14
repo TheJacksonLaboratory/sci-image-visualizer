@@ -5,7 +5,9 @@
 //
 // A set under $REGION_DIR is either
 //   <id>.geojson   one FeatureCollection; a z-stack's slices by QuPath's `geometry.plane.z`, or
-//   <id>/          a folder of *.geojson files, one per slice (plane z = the z-th file by name).
+//   <id>/          a folder of *.geojson files, one per slice (plane z = the z-th file by name),
+//                  with an optional `regionset.json` { classHierarchy, style } for the whole set
+//                  (a single file carries those as FeatureCollection members).
 //
 // Tiling is the library's own pure core (region-tiles.ts), bundled with esbuild on first use,
 // so the server and the in-browser worker cut tiles the same way.
@@ -77,7 +79,7 @@ export async function openRegionSet(dir, id) {
   if (await isFile(file)) set = new FileRegionSet(file);
   else if (await isDir(folder)) {
     const files = (await readdir(folder)).filter((f) => f.endsWith('.geojson')).sort();
-    set = new FolderRegionSet(files.map((f) => path.join(folder, f)));
+    set = new FolderRegionSet(folder, files.map((f) => path.join(folder, f)));
   }
   if (set) sets.set(key, set);
   return set;
@@ -114,6 +116,7 @@ function wireTile(tile, idOf = (id) => id) {
       bbox: f.bbox,
       rings: f.rings.map((r) => Array.from(r, (v) => Math.round(v * 100) / 100)),
       open: f.open || undefined,
+      labels: f.labels ? Array.from(f.labels, (v) => Math.round(v * 100) / 100) : undefined,
     })),
   };
 }
@@ -149,6 +152,10 @@ class FileRegionSet {
     return (await this.table()).index(z, query);
   }
 
+  async classes(z) {
+    return (await this.table()).classCounts(z);
+  }
+
   async export(exclude, extra) {
     return (await this.table()).exportGeoJson(exclude, extra);
   }
@@ -159,7 +166,8 @@ class FileRegionSet {
  * sections), so the set qualifies them with the slice: `<z>:<id>`.
  */
 class FolderRegionSet {
-  constructor(files) {
+  constructor(folder, files) {
+    this.folder = folder;
     this.files = files;
     this.tables = new Map();
     this.infoPromise = null;
@@ -185,7 +193,12 @@ class FolderRegionSet {
   /** Over every slice: read once, one file at a time. */
   info() {
     this.infoPromise ??= (async () => {
-      const { REGION_TILE_SIZE } = await loadTiler();
+      const { REGION_TILE_SIZE, readHierarchy, readStyle } = await loadTiler();
+      const meta = await readFile(path.join(this.folder, 'regionset.json'), 'utf8')
+        .then((t) => JSON.parse(t))
+        .catch(() => ({}));
+      const hierarchy = readHierarchy(meta.classHierarchy);
+      const style = readStyle(meta.style);
       let featureCount = 0;
       let bounds = null;
       const classColors = {};
@@ -208,7 +221,16 @@ class FolderRegionSet {
       const extent = bounds ? Math.max(...bounds.map(Math.abs)) : 0;
       const levels = 1 + Math.max(0, Math.ceil(Math.log2(Math.max(extent, REGION_TILE_SIZE) / REGION_TILE_SIZE)));
       const planes = this.files.map((_, z) => z);
-      return { featureCount, bounds, tileSize: REGION_TILE_SIZE, levels, planes, classColors };
+      return {
+        featureCount,
+        bounds,
+        tileSize: REGION_TILE_SIZE,
+        levels,
+        planes,
+        classColors,
+        ...(hierarchy ? { hierarchy } : {}),
+        ...(style ? { style } : {}),
+      };
     })().catch((err) => {
       this.infoPromise = null;
       throw err;
@@ -239,6 +261,11 @@ class FolderRegionSet {
     // In the order asked.
     const at = new Map(ids.map((id, i) => [id, i]));
     return out.sort((a, b) => at.get(a.id) - at.get(b.id));
+  }
+
+  async classes(z) {
+    const entry = await this.table(z);
+    return entry ? entry.table.classCounts(entry.plane) : {};
   }
 
   async index(z, query) {

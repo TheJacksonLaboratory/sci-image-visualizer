@@ -19,6 +19,7 @@ export type RegionSourceRequest =
   | { op: 'tile'; handle: number; z: number; level: number; gx: number; gy: number }
   | { op: 'features'; handle: number; ids: readonly string[] }
   | { op: 'index'; handle: number; z: number; query: RegionIndexQuery }
+  | { op: 'classes'; handle: number; z: number }
   | { op: 'export'; handle: number; exclude: readonly string[]; extra: readonly object[] }
   | { op: 'close'; handle: number };
 
@@ -27,6 +28,7 @@ export interface RegionSourceResults {
   tile: RegionTile;
   features: SourceFeature[];
   index: RegionIndexPage;
+  classes: Record<string, number>;
   export: string;
   close: null;
 }
@@ -59,6 +61,8 @@ export class RegionSourceTables {
         return this.table(r.handle).features(r.ids);
       case 'index':
         return this.table(r.handle).index(r.z, r.query);
+      case 'classes':
+        return this.table(r.handle).classCounts(r.z);
       case 'export':
         return this.table(r.handle).exportGeoJson(r.exclude, r.extra);
       case 'close':

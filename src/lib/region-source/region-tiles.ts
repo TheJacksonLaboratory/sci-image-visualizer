@@ -15,12 +15,48 @@
  */
 import { rgbToHex } from '../contracts/color';
 import { simplifyRing } from '../geometry/ring';
+import { polylabel } from '../geometry/polylabel';
 
 /** An axis-aligned box `[x0, y0, x1, y1]` in image pixels. */
 export type Bbox = [number, number, number, number];
 
 /** Edge of a level-0 tile, in image pixels. */
 export const REGION_TILE_SIZE = 512;
+
+/**
+ * One class of a class hierarchy (e.g. a brain-atlas ontology): the class name the features use,
+ * its long name, its parent class and its colour. A region set may carry one (a GeoJSON
+ * FeatureCollection's `classHierarchy` member); the Region Editor then lists the set as a tree.
+ */
+export interface RegionClassNode {
+  /** The class name, as features use it (`classification.name`): an atlas acronym, say. */
+  name: string;
+  /** The long name, e.g. "Somatomotor areas, Layer 5". */
+  title?: string;
+  /** The parent class's name; absent for a root. */
+  parent?: string | null;
+  /** `#rrggbb`. */
+  color?: string;
+  /** Position among its siblings (an atlas's graph order); file order without one. */
+  order?: number;
+}
+
+/**
+ * How a region set wants to be drawn, a hint the viewer applies when the set opens (a GeoJSON
+ * FeatureCollection's `style` member): an atlas fills its structures and labels them.
+ */
+export interface RegionSourceStyle {
+  /** Fill regions in their colour at this opacity (0 = outlines only). */
+  fillOpacity?: number;
+  /** Outline colour when filled (default: the region's colour). */
+  stroke?: string;
+  /** Outline width in screen px. */
+  strokeWidth?: number;
+  /** Show class labels inside the regions. */
+  labels?: boolean;
+  /** Fill colour of selected regions. */
+  highlight?: string;
+}
 
 /** What a region source holds, known once it is open. */
 export interface RegionSourceInfo {
@@ -36,6 +72,10 @@ export interface RegionSourceInfo {
   planes: number[];
   /** The colour the file gives each class (its first feature's), by class name. */
   classColors: Record<string, string>;
+  /** The set's class hierarchy, when it has one. */
+  hierarchy?: RegionClassNode[];
+  /** How the set wants to be drawn, when it says. */
+  style?: RegionSourceStyle;
 }
 
 /** One feature as a tile carries it: identity, class and outline at the tile's level. */
@@ -52,6 +92,11 @@ export interface TileFeature {
   rings: Float32Array[];
   /** A polyline (LineString) rather than an area. */
   open: boolean;
+  /**
+   * Where to label the feature, per part big enough: `x, y, room` triples, `room` the distance
+   * from the point to the part's nearest edge (image px), so a label shows once it fits.
+   */
+  labels?: Float32Array;
 }
 
 /** One tile of one level of one plane. */
@@ -93,6 +138,8 @@ export interface RegionIndexQuery {
   label?: string;
   /** Leave these ids out (taken into the working set, or deleted). */
   exclude?: readonly string[];
+  /** Only rows of exactly these classes. */
+  classes?: readonly string[];
 }
 
 /** The parts of a GeoJSON feature the tiler reads. Parsed from a file: nothing is guaranteed. */
@@ -349,6 +396,11 @@ export class RegionFeatureTable {
   readonly boxes: Bbox[] = [];
   readonly rings: Float64Array[][] = [];
   readonly open: boolean[] = [];
+  /** Per feature, its parts as ring indices (the exterior first, then its holes). */
+  readonly parts: number[][][] = [];
+  private readonly labelPoints = new Map<number, Float32Array>();
+  private hierarchy?: RegionClassNode[];
+  private style?: RegionSourceStyle;
   private readonly byId = new Map<string, number>();
   private readonly buckets = new Map<string, Map<string, number[]>>();
   private readonly simplified = new Map<string, Float32Array[]>();
@@ -372,9 +424,10 @@ export class RegionFeatureTable {
       this.labels.push(label);
       this.colors.push(color);
       this.planes.push(feature?.geometry?.plane?.z ?? 0);
-      const { rings, open } = ringsOf(feature);
+      const { rings, open, parts } = ringsOf(feature);
       this.rings.push(rings);
       this.open.push(open);
+      this.parts.push(parts);
       const box = ringsBox(rings);
       this.boxes.push(box);
       if (rings.length) {
@@ -395,7 +448,26 @@ export class RegionFeatureTable {
     if (!parsed || !Array.isArray(parsed.features)) {
       throw new Error("Invalid GeoJson file: must contain the 'features' key.");
     }
-    return new RegionFeatureTable(parsed.features, tileSize);
+    const table = new RegionFeatureTable(parsed.features, tileSize);
+    table.describe(parsed.classHierarchy, parsed.style);
+    return table;
+  }
+
+  /** Attach a class hierarchy and a style hint (each ignored when not well formed). */
+  describe(hierarchy?: unknown, style?: unknown): void {
+    this.hierarchy = readHierarchy(hierarchy) ?? this.hierarchy;
+    this.style = readStyle(style) ?? this.style;
+  }
+
+  /** Features per class on plane `z` (what the plane has of each class). */
+  classCounts(z: number): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < this.ids.length; i++) {
+      const label = this.labels[i];
+      if (this.planes[i] !== z || !label) continue;
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+    return counts;
   }
 
   info(): RegionSourceInfo {
@@ -411,6 +483,8 @@ export class RegionFeatureTable {
       levels: this.levels,
       planes: Array.from(new Set(this.planes)).sort((a, b) => a - b),
       classColors,
+      ...(this.hierarchy ? { hierarchy: this.hierarchy } : {}),
+      ...(this.style ? { style: this.style } : {}),
     };
   }
 
@@ -421,6 +495,7 @@ export class RegionFeatureTable {
     for (const i of bucket) {
       const rings = this.ringsAt(i, level);
       if (!rings.length) continue;
+      const labels = this.labelsAt(i, level);
       features.push({
         id: this.ids[i],
         label: this.labels[i],
@@ -428,6 +503,7 @@ export class RegionFeatureTable {
         bbox: this.boxes[i],
         rings,
         open: this.open[i],
+        ...(labels ? { labels } : {}),
       });
     }
     return { z, level, gx, gy, features };
@@ -446,12 +522,14 @@ export class RegionFeatureTable {
   /** A page of plane `z`'s features, in file order. */
   index(z: number, query: RegionIndexQuery): RegionIndexPage {
     const exclude = new Set(query.exclude ?? []);
+    const classes = query.classes ? new Set(query.classes) : null;
     const needle = query.label?.trim().toLowerCase() || null;
     const rows: RegionIndexRow[] = [];
     let total = 0;
     for (let i = 0; i < this.ids.length; i++) {
       if (this.planes[i] !== z || exclude.has(this.ids[i])) continue;
       if (needle && !(this.labels[i] ?? '').toLowerCase().includes(needle)) continue;
+      if (classes && !classes.has(this.labels[i] ?? '')) continue;
       if (total >= query.offset && rows.length < query.limit) {
         rows.push({ id: this.ids[i], label: this.labels[i], color: this.colors[i], bbox: this.boxes[i] });
       }
@@ -475,6 +553,30 @@ export class RegionFeatureTable {
     });
     for (const f of extra) parts.push(JSON.stringify(f));
     return `{"type":"FeatureCollection","features":[${parts.join(',')}]}`;
+  }
+
+  /**
+   * Feature `i`'s label points (one per part with room for a label at `level`: a part under the
+   * level's minimum extent is not drawn there), from the exact geometry, computed once.
+   */
+  private labelsAt(i: number, level: number): Float32Array | null {
+    if (this.open[i] || !this.labels[i]) return null;
+    let points = this.labelPoints.get(i);
+    if (!points) {
+      const out: number[] = [];
+      for (const part of this.parts[i]) {
+        const pole = polylabel(part.map((r) => this.rings[i][r]));
+        if (pole && pole.distance > 0) out.push(pole.x, pole.y, pole.distance);
+      }
+      points = Float32Array.from(out);
+      this.labelPoints.set(i, points);
+    }
+    const min = levelMinExtent(level) / 2;
+    if (!min) return points.length ? points : null;
+    const kept: number[] = [];
+    for (let k = 0; k + 2 < points.length; k += 3)
+      if (points[k + 2] >= min) kept.push(points[k], points[k + 1], points[k + 2]);
+    return kept.length ? Float32Array.from(kept) : null;
   }
 
   /** Feature `i`'s rings at `level`, simplified once and cached. */
@@ -534,23 +636,70 @@ function classificationOf(feature: GeoJsonFeatureLike): { label: string | null; 
   return { label: c.name ?? null, color };
 }
 
-/** A feature's rings, interleaved, without the closing vertex; and whether it is a polyline. */
-function ringsOf(feature: GeoJsonFeatureLike): { rings: Float64Array[]; open: boolean } {
+/**
+ * A feature's rings, interleaved, without the closing vertex; whether it is a polyline; and its
+ * parts as ring indices (each part's exterior first, then its holes).
+ */
+function ringsOf(feature: GeoJsonFeatureLike): { rings: Float64Array[]; open: boolean; parts: number[][] } {
   const g = feature?.geometry;
   const coords = g?.coordinates as unknown;
-  if (!g || !Array.isArray(coords)) return { rings: [], open: false };
+  if (!g || !Array.isArray(coords)) return { rings: [], open: false, parts: [] };
+  const polygons = (list: number[][][][]) => {
+    const rings: Float64Array[] = [];
+    const parts: number[][] = [];
+    for (const polygon of list) {
+      const part: number[] = [];
+      for (const r of polygon) {
+        part.push(rings.length);
+        rings.push(flatRing(r, true));
+      }
+      if (part.length) parts.push(part);
+    }
+    return { rings, open: false, parts };
+  };
   switch (g.type) {
     case 'Polygon':
-      return { rings: (coords as number[][][]).map((r) => flatRing(r, true)), open: false };
+      return polygons([coords as number[][][]]);
     case 'MultiPolygon':
-      return { rings: (coords as number[][][][]).flatMap((p) => p.map((r) => flatRing(r, true))), open: false };
+      return polygons(coords as number[][][][]);
     case 'LineString':
-      return { rings: [flatRing(coords as number[][], false)], open: true };
+      return { rings: [flatRing(coords as number[][], false)], open: true, parts: [] };
     case 'MultiLineString':
-      return { rings: (coords as number[][][]).map((r) => flatRing(r, false)), open: true };
+      return { rings: (coords as number[][][]).map((r) => flatRing(r, false)), open: true, parts: [] };
     default:
-      return { rings: [], open: false };
+      return { rings: [], open: false, parts: [] };
   }
+}
+
+/** A well-formed class hierarchy from a file (colours as `#rrggbb` or `[r, g, b]`), else undefined. */
+export function readHierarchy(raw: unknown): RegionClassNode[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: RegionClassNode[] = [];
+  for (const n of raw as Array<Record<string, unknown>>) {
+    if (!n || typeof n.name !== 'string') continue;
+    const color = Array.isArray(n.color) ? rgbToHex([+n.color[0], +n.color[1], +n.color[2]]) : n.color;
+    out.push({
+      name: n.name,
+      ...(typeof n.title === 'string' ? { title: n.title } : {}),
+      ...(typeof n.parent === 'string' ? { parent: n.parent } : {}),
+      ...(typeof color === 'string' ? { color } : {}),
+      ...(typeof n.order === 'number' ? { order: n.order } : {}),
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+/** A well-formed style hint from a file, else undefined. */
+export function readStyle(raw: unknown): RegionSourceStyle | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const style: RegionSourceStyle = {};
+  if (typeof r.fillOpacity === 'number') style.fillOpacity = Math.max(0, Math.min(1, r.fillOpacity));
+  if (typeof r.stroke === 'string') style.stroke = r.stroke;
+  if (typeof r.strokeWidth === 'number' && r.strokeWidth > 0) style.strokeWidth = r.strokeWidth;
+  if (typeof r.labels === 'boolean') style.labels = r.labels;
+  if (typeof r.highlight === 'string') style.highlight = r.highlight;
+  return Object.keys(style).length ? style : undefined;
 }
 
 function flatRing(points: number[][], closed: boolean): Float64Array {

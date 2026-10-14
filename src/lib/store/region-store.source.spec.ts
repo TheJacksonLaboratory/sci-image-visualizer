@@ -38,6 +38,7 @@ function tableSource(features: object[]): RegionSource & { disposed: boolean; as
       return table.features(ids);
     },
     getIndex: async (z: number, q: never) => table.index(z, q),
+    getClassCounts: async (z: number) => table.classCounts(z),
     exportGeoJson: async (exclude: readonly string[], extra: readonly object[]) =>
       table.exportGeoJson(exclude, extra),
     dispose: () => {

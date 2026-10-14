@@ -6,9 +6,10 @@
  *  - `GET  tile/{z}/{level}/{gx}/{gy}` → `{ features: WireTileFeature[] }`
  *  - `POST features` `{ ids }`         → `{ features: SourceFeature[] }`
  *  - `POST index` `{ z, ...query }`    → {@link RegionIndexPage}
+ *  - `GET  classes/{z}`                → features per class on plane z
  *  - `POST export` `{ exclude, extra }`→ a GeoJSON FeatureCollection
  *
- * Tile rings travel as flat `[x, y, x, y, …]` arrays.
+ * Tile rings travel as flat `[x, y, x, y, …]` arrays, label points as flat `[x, y, room, …]`.
  */
 import { RegionSource, RegionTileCache, SourceFeature, abortable } from './region-source';
 import type {
@@ -29,6 +30,7 @@ export interface WireTileFeature {
   bbox: Bbox;
   rings: number[][];
   open?: boolean;
+  labels?: number[];
 }
 
 /** Options of {@link openHttpRegionSource}. */
@@ -109,6 +111,10 @@ class HttpRegionSource implements RegionSource {
     return this.http.json<RegionIndexPage>('index', { z, ...query });
   }
 
+  getClassCounts(z: number): Promise<Record<string, number>> {
+    return this.http.json<Record<string, number>>(`classes/${z}`);
+  }
+
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): Promise<string> {
     return this.http.text('export', { exclude, extra });
   }
@@ -126,5 +132,6 @@ function fromWire(f: WireTileFeature): TileFeature {
     bbox: f.bbox,
     rings: f.rings.map((r) => Float32Array.from(r)),
     open: !!f.open,
+    ...(f.labels?.length ? { labels: Float32Array.from(f.labels) } : {}),
   };
 }

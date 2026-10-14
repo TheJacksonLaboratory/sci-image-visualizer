@@ -53,6 +53,7 @@ function source(): RegionSource & { asked: RegionTileKey[]; gate: Promise<void> 
     },
     getFeatures: async () => [],
     getIndex: async () => ({ total: 0, rows: [] }),
+    getClassCounts: async () => ({}),
     exportGeoJson: async () => '',
     dispose: () => undefined,
   };

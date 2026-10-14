@@ -230,4 +230,59 @@ describe('region-tiles', () => {
       ).toEqual(['donut', 'outer']);
     });
   });
+
+  describe('class hierarchy, style, labels and counts', () => {
+    const table = RegionFeatureTable.fromGeoJson(
+      JSON.stringify({
+        type: 'FeatureCollection',
+        classHierarchy: [
+          { name: 'root', title: 'root' },
+          { name: 'CTX', title: 'Cerebral cortex', parent: 'root', color: [0, 128, 0], order: 2 },
+          { bogus: true },
+        ],
+        style: { fillOpacity: 2, labels: true, stroke: '#333', strokeWidth: -1 },
+        features: [
+          polygon('a', denseSquare(0, 0, 100), { classification: { name: 'CTX' } }),
+          polygon('b', denseSquare(200, 0, 100), { classification: { name: 'CTX' } }),
+          {
+            type: 'Feature',
+            id: 'two',
+            properties: { classification: { name: 'root' } },
+            geometry: {
+              type: 'MultiPolygon',
+              coordinates: [[denseSquare(0, 300, 40)], [denseSquare(100, 300, 2)]],
+            },
+          },
+        ],
+      }),
+    );
+
+    it('reads a well-formed hierarchy and style from the collection', () => {
+      const info = table.info();
+      expect(info.hierarchy).toEqual([
+        { name: 'root', title: 'root' },
+        { name: 'CTX', title: 'Cerebral cortex', parent: 'root', color: '#008000', order: 2 },
+      ]);
+      expect(info.style).toEqual({ fillOpacity: 1, labels: true, stroke: '#333' });
+    });
+
+    it('counts features per class on a plane', () => {
+      expect(table.classCounts(0)).toEqual({ CTX: 2, root: 1 });
+      expect(table.classCounts(3)).toEqual({});
+    });
+
+    it('labels each part at its pole, dropping parts too small for the level', () => {
+      const two = (level: number) => table.tile(0, level, 0, 0).features.find((f) => f.id === 'two')!;
+      const exact = two(0).labels!;
+      expect(exact.length).toBe(6);
+      expect(exact[0]).toBeCloseTo(20, 0);
+      expect(exact[1]).toBeCloseTo(320, 0);
+      expect(exact[2]).toBeCloseTo(20, 0);
+      expect(two(2).labels!.length).toBe(3);
+    });
+
+    it('filters the index by exact classes', () => {
+      expect(table.index(0, { offset: 0, limit: 9, classes: ['root'] }).rows.map((r) => r.id)).toEqual(['two']);
+    });
+  });
 });
