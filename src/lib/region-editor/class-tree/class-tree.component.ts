@@ -77,12 +77,9 @@ export class ClassTreeComponent implements OnChanges {
     this.refresh();
   }
 
-  protected choose(name: string, event: MouseEvent | KeyboardEvent): void {
-    this.pick.emit({
-      name,
-      classes: subtree(this.tree, name),
-      additive: event.shiftKey || event.metaKey || event.ctrlKey,
-    });
+  protected choose(name: string, event: Event): void {
+    const e = event as MouseEvent | KeyboardEvent;
+    this.pick.emit({ name, classes: subtree(this.tree, name), additive: e.shiftKey || e.metaKey || e.ctrlKey });
   }
 
   protected onQuery(value: string): void {
@@ -96,7 +93,7 @@ export class ClassTreeComponent implements OnChanges {
     const hit = this.rows.find(
       (r) => r.name.toLowerCase().includes(q) || (this.node(r.name)?.title ?? '').toLowerCase().includes(q),
     );
-    if (hit) this.choose(hit.name, event as KeyboardEvent);
+    if (hit) this.choose(hit.name, event);
   }
 
   protected readonly trackRow = (_: number, r: ClassTreeRow) => r.name;
