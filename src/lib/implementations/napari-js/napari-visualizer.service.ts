@@ -134,8 +134,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private lifetime = new AbortController();
   /** What {@link plot} mounted, while it is mounted. */
   private scene: NapariScene | null = null;
-  /** Region reconstructions to show in a volume view, kept across re-plots. */
+  /** Region reconstructions to show in a volume view, kept across re-plots of their image. */
   private regionMeshes: readonly RegionMesh3D[] = [];
+  /** The image (file name) {@link regionMeshes} were built from. */
+  private regionMeshesImage: string | undefined;
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -342,6 +344,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // No loaded image: an image-less spatial dataset opened before any image (the visualizer's
       // plotSpatialWithoutImage) — the observations alone.
       this.scene = this.createScene(plotType, this.sceneContext(viewer, host, canvas), info, imageLoaded == null);
+      // Another image's surfaces would land in this volume's frame at the wrong size: drop them.
+      if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
       this.scene.setRegionMeshes?.(this.regionMeshes);
       await this.scene.mount();
       this.tools.scheduleReadback();
@@ -405,9 +409,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.badge.beginTask(message);
   }
 
-  /** Show these region reconstructions in the volume view (kept for the next volume plot). */
-  setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
+  /** Show these region reconstructions of `image` in the volume view (kept for its next volume plot). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[], image: string | undefined): void {
     this.regionMeshes = meshes;
+    this.regionMeshesImage = image;
     this.scene?.setRegionMeshes?.(meshes);
   }
 

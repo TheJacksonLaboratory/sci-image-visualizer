@@ -130,6 +130,8 @@ export interface IRegionEditorApi {
   showRegionClasses3d?(
     groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
   ): Promise<void>;
+  /** The class groups shown in 3D on the image on screen; emits [] when another image is plotted. */
+  getRegionClasses3d$?(): Observable<ReadonlyArray<{ key: string; classes: readonly string[] }>>;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see

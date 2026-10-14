@@ -103,8 +103,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private readonly volumeView$ = new BehaviorSubject<boolean>(false);
   /** Region reconstructions built so far, by image, resolution and classes. */
   private readonly meshCache = new Map<string, Mesh>();
-  /** Bumped per {@link showRegionClasses3d}, so only the latest one shows. */
+  /** Bumped per {@link showRegionClasses3d} (and per new image), so only the latest one shows. */
   private meshRequest = 0;
+  /** The class groups shown in 3D, and the image they belong to. */
+  private readonly classes3d$ = new BehaviorSubject<ReadonlyArray<{ key: string; classes: readonly string[] }>>(
+    [],
+  );
+  private classes3dImage: string | undefined;
 
   constructor(
     private plotly: PlotlyService,
@@ -237,6 +242,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.currentPlotType = plotType;
     this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
     this.plottedFileName = imageInfo?.fileName;
+    // Region surfaces belong to the image they were built from: another image drops them.
+    if (this.classes3d$.value.length && this.plottedFileName !== this.classes3dImage) this.clearRegionClasses3d();
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
@@ -577,6 +584,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.volumeView$.asObservable();
   }
 
+  /** The class groups shown in 3D on this image ([] after a switch to another image). */
+  getRegionClasses3d$(): Observable<ReadonlyArray<{ key: string; classes: readonly string[] }>> {
+    return this.classes3d$.asObservable();
+  }
+
+  /** Hide every region surface and forget them (a build still running is dropped). */
+  private clearRegionClasses3d(): void {
+    this.meshRequest++;
+    this.classes3d$.next([]);
+    this.classes3dImage = undefined;
+    this.napari.setRegionMeshes([], undefined);
+  }
+
   /**
    * Show these groups of classes in the volume view as 3D reconstructions (each group one surface
    * in its colour: an atlas structure with its substructures), and only these; [] hides them.
@@ -586,6 +606,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
   ): Promise<void> {
     const request = ++this.meshRequest;
+    this.classes3dImage = this.plottedFileName;
+    this.classes3d$.next(groups.map((g) => ({ key: g.key, classes: g.classes })));
     const width = this.getTrueImageSize()?.width ?? 1024;
     const step = this.napari.regionVoxelStep() ?? Math.max(1, width / 256);
     const image = this.plottedFileName ?? '';
@@ -611,6 +633,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         const mesh = this.meshCache.get(cacheKey(g))!;
         return { key: g.key, color: g.color, vertices: mesh.vertices, faces: mesh.faces };
       }),
+      this.plottedFileName,
     );
   }
 

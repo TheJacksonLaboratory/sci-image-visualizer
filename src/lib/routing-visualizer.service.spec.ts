@@ -189,6 +189,29 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(done).toHaveBeenCalledTimes(2);
   });
 
+  it("drops an image's region surfaces when another image is plotted, not on a re-plot", async () => {
+    napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+    napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+    napari.setRegionMeshes = jest.fn();
+    const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+    jest
+      .spyOn(regionStore, 'reconstructClasses')
+      .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+    const shown: string[][] = [];
+    router.getRegionClasses3d$().subscribe((groups) => shown.push(groups.map((g) => g.key)));
+
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.NAPARI_VOLUME);
+    await router.showRegionClasses3d([{ key: 'HPF', classes: ['HPF'], color: '#7ed04b' }]);
+    expect(napari.setRegionMeshes).toHaveBeenLastCalledWith([expect.objectContaining({ key: 'HPF' })], 'test.tif');
+
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);
+    expect(shown[shown.length - 1]).toEqual(['HPF']);
+
+    await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'merfish.zarr' }, 600, PlotType.NAPARI_VOLUME);
+    expect(shown[shown.length - 1]).toEqual([]);
+    expect(napari.setRegionMeshes).toHaveBeenLastCalledWith([], undefined);
+  });
+
   // ── backend selection per plot type ───────────────────────────────────
   it('routes the IMAGE plot type to OpenSeadragon', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);

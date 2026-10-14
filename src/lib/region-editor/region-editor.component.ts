@@ -299,6 +299,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.changed();
       });
 
+    // What is shown in 3D: the router clears it when another image is plotted.
+    this.regionApi
+      .getRegionClasses3d$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((groups) => {
+        this.shown3d = new Map(groups.map((g) => [g.key, [...g.classes]]));
+        this.shown3dNames = new Set(this.shown3d.keys());
+        this.changed();
+      });
+
     this.persistence
       .fileExists(this.saveAsCheck$)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -468,7 +478,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.toast('error', 'Could not show the region in 3D', `${(err as Error)?.message ?? err}`);
     });
   }
-
 
   /** Pick a class in the class tree: select its regions and its subclasses', the source's taken. */
   protected async pickClasses(pick: ClassTreePick): Promise<void> {
