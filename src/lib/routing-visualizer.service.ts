@@ -34,6 +34,8 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
+import type { RegionSource } from './region-source/region-source';
+import type { RegionSourceOpener, RegionSourceSlices } from './store/region-source-scope';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
@@ -519,6 +521,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   getGeoJsonString(regions: Region[]): string {
     return this.regionStore.getGeoJsonString(regions);
+  }
+
+  /** Hold a large region set as a tiled region source (see RegionStore.attachRegionSource). */
+  attachRegionSource(source: RegionSource | RegionSourceOpener, slices?: RegionSourceSlices): void {
+    this.regionStore.attachRegionSource(source, slices);
   }
 
   // ── Per-slice z-stack regions (jit-ui#93), from the shared RegionStore. ──

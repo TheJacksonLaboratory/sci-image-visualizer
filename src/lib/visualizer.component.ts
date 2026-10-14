@@ -361,7 +361,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.state.setImageLoading(false);
     },
     landed: (info) => {
-      applyImageRois(info, this.plotService, this.zIndex);
+      applyImageRois(info, this.plotService, this.zIndex, this.vizConfig?.regionSourceMinChars);
       this.contributions.activate();
     },
     setImageLoading: (loading) => this.state.setImageLoading(loading),
