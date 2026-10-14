@@ -158,6 +158,20 @@
     >
     </toolbar-view-controls>
 
+    <!-- A volume view draws no regions, but the Region Editor shows them in it, in 3D. -->
+    <ng-container *ngIf="isVolumeView && !isHeatmap && !is3dRegions && tools.regionTools">
+      <span class="toolbar-separator"></span>
+      <p-button
+        size="small"
+        [text]="true"
+        ariaLabel="Open the Region Editor"
+        pTooltip="Open the Region Editor — show regions in the volume, in 3D"
+        tooltipPosition="bottom"
+        (onClick)="openRegionEditor.emit()"
+      >
+        <img src="assets/plotting/region-editor.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
+      </p-button>
+    </ng-container>
     <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
       <toolbar-region-tools
         [activeDragMode]="activeDragMode"

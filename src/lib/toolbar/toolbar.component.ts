@@ -102,6 +102,8 @@ export class ToolbarComponent {
    * controls — flipping that would show 2D pan/zoom and hide the orbit controls.
    */
   @Input() is3dRegions = false;
+  /** A napari volume / isosurface view: the Region Editor (regions in 3D) without drawing tools. */
+  @Input() isVolumeView = false;
   /** The armed tool's mode (zoom, pan, a drawing tool, `samPoint`, …), or null. */
   @Input() activeDragMode: string | null = null;
   /** The 3D camera mode (`turntable` / `orbit` / …). */

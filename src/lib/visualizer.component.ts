@@ -56,6 +56,8 @@ import {
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
+  isNapariVolume,
+  isNapariIsosurface,
 } from './contracts/plot-type';
 import {
   PLOT_TYPE_CONTRIBUTIONS,
@@ -454,6 +456,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  camera a drawn rectangle has no fixed meaning in the data. */
   protected get isSpatial3dMode(): boolean {
     return isSpatialOmics3d(this.basePlotType);
+  }
+
+  /** True in a napari volume or isosurface view, where the Region Editor shows regions in 3D. */
+  protected get isVolumeView(): boolean {
+    return isNapariVolume(this.basePlotType) || isNapariIsosurface(this.basePlotType);
   }
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
