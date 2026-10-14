@@ -127,7 +127,9 @@ export interface IRegionEditorApi {
    * Show these groups of classes in the volume view as 3D reconstructions (one surface per group,
    * in its colour), and only these; [] hides them.
    */
-  showRegionClasses3d?(groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>): Promise<void>;
+  showRegionClasses3d?(
+    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
+  ): Promise<void>;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see
