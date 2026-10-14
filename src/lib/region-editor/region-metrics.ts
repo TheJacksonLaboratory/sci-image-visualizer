@@ -5,6 +5,8 @@ import { IImageMetadata } from '../contracts/image.contract';
 export interface PixelSize {
   mppX?: number;
   mppY?: number;
+  /** Spacing between slices (µm), when the stack declares it. */
+  mppZ?: number;
 }
 
 /**
@@ -18,7 +20,8 @@ export function pickMpp(meta: IImageMetadata[] | undefined): PixelSize {
   const m = Array.isArray(meta) ? (meta.find((e) => e && (e.mppX ?? 0) > 0) ?? meta[0]) : undefined;
   const mx = m && (m.mppX ?? 0) > 0 ? (m.mppX as number) : undefined;
   const my = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : undefined;
-  return { mppX: mx, mppY: my ?? mx };
+  const mz = m && (m.mppZ ?? 0) > 0 ? (m.mppZ as number) : undefined;
+  return { mppX: mx, mppY: my ?? mx, mppZ: mz };
 }
 
 /**
@@ -46,6 +49,23 @@ export function formatArea(px: number, mpp: PixelSize = {}): string {
     return um2 >= 1e6 ? `${fmt(um2 / 1e6)} mm²` : `${fmt(um2)} µm²`;
   }
   return `${fmt(px)} px²`;
+}
+
+/**
+ * A volume in px² × slices for display: mm³ (three significant digits) from 0.001 mm³, µm³ below,
+ * when the pixel size and the slice spacing are known; otherwise voxels (one pixel by one slice).
+ * Empty for a non-positive volume.
+ */
+export function formatVolume(pxSlices: number, mpp: PixelSize = {}): string {
+  if (!(pxSlices > 0)) return '';
+  const { mppX, mppY, mppZ } = mpp;
+  if (mppX && mppY && mppZ && mppX > 0 && mppY > 0 && mppZ > 0) {
+    const um3 = pxSlices * mppX * mppY * mppZ;
+    return um3 >= 1e6
+      ? `${Number((um3 / 1e9).toPrecision(3)).toLocaleString(undefined, { maximumFractionDigits: 6 })} mm³`
+      : `${fmt(um3)} µm³`;
+  }
+  return `${fmt(pxSlices)} voxels`;
 }
 
 /** Exterior shoelace minus each hole, never negative. */

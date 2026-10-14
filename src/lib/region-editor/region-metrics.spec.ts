@@ -1,7 +1,7 @@
 import { MultiPolygon, Rectangle, Region } from '../models/region';
 import { makePolygon } from '../models/polygon-factory';
 import { IImageMetadata } from '../contracts/image.contract';
-import { formatArea, pickMpp, regionAreaPx } from './region-metrics';
+import { formatArea, formatVolume, pickMpp, regionAreaPx } from './region-metrics';
 
 const region = (bounds: Region['bounds']) => Object.assign(new Region(), { bounds });
 const square = (x0: number, w: number) => makePolygon([x0, x0 + w, x0 + w, x0], [0, 0, w, w]);
@@ -37,6 +37,16 @@ describe('region-metrics', () => {
     ).toBe(125);
     expect(regionAreaPx(region(makePolygon([0, 1], [0, 1])))).toBe(0);
     expect(regionAreaPx(region(undefined as unknown as Region['bounds']))).toBe(0);
+  });
+
+  it('formatVolume: voxels without a slice spacing, µm³ / mm³ with it, blank when empty', () => {
+    expect(formatVolume(0)).toBe('');
+    expect(formatVolume(1500, { mppX: 1, mppY: 1 })).toBe('1,500 voxels');
+    expect(formatVolume(8, { mppX: 2, mppY: 2, mppZ: 2 })).toBe('64 µm³');
+    expect(formatVolume(1e6, { mppX: 10, mppY: 10, mppZ: 10 })).toBe('1 mm³');
+    expect(formatVolume(4321, { mppX: 25, mppY: 25, mppZ: 25 })).toBe('0.0675 mm³');
+    expect(formatVolume(999, { mppX: 1, mppY: 1, mppZ: 1 })).toBe('999 µm³');
+    expect(pickMpp([{ mppX: 25, mppY: 25, mppZ: 50 }] as unknown as IImageMetadata[]).mppZ).toBe(50);
   });
 
   it('formatArea: px² without calibration, µm² / mm² with it, blank when degenerate', () => {

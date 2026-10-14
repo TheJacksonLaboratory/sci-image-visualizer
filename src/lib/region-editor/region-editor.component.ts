@@ -280,6 +280,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.clampPaginatorFirst();
         this.syncClassesFromRegions(updated);
         this.recomputeClassCounts();
+        if (this.volumeView) this.resetVolumes();
         this.changed();
         void this.refreshSource();
       });
@@ -306,6 +307,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       ?.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((volume) => {
         this.volumeView = volume;
+        this.resetVolumes();
         this.changed();
       });
 
@@ -674,8 +676,58 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         own.length >= this.paginatorRows
           ? own
           : [...own, ...this.sourceRows.slice(0, this.paginatorRows - own.length)];
+      // A new page may show classes whose volume is not known yet (after this check).
+      if (this.volumeView) queueMicrotask(() => this.requestVolumes());
     }
     return this._page;
+  }
+
+  /** In a volume view, each class's volume over the whole stack, for the table (null: areas). */
+  protected tableVolumes: ReadonlyMap<string, number | null> | null = null;
+  /** Bumped when the regions change, so a volume computed before is dropped. */
+  private volumeRequest = 0;
+
+  /** Compute the volumes of the classes on the table's page that are not known yet. */
+  private requestVolumes(): void {
+    const api = this.regionApi.getClassVolumes?.bind(this.regionApi);
+    if (!this.volumeView || !api) {
+      if (this.tableVolumes) {
+        this.tableVolumes = null;
+        this.changed();
+      }
+      return;
+    }
+    const known = this.tableVolumes ?? new Map<string, number | null>();
+    const labels = new Set(this.pagedRegions.map((r) => r.label).filter((l): l is string => !!l));
+    const missing = [...labels].filter((l) => !known.has(l));
+    if (!missing.length && this.tableVolumes) return;
+    this.tableVolumes = new Map([...known, ...missing.map((l): [string, null] => [l, null])]);
+    this.changed();
+    if (!missing.length) return;
+    const request = this.volumeRequest;
+    api(missing).then(
+      (volumes) => {
+        if (request !== this.volumeRequest || !this.tableVolumes) return;
+        this.tableVolumes = new Map([...this.tableVolumes, ...Object.entries(volumes)]);
+        this.changed();
+      },
+      (err) => {
+        if (request !== this.volumeRequest || !this.tableVolumes) return;
+        // Leave them unknown ('—') rather than computing forever.
+        const next = new Map(this.tableVolumes);
+        for (const l of missing) next.delete(l);
+        this.tableVolumes = next;
+        this.changed();
+        console.warn('[regions] could not compute class volumes', err);
+      },
+    );
+  }
+
+  /** The regions changed (or the view did): forget the volumes and compute the page's again. */
+  private resetVolumes(): void {
+    this.volumeRequest++;
+    this.tableVolumes = null;
+    this.requestVolumes();
   }
   private _pageKey: { regions?: Region[]; source?: Region[]; first?: number; rows?: number } = {};
   private _page: Region[] = [];

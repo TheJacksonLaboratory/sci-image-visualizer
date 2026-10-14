@@ -1917,4 +1917,26 @@ describe('RegionEditorComponent with a region source', () => {
     expect(highlight).toHaveBeenLastCalledWith([]);
     picked$.complete();
   });
+
+  it("in a volume view, asks for the volumes of the page's classes, once each", async () => {
+    const volumes = jest.fn(async (classes: readonly string[]) =>
+      Object.fromEntries(classes.map((c) => [c, c === 'MB' ? 900 : 40])),
+    );
+    Object.assign(api, { getClassVolumes: volumes });
+    await settle();
+    (component as any).volumeView = true;
+    (component as any).resetVolumes();
+    expect([...(component as any).tableVolumes.values()].every((v: unknown) => v === null)).toBe(true);
+    await settle();
+    expect(volumes).toHaveBeenCalledTimes(1);
+    expect(new Set(volumes.mock.calls[0][0])).toEqual(new Set(['MB', 'CTX']));
+    expect(Object.fromEntries((component as any).tableVolumes)).toEqual({ MB: 900, CTX: 40 });
+    (component as any).requestVolumes();
+    expect(volumes).toHaveBeenCalledTimes(1);
+
+    // Back to a 2D view: areas again.
+    (component as any).volumeView = false;
+    (component as any).resetVolumes();
+    expect((component as any).tableVolumes).toBeNull();
+  });
 });

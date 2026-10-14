@@ -13,7 +13,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { Region } from '../../models/region';
 import { PresetSet, defaultPresetSet } from '../../models/class-preset';
 import { colorForLabel } from '../../store/class-color.util';
-import { PixelSize, formatArea, regionAreaPx } from '../region-metrics';
+import { PixelSize, formatArea, formatVolume, regionAreaPx } from '../region-metrics';
 
 /** A page change from the paginator. */
 export interface RegionPage {
@@ -74,6 +74,11 @@ export class RegionTableComponent implements OnChanges {
   @Input() defaultColor = '#00FFFF';
   /** Pixel size for the area column. */
   @Input() mpp: PixelSize = {};
+  /**
+   * In a volume view, each class's volume over the whole stack (px² × slices; null while it is
+   * computed): the column shows the row's class volume instead of its area. Null: areas.
+   */
+  @Input() volumes: ReadonlyMap<string, number | null> | null = null;
 
   /** Rows whose label is being edited → the typed draft. A new map per start/stop. */
   @Input() labelDrafts = new Map<Region, string>();
@@ -91,12 +96,21 @@ export class RegionTableComponent implements OnChanges {
   /** The paginator moved or changed its page size. */
   @Output() pageChange = new EventEmitter<RegionPage>();
 
-  /** Per row of {@link page}: its class swatch colour and formatted area, derived when
-   *  an input changes instead of per check (the area walks the region's geometry). */
-  protected rowView = new Map<Region, { color: string; area: string }>();
+  /** Per row of {@link page}: its class swatch colour and formatted area (or class volume),
+   *  derived when an input changes instead of per check (the area walks the region's geometry). */
+  protected rowView = new Map<Region, { color: string; measure: string }>();
 
   ngOnChanges(): void {
-    this.rowView = new Map(this.page.map((r) => [r, { color: this.classColor(r.label), area: this.area(r) }]));
+    this.rowView = new Map(
+      this.page.map((r) => [r, { color: this.classColor(r.label), measure: this.measure(r) }]),
+    );
+  }
+
+  private measure(region: Region): string {
+    if (!this.volumes) return this.area(region);
+    if (!region.label || !this.volumes.has(region.label)) return '';
+    const v = this.volumes.get(region.label);
+    return v == null ? '…' : formatVolume(v, this.mpp);
   }
 
   private classColor(name?: string): string {

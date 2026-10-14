@@ -17,7 +17,7 @@ import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.cont
 import { applyPresetColors, colorForLabel } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
 import type { Mesh } from '../geometry/surface-nets';
-import type { SliceOutlines } from '../geometry/reconstruct';
+import { SliceOutlines, outlinedVolume } from '../geometry/reconstruct';
 import { reconstructInWorker } from '../region-source/worker-region-source';
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
@@ -134,6 +134,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   private readonly regionStyle$ = new BehaviorSubject<RegionStyle>(DEFAULT_REGION_STYLE);
   /** Bumped on every change of the slice's source, so a late open is dropped. */
   private sourceGeneration = 0;
+
+  /** {@link classVolumes} by image and class, until the regions change. */
+  private readonly volumeCache = new Map<string, Promise<number>>();
 
   constructor(private store: VisualizerStore) {
     // A class colour change recolours the source's features as it recolours regions.
@@ -790,7 +793,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
       this.setTaken(new Set([...taken, ...fresh.map((f) => f.id)]));
       this.syncCache();
       this.emitSelection();
-      this.emit();
+      // Taken in as they were: the outlines, and so the volumes, did not change.
+      this.emit(true);
     }
     const bySource = new Map(this.regions.filter((r) => r.sourceId !== undefined).map((r) => [r.sourceId, r.id]));
     return ids.map((id) => bySource.get(id)).filter((id): id is number => id !== undefined);
@@ -853,6 +857,29 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
       const slices = await this.classOutlines(group.classes, level);
       out.push({ key: group.key, mesh: await reconstructInWorker(slices, { pixelStep }) });
     }
+    return out;
+  }
+
+  /**
+   * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice,
+   * one slice thick (Cavalieri's estimator), from the exact outlines. Cached per image and class
+   * until the regions change.
+   */
+  async classVolumes(classes: readonly string[]): Promise<Map<string, number>> {
+    const image = this.scope.activeImage;
+    const out = new Map<string, number>();
+    await Promise.all(
+      [...new Set(classes)].map(async (name) => {
+        const key = `${image}\n${name}`;
+        let volume = this.volumeCache.get(key);
+        if (!volume) {
+          volume = this.classOutlines([name], 0).then(outlinedVolume);
+          this.volumeCache.set(key, volume);
+          volume.catch(() => this.volumeCache.delete(key));
+        }
+        out.set(name, await volume);
+      }),
+    );
     return out;
   }
 
@@ -1107,7 +1134,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.scope.sync(this.regions);
   }
 
-  private emit(): void {
+  private emit(keepVolumes = false): void {
+    // The regions changed: so may every class's volume (not when features were only taken in).
+    if (!keepVolumes) this.volumeCache.clear();
     // Live-edit listeners (e.g. the intensity-profile inset) react on EVERY
     // change — including per-frame during a batched drag — so they track the
     // region live. The main regionUpdate$ stays coalesced during a batch (fires

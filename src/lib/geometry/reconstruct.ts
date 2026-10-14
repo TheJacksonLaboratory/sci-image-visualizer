@@ -104,3 +104,69 @@ function fillSlice(
     }
   }
 }
+
+/**
+ * The area inside `rings` (interleaved `x, y`), even-odd: a ring inside an odd number of others is
+ * a hole. Exact for rings that do not cross (a polygon set's exteriors and holes).
+ */
+export function ringsArea(rings: readonly ArrayLike<number>[]): number {
+  const boxes = rings.map(ringBox);
+  let area = 0;
+  for (let i = 0; i < rings.length; i++) {
+    const r = rings[i];
+    if (r.length < 6) continue;
+    const x = r[0],
+      y = r[1];
+    let depth = 0;
+    for (let j = 0; j < rings.length; j++) {
+      if (j === i) continue;
+      const b = boxes[j];
+      if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+      if (insideRing(rings[j], x, y)) depth++;
+    }
+    area += (depth % 2 ? -1 : 1) * Math.abs(shoelace(r));
+  }
+  return Math.max(0, area);
+}
+
+/**
+ * The volume of the region outlined by `slices`, in px² × slices (one slice thick per outline):
+ * the sum of each slice's area (Cavalieri's estimator). Times µm per px² and per slice, µm³.
+ */
+export function outlinedVolume(slices: readonly SliceOutlines[]): number {
+  let v = 0;
+  for (const s of slices) v += ringsArea(s.rings);
+  return v;
+}
+
+function shoelace(r: ArrayLike<number>): number {
+  const n = r.length >> 1;
+  let a = 0;
+  for (let i = 0, j = n - 1; i < n; j = i++) a += (r[2 * j] + r[2 * i]) * (r[2 * j + 1] - r[2 * i + 1]);
+  return a / 2;
+}
+
+function ringBox(r: ArrayLike<number>): [number, number, number, number] {
+  let x0 = Infinity,
+    y0 = Infinity,
+    x1 = -Infinity,
+    y1 = -Infinity;
+  for (let i = 0; i + 1 < r.length; i += 2) {
+    if (r[i] < x0) x0 = r[i];
+    if (r[i] > x1) x1 = r[i];
+    if (r[i + 1] < y0) y0 = r[i + 1];
+    if (r[i + 1] > y1) y1 = r[i + 1];
+  }
+  return [x0, y0, x1, y1];
+}
+
+function insideRing(r: ArrayLike<number>, x: number, y: number): boolean {
+  let inside = false;
+  const n = r.length >> 1;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const yi = r[2 * i + 1],
+      yj = r[2 * j + 1];
+    if (yi > y !== yj > y && x < ((r[2 * j] - r[2 * i]) * (y - yi)) / (yj - yi) + r[2 * i]) inside = !inside;
+  }
+  return inside;
+}

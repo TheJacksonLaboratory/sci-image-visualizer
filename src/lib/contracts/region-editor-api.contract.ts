@@ -130,6 +130,11 @@ export interface IRegionEditorApi {
   showRegionClasses3d?(
     groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }>,
   ): Promise<void>;
+  /**
+   * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice,
+   * one slice thick. Times the pixel size and the slice spacing, µm³.
+   */
+  getClassVolumes?(classes: readonly string[]): Promise<Record<string, number>>;
   /** Highlight the surfaces of these group keys in the volume view (none: all as usual). */
   highlightRegionClasses3d?(keys: readonly string[]): void;
   /** A surface clicked in the volume view with the selection tool (its group key), or none (null). */

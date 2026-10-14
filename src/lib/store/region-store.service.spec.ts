@@ -1378,4 +1378,18 @@ describe('RegionStore', () => {
       expect(live.z).toBe(before);
     });
   });
+
+  describe('classVolumes', () => {
+    it("sums a class's area over the slices, cached until the regions change", async () => {
+      const a = Object.assign(rectRegion(0, 0, 10, 10), { label: 'A' });
+      const b = Object.assign(rectRegion(20, 0, 5, 4), { label: 'A' });
+      const c = Object.assign(rectRegion(0, 0, 3, 3), { label: 'B' });
+      store.setRegions([a, b, c], false, true);
+      const first = await store.classVolumes(['A', 'B', 'C']);
+      expect(Object.fromEntries(first)).toEqual({ A: 120, B: 9, C: 0 });
+
+      store.setRegions([Object.assign(rectRegion(0, 0, 2, 2), { label: 'A' })], false, true);
+      expect((await store.classVolumes(['A'])).get('A')).toBe(4);
+    });
+  });
 });

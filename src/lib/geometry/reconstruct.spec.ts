@@ -1,4 +1,4 @@
-import { reconstruct } from './reconstruct';
+import { outlinedVolume, reconstruct, ringsArea } from './reconstruct';
 import { smoothMesh, surfaceNets } from './surface-nets';
 
 /** Signed volume of a closed triangle mesh (positive when its faces point outward). */
@@ -109,5 +109,27 @@ describe('reconstruct', () => {
     });
     expect(big.faces.length).toBeGreaterThan(0);
     expect(reconstruct([{ z: 0, rings: [] }]).faces.length).toBe(0);
+  });
+});
+
+describe('ringsArea / outlinedVolume', () => {
+  const square = (x: number, y: number, s: number) => Float64Array.of(x, y, x + s, y, x + s, y + s, x, y + s);
+
+  it('measures rings even-odd: a hole subtracts, an island in it adds back', () => {
+    expect(ringsArea([square(0, 0, 10)])).toBe(100);
+    expect(ringsArea([square(0, 0, 10), square(2, 2, 6)])).toBe(64);
+    expect(ringsArea([square(0, 0, 10), square(2, 2, 6), square(4, 4, 2)])).toBe(68);
+    // Either winding; side-by-side parts add.
+    expect(ringsArea([square(0, 0, 10).reverse(), square(20, 0, 5)])).toBe(125);
+  });
+
+  it('sums each slice’s area, one slice thick (Cavalieri)', () => {
+    expect(
+      outlinedVolume([
+        { z: 3, rings: [square(0, 0, 10)] },
+        { z: 4, rings: [square(0, 0, 10), square(2, 2, 6)] },
+      ]),
+    ).toBe(164);
+    expect(outlinedVolume([])).toBe(0);
   });
 });

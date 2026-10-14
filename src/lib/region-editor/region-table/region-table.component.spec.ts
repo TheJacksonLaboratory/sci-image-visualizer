@@ -59,6 +59,21 @@ describe('RegionTableComponent', () => {
     ]);
   });
 
+  it("shows each row's class volume in a volume view, '…' while it is computed", () => {
+    const cells = () => Array.from(el().querySelectorAll('td.surface-cell')).map((td) => td.textContent?.trim());
+    fixture.componentRef.setInput('volumes', new Map([['Tumor', null]]));
+    fixture.detectChanges();
+    expect(el().querySelector('.surface-col-header')?.textContent?.trim()).toBe('Volume');
+    expect(cells()).toEqual(['…', '—']);
+    fixture.componentRef.setInput('volumes', new Map([['Tumor', 4000]]));
+    fixture.componentRef.setInput('mpp', { mppX: 25, mppY: 25, mppZ: 25 });
+    fixture.detectChanges();
+    expect(cells()).toEqual(['0.0625 mm³', '—']);
+    fixture.componentRef.setInput('volumes', null);
+    fixture.detectChanges();
+    expect(el().querySelector('.surface-col-header')?.textContent?.trim()).toBe('Surface');
+  });
+
   it('a row trash button reports the row index across pages', () => {
     const del = jest.fn();
     table.deleteRow.subscribe(del);

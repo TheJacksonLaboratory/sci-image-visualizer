@@ -648,6 +648,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     );
   }
 
+  /** Each class's volume over the whole stack, in px² × slices (see RegionStore.classVolumes). */
+  async getClassVolumes(classes: readonly string[]): Promise<Record<string, number>> {
+    return Object.fromEntries(await this.regionStore.classVolumes(classes));
+  }
+
   getRegionSourceClassCounts(): Promise<Record<string, number>> {
     return this.regionStore.getRegionSourceClassCounts();
   }

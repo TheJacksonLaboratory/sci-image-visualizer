@@ -20,7 +20,24 @@
       <tr *ngIf="total > 0">
         <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
         <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
-        <th class="surface-col-header" pResizableColumn>Surface</th>
+        <th
+          *ngIf="!volumes"
+          class="surface-col-header"
+          pResizableColumn
+          pTooltip="The region's area on this slice"
+          tooltipPosition="top"
+        >
+          Surface
+        </th>
+        <th
+          *ngIf="volumes"
+          class="surface-col-header"
+          pResizableColumn
+          pTooltip="The volume of the region's class over the whole stack: its area on every slice, one slice thick"
+          tooltipPosition="top"
+        >
+          Volume
+        </th>
         <!-- Trash column: just enough for the icon. -->
         <th style="width: 2rem"></th>
       </tr>
@@ -93,7 +110,7 @@
           </ng-template>
         </td>
         <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
-        <td class="surface-cell">{{ rowView.get(region)?.area || '—' }}</td>
+        <td class="surface-cell">{{ rowView.get(region)?.measure || '—' }}</td>
         <td>
           <button
             pButton
