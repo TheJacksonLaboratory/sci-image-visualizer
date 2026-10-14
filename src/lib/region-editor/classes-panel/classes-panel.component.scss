@@ -27,6 +27,10 @@
   color: var(--text-color-secondary);
   margin-right: auto;
 }
+/* The search box over the list, as the class tree has. */
+.classes-search {
+  margin: 0.25rem 0.5rem;
+}
 /* Scrollable class list — kept short by default so the regions table has room,
  * but the user can drag its bottom edge (resize handle) to make it taller. */
 .classes-panel-body {

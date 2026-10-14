@@ -112,4 +112,20 @@ describe('ClassesPanelComponent', () => {
     expect(el().querySelectorAll('.class-row').length).toBe(3);
     expect(el().querySelector('[aria-label="Show the classes as a tree"]')).toBeTruthy();
   });
+
+  it('filters the list by name, and Enter picks the first match', () => {
+    const picks: string[] = [];
+    panel.pick.subscribe((n) => picks.push(n));
+    const input = el().querySelector('.classes-search') as HTMLInputElement;
+    input.value = 'RO';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(Array.from(el().querySelectorAll('.row-name')).map((r) => r.textContent?.trim())).toEqual(['Stroma']);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(picks).toEqual(['Stroma']);
+    input.value = 'xyz';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(el().querySelector('.classes-empty')?.textContent).toContain('No class matches');
+  });
 });

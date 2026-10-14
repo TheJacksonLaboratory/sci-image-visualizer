@@ -32,9 +32,20 @@
   </div>
   <ng-container *ngIf="treeView; else list"><ng-content></ng-content></ng-container>
   <ng-template #list>
+    <input
+      *ngIf="classes.length"
+      type="text"
+      pInputText
+      class="p-inputtext-sm classes-search"
+      placeholder="Search by name"
+      aria-label="Search the classes"
+      [ngModel]="query"
+      (ngModelChange)="onQuery($event)"
+      (keydown.enter)="pickFirstMatch()"
+    />
     <div class="classes-panel-body">
       <div
-        *ngFor="let c of rows; trackBy: trackByName"
+        *ngFor="let c of shownRows; trackBy: trackByName"
         class="class-row"
         [class.active]="activeClass === c.name"
         (click)="pick.emit(c.name)"
@@ -71,6 +82,7 @@
         ></button>
       </div>
       <div *ngIf="!classes.length" class="classes-empty">No classes yet — add one from Manage.</div>
+      <div *ngIf="classes.length && !shownRows.length" class="classes-empty">No class matches.</div>
     </div>
   </ng-template>
 </div>

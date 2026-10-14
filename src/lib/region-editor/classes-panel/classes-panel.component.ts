@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { InputTextModule } from 'primeng/inputtext';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
@@ -21,14 +23,15 @@ interface ClassRow {
  * The Region Editor's docked "Classes" panel (jit-ui#70): every annotation
  * class with its colour swatch and region count. A row click picks the active
  * class (and re-classifies a selection), the swatch recolours the class, the
- * trash removes it, Manage opens the full editor. For a class hierarchy the
- * editor projects a class tree in, shown in place of the list while
- * {@link treeView} is on. Presentational: the editor applies every action.
+ * trash removes it, Manage opens the full editor; the search box filters the
+ * rows by name. For a class hierarchy the editor projects a class tree in,
+ * shown in place of the list while {@link treeView} is on. Presentational: the
+ * editor applies every action.
  */
 @Component({
   selector: 'region-classes-panel',
   standalone: true,
-  imports: [CommonModule, ButtonModule, TooltipModule, HexColorPickerComponent],
+  imports: [CommonModule, FormsModule, ButtonModule, InputTextModule, TooltipModule, HexColorPickerComponent],
   templateUrl: './classes-panel.component.html',
   styleUrls: ['./classes-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -69,8 +72,12 @@ export class ClassesPanelComponent implements OnChanges {
   /** trackBy for the class rows so re-sorting doesn't re-create the pickers. */
   protected readonly trackByName = (_: number, c: ClassRow): string => c.name;
 
-  /** The rows drawn, rebuilt when an input changes rather than per check. */
+  /** Every class's row, rebuilt when an input changes rather than per check. */
   protected rows: ClassRow[] = [];
+  /** The rows matching {@link query}. */
+  protected shownRows: ClassRow[] = [];
+  /** The search box's text. */
+  protected query = '';
 
   ngOnChanges(): void {
     this.rows = this.classes.map((c) => ({
@@ -81,6 +88,22 @@ export class ClassesPanelComponent implements OnChanges {
       rowTooltip: this.rowTooltip(c.name),
       removeTooltip: this.removeTooltip(c.name),
     }));
+    this.filter();
+  }
+
+  protected onQuery(value: string): void {
+    this.query = value;
+    this.filter();
+  }
+
+  /** Enter in the search box picks the first match. */
+  protected pickFirstMatch(): void {
+    if (this.query.trim() && this.shownRows.length) this.pick.emit(this.shownRows[0].name);
+  }
+
+  private filter(): void {
+    const q = this.query.trim().toLowerCase();
+    this.shownRows = q ? this.rows.filter((r) => r.name.toLowerCase().includes(q)) : this.rows;
   }
 
   private count(name: string): number {
