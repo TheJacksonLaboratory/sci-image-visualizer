@@ -23,10 +23,22 @@ file was added.
 - **Server-side region sources**: `IImageInfo.regionSourceUrl` names a server that serves the
   tiles itself (`openHttpRegionSource`), so the browser never downloads the set; the example tile
   server serves any GeoJSON file or folder of per-slice files under `REGION_DIR` this way.
-- **The Region Editor lists a region source** — the features still in it, a page at a time,
-  filterable by class — above its table; picking one takes it into the regions. A large import
-  becomes the slice's source; save and export write its remaining features with the regions, and
-  Delete all clears it.
+- **The Region Editor's table lists a region source's features** after the regions, paged by
+  its paginator; selecting, reclassifying or recolouring a source row takes it into the regions,
+  the bin deletes it. The classes panel counts the source's classes. A large import becomes the
+  slice's source; save and export write its remaining features with the regions, and Delete all
+  clears it.
+- **Class hierarchies**: a region set may carry one (`classHierarchy`, e.g. an atlas ontology,
+  as a FeatureCollection member or a served folder's `regionset.json`). The Region Editor then
+  shows its classes as a tree, as the Allen atlas viewer does: search, colour swatches, counts,
+  classes absent from the slice greyed; picking a class selects its regions and its subclasses'.
+- **An atlas look**: regions filled in their colour with thin outlines, the selection in a
+  highlight, class labels centred inside each part where they fit (only the deepest classes
+  drawn). A region set can ask for it (`style`), and the Region Editor's fill button toggles it.
+- **Regions in 3D**: in a napari volume or isosurface view, each class in the Region Editor (a
+  tree node with its subclasses) can be shown as its 3D reconstruction from every slice's
+  outlines — a translucent surface in its colour inside the volume, following its Z stretch.
+  The Region Editor button is on the toolbar in those views.
 - **Regions keep their GeoJSON feature id and other properties** (`Region.sourceId`,
   `Region.properties`) through an import and a save, e.g. QuPath's `id` and `objectType`, or an
   atlas structure's acronym and id.

@@ -15,13 +15,42 @@ someone selects it.
   Editor's region-set list) takes it into the regions: it is now an ordinary region, with every
   editing tool, undo and the class tools. Undoing past the moment it was taken puts it back in the
   source.
-- **The Region Editor** lists the features still in the source above its table, a page at a time,
-  filterable by class. The bin on a row deletes a feature without taking it. **Delete all**
-  clears the source too.
+- **The Region Editor's table** lists the source's features after the regions, a page at a time.
+  Selecting or editing a source row takes it; the bin deletes a feature without taking it.
+  **Delete all** clears the source too.
 - **Save and export** write the source's remaining features with the regions, so nothing is lost.
   Each feature keeps its GeoJSON `id` and other properties.
 - OpenSeadragon and napari draw a source. **Plotly** shows only the regions taken from it, and the
   3D views none.
+
+## Class hierarchies, the atlas look, and 3D
+
+A region set can carry a **class hierarchy** — an atlas ontology, say — as a FeatureCollection
+member, and a **style** hint:
+
+```json
+{
+  "type": "FeatureCollection",
+  "classHierarchy": [
+    { "name": "root", "title": "root" },
+    { "name": "CTX", "title": "Cerebral cortex", "parent": "root", "color": "#70FF71", "order": 3 }
+  ],
+  "style": { "fillOpacity": 0.6, "stroke": "#3c3c3c", "strokeWidth": 1, "labels": true },
+  "features": [ … ]
+}
+```
+
+(A folder set served by the tile server takes them from its `regionset.json`.) Classes are
+matched by name (`classification.name`). With a hierarchy the Region Editor shows the classes as a
+tree — search, swatches, counts, classes absent from the slice greyed — and picking one selects
+its regions and its subclasses'. With `fillOpacity` the regions are filled in their colour with
+thin outlines and the selection in a highlight; `labels` puts each class name inside its parts,
+the deepest classes only. The editor's fill button toggles the look either way.
+
+In a napari **volume** (or isosurface) view the Region Editor offers a 3D toggle on each class:
+the class (with its subclasses) is reconstructed from its outlines on every slice — the region
+source's and the drawn regions' — and shown as a translucent surface in its colour inside the
+volume. Meshes are built at the volume's resolution in a worker and kept per image.
 
 The wand, brush, vertex eraser and merge tools work on regions: to grow, cut or merge a source
 feature, select it first.

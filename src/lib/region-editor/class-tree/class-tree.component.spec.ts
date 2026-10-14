@@ -69,6 +69,7 @@ describe('ClassTreeComponent', () => {
     fixture.componentRef.setInput('shown3d', new Set(['grey']));
     fixture.detectChanges();
     const icons = Array.from(fixture.nativeElement.querySelectorAll('.tree-3d')) as HTMLElement[];
+    // Every class: in 3D a class is wherever it is in the stack, not only on this slice.
     expect(icons).toHaveLength(2);
     expect(icons[0].classList).toContain('on');
     icons[1].click();

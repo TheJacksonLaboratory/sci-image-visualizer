@@ -33,7 +33,7 @@
       <span class="row-name">{{ c.name }}</span>
       <span class="row-count" [class.zero]="c.count === 0">{{ c.count }}</span>
       <i
-        *ngIf="volume && c.count > 0"
+        *ngIf="volume"
         class="pi pi-box row-3d"
         [class.on]="shown3d.has(c.name)"
         role="button"

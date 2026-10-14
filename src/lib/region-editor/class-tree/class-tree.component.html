@@ -44,7 +44,7 @@
       <span class="tree-long">{{ node(row.name)?.title }}</span>
       <span class="tree-count" *ngIf="total(row.name) > 0">{{ total(row.name) }}</span>
       <i
-        *ngIf="volume && total(row.name) > 0"
+        *ngIf="volume"
         class="pi pi-box tree-3d"
         [class.on]="shown3d.has(row.name)"
         role="button"
