@@ -66,7 +66,7 @@ type Classification = string | { name?: string; color?: number[] };
 
 /** The parts of a GeoJSON feature the reader looks at, JIT's bezier extras
  *  included. Parsed from a file, so nothing here is guaranteed. */
-interface GeoJsonFeature {
+export interface GeoJsonFeature {
   id?: string | number;
   geometry: { type?: string; coordinates?: unknown; plane?: { z?: number } };
   properties?: {
