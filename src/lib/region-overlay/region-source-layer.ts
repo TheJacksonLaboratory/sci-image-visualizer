@@ -53,6 +53,8 @@ export class RegionSourceLayer {
   private readonly labelLayer = new ScreenLayer(svgEl('g'), (x, y) => applyAffine(this.camera, x, y));
   /** Class name → depth in the source's class hierarchy (parents draw under their children). */
   private depthOf = new Map<string, number>();
+  /** Class name → its parent class in the source's class hierarchy. */
+  private parentOf = new Map<string, string>();
   private view: RegionSourceView | null = null;
   private visible = true;
   private readonly sub: Subscription;
@@ -131,7 +133,11 @@ export class RegionSourceLayer {
       this.loading?.abort();
       this.loading = null;
     }
-    if (view && prev?.source !== view.source) this.depthOf = hierarchyDepths(view.source.info.hierarchy);
+    if (view && prev?.source !== view.source) {
+      const hierarchy = view.source.info.hierarchy ?? [];
+      this.depthOf = hierarchyDepths(hierarchy);
+      this.parentOf = new Map(hierarchy.filter((n) => n.parent).map((n) => [n.name, n.parent as string]));
+    }
     this.attach();
     if (view) this.replan();
     else this.draw();
@@ -324,9 +330,19 @@ export class RegionSourceLayer {
     this.labelLayer.clear();
     const view = this.view;
     if (!view?.labels) return;
+    // Only the deepest classes drawn are labelled: a class whose subclasses are drawn too (an
+    // atlas's "Isocortex" under its areas) would only repeat over them.
+    const covered = new Set<string>();
+    for (const f of this.drawn.values()) {
+      let p = f.label ? this.parentOf.get(f.label) : undefined;
+      while (p && !covered.has(p)) {
+        covered.add(p);
+        p = this.parentOf.get(p);
+      }
+    }
     for (const f of this.drawn.values()) {
       const at = f.labels;
-      if (!at || !f.label) continue;
+      if (!at || !f.label || covered.has(f.label)) continue;
       const color = filled ? '#111' : view.colorOf(f);
       for (let k = 0; k + 2 < at.length; k += 3) {
         placeInsideLabel(this.labelLayer, f.label, { x: at[k], y: at[k + 1], room: at[k + 2] }, color);

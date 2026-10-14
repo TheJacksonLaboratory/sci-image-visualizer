@@ -150,6 +150,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private standInSeq = 0;
   /** Bumped per source refresh, so a late answer is dropped. */
   private sourceRequest = 0;
+  /** The classes the table's Class column offers: the presets and the region source's classes
+   *  (a dropdown can only show a value that is one of its options). */
+  protected tablePresetSet: PresetSet = defaultPresetSet();
   /** Whether regions are drawn filled (the atlas look) rather than outlined. */
   protected regionsFilled = false;
   /** The class picked last in the class tree. */
@@ -793,6 +796,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       known.add(k);
       fromSource.push({ name: label, color: colorForLabel(label, this.presetSet) });
     }
+    this.tablePresetSet = fromSource.length
+      ? { ...this.presetSet, classes: [...this.presetSet.classes, ...fromSource] }
+      : this.presetSet;
     this.displayClasses = [...this.presetSet.classes, ...fromSource].sort((a, b) => {
       const d = this.classCount(b.name) - this.classCount(a.name);
       return d !== 0 ? d : a.name.localeCompare(b.name);
