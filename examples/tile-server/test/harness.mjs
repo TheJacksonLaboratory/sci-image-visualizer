@@ -46,7 +46,7 @@ export function infoToken(image) {
  */
 export async function startServer(env = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'tile-server-test-'));
-  for (const name of ['cogs', 'spatial', 'stores', 'st', 'abc', 'h5ad']) {
+  for (const name of ['cogs', 'spatial', 'stores', 'st', 'abc', 'h5ad', 'regions']) {
     await mkdir(path.join(dir, name), { recursive: true });
   }
   const port = await freePort();
@@ -60,6 +60,7 @@ export async function startServer(env = {}) {
       ST_DIR: path.join(dir, 'st'),
       ABC_DIR: path.join(dir, 'abc'),
       H5AD_DIR: path.join(dir, 'h5ad'),
+      REGION_DIR: path.join(dir, 'regions'),
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -17,6 +17,16 @@
 //   GET  /spatial/:id/embedding/:name         -> f32[N] per dim (bundle only)
 //   GET  /spatial/:id/features?q=&limit=      -> { names: [...] }
 //
+// …and REGION SOURCES, large GeoJSON region sets served as level-of-detail tiles for the
+// library's HTTP region source (see lib/regions.mjs):
+//
+//   GET  /regions                             -> { sets: [{ id, kind }] }
+//   GET  /regions/:id/info                    -> RegionSourceInfo
+//   GET  /regions/:id/tile/:z/:level/:gx/:gy  -> { features: [...] }
+//   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
+//   POST /regions/:id/index { z, offset, limit, label?, exclude? } -> { total, rows }
+//   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
+//
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
 // example's host adapter (ServerTileAccessAdapter). Here it decodes to
 // `{ image: "<imageId>" }` naming a pyramid under $COG_DIR. The library never
@@ -56,6 +66,7 @@ import {
   listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch, abcVolume,
 } from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
+import { listRegionSets, openRegionSet } from './lib/regions.mjs';
 import {
   listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
   xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
@@ -94,6 +105,11 @@ const ABC_DIR = process.env.ABC_DIR
 const XENIUM_DIR = process.env.XENIUM_DIR
   ? process.env.XENIUM_DIR
   : new URL('./xenium', import.meta.url).pathname;
+// Large GeoJSON region sets served as level-of-detail tiles: `<id>.geojson`, or a folder of
+// per-slice `*.geojson`. See lib/regions.mjs.
+const REGION_DIR = process.env.REGION_DIR
+  ? process.env.REGION_DIR
+  : new URL('./regions', import.meta.url).pathname;
 
 const app = express();
 
@@ -101,6 +117,8 @@ const app = express();
 // wildcard ACAO — echo the request origin and allow credentials. For a public,
 // unauthenticated demo this is harmless; a real deployment would restrict origin.
 app.use(cors({ origin: true, credentials: true }));
+// A region export carries the viewer's edited regions back: larger than the other bodies.
+app.use('/regions/:id/export', express.json({ limit: '200mb' }));
 app.use(express.json({ limit: '1mb' }));
 // Cell-group tables imported from the viewer: about 30 MB for 700k cells with long labels.
 app.use('/spatial/:id/groups', express.text({ type: '*/*', limit: '50mb' }));
@@ -629,6 +647,51 @@ app.get('/spatial/:id/markers/:column', async (req, res) => {
 });
 
 // Health + discovery (handy for the example / smoke checks).
+// ── Region sources ────────────────────────────────────────────────────────────────────
+app.get('/regions', async (_req, res) => res.json({ sets: await listRegionSets(REGION_DIR) }));
+
+/** Run `fn` on region set `req.params.id`: 404 for an unknown set, 500 when it cannot be read. */
+async function withRegionSet(req, res, fn) {
+  try {
+    const set = await openRegionSet(REGION_DIR, req.params.id);
+    if (!set) return res.status(404).json({ error: 'no such region set' });
+    const out = await fn(set);
+    if (typeof out === 'string') res.type('application/json').send(out);
+    else res.json(out);
+  } catch (err) {
+    console.error('[regions]', req.params.id, err?.message ?? err);
+    res.status(500).json({ error: String(err?.message ?? err) });
+  }
+}
+
+app.get('/regions/:id/info', (req, res) => withRegionSet(req, res, (set) => set.info()));
+app.get('/regions/:id/tile/:z/:level/:gx/:gy', (req, res) => {
+  const [z, level, gx, gy] = ['z', 'level', 'gx', 'gy'].map((k) => intParam(req.params[k], NaN));
+  if (![z, level, gx, gy].every(Number.isFinite) || z < 0 || level < 0) {
+    return res.status(400).json({ error: 'bad tile address' });
+  }
+  return withRegionSet(req, res, (set) => set.tile(z, level, gx, gy));
+});
+app.post('/regions/:id/features', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+  return withRegionSet(req, res, async (set) => ({ features: await set.features(ids) }));
+});
+app.post('/regions/:id/index', (req, res) => {
+  const b = req.body ?? {};
+  const query = {
+    offset: Math.max(0, intParam(b.offset, 0)),
+    limit: Math.max(0, intParam(b.limit, 50)),
+    label: typeof b.label === 'string' ? b.label : undefined,
+    exclude: Array.isArray(b.exclude) ? b.exclude.map(String) : [],
+  };
+  return withRegionSet(req, res, (set) => set.index(intParam(b.z, 0), query));
+});
+app.post('/regions/:id/export', (req, res) => {
+  const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
+  const extra = Array.isArray(req.body?.extra) ? req.body.extra : [];
+  return withRegionSet(req, res, (set) => set.export(exclude, extra));
+});
+
 app.get('/', (_req, res) => res.json({ ok: true, service: 'tile-server' }));
 app.get('/images', async (_req, res) => res.json({ images: await listImages(COG_DIR) }));
 
@@ -654,4 +717,5 @@ app.listen(PORT, () => {
   console.log(`  ZARR_DIR=${ZARR_DIR}  (SpatialData stores, read live)`);
   console.log(`  ST_DIR=${ST_DIR}  (legacy Spatial Transcriptomics bundles)`);
   console.log(`  XENIUM_DIR=${XENIUM_DIR}  (10x Xenium bundles, read in place)`);
+  console.log(`  REGION_DIR=${REGION_DIR}  (GeoJSON region sets, tiled by level of detail)`);
 });
