@@ -54,8 +54,11 @@ export async function listRegionSets(dir) {
   }
   const sets = [];
   for (const e of entries) {
-    if (e.isFile() && e.name.endsWith('.geojson')) sets.push({ id: e.name.slice(0, -8), kind: 'file' });
-    else if (e.isDirectory() && !e.name.startsWith('.')) sets.push({ id: e.name, kind: 'folder' });
+    // A symbolic link counts as what it points at (a set can live elsewhere, linked in).
+    const target = e.isSymbolicLink() ? await stat(path.join(dir, e.name)).catch(() => null) : e;
+    if (!target) continue;
+    if (target.isFile() && e.name.endsWith('.geojson')) sets.push({ id: e.name.slice(0, -8), kind: 'file' });
+    else if (target.isDirectory() && !e.name.startsWith('.')) sets.push({ id: e.name, kind: 'folder' });
   }
   return sets.filter((s) => validRegionId(s.id)).sort((a, b) => a.id.localeCompare(b.id));
 }

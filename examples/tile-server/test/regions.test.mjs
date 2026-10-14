@@ -5,7 +5,7 @@
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, symlink } from 'node:fs/promises';
 import path from 'node:path';
 
 import { startServer } from './harness.mjs';
@@ -50,6 +50,7 @@ before(async () => {
   await writeFile(path.join(dir, 'plates', '001.geojson'), collection([feature('997', 0, 'root')]));
   await writeFile(path.join(dir, 'plates', '002.geojson'), collection([feature('997', 0, 'root'), feature('8', 200, 'grey')]));
   await writeFile(path.join(server.dir, 'secret.geojson'), collection([feature('x', 0, 'X')]));
+  await symlink(path.join(dir, 'plates'), path.join(dir, 'linked'));
 });
 
 after(() => server.stop());
@@ -58,6 +59,7 @@ test('lists the region sets', async () => {
   const { body } = await get('/regions');
   assert.deepEqual(body.sets, [
     { id: 'cells', kind: 'file' },
+    { id: 'linked', kind: 'folder' },
     { id: 'plates', kind: 'folder' },
   ]);
 });
