@@ -16,6 +16,7 @@
 import { rgbToHex } from '../contracts/color';
 import { simplifyRing } from '../geometry/ring';
 import { polylabel } from '../geometry/polylabel';
+import { ringsArea } from '../geometry/reconstruct';
 
 /** An axis-aligned box `[x0, y0, x1, y1]` in image pixels. */
 export type Bbox = [number, number, number, number];
@@ -127,6 +128,9 @@ export interface RegionIndexRow {
   label: string | null;
   color: string | null;
   bbox: Bbox;
+  /** The area inside the exact outline (holes left out), image px²; 0 for a polyline. Absent from a
+   *  server that predates it. */
+  area?: number;
 }
 
 /** A page of a plane's feature index. */
@@ -405,6 +409,8 @@ export class RegionFeatureTable {
   /** Per feature, its parts as ring indices (the exterior first, then its holes). */
   readonly parts: number[][][] = [];
   private readonly labelPoints = new Map<number, Float32Array>();
+  /** Each feature's area, worked out the first time its row is asked for. */
+  private readonly areas = new Map<number, number>();
   private hierarchy?: RegionClassNode[];
   private style?: RegionSourceStyle;
   private readonly byId = new Map<string, number>();
@@ -546,6 +552,16 @@ export class RegionFeatureTable {
     return out;
   }
 
+  /** Feature `i`'s area in px² (0 for a polyline). */
+  private areaOf(i: number): number {
+    let area = this.areas.get(i);
+    if (area === undefined) {
+      area = this.open[i] ? 0 : ringsArea(this.rings[i]);
+      this.areas.set(i, area);
+    }
+    return area;
+  }
+
   /** A page of plane `z`'s features, in file order. */
   index(z: number, query: RegionIndexQuery): RegionIndexPage {
     const exclude = new Set(query.exclude ?? []);
@@ -558,7 +574,13 @@ export class RegionFeatureTable {
       if (needle && !(this.labels[i] ?? '').toLowerCase().includes(needle)) continue;
       if (classes && !classes.has(this.labels[i] ?? '')) continue;
       if (total >= query.offset && rows.length < query.limit) {
-        rows.push({ id: this.ids[i], label: this.labels[i], color: this.colors[i], bbox: this.boxes[i] });
+        rows.push({
+          id: this.ids[i],
+          label: this.labels[i],
+          color: this.colors[i],
+          bbox: this.boxes[i],
+          area: this.areaOf(i),
+        });
       }
       total++;
     }

@@ -118,7 +118,8 @@ export class RegionTableComponent implements OnChanges {
   }
 
   private area(region: Region): string {
-    return formatArea(regionAreaPx(region), this.mpp);
+    // A region source's stand-in row has no geometry yet: the source's index gives its area.
+    return formatArea(region.bounds ? regionAreaPx(region) : (region.sourceArea ?? 0), this.mpp);
   }
 
   protected startEdit(region: Region, event: Event): void {

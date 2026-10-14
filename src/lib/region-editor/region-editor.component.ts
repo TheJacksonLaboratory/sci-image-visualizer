@@ -443,6 +443,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       label: row.label ?? undefined,
       color: this.sourceView?.colorOf(row) ?? row.color ?? this.shapeColor,
       sourceId: row.id,
+      sourceArea: row.area,
       bounds: null,
     });
     this.standIns.add(r);

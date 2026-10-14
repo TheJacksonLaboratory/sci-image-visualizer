@@ -169,6 +169,13 @@ describe('region-tiles', () => {
       expect(table.index(0, { offset: 0, limit: 10, exclude: ['a', '#1'] }).total).toBe(3);
     });
 
+    it("gives each row its feature's area, 0 for a polyline", () => {
+      const area = new Map(table.index(0, { offset: 0, limit: 10 }).rows.map((r) => [r.id, r.area]));
+      expect(area.get('a')).toBeCloseTo(100 * 100);
+      expect(area.get('#1')).toBeCloseTo(1000 * 1000);
+      expect(area.get('#5')).toBe(0);
+    });
+
     it('exports through the working set, every feature with an id', () => {
       const out = JSON.parse(table.exportGeoJson(['a', '#3'], [{ type: 'Feature', id: 'new', geometry: null }]));
       expect(out.type).toBe('FeatureCollection');

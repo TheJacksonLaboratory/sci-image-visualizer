@@ -46,6 +46,11 @@ export class Region {
    */
   sourceId?: string;
   /**
+   * A region source feature's area (image px²) while it stands in for the feature in the Region
+   * Editor's table: such a row has no geometry until the feature is taken.
+   */
+  sourceArea?: number;
+  /**
    * The feature's other GeoJSON properties (everything but the ones SIV reads and writes:
    * `classification`, `id` and the bézier fields), carried through untouched so a save keeps
    * them, e.g. an atlas structure's acronym and id.
