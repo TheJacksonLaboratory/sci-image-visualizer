@@ -102,3 +102,18 @@
   height: 1.75rem;
   padding: 0;
 }
+
+/* The 3D toggle (volume view): dim until the class is shown. */
+.class-row .row-3d {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.35;
+  cursor: pointer;
+}
+.class-row .row-3d:hover {
+  opacity: 0.8;
+}
+.class-row .row-3d.on {
+  opacity: 1;
+  color: var(--primary-color);
+}

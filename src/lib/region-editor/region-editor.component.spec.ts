@@ -1844,4 +1844,18 @@ describe('RegionEditorComponent with a region source', () => {
     expect(api.selectRegionClasses).toHaveBeenCalledWith(['grey', 'CTX', 'MB'], false);
     expect((component as any).pickedClass).toBe('grey');
   });
+
+  it('shows classes in 3D in a volume view, each with its subtree, and hides them again', async () => {
+    const show = jest.fn(async () => undefined);
+    (api as unknown as { showRegionClasses3d: typeof show }).showRegionClasses3d = show;
+    (component as any).toggleClass3d('grey', ['grey', 'CTX', 'MB']);
+    (component as any).toggleClass3d('MB');
+    expect(show).toHaveBeenLastCalledWith([
+      { key: 'grey', classes: ['grey', 'CTX', 'MB'], color: expect.any(String) },
+      { key: 'MB', classes: ['MB'], color: expect.any(String) },
+    ]);
+    (component as any).toggleClass3d('grey');
+    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: expect.any(String) }]);
+    expect([...(component as any).shown3dNames]).toEqual(['MB']);
+  });
 });

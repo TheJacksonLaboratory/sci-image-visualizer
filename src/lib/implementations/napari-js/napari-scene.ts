@@ -1,3 +1,4 @@
+import type { RegionMesh3D } from './napari-volume-region-meshes';
 import type { Viewer } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
@@ -36,6 +37,10 @@ export interface NapariScene {
   setNavigatorVisible?(visible: boolean): void;
   /** Observations projected to canvas pixels (the spatial 3D cloud), or null. */
   screenProjection?(obs: SpatialObservations): Float32Array | null;
+  /** Show these region reconstructions in the 3D view (volume scenes only). */
+  setRegionMeshes?(meshes: readonly RegionMesh3D[]): void;
+  /** Image px per voxel of the assembled volume, in-plane (volume scenes only). */
+  voxelStep?(): number | null;
   /** Remove everything the scene added; called before the viewer is disposed. */
   dispose(): void;
 }

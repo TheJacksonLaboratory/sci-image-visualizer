@@ -32,6 +32,17 @@
       </span>
       <span class="row-name">{{ c.name }}</span>
       <span class="row-count" [class.zero]="c.count === 0">{{ c.count }}</span>
+      <i
+        *ngIf="volume && c.count > 0"
+        class="pi pi-box row-3d"
+        [class.on]="shown3d.has(c.name)"
+        role="button"
+        [attr.aria-pressed]="shown3d.has(c.name)"
+        [attr.aria-label]="'Show ' + c.name + ' in 3D'"
+        pTooltip="Show in the volume, in 3D"
+        tooltipPosition="bottom"
+        (click)="$event.stopPropagation(); toggle3d.emit(c.name)"
+      ></i>
       <button
         pButton
         type="button"

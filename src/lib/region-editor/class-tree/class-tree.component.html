@@ -43,6 +43,17 @@
       <span class="tree-name">{{ row.name }}</span>
       <span class="tree-long">{{ node(row.name)?.title }}</span>
       <span class="tree-count" *ngIf="total(row.name) > 0">{{ total(row.name) }}</span>
+      <i
+        *ngIf="volume && total(row.name) > 0"
+        class="pi pi-box tree-3d"
+        [class.on]="shown3d.has(row.name)"
+        role="button"
+        [attr.aria-pressed]="shown3d.has(row.name)"
+        [attr.aria-label]="'Show ' + row.name + ' in 3D'"
+        pTooltip="Show in the volume, in 3D"
+        tooltipPosition="left"
+        (click)="flip3d(row.name, $event)"
+      ></i>
     </div>
     <div *ngIf="!rows.length" class="tree-empty">No class matches.</div>
   </div>

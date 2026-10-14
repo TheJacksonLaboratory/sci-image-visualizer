@@ -140,7 +140,21 @@ describe('RegionEditorComponent (DOM)', () => {
       (b) => (b as HTMLButtonElement).disabled,
     );
     // Selection-dependent actions (tags, palette, trash) start disabled.
-    expect(disabled).toEqual([false, false, false, false, false, false, false, false, true, true, true, false, false]);
+    expect(disabled).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
   });
 
   it('lists the classes, most-used first, with their counts', () => {

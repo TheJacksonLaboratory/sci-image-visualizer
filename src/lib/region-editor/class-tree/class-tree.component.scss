@@ -113,3 +113,20 @@
   font-size: 0.8rem;
   color: var(--text-color-secondary);
 }
+
+/* The 3D toggle (volume view): dim until the class is shown. */
+.tree-3d {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.35;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  &.on {
+    opacity: 1;
+    color: var(--primary-color);
+  }
+}

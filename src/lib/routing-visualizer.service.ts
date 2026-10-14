@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
-import { EMPTY, Observable, combineLatest, merge } from 'rxjs';
+import { EMPTY, Observable, combineLatest, merge, BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -15,6 +15,8 @@ import {
   isNapariScatter,
   isSpatialOmics,
   isSpatialOmics3d,
+  isNapariIsosurface,
+  isNapariVolume,
 } from './contracts/plot-type';
 import {
   IViewerBackend,
@@ -37,6 +39,7 @@ import { RegionStore } from './store/region-store.service';
 import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
 import type { RegionStyle } from './region-overlay/region-style';
+import type { Mesh } from './geometry/surface-nets';
 import { openGeoJsonRegionSource } from './region-source/worker-region-source';
 import type { RegionSourceOpener, RegionSourceSlices } from './store/region-source-scope';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
@@ -96,6 +99,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private plottedFileName: string | undefined;
   /** The div the backends render into (every backend shares it); '' before the first plot. */
   private plotDiv = '';
+  /** Whether a napari volume view is the current plot type. */
+  private readonly volumeView$ = new BehaviorSubject<boolean>(false);
+  /** Region reconstructions built so far, by image, resolution and classes. */
+  private readonly meshCache = new Map<string, Mesh>();
+  /** Bumped per {@link showRegionClasses3d}, so only the latest one shows. */
+  private meshRequest = 0;
 
   constructor(
     private plotly: PlotlyService,
@@ -226,6 +235,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     inPlace?: boolean,
   ): Promise<boolean> {
     this.currentPlotType = plotType;
+    this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
     this.plottedFileName = imageInfo?.fileName;
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
@@ -334,6 +344,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;
+    this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
@@ -559,6 +570,43 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setRegionStyle(patch: Partial<RegionStyle>): void {
     this.regionStore.setRegionStyle(patch);
   }
+  // ── Regions in 3D: their reconstructions shown in the volume view ─────
+
+  /** Whether a napari volume (or isosurface) view is on screen: regions can be shown in 3D. */
+  getVolumeView$(): Observable<boolean> {
+    return this.volumeView$.asObservable();
+  }
+
+  /**
+   * Show these groups of classes in the volume view as 3D reconstructions (each group one surface
+   * in its colour: an atlas structure with its substructures), and only these; [] hides them.
+   * Reconstructed from every slice's outlines at the volume's resolution, cached per image.
+   */
+  async showRegionClasses3d(
+    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
+  ): Promise<void> {
+    const request = ++this.meshRequest;
+    const width = this.getTrueImageSize()?.width ?? 1024;
+    const step = this.napari.regionVoxelStep() ?? Math.max(1, width / 256);
+    const image = this.plottedFileName ?? '';
+    const cacheKey = (g: { classes: readonly string[] }) => `${image}|${step.toFixed(3)}|${g.classes.join(',')}`;
+    const missing = groups.filter((g) => !this.meshCache.has(cacheKey(g)));
+    if (missing.length) {
+      const built = await this.regionStore.reconstructClasses(
+        missing.map((g) => ({ key: cacheKey(g), classes: g.classes })),
+        step,
+      );
+      for (const b of built) this.meshCache.set(b.key, b.mesh);
+    }
+    if (request !== this.meshRequest) return;
+    this.napari.setRegionMeshes(
+      groups.map((g) => {
+        const mesh = this.meshCache.get(cacheKey(g))!;
+        return { key: g.key, color: g.color, vertices: mesh.vertices, faces: mesh.faces };
+      }),
+    );
+  }
+
   getRegionSourceClassCounts(): Promise<Record<string, number>> {
     return this.regionStore.getRegionSourceClassCounts();
   }

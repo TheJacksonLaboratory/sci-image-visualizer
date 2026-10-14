@@ -45,6 +45,12 @@ export class ClassesPanelComponent implements OnChanges {
   @Input() selectedCount = 0;
   /** The class regions revert to; it can't be removed while in use. */
   @Input() defaultClassName = 'Region';
+  /** Whether a volume view is on screen: each class can then be shown in 3D. */
+  @Input() volume = false;
+  /** The classes shown in 3D. */
+  @Input() shown3d: ReadonlySet<string> = new Set();
+  /** A class's 3D toggle (its name). */
+  @Output() toggle3d = new EventEmitter<string>();
 
   /** A row was clicked: make the class active / apply it to the selection. */
   @Output() pick = new EventEmitter<string>();

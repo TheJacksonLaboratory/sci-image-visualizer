@@ -45,8 +45,14 @@ export class ClassTreeComponent implements OnChanges {
   @Input() colorOf: (name: string) => string = () => '#999999';
   /** The class picked last (highlighted, its path expanded). */
   @Input() picked: string | null = null;
+  /** Whether a volume view is on screen: each class can then be shown in 3D. */
+  @Input() volume = false;
+  /** The classes shown in 3D. */
+  @Input() shown3d: ReadonlySet<string> = new Set();
 
   @Output() pick = new EventEmitter<ClassTreePick>();
+  /** A class's 3D toggle: it with every class under it. */
+  @Output() toggle3d = new EventEmitter<{ name: string; classes: string[] }>();
 
   protected tree: ClassTree = buildClassTree([], new Map());
   protected rows: ClassTreeRow[] = [];
@@ -80,6 +86,11 @@ export class ClassTreeComponent implements OnChanges {
   protected choose(name: string, event: Event): void {
     const e = event as MouseEvent | KeyboardEvent;
     this.pick.emit({ name, classes: subtree(this.tree, name), additive: e.shiftKey || e.metaKey || e.ctrlKey });
+  }
+
+  protected flip3d(name: string, event: Event): void {
+    event.stopPropagation();
+    this.toggle3d.emit({ name, classes: subtree(this.tree, name) });
   }
 
   protected onQuery(value: string): void {

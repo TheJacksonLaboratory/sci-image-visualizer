@@ -57,6 +57,7 @@ import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
 import { cameraDragMode } from './napari-axes-gizmo';
 import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
+import type { RegionMesh3D } from './napari-volume-region-meshes';
 import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
 import { SurfaceScene } from './napari-surface-scene';
@@ -133,6 +134,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private lifetime = new AbortController();
   /** What {@link plot} mounted, while it is mounted. */
   private scene: NapariScene | null = null;
+  /** Region reconstructions to show in a volume view, kept across re-plots. */
+  private regionMeshes: readonly RegionMesh3D[] = [];
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -339,6 +342,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // No loaded image: an image-less spatial dataset opened before any image (the visualizer's
       // plotSpatialWithoutImage) — the observations alone.
       this.scene = this.createScene(plotType, this.sceneContext(viewer, host, canvas), info, imageLoaded == null);
+      this.scene.setRegionMeshes?.(this.regionMeshes);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -394,6 +398,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** @deprecated Plotly-specific; host re-drives plot() from its image stream. */
   reloadAndPlot(): void {
     /* no-op */
+  }
+
+  /** Show these region reconstructions in the volume view (kept for the next volume plot). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
+    this.regionMeshes = meshes;
+    this.scene?.setRegionMeshes?.(meshes);
+  }
+
+  /** Image px per voxel of the volume on screen, in-plane; null outside a volume view. */
+  regionVoxelStep(): number | null {
+    return this.scene?.voxelStep?.() ?? null;
   }
 
   /**

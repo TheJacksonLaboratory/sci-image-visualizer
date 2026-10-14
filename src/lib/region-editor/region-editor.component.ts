@@ -155,6 +155,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected tablePresetSet: PresetSet = defaultPresetSet();
   /** Whether regions are drawn filled (the atlas look) rather than outlined. */
   protected regionsFilled = false;
+  /** Whether a volume view is on screen (classes can then be shown in 3D). */
+  protected volumeView = false;
+  /** Classes shown in 3D in the volume view, each with the classes its surface covers. */
+  protected shown3d = new Map<string, string[]>();
+  /** Their names, for the class lists' toggles (a new set per change, for OnPush). */
+  protected shown3dNames: ReadonlySet<string> = new Set();
   /** The class picked last in the class tree. */
   protected pickedClass: string | null = null;
   /** Regions per class (the regions' and the source's), for the class tree. */
@@ -280,6 +286,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       ?.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((style) => {
         this.regionsFilled = style.fillOpacity > 0;
+        this.changed();
+      });
+
+    this.regionApi
+      .getVolumeView$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((volume) => {
+        this.volumeView = volume;
         this.changed();
       });
 
@@ -435,6 +449,24 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected toggleFill(): void {
     this.regionApi.setRegionStyle?.({ fillOpacity: this.regionsFilled ? 0 : REGION_FILL_OPACITY });
   }
+
+  /**
+   * Show or hide a class in the volume view as a 3D reconstruction — a tree node with every class
+   * under it, as one surface in its colour.
+   */
+  protected toggleClass3d(name: string, classes: string[] = [name]): void {
+    const next = new Map(this.shown3d);
+    if (next.has(name)) next.delete(name);
+    else next.set(name, classes);
+    this.shown3d = next;
+    this.shown3dNames = new Set(next.keys());
+    this.changed();
+    const groups = [...next].map(([key, cls]) => ({ key, classes: cls, color: this.treeColor(key) }));
+    this.regionApi.showRegionClasses3d?.(groups).catch((err) => {
+      this.toast('error', 'Could not show the region in 3D', `${(err as Error)?.message ?? err}`);
+    });
+  }
+
 
   /** Pick a class in the class tree: select its regions and its subclasses', the source's taken. */
   protected async pickClasses(pick: ClassTreePick): Promise<void> {

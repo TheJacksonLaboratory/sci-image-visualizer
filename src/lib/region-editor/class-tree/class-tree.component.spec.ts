@@ -60,4 +60,20 @@ describe('ClassTreeComponent', () => {
     expect(names()).toContain('AUD');
     expect(fixture.nativeElement.querySelector('.tree-picked').textContent).toContain('Auditory areas');
   });
+
+  it('offers a 3D toggle per class with regions in a volume view', () => {
+    const toggles: Array<{ name: string; classes: string[] }> = [];
+    fixture.componentInstance.toggle3d.subscribe((t) => toggles.push(t));
+    expect(fixture.nativeElement.querySelector('.tree-3d')).toBeNull();
+    fixture.componentRef.setInput('volume', true);
+    fixture.componentRef.setInput('shown3d', new Set(['grey']));
+    fixture.detectChanges();
+    const icons = Array.from(fixture.nativeElement.querySelectorAll('.tree-3d')) as HTMLElement[];
+    expect(icons).toHaveLength(2);
+    expect(icons[0].classList).toContain('on');
+    icons[1].click();
+    expect(toggles[0].name).toBe('CTX');
+    expect(toggles[0].classes.sort()).toEqual(['AUD', 'CTX', 'MO']);
+    expect(picks).toEqual([]);
+  });
 });

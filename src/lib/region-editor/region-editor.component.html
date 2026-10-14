@@ -207,7 +207,10 @@
   [counts]="treeCounts"
   [colorOf]="treeColor"
   [picked]="pickedClass"
+  [volume]="volumeView"
+  [shown3d]="shown3dNames"
   (pick)="pickClasses($event)"
+  (toggle3d)="toggleClass3d($event.name, $event.classes)"
 >
 </region-class-tree>
 <ng-template #flatClasses>
@@ -222,6 +225,9 @@
     (recolor)="setClassColor($event.name, $event.color)"
     (remove)="deleteClass($event)"
     (manage)="openManageDialog()"
+    [volume]="volumeView"
+    [shown3d]="shown3dNames"
+    (toggle3d)="toggleClass3d($event)"
   >
   </region-classes-panel>
 </ng-template>

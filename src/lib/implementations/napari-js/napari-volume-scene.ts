@@ -23,6 +23,7 @@ import {
   volumeResolutionFor,
 } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
+import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
 function channelHistogram(data: Map<number, Uint8Array>, channel: number, bins: number): IHistogram | null {
@@ -68,12 +69,36 @@ export class VolumeScene implements NapariScene {
   gizmo: Axes3dGizmo | null = null;
   private zHandle: NapariVolumeZHandle | null = null;
   private displaySub: Subscription | null = null;
+  /** Regions' 3D reconstructions shown in the volume (see {@link setRegionMeshes}). */
+  private readonly regionMeshes: VolumeRegionMeshes;
+  /** The image's full size (px, px, slices), which reconstructions are in. */
+  private fullSize: [number, number, number] | null = null;
 
   constructor(
     private readonly ctx: SceneContext,
     private readonly info: IImageInfo | undefined,
     private readonly rendering: 'iso' | 'mip',
-  ) {}
+  ) {
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+  }
+
+  /** Show these region reconstructions in the volume (replacing the ones shown). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
+    this.regionMeshes.set(meshes);
+  }
+
+  /** Image px per voxel of the assembled volume (in-plane), or null before it is assembled. */
+  voxelStep(): number | null {
+    return this.fullSize && this.dims ? this.fullSize[0] / Math.max(1, this.dims.width) : null;
+  }
+
+  /** Place the region reconstructions in the volume's world box as it is now. */
+  private frameRegionMeshes(): void {
+    const base = this.worldBase;
+    if (!base || !this.fullSize) return;
+    const depth = base.depth * this.ctx.settings.volumeZScale;
+    this.regionMeshes.setFrame({ size: this.fullSize, world: [base.width, base.height, depth] });
+  }
 
   /**
    * Assemble and render the volume, then add the axes gizmo + labels and the Z handle and follow
@@ -133,6 +158,7 @@ export class VolumeScene implements NapariScene {
       setScale: (s) => this.setZScale(s),
     });
     this.followDisplayState();
+    this.frameRegionMeshes();
   }
 
   /**
@@ -230,6 +256,7 @@ export class VolumeScene implements NapariScene {
     const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
     const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
     const fullD = stackDepth(ctx.info()) || dims.depth;
+    this.fullSize = [fullW, fullH, fullD];
     if (mppXYZ) {
       return {
         width: fullW * mppXYZ[0],
@@ -287,6 +314,7 @@ export class VolumeScene implements NapariScene {
     this.gizmo = null;
     this.zHandle?.destroy();
     this.zHandle = null;
+    this.regionMeshes.clear();
     this.worldBase = null;
   }
 
@@ -309,6 +337,7 @@ export class VolumeScene implements NapariScene {
     }
     this.gizmo?.setDepth(worldZ, this.axesLabels({ width: base.width, height: base.height, depth: worldZ }));
     this.zHandle?.reposition();
+    this.frameRegionMeshes();
     this.ctx.viewer.requestRender();
   }
 
