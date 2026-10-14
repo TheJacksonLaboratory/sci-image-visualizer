@@ -1,5 +1,7 @@
 import { Rectangle, Polygon, MultiPolygon } from '../models/region';
 import { Region } from '../models/region';
+import type { Observable } from 'rxjs';
+import type { RegionSourceView } from '../region-source/region-source';
 
 /**
  * Region-native editing surface — typed geometry operations on the neutral
@@ -92,4 +94,18 @@ export interface IRegionEditApi {
    */
   beginBatch(): void;
   endBatch(): void;
+}
+
+/**
+ * The region-source side of the store, as the overlays use it: a large region set held as a
+ * tiled source (see `RegionStore.attachRegionSource`) that the overlays draw at the zoom's level
+ * of detail and pick from. Optional on the overlays' store: a store without it simply has no
+ * source to draw.
+ */
+export interface IRegionSourceApi {
+  /** The current slice's source as a layer draws it, and every change of it; null without one. */
+  getRegionSourceView$(): Observable<RegionSourceView | null>;
+  /** Take source features into the working set as regions and select them (added to the
+   *  selection with `additive`). Resolves the region ids. */
+  selectSourceFeatures(ids: readonly string[], additive?: boolean): Promise<number[]>;
 }

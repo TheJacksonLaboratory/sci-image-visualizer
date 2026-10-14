@@ -4,7 +4,7 @@ import { Subscription } from 'rxjs';
 
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 import { IRegionStore } from '../../contracts/visualizer.contract';
-import { IRegionEditApi } from '../../contracts/region-store.contract';
+import { IRegionEditApi, IRegionSourceApi } from '../../contracts/region-store.contract';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { elementToImage, imageToElement } from './osd-coords';
 import { OsdViewerLike } from './osd-viewer-like';
@@ -21,6 +21,7 @@ import {
   topmostRegionAt,
 } from '../../region-overlay/region-geometry';
 import { SvgRegionRenderer, affineFromProjection } from '../../region-overlay/svg-region-renderer';
+import { RegionSourceLayer, SOURCE_MARQUEE_LIMIT } from '../../region-overlay/region-source-layer';
 import {
   drawDraftPath,
   drawDraftRect,
@@ -38,9 +39,10 @@ import { EDIT_TOL_PX, EditZone, ZONE_CURSOR, rectZone, resizeRect } from '../../
  * {@link IRegionEditApi} (add/move/resize/vertex edits). The shared RegionStore
  * satisfies both. The overlay edits through these typed operations on the
  * neutral Region model — it never touches a backend's own shape representation
- * (e.g. Plotly's `x0/y0/x1/y1` / `M…L…Z` dicts).
+ * (e.g. Plotly's `x0/y0/x1/y1` / `M…L…Z` dicts). With {@link IRegionSourceApi}
+ * (optional) it also draws and picks the image's region source.
  */
-export type RegionEditStore = IRegionStore & IRegionEditApi;
+export type RegionEditStore = IRegionStore & IRegionEditApi & Partial<IRegionSourceApi>;
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
@@ -113,6 +115,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
    *  projection, and so the DOM, untouched. */
   private readonly cameraHandler = () => this.updateCamera();
   private readonly renderer: SvgRegionRenderer;
+  /** The image's region source, drawn under the regions at the zoom's level of detail. */
+  private readonly sourceLayer: RegionSourceLayer | null;
   /** OSD's MouseTracker drops a cancelled pointer (touch interrupted, pointer
    *  capture lost to the browser) without calling releaseHandler, so the
    *  gesture is ended here instead. */
@@ -143,6 +147,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
         if (this.store.getShowShapeLabel()) drawRegionLabel(layer, region, this.store.getShapeColor());
       },
     });
+    this.sourceLayer = this.store.getRegionSourceView$
+      ? new RegionSourceLayer(this.svg, this.store.getRegionSourceView$())
+      : null;
     this.viewer.canvas.addEventListener('pointercancel', this.pointerCancelHandler);
 
     // 'update-viewport' fires on every redrawn frame, animated ones included —
@@ -255,6 +262,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.removeHandler('resize', this.cameraHandler);
     this.viewer.removeHandler('rotate', this.cameraHandler);
     if (this.tracker) this.tracker.destroy();
+    this.sourceLayer?.destroy();
     if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
   }
 
@@ -283,7 +291,9 @@ export class OsdRegionOverlay implements IRegionOverlay {
   /** Follow the current image→element projection: the renderer rewrites one transform
    *  and re-positions its screen-space elements, or does nothing when it did not move. */
   private updateCamera(): void {
-    this.renderer.setCamera(affineFromProjection(this.toScreen));
+    const affine = affineFromProjection(this.toScreen);
+    this.renderer.setCamera(affine);
+    this.sourceLayer?.setCamera(affine);
   }
 
   /** Rebuild everything: the regions (in image coordinates), their labels and the overlay. */
@@ -472,6 +482,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
       // Only a real drag selects; a click-sized band falls through to onClick.
       if (this.bandDragged && (x1 - x0 > 2 || y1 - y0 > 2)) {
         this.store.setSelectedShapeIndices(regionsInRect(this.store.getRegions(), x0, y0, x1, y1));
+        this.selectSourceIn(x0, y0, x1, y1);
       }
       this.renderOverlay();
     }
@@ -562,7 +573,8 @@ export class OsdRegionOverlay implements IRegionOverlay {
       this.viewer.canvas.style.cursor = ZONE_CURSOR[ez.zone];
       return;
     }
-    this.updateCursor(this.regionIndexAt(this.toWorld(e.position)) >= 0);
+    const pt = this.toWorld(e.position);
+    this.updateCursor(this.regionIndexAt(pt) >= 0 || !!this.sourceLayer?.featureAt(pt.x, pt.y, OPEN_PATH_TOL_PX));
   }
 
   /**
@@ -692,6 +704,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
 
   private selectAt(pt: { x: number; y: number }, additive = false): void {
     const idx = this.regionIndexAt(pt);
+    // Not on a region: a feature of the region source there is taken into the regions and
+    // selected (the source draws it until then).
+    const feature = idx < 0 ? this.sourceLayer?.featureAt(pt.x, pt.y, OPEN_PATH_TOL_PX) : null;
+    if (feature && this.store.selectSourceFeatures) {
+      void this.store.selectSourceFeatures([feature.id], additive);
+      return;
+    }
     if (additive) {
       // Shift-click on empty space keeps the current selection.
       if (idx < 0) return;
@@ -706,6 +725,14 @@ export class OsdRegionOverlay implements IRegionOverlay {
       return;
     }
     this.store.setSelectedShapeIndices(idx >= 0 ? [idx] : []);
+  }
+
+  /** Take the region-source features the band meets into the regions, adding them to the selection. */
+  private selectSourceIn(x0: number, y0: number, x1: number, y1: number): void {
+    const features = this.sourceLayer?.featuresInRect(x0, y0, x1, y1) ?? [];
+    if (!features.length || !this.store.selectSourceFeatures) return;
+    const ids = features.slice(0, SOURCE_MARQUEE_LIMIT).map((f) => f.id);
+    void this.store.selectSourceFeatures(ids, true);
   }
 
   /** Index of the topmost region under an image point, or -1. */

@@ -2,10 +2,10 @@ import { TestBed } from '@angular/core/testing';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { Rectangle, Region } from '../models/region';
-import { RegionSource } from '../region-source/region-source';
+import { RegionSource, RegionSourceView } from '../region-source/region-source';
 import { RegionFeatureTable } from '../region-source/region-tiles';
 import { RegionStore } from './region-store.service';
-import { OPEN_REGION_SOURCES, RegionSourceView } from './region-source-scope';
+import { OPEN_REGION_SOURCES } from './region-source-scope';
 import { VisualizerStore } from './visualizer-store.service';
 
 const square = (x: number, y: number, s: number) => [

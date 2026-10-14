@@ -173,7 +173,10 @@ export class NapariToolBridge {
    */
   install3dInteraction(viewer: Viewer, host: HTMLElement): void {
     const { regionStore } = this.deps;
-    this.regionOverlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), regionStore);
+    // World here is the canvas, not the image: no region source to draw.
+    this.regionOverlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), regionStore, {
+      regionSource: false,
+    });
     this.buildCoordinateTransform();
     // Regions already in the shared store when the 3D view mounted (the image's own, say) are
     // not screen-space shapes and must survive an orbit; only those drawn here are cleared.

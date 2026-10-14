@@ -13,6 +13,7 @@ import type {
   RegionSourceInfo,
   RegionTile,
   RegionTileKey,
+  TileFeature,
 } from './region-tiles';
 
 /** A feature's exact GeoJSON with the source's id for it. */
@@ -38,6 +39,17 @@ export interface RegionSource {
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): Promise<string>;
   /** Release the source (its worker table, its cache). */
   dispose(): void;
+}
+
+/** What the store shows of the current slice's region source: what a source layer draws. */
+export interface RegionSourceView {
+  source: RegionSource;
+  /** The source plane the slice shows. */
+  plane: number;
+  /** Ids the source no longer draws: taken into the working set, or deleted. */
+  taken: ReadonlySet<string>;
+  /** The colour a feature is drawn in (its class colour, as a region of that class gets). */
+  colorOf(feature: Pick<TileFeature, 'label' | 'color'>): string;
 }
 
 /** Tiles a source keeps, most recently used last. */

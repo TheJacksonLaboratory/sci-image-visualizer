@@ -12,7 +12,7 @@ import {
 } from '../models/region-geojson';
 import { VisualizerStore } from './visualizer-store.service';
 import { IRegionStore } from '../contracts/visualizer.contract';
-import { IRegionEditApi } from '../contracts/region-store.contract';
+import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.contract';
 import { applyPresetColors, colorForLabel } from './class-color.util';
 import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
 import * as edit from '../models/polygon-edit';
@@ -20,13 +20,8 @@ import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clo
 import { RegionHistory } from './region-history';
 import { RegionSelection } from './region-selection';
 import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
-import {
-  RegionSourceOpener,
-  RegionSourceScope,
-  RegionSourceSlices,
-  RegionSourceView,
-} from './region-source-scope';
-import type { RegionSource } from '../region-source/region-source';
+import { RegionSourceOpener, RegionSourceScope, RegionSourceSlices } from './region-source-scope';
+import type { RegionSource, RegionSourceView } from '../region-source/region-source';
 
 /** One undo step: the region set and, for a slice with a region source, what was taken from it. */
 interface RegionSnapshot {
@@ -63,7 +58,7 @@ interface RegionSnapshot {
  * are image pixels.
  */
 @Injectable({ providedIn: 'root' })
-export class RegionStore implements IRegionStore, IRegionEditApi {
+export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceApi {
   private static readonly UNDO_LIMIT = 10;
   private static readonly UNDO_COALESCE_MS = 250;
 

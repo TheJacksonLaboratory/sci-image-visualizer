@@ -1,5 +1,4 @@
 import type { RegionSource } from '../region-source/region-source';
-import type { TileFeature } from '../region-source/region-tiles';
 
 /** Opens a region source on demand (and again after it was closed to save memory). */
 export type RegionSourceOpener = () => Promise<RegionSource>;
@@ -178,15 +177,4 @@ export class RegionSourceScope {
     entry.ready = null;
     entry.source = null;
   }
-}
-
-/** What the store shows of the current slice's region source: what a source layer draws. */
-export interface RegionSourceView {
-  source: RegionSource;
-  /** The source plane the slice shows. */
-  plane: number;
-  /** Ids the source no longer draws: taken into the working set, or deleted. */
-  taken: ReadonlySet<string>;
-  /** The colour a feature is drawn in (its class colour, as a region of that class gets). */
-  colorOf(feature: Pick<TileFeature, 'label' | 'color'>): string;
 }

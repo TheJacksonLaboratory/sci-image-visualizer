@@ -3,6 +3,7 @@ import { RegionStore } from '../../store/region-store.service';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import { Region, Rectangle, Polygon, MultiPolygon } from '../../models/region';
 import { fakeOsdViewer } from '../../testing/fake-osd-viewer';
+import { RegionSourceWorkerClient, openGeoJsonRegionSource } from '../../region-source/worker-region-source';
 
 /**
  * Mock OpenSeadragon with an *identity* viewport (image coords == element
@@ -618,4 +619,81 @@ describe('OsdRegionOverlay — regions arriving as JSON (jit-ui#124)', () => {
 
     expect(store.getSelectedShapeIndices()).toEqual([0]);
   });
+});
+
+describe('OsdRegionOverlay — region source', () => {
+  const square = (x: number, y: number, s: number) => [
+    [x, y],
+    [x + s, y + 1],
+    [x + s, y + s],
+    [x, y + s],
+    [x, y],
+  ];
+  const collection = JSON.stringify({
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        id: 'a',
+        properties: { classification: 'A' },
+        geometry: { type: 'Polygon', coordinates: [square(0, 0, 50)] },
+      },
+      {
+        type: 'Feature',
+        id: 'b',
+        properties: { classification: 'B' },
+        geometry: { type: 'Polygon', coordinates: [square(100, 0, 50)] },
+      },
+    ],
+  });
+  let store: RegionStore;
+  let overlay: OsdRegionOverlay;
+
+  beforeEach(async () => {
+    store = new RegionStore(new VisualizerStore());
+    store.setActiveImage({ urls: ['x.tif'] } as any);
+    overlay = new OsdRegionOverlay(fakeOsdViewer(), store);
+    const svg = (overlay as any).svg as SVGSVGElement;
+    Object.defineProperty(svg, 'clientWidth', { value: 400 });
+    Object.defineProperty(svg, 'clientHeight', { value: 300 });
+    store.attachRegionSource(await openGeoJsonRegionSource(collection, new RegionSourceWorkerClient()));
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  afterEach(() => overlay.destroy());
+
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+
+  it('draws the source under the regions', () => {
+    const svg = (overlay as any).svg as SVGSVGElement;
+    expect(svg.firstElementChild?.getAttribute('data-layer')).toBe('region-source');
+    expect(svg.querySelectorAll('[data-layer="region-source"] path')).toHaveLength(2);
+  });
+
+  it('a click on a source feature takes it into the regions and selects it', async () => {
+    overlay.setMode('select');
+    handlers().clickHandler({ position: { x: 120, y: 20 } });
+    await settle();
+    const regions = store.getRegions();
+    expect(regions.map((r) => r.sourceId)).toEqual(['b']);
+    expect(store.getSelectedShapeIndices()).toEqual([0]);
+    // It is no longer drawn by the source.
+    expect(svg().querySelectorAll('[data-layer="region-source"] path')).toHaveLength(1);
+  });
+
+  it('a rubber band takes every source feature it meets, with the regions it meets', async () => {
+    store.addRegion(rectRegionAt(300, 0, 10, 10));
+    overlay.setMode('select');
+    const h = handlers();
+    h.pressHandler({ position: { x: 40, y: 200 } });
+    h.dragHandler({ position: { x: 320, y: 5 } });
+    h.releaseHandler({ position: { x: 320, y: 5 } });
+    await settle();
+    expect(store.getRegions().map((r) => r.sourceId ?? 'drawn')).toEqual(['drawn', 'a', 'b']);
+    expect(store.getSelectedShapeIndices()).toEqual([0, 1, 2]);
+  });
+
+  function svg(): SVGSVGElement {
+    return (overlay as any).svg as SVGSVGElement;
+  }
 });

@@ -4,6 +4,7 @@ import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.c
 import { Region, Rectangle, Polygon } from '../../models/region';
 import { RegionStore } from '../../store/region-store.service';
 import type { Affine } from '../../region-overlay/svg-region-renderer';
+import { RegionSourceLayer, SOURCE_MARQUEE_LIMIT } from '../../region-overlay/region-source-layer';
 
 import {
   hitHandle,
@@ -101,6 +102,9 @@ export interface OverlayViewer {
 export class NapariRegionOverlay implements IRegionOverlay {
   private readonly svg: SVGSVGElement;
   private readonly renderer: NapariRegionSvgRenderer;
+  /** The image's region source, drawn under the regions at the zoom's level of detail; null
+   *  where world is not the image (the 3D view's screen-space lassos). */
+  private readonly sourceLayer: RegionSourceLayer | null;
   /** Client ↔ svg-local ↔ world conversions, with the svg origin read once per gesture/redraw. */
   private readonly projection: OverlayProjection;
   private readonly subs = new Subscription();
@@ -125,6 +129,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     private readonly host: HTMLElement,
     private readonly viewer: OverlayViewer,
     private readonly store: RegionStore,
+    opts: { regionSource?: boolean } = {},
   ) {
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     this.svg = document.createElementNS(SVG_NS, 'svg');
@@ -140,6 +145,8 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.host.appendChild(this.svg);
     this.renderer = new NapariRegionSvgRenderer(this.svg, this.store);
     this.projection = new OverlayProjection(this.svg, this.viewer);
+    this.sourceLayer =
+      opts.regionSource === false ? null : new RegionSourceLayer(this.svg, this.store.getRegionSourceView$());
 
     this.svg.addEventListener('pointerdown', this.onPointerDown);
     this.svg.addEventListener('pointermove', this.onPointerMove);
@@ -212,6 +219,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.subs.unsubscribe();
     // A drag torn down mid-gesture (a backend switch) must still close its store batch.
     this.endGesture();
+    this.sourceLayer?.destroy();
     if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
   }
 
@@ -412,6 +420,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
         return;
       }
     }
+    // A feature of the region source: take it into the regions and select it (a drag on it
+    // moves it once it is selected).
+    const feature = this.sourceLayer?.featureAt(wx, wy, OPEN_PATH_HIT_PX);
+    if (feature) {
+      void this.store.selectSourceFeatures([feature.id], e.shiftKey || e.metaKey || e.ctrlKey);
+      return;
+    }
     // Empty space: in select mode start a rubber-band marquee (selects the regions it covers on
     // release); in move mode just clear the selection.
     if (this.mode === 'select') {
@@ -469,6 +484,13 @@ export class NapariRegionOverlay implements IRegionOverlay {
     }
     const regions = this.store.getRegions();
     this.store.setSelectedShapeIndices(regionsInRect(regions, x0, y0, x1, y1, { skipProfiles: true }));
+    const features = this.sourceLayer?.featuresInRect(x0, y0, x1, y1) ?? [];
+    if (features.length) {
+      void this.store.selectSourceFeatures(
+        features.slice(0, SOURCE_MARQUEE_LIMIT).map((f) => f.id),
+        true,
+      );
+    }
   }
 
   // ── shape commit ──────────────────────────────────────────────────────────
@@ -503,12 +525,15 @@ export class NapariRegionOverlay implements IRegionOverlay {
   setRegionsVisible(visible: boolean): void {
     if (visible === this.regionsVisible) return;
     this.regionsVisible = visible;
+    this.sourceLayer?.setVisible(visible);
     this.redraw();
   }
 
   /** Follow a camera move: one transform attribute plus the screen-space elements. */
   private updateCamera(): void {
-    this.renderer.setCamera(this.projection.affine());
+    const affine = this.projection.affine();
+    this.renderer.setCamera(affine);
+    this.sourceLayer?.setCamera(affine);
   }
 
   /**
@@ -516,7 +541,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
    * group), their labels, and the overlay. Reads no layout: the camera affine is the viewer's.
    */
   redraw(): void {
-    this.renderer.setCamera(this.projection.affine());
+    this.updateCamera();
     this.renderer.render(this.regionsVisible ? this.store.getRegions() : [], this.selected);
     this.renderOverlay();
   }
