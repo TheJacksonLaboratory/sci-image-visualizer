@@ -3,25 +3,18 @@
   flex: 0 0 auto;
 }
 
+/* Shown inside the classes panel, under its header. */
 .class-tree {
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--surface-border);
+  padding-top: 0.25rem;
 }
 
 .tree-header {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  padding: 0.35rem 0.5rem 0.25rem;
-}
-
-.tree-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-color-secondary);
+  padding: 0 0.5rem 0.25rem;
 }
 
 .tree-picked {

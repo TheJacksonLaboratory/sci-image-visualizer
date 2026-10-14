@@ -200,37 +200,37 @@
   </div>
 </p-toolbar>
 
-<!-- A region set with a class hierarchy (an atlas ontology) shows its classes as a tree. -->
-<region-class-tree
-  *ngIf="classHierarchy as hierarchy; else flatClasses"
-  [nodes]="hierarchy"
-  [counts]="treeCounts"
-  [colorOf]="treeColor"
-  [picked]="pickedClass"
+<region-classes-panel
+  [classes]="displayClasses"
+  [counts]="classCounts"
+  [matchMode]="presetSet.matchMode"
+  [activeClass]="activeClass"
+  [selectedCount]="selectedRegions?.length || 0"
+  [defaultClassName]="defaultClassName"
+  (pick)="selectActiveClass($event)"
+  (recolor)="setClassColor($event.name, $event.color)"
+  (remove)="deleteClass($event)"
+  (manage)="openManageDialog()"
   [volume]="volumeView"
   [shown3d]="shown3dNames"
-  (pick)="pickClasses($event)"
-  (toggle3d)="toggleClass3d($event.name, $event.classes)"
+  (toggle3d)="toggleClass3d($event)"
+  [treeView]="classHierarchy ? classTreeView : null"
+  (treeViewChange)="classTreeView = $event"
 >
-</region-class-tree>
-<ng-template #flatClasses>
-  <region-classes-panel
-    [classes]="displayClasses"
-    [counts]="classCounts"
-    [matchMode]="presetSet.matchMode"
-    [activeClass]="activeClass"
-    [selectedCount]="selectedRegions?.length || 0"
-    [defaultClassName]="defaultClassName"
-    (pick)="selectActiveClass($event)"
-    (recolor)="setClassColor($event.name, $event.color)"
-    (remove)="deleteClass($event)"
-    (manage)="openManageDialog()"
+  <!-- A region set with a class hierarchy (an atlas ontology) can show its classes as a tree. -->
+  <region-class-tree
+    *ngIf="classHierarchy as hierarchy"
+    [nodes]="hierarchy"
+    [counts]="treeCounts"
+    [colorOf]="treeColor"
+    [picked]="pickedClass"
     [volume]="volumeView"
     [shown3d]="shown3dNames"
-    (toggle3d)="toggleClass3d($event)"
+    (pick)="pickClasses($event)"
+    (toggle3d)="toggleClass3d($event.name, $event.classes)"
   >
-  </region-classes-panel>
-</ng-template>
+  </region-class-tree>
+</region-classes-panel>
 
 <region-table
   [page]="pagedRegions"

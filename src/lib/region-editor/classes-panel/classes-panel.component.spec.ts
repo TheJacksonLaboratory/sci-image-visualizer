@@ -89,4 +89,27 @@ describe('ClassesPanelComponent', () => {
     fixture.componentRef.setInput('selectedCount', 2);
     expect(panel['rowTooltip']('Tumor')).toContain('selected region');
   });
+
+  it('switches to a class tree only when there is one, keeping Manage', () => {
+    const switchButton = () =>
+      el().querySelector('[aria-label="Show the classes as a list"]') as HTMLButtonElement | null;
+    const manage = () =>
+      Array.from(el().querySelectorAll('button')).find((b) => b.textContent?.includes('Manage'));
+    expect(switchButton()).toBeNull();
+    expect(el().querySelectorAll('[aria-label^="Show the classes"]').length).toBe(0);
+
+    const views = jest.fn();
+    panel.treeViewChange.subscribe(views);
+    fixture.componentRef.setInput('treeView', true);
+    fixture.detectChanges();
+    expect(el().querySelectorAll('.class-row').length).toBe(0);
+    expect(manage()).toBeTruthy();
+    switchButton()?.click();
+    expect(views.mock.calls).toEqual([[false]]);
+
+    fixture.componentRef.setInput('treeView', false);
+    fixture.detectChanges();
+    expect(el().querySelectorAll('.class-row').length).toBe(3);
+    expect(el().querySelector('[aria-label="Show the classes as a tree"]')).toBeTruthy();
+  });
 });

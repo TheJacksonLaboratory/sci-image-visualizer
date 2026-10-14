@@ -161,6 +161,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected shown3d = new Map<string, string[]>();
   /** Their names, for the class lists' toggles (a new set per change, for OnPush). */
   protected shown3dNames: ReadonlySet<string> = new Set();
+  /** Whether a region set's class hierarchy is shown as a tree (rather than the class list). */
+  protected classTreeView = true;
   /** The class picked last in the class tree. */
   protected pickedClass: string | null = null;
   /** Regions per class (the regions' and the source's), for the class tree. */

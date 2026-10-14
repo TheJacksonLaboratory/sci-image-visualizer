@@ -1,7 +1,6 @@
 <div class="class-tree">
-  <div class="tree-header">
-    <span class="tree-title">Classes</span>
-    <span class="tree-picked" *ngIf="picked as p">
+  <div class="tree-header" *ngIf="picked as p">
+    <span class="tree-picked">
       <b>{{ p }}</b
       ><span *ngIf="node(p)?.title as t"> · {{ t }}</span>
     </span>

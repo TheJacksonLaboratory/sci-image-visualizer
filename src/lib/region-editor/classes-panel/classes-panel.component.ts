@@ -21,8 +21,9 @@ interface ClassRow {
  * The Region Editor's docked "Classes" panel (jit-ui#70): every annotation
  * class with its colour swatch and region count. A row click picks the active
  * class (and re-classifies a selection), the swatch recolours the class, the
- * trash removes it, Manage opens the full editor. Presentational: the editor
- * applies every action.
+ * trash removes it, Manage opens the full editor. For a class hierarchy the
+ * editor projects a class tree in, shown in place of the list while
+ * {@link treeView} is on. Presentational: the editor applies every action.
  */
 @Component({
   selector: 'region-classes-panel',
@@ -51,6 +52,10 @@ export class ClassesPanelComponent implements OnChanges {
   @Input() shown3d: ReadonlySet<string> = new Set();
   /** A class's 3D toggle (its name). */
   @Output() toggle3d = new EventEmitter<string>();
+  /** Whether the projected class tree is shown instead of the list; null: there is no tree. */
+  @Input() treeView: boolean | null = null;
+  /** The list / tree switch. */
+  @Output() treeViewChange = new EventEmitter<boolean>();
 
   /** A row was clicked: make the class active / apply it to the selection. */
   @Output() pick = new EventEmitter<string>();
