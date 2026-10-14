@@ -9,6 +9,35 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Large region sets drawn by level of detail.** An image's ROI GeoJSON of at least
+  `VizConfig.regionSourceMinChars` characters (default 1 000 000) no longer loads as regions: it
+  opens as a *region source*, parsed and tiled in a Web Worker, and OpenSeadragon and napari draw
+  only the tiles in view — outlines simplified to under a screen pixel when zoomed out, exact at
+  1:1 and closer (as the spatial views draw cell outlines). A feature joins the regions, as an
+  ordinary editable region, when it is clicked, caught in a rubber band or picked in the Region
+  Editor; until then it costs no region. A z-indexed stack file serves each slice its plane, and
+  each large slice file of a folder stack opens the first time its slice is shown. Plotly shows
+  the regions only, not the source.
+- **Server-side region sources**: `IImageInfo.regionSourceUrl` names a server that serves the
+  tiles itself (`openHttpRegionSource`), so the browser never downloads the set; the example tile
+  server serves any GeoJSON file or folder of per-slice files under `REGION_DIR` this way.
+- **The Region Editor lists a region source** — the features still in it, a page at a time,
+  filterable by class — above its table; picking one takes it into the regions. A large import
+  becomes the slice's source; save and export write its remaining features with the regions, and
+  Delete all clears it.
+- **Regions keep their GeoJSON feature id and other properties** (`Region.sourceId`,
+  `Region.properties`) through an import and a save, e.g. QuPath's `id` and `objectType`, or an
+  atlas structure's acronym and id.
+
+### Changed
+
+- **Imported GeoJSON keeps its class colours**: a class with no preset is drawn in the colour the
+  file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
+  preset colour, and a class colour set later recolours the class as before. The imported colours
+  last for the session and are never saved with the presets.
+
 ## [0.9.0] — 2026-10-13
 
 Implements the 0.8.3 code review ([#45](https://github.com/TheJacksonLaboratory/sci-image-visualizer/issues/45)):
@@ -152,10 +181,6 @@ CORE-1) refer to the review document attached to #45.
 
 ### Changed
 
-- **Imported GeoJSON keeps its class colours**: a class with no preset is drawn in the colour the
-  file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
-  preset colour, and a class colour set later recolours the class as before. The imported colours
-  last for the session and are never saved with the presets.
 - **Performance**: global listeners and the napari render loop run outside the Angular zone;
   region overlays draw in world space and move only a transform on camera change; per-point
   `RGBA[]` tuples and nested per-pixel readback arrays are gone (packed RGBA frames); Cellpose

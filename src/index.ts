@@ -110,6 +110,24 @@ export * from './lib/models/region';
 export * from './lib/models/class-preset';
 export { ShapeSelection } from './lib/models/shape';
 
+// ── Region sources: large region sets, drawn by level of detail ─────────
+// A host hands one over through `IImageInfo.regionSourceUrl` or a large `roiJsonStr`; these
+// open one directly (e.g. for a custom loader, or a test).
+export { openGeoJsonRegionSource } from './lib/region-source/worker-region-source';
+export { openHttpRegionSource } from './lib/region-source/http-region-source';
+export type { HttpRegionSourceOptions, WireTileFeature } from './lib/region-source/http-region-source';
+export { REGION_SOURCE_MIN_CHARS } from './lib/region-source/region-source';
+export type { RegionSource, RegionSourceView, SourceFeature } from './lib/region-source/region-source';
+export type {
+  RegionIndexPage,
+  RegionIndexQuery,
+  RegionIndexRow,
+  RegionSourceInfo,
+  RegionTile,
+  RegionTileKey,
+  TileFeature,
+} from './lib/region-source/region-tiles';
+
 // ── Angular module + providers ───────────────────────────────────────────
 // DEPRECATED, kept for one minor release: a shim re-exporting the standalone components
 // below and binding the host-facing tokens at root.

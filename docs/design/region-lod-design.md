@@ -1,6 +1,6 @@
 # Level-of-detail regions
 
-Status: in progress (branch `feat/region-lod`).
+Status: implemented (branch `feat/region-lod`). User guide: `docs/guides/large-region-sets.md`.
 
 ## Problem
 
@@ -78,6 +78,32 @@ outlines do), and keep every region editable.
 - **Saving.** Export streams the source's features through the overlay (patches, deletions,
   materialized replacements) plus the regions created in the working set into one GeoJSON, in the
   worker for a worker source.
+
+## As built
+
+The model above, with these decisions taken while building it:
+
+- **One overlay set, `taken`, instead of patches and deletions.** Per image and slice the store
+  keeps the ids taken out of the source — into the working set, or deleted. The layer skips them,
+  the export excludes them, and the working set carries the taken features as regions (with
+  `sourceId`). Label and colour edits therefore go through taking (the editor's list takes a
+  feature on pick), so no patch type is needed. Undo snapshots `{ regions, taken }`; taking is not
+  a step of its own, so undoing past it returns the feature to the source.
+- **Levels.** Exact at 1:1 and closer; level k for zooms in [2⁻ᵏ, 2¹⁻ᵏ), so a level's tolerance
+  (`2ᵏ⁻¹` image px) is half to one screen pixel and the features it drops are under one to two.
+- **Store scope.** `RegionSourceScope` holds per image and slice an *opener*, not a source: a
+  folder stack's per-slice sources open the first time their slice is shown and at most six stay
+  open (re-opened on demand; ids are stable, so `taken` survives).
+- **Ids.** A feature's `id`, else `properties.id`, else `#<index>`; duplicates fall back to the
+  index. A server folder set qualifies ids by slice (`<z>:<id>`).
+- **Regions keep their feature.** Every GeoJSON import (not only sources) now carries the feature
+  id (`Region.sourceId`) and its other properties (`Region.properties`) through to a save.
+- **Drawing.** `RegionSourceLayer`, the svg's first child under both overlays' region renderers,
+  re-plans the tiles 90 ms after the camera settles and draws a loading tile's nearest coarser
+  ancestor meanwhile. Picking uses the features drawn (simplified when zoomed out).
+- **Not done.** The wand, brush, vertex eraser and merge tools act on regions only: a source
+  feature is grown, cut or merged after it is selected (taken). Plotly and the 3D views draw no
+  source.
 
 ## Phases
 

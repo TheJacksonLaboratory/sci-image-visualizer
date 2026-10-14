@@ -676,6 +676,27 @@ while the image in the file is the 2000 px `hires` tier, so `imageRef.scale` is
 `tissue_hires_scalef` — that is what aligns the spots — and `--mpp` on the pyramid is µm per
 *served* pixel, which is what the scale bar reads. They differ by exactly that scale factor.
 
+### Region-source endpoints
+
+Large GeoJSON region sets, served as level-of-detail tiles for the library's HTTP region source
+(`IImageInfo.regionSourceUrl`; see [the guide](../../docs/guides/large-region-sets.md)). A set
+under `$REGION_DIR` (default `./regions`) is a `<id>.geojson` file — a z-stack's slices by
+`geometry.plane.z` — or an `<id>/` folder of `*.geojson` files, one per slice in name order, whose
+feature ids are qualified by slice (`<z>:<id>`). Symbolic links count as what they point at, so a
+set can be linked in from elsewhere.
+
+| Method + path | Returns |
+|---|---|
+| `GET /regions` | `{ sets: [{ id, kind: 'file' \| 'folder' }] }` |
+| `GET /regions/:id/info` | `RegionSourceInfo` (a folder's is read once, file by file) |
+| `GET /regions/:id/tile/:z/:level/:gx/:gy` | the tile's features, whole, simplified for the level |
+| `POST /regions/:id/features` `{ ids }` | the exact GeoJSON features |
+| `POST /regions/:id/index` `{ z, offset, limit, label?, exclude? }` | a page of the slice's features |
+| `POST /regions/:id/export` `{ exclude, extra }` | the set as one FeatureCollection, edits applied |
+
+Tiles are cut by the library's own `src/lib/region-source/region-tiles.ts`, bundled with esbuild
+on first use; per-slice files are parsed on demand and the last eight kept.
+
 ## Deploy (Cloud Run)
 
 Deployed to Cloud Run in **jax-cloud-image-tools**, reading the COGs from a
