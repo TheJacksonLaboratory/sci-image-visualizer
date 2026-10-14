@@ -592,11 +592,18 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     const cacheKey = (g: { classes: readonly string[] }) => `${image}|${step.toFixed(3)}|${g.classes.join(',')}`;
     const missing = groups.filter((g) => !this.meshCache.has(cacheKey(g)));
     if (missing.length) {
-      const built = await this.regionStore.reconstructClasses(
-        missing.map((g) => ({ key: cacheKey(g), classes: g.classes })),
-        step,
-      );
-      for (const b of built) this.meshCache.set(b.key, b.mesh);
+      const names = missing.map((g) => g.key);
+      const what = names.length > 3 ? `${names.length} regions` : names.join(', ');
+      const done = this.napari.beginTask(`Building ${what} in 3D…`);
+      try {
+        const built = await this.regionStore.reconstructClasses(
+          missing.map((g) => ({ key: cacheKey(g), classes: g.classes })),
+          step,
+        );
+        for (const b of built) this.meshCache.set(b.key, b.mesh);
+      } finally {
+        done();
+      }
     }
     if (request !== this.meshRequest) return;
     this.napari.setRegionMeshes(

@@ -400,6 +400,11 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     /* no-op */
   }
 
+  /** Show `message` on the canvas's loading badge until the returned function is called. */
+  beginTask(message: string): () => void {
+    return this.badge.beginTask(message);
+  }
+
   /** Show these region reconstructions in the volume view (kept for the next volume plot). */
   setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
     this.regionMeshes = meshes;

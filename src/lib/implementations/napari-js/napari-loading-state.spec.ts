@@ -42,4 +42,19 @@ describe('LoadingBadgeState', () => {
     fresh();
     expect(state.text).toBe('');
   });
+
+  it('shows a task by its message, beside the layers loading, and across a new scene', () => {
+    const done = state.beginTask('Building HPF in 3D…');
+    expect(state.text).toBe('Building HPF in 3D…');
+    const image = state.begin('Image');
+    expect(state.text).toBe('Image reloading… · Building HPF in 3D…');
+    image();
+    // A re-plot (the volume re-mounts) keeps the task: it is not the old scene's.
+    state.reset();
+    state.attach(document.createElement('div'));
+    expect(state.text).toBe('Building HPF in 3D…');
+    done();
+    done();
+    expect(state.text).toBe('');
+  });
 });

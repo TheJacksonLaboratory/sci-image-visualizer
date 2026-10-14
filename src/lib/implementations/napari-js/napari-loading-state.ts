@@ -12,6 +12,9 @@ export type LoadingSource = 'Image' | 'Observations';
  * the counts are dropped, and an `end` from a load that began before it is a no-op, so a load
  * that settles after a re-plot can neither un-count the new scene's work nor drive a count below
  * zero (which hid the next scene's "Observations reloading…" until a second load overlapped it).
+ *
+ * A {@link beginTask} is work that outlives a scene (a region's 3D reconstruction, built for
+ * whichever volume is on screen when it is done): its message stays across a reset.
  */
 export class LoadingBadgeState {
   private host: HTMLElement | null = null;
@@ -19,10 +22,12 @@ export class LoadingBadgeState {
   private readonly counts = new Map<LoadingSource, number>();
   private tileLayers: readonly string[] = [];
   private generation = 0;
+  private readonly tasks = new Map<symbol, string>();
 
   /** The element the badge is drawn into (the plot host); set per plot. */
   attach(host: HTMLElement): void {
     this.host = host;
+    if (this.tasks.size) this.show();
   }
 
   /** One load of `source` started; call the returned function once it settles. */
@@ -39,6 +44,17 @@ export class LoadingBadgeState {
     };
   }
 
+  /** A task started, shown by its `message` ("Building HPF in 3D…"); call the returned function
+   *  once it settles. */
+  beginTask(message: string): () => void {
+    const id = Symbol(message);
+    this.tasks.set(id, message);
+    this.show();
+    return () => {
+      if (this.tasks.delete(id)) this.show();
+    };
+  }
+
   /** The spatial tile layers still loading (their own names, in their order). */
   setTileLayers(layers: readonly string[]): void {
     this.tileLayers = layers;
@@ -50,7 +66,7 @@ export class LoadingBadgeState {
     return this.badge?.text ?? '';
   }
 
-  /** A new scene: forget every count and remove the badge. */
+  /** A new scene: forget every count and remove the badge (tasks show again on the next attach). */
   reset(): void {
     this.generation++;
     this.counts.clear();
@@ -62,10 +78,13 @@ export class LoadingBadgeState {
   private show(): void {
     if (!this.host) return;
     this.badge ??= new NapariLoadingBadge(this.host);
-    this.badge.set([
-      ...((this.counts.get('Image') ?? 0) > 0 ? ['Image'] : []),
-      ...((this.counts.get('Observations') ?? 0) > 0 ? ['Observations'] : []),
-      ...this.tileLayers,
-    ]);
+    this.badge.set(
+      [
+        ...((this.counts.get('Image') ?? 0) > 0 ? ['Image'] : []),
+        ...((this.counts.get('Observations') ?? 0) > 0 ? ['Observations'] : []),
+        ...this.tileLayers,
+      ],
+      [...this.tasks.values()],
+    );
   }
 }

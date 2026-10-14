@@ -161,6 +161,34 @@ describe('RoutingVisualizerService (characterization)', () => {
 
   beforeEach(() => setup());
 
+  // ── regions in 3D ─────────────────────────────────────────────────────
+  it('names a 3D build on the loading badge until it settles, once per mesh', async () => {
+    const done = jest.fn();
+    napari.beginTask = jest.fn().mockReturnValue(done);
+    napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+    napari.setRegionMeshes = jest.fn();
+    const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+    const build = jest
+      .spyOn(regionStore, 'reconstructClasses')
+      .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+    const hpf = { key: 'HPF', classes: ['HPF', 'CA1'], color: '#7ed04b' };
+
+    await router.showRegionClasses3d([hpf]);
+    expect(napari.beginTask).toHaveBeenCalledWith('Building HPF in 3D…');
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(napari.setRegionMeshes).toHaveBeenCalledTimes(1);
+
+    // Built already: no build, no message.
+    await router.showRegionClasses3d([hpf]);
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(napari.beginTask).toHaveBeenCalledTimes(1);
+
+    // A failed build still clears its message.
+    build.mockRejectedValueOnce(new Error('no outlines'));
+    await expect(router.showRegionClasses3d([{ key: 'CB', classes: ['CB'], color: '#f0f080' }])).rejects.toThrow();
+    expect(done).toHaveBeenCalledTimes(2);
+  });
+
   // ── backend selection per plot type ───────────────────────────────────
   it('routes the IMAGE plot type to OpenSeadragon', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);

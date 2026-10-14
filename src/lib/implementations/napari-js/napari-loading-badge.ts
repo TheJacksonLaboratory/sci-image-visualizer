@@ -1,6 +1,7 @@
 /**
  * "Transcripts reloading…" at the bottom of the canvas while a layer's data is in flight: one
  * line naming every layer still loading, on a semi-opaque backing so it reads over any tissue.
+ * Longer work names itself ("Building HPF in 3D…") and joins the line.
  *
  * Shown only once something has been loading for {@link SHOW_AFTER_MS}, so a redraw served from
  * cache does not flash it.
@@ -10,6 +11,7 @@ export const SHOW_AFTER_MS = 150;
 export class NapariLoadingBadge {
   private readonly el: HTMLDivElement;
   private names: string[] = [];
+  private tasks: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(host: HTMLElement) {
@@ -36,26 +38,28 @@ export class NapariLoadingBadge {
     host.appendChild(this.el);
   }
 
-  /** The layers loading now; empty hides the badge. */
-  set(names: readonly string[]): void {
+  /** The layers loading now, and the tasks running (their messages); both empty hides the badge. */
+  set(names: readonly string[], tasks: readonly string[] = []): void {
     this.names = [...new Set(names)];
-    if (!this.names.length) {
+    this.tasks = [...new Set(tasks)];
+    if (!this.names.length && !this.tasks.length) {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
       this.el.style.display = 'none';
       return;
     }
-    this.el.textContent = `${listOf(this.names)} reloading…`;
+    const parts = this.names.length ? [`${listOf(this.names)} reloading…`, ...this.tasks] : this.tasks;
+    this.el.textContent = parts.join(' · ');
     if (this.el.style.display === 'block' || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      if (this.names.length) this.el.style.display = 'block';
+      if (this.names.length || this.tasks.length) this.el.style.display = 'block';
     }, SHOW_AFTER_MS);
   }
 
   /** The text currently set (shown or about to be). */
   get text(): string {
-    return this.names.length ? (this.el.textContent ?? '') : '';
+    return this.names.length || this.tasks.length ? (this.el.textContent ?? '') : '';
   }
 
   destroy(): void {
