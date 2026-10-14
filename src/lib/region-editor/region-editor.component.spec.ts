@@ -282,13 +282,13 @@ describe('RegionEditorComponent', () => {
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
   });
 
-  it('a failed region import shows its error toast in the library outlet (RT-32)', () => {
+  it('a failed region import shows its error toast in the library outlet (RT-32)', async () => {
     (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
       throw new Error('bad geojson');
     });
     const add = jest.spyOn(component['messageService'], 'add');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    (component as any).applyImportedRois('garbage');
+    await (component as any).applyImportedRois('garbage');
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
   });
 
@@ -901,7 +901,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(JSON.stringify({ count: 3 }), 'stack.geojson');
   }));
 
-  it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', () => {
+  it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', async () => {
     // Folder stack: persistRegions should skip the single-file save-as dialog
     // and write each slice's regions back to its own slice-file's geojson.
     const s0 = new Region();
@@ -921,6 +921,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     );
 
     component['persistRegions']();
+    await new Promise((r) => setTimeout(r)); // the slices serialize first
 
     // No single-file dialog for a folder stack.
     expect(component['showSaveAsDialog']).toBe(false);
@@ -933,7 +934,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
-  it("ignores a folder stack's Save while its save is still uploading, and destroy cancels that one", () => {
+  it("ignores a folder stack's Save while its save is still uploading, and destroy cancels that one", async () => {
     // The toolbar Save stays enabled during a stack save (there is no dialog);
     // a second click must not start a duplicate write and orphan the first.
     const s0 = new Region();
@@ -946,6 +947,7 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     component['persistRegions']();
     component['persistRegions']();
+    await new Promise((r) => setTimeout(r)); // the slices serialize first
 
     expect(mockRegionIo.saveSliceGeoJsons).toHaveBeenCalledTimes(1);
     expect(upload.observed).toBe(true);
@@ -1133,11 +1135,12 @@ describe('RegionEditorComponent export', () => {
 
   // --- confirmExport (download action) ---
 
-  it('should download geojson with the chosen filename', () => {
+  it('should download geojson with the chosen filename', async () => {
     component['exportFilename'] = 'my_export.geojson';
     component['showExportDialog'] = true;
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(component['showExportDialog']).toBe(false);
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'my_export.geojson');
@@ -1145,10 +1148,11 @@ describe('RegionEditorComponent export', () => {
     expect(blob.type).toBe('application/json');
   });
 
-  it('should use custom filename entered by user', () => {
+  it('should use custom filename entered by user', async () => {
     component['exportFilename'] = 'custom_regions.geojson';
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'custom_regions.geojson');
   });
@@ -1170,10 +1174,11 @@ describe('RegionEditorComponent export', () => {
     expect(saveAs).not.toHaveBeenCalled();
   });
 
-  it('should trim whitespace from filename before downloading', () => {
+  it('should trim whitespace from filename before downloading', async () => {
     component['exportFilename'] = '  padded_name.geojson  ';
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'padded_name.geojson');
   });

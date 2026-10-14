@@ -2,15 +2,9 @@ import { IImageInfo } from '../contracts/image.contract';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
 import { openHttpRegionSource } from '../region-source/http-region-source';
-import type { RegionSource } from '../region-source/region-source';
+import { REGION_SOURCE_MIN_CHARS, RegionSource } from '../region-source/region-source';
 import { openGeoJsonRegionSource } from '../region-source/worker-region-source';
 import type { RegionSourceOpener, RegionSourceSlices } from '../store/region-source-scope';
-
-/**
- * ROI GeoJSON at least this many characters long loads as a tiled region source rather than as
- * regions (see `VizConfig.regionSourceMinChars`).
- */
-export const REGION_SOURCE_MIN_CHARS = 1_000_000;
 
 /** The region-store members {@link applyImageRois} writes through. A target without
  *  `attachRegionSource` loads every ROI file as regions. */

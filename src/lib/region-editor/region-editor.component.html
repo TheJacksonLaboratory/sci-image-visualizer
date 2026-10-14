@@ -47,7 +47,7 @@
       pTooltip="Save regions to server."
       tooltipPosition="bottom"
       (click)="persistRegions()"
-      [disabled]="!regions || !regions.length"
+      [disabled]="(!regions || !regions.length) && !hasRegionSource"
     >
     </p-button>
     <p-button
@@ -177,7 +177,7 @@
       (click)="clearAllRegions()"
       pTooltip="Delete all regions"
       tooltipPosition="bottom"
-      [disabled]="!regions || !regions.length"
+      [disabled]="(!regions || !regions.length) && !hasRegionSource"
     ></p-button>
     <p-button
       icon="pi pi-question"
@@ -203,6 +203,8 @@
   (manage)="openManageDialog()"
 >
 </region-classes-panel>
+
+<region-source-list></region-source-list>
 
 <region-table
   [page]="pagedRegions"

@@ -31,10 +31,11 @@ import { colorForLabel, presetKey } from '../store/class-color.util';
 import { ConfirmationService, MessageService, SharedModule } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
-import { RegionPersistenceService } from './region-persistence.service';
+import { RegionPersistenceService, SliceGeoJson } from './region-persistence.service';
 import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialog/region-color-dialog.component';
 import { ClassesPanelComponent } from './classes-panel/classes-panel.component';
 import { RegionTableComponent } from './region-table/region-table.component';
+import { RegionSourceListComponent } from './region-source-list/region-source-list.component';
 import { SaveRegionsDialogComponent } from './save-regions-dialog/save-regions-dialog.component';
 import { SaveMaskDialogComponent } from './save-mask-dialog/save-mask-dialog.component';
 import { ManageClassesDialogComponent } from './manage-classes-dialog/manage-classes-dialog.component';
@@ -69,6 +70,7 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
     TooltipModule,
     ClassesPanelComponent,
     RegionTableComponent,
+    RegionSourceListComponent,
     SaveRegionsDialogComponent,
     SaveMaskDialogComponent,
     RegionColorDialogComponent,
@@ -123,6 +125,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected editingLabelRegions = new Map<Region, string>();
 
   protected showSaveAsDialog = false;
+  /** Whether the slice shown has a region source (a large region set drawn by level of
+   *  detail): it then has regions to save even with an empty table. */
+  protected hasRegionSource = false;
   protected saveAsFilename = '';
   protected saveAsFileExists = false;
   /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
@@ -224,6 +229,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.clampPaginatorFirst();
         this.syncClassesFromRegions(updated);
         this.recomputeClassCounts();
+        this.changed();
+      });
+
+    this.regionApi
+      .getRegionSourceView$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((view) => {
+        this.hasRegionSource = !!view;
         this.changed();
       });
 
@@ -421,8 +434,17 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.paginatorFirst = 0;
         this.commit([]);
         this.onSelectionChanged();
+        if (this.hasRegionSource) void this.deleteAllSourceFeatures();
       },
     });
+  }
+
+  /** Delete every feature still in the slice's region source (with "Delete all regions"). */
+  private async deleteAllSourceFeatures(): Promise<void> {
+    const index = this.regionApi.getRegionSourceIndex;
+    if (!index || !this.regionApi.deleteSourceFeatures) return;
+    const page = await index.call(this.regionApi, { offset: 0, limit: Number.MAX_SAFE_INTEGER });
+    if (page?.rows.length) this.regionApi.deleteSourceFeatures(page.rows.map((r) => r.id));
   }
 
   protected deleteRegion(shapeIdx: number) {
@@ -759,12 +781,22 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   protected importRois(event: Event) {
-    this.persistence.readChosenFile(event, (text) => this.applyImportedRois(text));
+    this.persistence.readChosenFile(event, (text) => void this.applyImportedRois(text));
   }
 
-  /** Replace the regions with an imported GeoJSON file's. */
-  private applyImportedRois(text: string): void {
+  /**
+   * Replace the regions with an imported GeoJSON file's. A large file becomes the slice's region
+   * source instead (drawn by level of detail; listed above the table), the table emptied.
+   */
+  private async applyImportedRois(text: string): Promise<void> {
     try {
+      if (await this.regionApi.importRegionSource?.(text)) {
+        this.selectedRegions = [];
+        this.paginatorFirst = 0;
+        this.commit([]);
+        this.onSelectionChanged();
+        return;
+      }
       this.regions = this.regionApi.importRegions(text);
       this.fillClassColors();
       this.commit();
@@ -785,7 +817,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   protected exportRois() {
-    if (!this.regionsForSave().length) return;
+    if (!this.regionsForSave().length && !this.hasRegionSource) return;
     this.exportFilename = this.persistence.defaultExportName();
     this.showExportDialog = true;
   }
@@ -793,9 +825,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected confirmExport() {
     const filename = this.exportFilename.trim();
     const regions = this.regionsForSave();
-    if (!filename || !regions.length) return;
+    if (!filename || (!regions.length && !this.hasRegionSource)) return;
     this.showExportDialog = false;
-    this.persistence.download(regions, filename);
+    this.persistence
+      .download(regions, filename)
+      .catch((err) => this.toast('error', 'Error exporting regions', `${(err as Error)?.message ?? err}`));
   }
 
   /** Open the "Save mask" dialog, seeded with `<image-stem>_mask.png`. */
@@ -900,7 +934,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       return;
     }
     const filename = this.persistence.defaultSaveName();
-    if (!filename || !this.regionsForSave().length) return;
+    if (!filename || (!this.regionsForSave().length && !this.hasRegionSource)) return;
 
     this.saveAsFilename = filename;
     this.saveAsFileExists = false;
@@ -911,11 +945,23 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Save a folder stack's regions as one geojson per slice-file (jit-ui#93).
    *  No dialog covers the toolbar meanwhile, so a Save while one is uploading
    *  is ignored rather than starting a second write (and orphaning the first). */
-  private saveStackSlices() {
+  private async saveStackSlices() {
     if (this.saveAsBusy) return;
-    const slices = this.persistence.sliceGeoJsons();
-    if (!slices.length) return;
     this.saveAsBusy = true;
+    let slices: SliceGeoJson[];
+    try {
+      slices = await this.persistence.sliceGeoJsons();
+    } catch (err) {
+      this.saveAsBusy = false;
+      this.changed();
+      this.toast('error', 'Error saving regions', `${(err as Error)?.message ?? err}`);
+      return;
+    }
+    // Cancelled while the slices serialized, or nothing to write.
+    if (!this.saveAsBusy || !slices.length) {
+      this.saveAsBusy = false;
+      return;
+    }
     this._saveAsSub = this.persistence.saveSlices(slices).subscribe({
       next: () => {
         this.saveAsBusy = false;

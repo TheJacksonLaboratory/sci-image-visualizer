@@ -110,15 +110,23 @@ describe('RegionPersistenceService', () => {
     expect(errors).toEqual(['ser', 'up']);
   }));
 
-  it('serializes per-slice files on the default plane, empty slices included', () => {
-    expect(svc.sliceGeoJsons()).toEqual([
+  it('serializes per-slice files on the default plane, empty slices included', async () => {
+    expect(await svc.sliceGeoJsons()).toEqual([
       { z: 2, geoJsonStr: '[0]' },
       { z: 3, geoJsonStr: '[]' },
     ]);
   });
 
-  it('download writes the GeoJSON blob under the given name', () => {
-    svc.download([r()], 'out.geojson');
+  it('download writes the GeoJSON blob under the given name', async () => {
+    await svc.download([r()], 'out.geojson');
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'out.geojson');
+  });
+
+  it('serializes through the region source when the API has one, per slice', async () => {
+    const withSource = jest.fn(async (regions: unknown[], slice?: number) => `source:${regions.length}:${slice}`);
+    (api as unknown as { getGeoJsonStringWithSource: typeof withSource }).getGeoJsonStringWithSource = withSource;
+    expect(await svc.serialize([r()])).toBe('source:1:undefined');
+    expect((await svc.sliceGeoJsons()).map((s) => s.geoJsonStr)).toEqual(['source:1:2', 'source:0:3']);
+    expect(api.getGeoJsonString).not.toHaveBeenCalled();
   });
 });

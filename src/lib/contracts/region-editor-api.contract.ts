@@ -3,6 +3,8 @@ import { Observable } from 'rxjs';
 import { Region } from '../models/region';
 import { ClassPreset, PresetSet } from '../models/class-preset';
 import { IImageMetadata } from './image.contract';
+import type { RegionSourceView } from '../region-source/region-source';
+import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-tiles';
 
 /**
  * Public, implementation-agnostic surface that the Region Editor (an *external*
@@ -96,6 +98,25 @@ export interface IRegionEditorApi {
    * mask worker) from the region geometry and this size.
    */
   getMaskImageSize(): { width: number; height: number } | null;
+
+  // ── region sources: large region sets, tiled by level of detail (optional) ─
+  /**
+   * Load `geoJsonStr` as the slice's region source when it is large enough
+   * (`VizConfig.regionSourceMinChars`): resolves true once it is open, false when it is small
+   * and should be imported as regions; rejects when it is not a GeoJSON FeatureCollection.
+   */
+  importRegionSource?(geoJsonStr: string): Promise<boolean>;
+  /** The slice's region source (null without one) and every change of it. */
+  getRegionSourceView$?(): Observable<RegionSourceView | null>;
+  /** A page of the slice source's features that were not taken from it. */
+  getRegionSourceIndex?(query: Omit<RegionIndexQuery, 'exclude'>): Promise<RegionIndexPage>;
+  /** Take source features into the regions and select them (added with `additive`). */
+  selectSourceFeatures?(ids: readonly string[], additive?: boolean): Promise<number[]>;
+  /** Delete source features without taking them (one undo step). */
+  deleteSourceFeatures?(ids: readonly string[]): void;
+  /** {@link getGeoJsonString} merged with the region source behind the regions (see
+   *  `RegionStore.getGeoJsonWithSource`); `slice` names a folder stack's slice. */
+  getGeoJsonStringWithSource?(regions: Region[], slice?: number): Promise<string>;
 }
 
 /** DI token the Region Editor injects instead of the concrete service. */

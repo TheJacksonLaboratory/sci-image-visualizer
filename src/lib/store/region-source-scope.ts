@@ -119,6 +119,18 @@ export class RegionSourceScope {
     return (image && this.images.get(image)?.taken.get(slice)) || NONE;
   }
 
+  /** Every id taken from any slice of `image` (a `'planes'` source's ids are unique across them). */
+  allTaken(image: string | undefined): string[] {
+    const taken = image ? this.images.get(image)?.taken : undefined;
+    return taken ? Array.from(taken.values()).flatMap((ids) => Array.from(ids)) : [];
+  }
+
+  /** The slices of `image` with anything taken from their source. */
+  slicesWithTaken(image: string | undefined): number[] {
+    const taken = image ? this.images.get(image)?.taken : undefined;
+    return taken ? Array.from(taken.keys()) : [];
+  }
+
   /** Replace the ids taken from `slice`'s source (copy-on-write: `ids` is kept as given). */
   setTaken(image: string | undefined, slice: number, ids: ReadonlySet<string>): void {
     if (!image) return;

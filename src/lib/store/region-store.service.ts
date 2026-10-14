@@ -6,6 +6,7 @@ import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../mode
 import {
   GeoJsonFeature,
   downloadGeoJson,
+  featureFromRegion,
   regionFromGeoJsonFeature,
   regionsFromGeoJson,
   regionsToGeoJson,
@@ -22,6 +23,7 @@ import { RegionSelection } from './region-selection';
 import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
 import { RegionSourceOpener, RegionSourceScope, RegionSourceSlices } from './region-source-scope';
 import type { RegionSource, RegionSourceView } from '../region-source/region-source';
+import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-tiles';
 
 /** One undo step: the region set and, for a slice with a region source, what was taken from it. */
 interface RegionSnapshot {
@@ -277,7 +279,12 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * the current live slice is captured first. Empty outside stack mode.
    */
   getStackSaveSlices(): Map<number, Region[]> {
-    return this.scope.stackSaveSlices(this.regions);
+    const slices = this.scope.stackSaveSlices(this.regions);
+    // A slice whose region source lost features (taken, deleted) is re-written too.
+    const changed = this.sources.slicesWithTaken(this.scope.activeImage).filter((z) => !slices.has(z));
+    if (!changed.length) return slices;
+    for (const z of changed) slices.set(z, []);
+    return new Map(Array.from(slices).sort((a, b) => a[0] - b[0]));
   }
 
   /** Mint ids/names + apply classification colours + tag the slice index, as
@@ -790,6 +797,35 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.recordUndoSnapshot();
     this.setTaken(new Set([...taken, ...drop]));
     this.emit();
+  }
+
+  /**
+   * A page of the slice source's features not taken from it (file order), e.g. for the Region
+   * Editor's list; an empty page without a source.
+   */
+  async getRegionSourceIndex(query: Omit<RegionIndexQuery, 'exclude'>): Promise<RegionIndexPage> {
+    const view = this.sourceView$.value;
+    if (!view) return { total: 0, rows: [] };
+    return view.source.getIndex(view.plane, { ...query, exclude: Array.from(view.taken) });
+  }
+
+  /**
+   * `regions` as a GeoJSON FeatureCollection string merged with the region source behind them:
+   * the source's features that were not taken (or deleted), then `regions`. Without a source,
+   * {@link getGeoJsonString}. `slice` names a folder stack's slice (default the one shown);
+   * on a z-indexed stack's source (`'planes'`) the export spans every slice.
+   */
+  async getGeoJsonWithSource(regions: Region[], slice = this.sourceSlice): Promise<string> {
+    const image = this.scope.activeImage;
+    const planes = this.scope.stackMode && this.sources.hasPlanesSource(image);
+    const binding = await this.sources.binding(image, slice);
+    if (!binding) return regionsToGeoJson(regions);
+    const features = regions
+      .filter((r) => !r.isProfile?.())
+      .map((r) => featureFromRegion(r))
+      .filter((f): f is object => !!f);
+    const exclude = planes ? this.sources.allTaken(image) : Array.from(this.sources.taken(image, slice));
+    return binding.source.exportGeoJson(exclude, features);
   }
 
   /** The slice a region source is keyed by: the display slice in stack mode, else 0. */

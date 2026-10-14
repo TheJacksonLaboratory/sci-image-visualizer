@@ -1,0 +1,63 @@
+<div class="source-list" *ngIf="view">
+  <div class="source-header">
+    <span
+      class="source-title"
+      pTooltip="Drawn from the image at the zoom's level of detail. Pick one here, or click it on the image, to edit it."
+      tooltipPosition="bottom"
+    >
+      <i class="pi pi-th-large"></i>
+      {{ total | number }} region{{ total === 1 ? '' : 's' }} in the image's region set
+    </span>
+    <input
+      type="text"
+      pInputText
+      class="p-inputtext-sm source-filter"
+      placeholder="Filter by class"
+      aria-label="Filter the region set by class"
+      [ngModel]="filter"
+      (ngModelChange)="onFilter($event)"
+    />
+  </div>
+  <ul class="source-rows" [class.loading]="loading">
+    <li
+      *ngFor="let row of rows; trackBy: trackRow"
+      class="source-row"
+      role="button"
+      tabindex="0"
+      [attr.aria-label]="'Edit ' + (row.label || row.id)"
+      (click)="take(row, $event)"
+      (keydown.enter)="take(row, $any($event))"
+    >
+      <span class="chip-swatch" [style.background]="colorOf(row)"></span>
+      <span class="source-label">{{ row.label || '—' }}</span>
+      <span class="source-id">{{ row.id }}</span>
+      <i
+        class="pi pi-trash icon-hover"
+        role="button"
+        aria-label="Delete"
+        pTooltip="Delete"
+        tooltipPosition="left"
+        (click)="remove(row, $event)"
+      ></i>
+    </li>
+  </ul>
+  <div class="source-pager" *ngIf="total > pageSize">
+    <p-button
+      icon="pi pi-angle-left"
+      size="small"
+      [text]="true"
+      [disabled]="first === 0"
+      (onClick)="page(-1)"
+      ariaLabel="Previous page"
+    ></p-button>
+    <span>{{ first + 1 }}–{{ lastShown }} of {{ total | number }}</span>
+    <p-button
+      icon="pi pi-angle-right"
+      size="small"
+      [text]="true"
+      [disabled]="lastShown >= total"
+      (onClick)="page(1)"
+      ariaLabel="Next page"
+    ></p-button>
+  </div>
+</div>

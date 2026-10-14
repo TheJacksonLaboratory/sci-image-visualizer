@@ -34,7 +34,9 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
-import type { RegionSource } from './region-source/region-source';
+import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
+import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
+import { openGeoJsonRegionSource } from './region-source/worker-region-source';
 import type { RegionSourceOpener, RegionSourceSlices } from './store/region-source-scope';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
@@ -526,6 +528,32 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Hold a large region set as a tiled region source (see RegionStore.attachRegionSource). */
   attachRegionSource(source: RegionSource | RegionSourceOpener, slices?: RegionSourceSlices): void {
     this.regionStore.attachRegionSource(source, slices);
+  }
+  async importRegionSource(geoJsonStr: string): Promise<boolean> {
+    if (geoJsonStr.length < (this.config?.regionSourceMinChars ?? REGION_SOURCE_MIN_CHARS)) return false;
+    let opened: RegionSource | null = await openGeoJsonRegionSource(geoJsonStr);
+    // The first open is the one just made; a source closed to save memory parses again.
+    this.regionStore.attachRegionSource(() => {
+      const source = opened;
+      opened = null;
+      return source ? Promise.resolve(source) : openGeoJsonRegionSource(geoJsonStr);
+    });
+    return true;
+  }
+  getRegionSourceView$(): Observable<RegionSourceView | null> {
+    return this.regionStore.getRegionSourceView$();
+  }
+  getRegionSourceIndex(query: Omit<RegionIndexQuery, 'exclude'>): Promise<RegionIndexPage> {
+    return this.regionStore.getRegionSourceIndex(query);
+  }
+  selectSourceFeatures(ids: readonly string[], additive?: boolean): Promise<number[]> {
+    return this.regionStore.selectSourceFeatures(ids, additive);
+  }
+  deleteSourceFeatures(ids: readonly string[]): void {
+    this.regionStore.deleteSourceFeatures(ids);
+  }
+  getGeoJsonStringWithSource(regions: Region[], slice?: number): Promise<string> {
+    return this.regionStore.getGeoJsonWithSource(regions, slice);
   }
 
   // ── Per-slice z-stack regions (jit-ui#93), from the shared RegionStore. ──

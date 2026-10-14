@@ -52,6 +52,12 @@ export interface RegionSourceView {
   colorOf(feature: Pick<TileFeature, 'label' | 'color'>): string;
 }
 
+/**
+ * ROI GeoJSON at least this many characters long loads as a tiled region source rather than as
+ * regions (see `VizConfig.regionSourceMinChars`).
+ */
+export const REGION_SOURCE_MIN_CHARS = 1_000_000;
+
 /** Tiles a source keeps, most recently used last. */
 export const REGION_TILE_CACHE_SIZE = 384;
 

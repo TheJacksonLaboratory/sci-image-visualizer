@@ -230,4 +230,53 @@ describe('RegionStore region sources', () => {
     expect(view).not.toBe(before);
     expect(view?.colorOf({ label: 'Cortex', color: null })).toBe('#00FF00');
   });
+
+  it('lists the source without what was taken', async () => {
+    store.attachRegionSource(tableSource([feature('a', 0), feature('b', 20), feature('c', 40)]));
+    await flush();
+    await store.takeSourceFeatures(['b']);
+    const page = await store.getRegionSourceIndex({ offset: 0, limit: 10 });
+    expect(page.rows.map((r) => r.id)).toEqual(['a', 'c']);
+  });
+
+  it('exports the source through the working set: untaken features, then the regions', async () => {
+    store.attachRegionSource(tableSource([feature('a', 0), feature('b', 20), feature('c', 40)]));
+    await flush();
+    const [id] = await store.takeSourceFeatures(['b']);
+    store.moveRegion(id, 100, 0);
+    store.deleteSourceFeatures(['c']);
+    const out = JSON.parse(await store.getGeoJsonWithSource(store.getRegions()));
+    expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a', 'b']);
+    const moved = out.features[1];
+    expect(moved.geometry.coordinates[0][0]).toEqual([120, 0]);
+    expect(moved.properties.acronym).toBe('B');
+  });
+
+  it('exports plain regions as before without a source', async () => {
+    const out = JSON.parse(await store.getGeoJsonWithSource([]));
+    expect(out).toEqual({ features: [], type: 'FeatureCollection' });
+  });
+
+  it('re-writes a folder-stack slice whose source lost features', async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 3 });
+    store.setDisplaySlice(3);
+    await flush();
+    store.deleteSourceFeatures(['a']);
+    expect(Array.from(store.getStackSaveSlices().keys())).toEqual([3]);
+    const out = JSON.parse(await store.getGeoJsonWithSource([], 3));
+    expect(out.features).toEqual([]);
+  });
+
+  it('exports a z-indexed source over every slice, without what any slice took', async () => {
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(tableSource([feature('a', 0, 'A', 0), feature('b', 0, 'A', 1)]), 'planes');
+    store.setDisplaySlice(1);
+    await flush();
+    store.deleteSourceFeatures(['b']);
+    store.setDisplaySlice(0);
+    await flush();
+    const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
+    expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
+  });
 });
