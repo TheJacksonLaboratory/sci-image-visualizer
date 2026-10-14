@@ -39,11 +39,12 @@ function polygon(id: string | undefined, ring: number[][], extra: Record<string,
 
 describe('region-tiles', () => {
   describe('levels', () => {
-    it('picks level 0 at or above 1:1 and one level per halving of the zoom', () => {
+    it('picks level 0 at or above 1:1 and one level per halving of the zoom below it', () => {
       expect(regionLevelFor(4, 6)).toBe(0);
       expect(regionLevelFor(1, 6)).toBe(0);
+      expect(regionLevelFor(0.9, 6)).toBe(1);
       expect(regionLevelFor(0.5, 6)).toBe(1);
-      expect(regionLevelFor(0.3, 6)).toBe(1);
+      expect(regionLevelFor(0.3, 6)).toBe(2);
       expect(regionLevelFor(0.25, 6)).toBe(2);
       expect(regionLevelFor(1e-6, 6)).toBe(5);
       expect(regionLevelFor(0, 6)).toBe(0);

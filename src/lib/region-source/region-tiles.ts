@@ -4,9 +4,9 @@
  * screen at the detail the zoom can show.
  *
  * Levels: level 0 is exact; a level-k tile covers `tileSize · 2ᵏ` image pixels and its outlines
- * are simplified (Douglas–Peucker) to `2ᵏ⁻¹` image pixels — half a screen pixel at the zoom that
- * picks that level ({@link regionLevelFor}). A feature smaller than a screen pixel at that zoom
- * (`2ᵏ` image pixels) is left out of the level. A tile holds the WHOLE simplified feature (not
+ * are simplified (Douglas–Peucker) to `2ᵏ⁻¹` image pixels — half to one screen pixel at the zooms
+ * that pick that level ({@link regionLevelFor}). A feature under `2ᵏ` image pixels (one to two
+ * screen pixels there) is left out of the level. A tile holds the WHOLE simplified feature (not
  * clipped) for every feature whose box meets it, so a view de-duplicates features by id, and at
  * level 0 the tiles in view hold the exact outline of everything visible.
  *
@@ -103,10 +103,14 @@ export interface GeoJsonFeatureLike {
   properties?: { id?: string | number; classification?: unknown } & Record<string, unknown>;
 }
 
-/** The level whose tiles suit a zoom of `pxPerImagePx` screen pixels per image pixel. */
+/**
+ * The level whose tiles suit a zoom of `pxPerImagePx` screen pixels per image pixel: exact (0)
+ * at 1:1 and closer, else level k for zooms in [2⁻ᵏ, 2¹⁻ᵏ), where its tolerance is half to one
+ * screen pixel and the features it leaves out are under one or two.
+ */
 export function regionLevelFor(pxPerImagePx: number, levels: number): number {
   if (!(pxPerImagePx > 0) || levels <= 1) return 0;
-  const level = Math.floor(-Math.log2(pxPerImagePx));
+  const level = Math.ceil(-Math.log2(pxPerImagePx) - 1e-9);
   return Math.max(0, Math.min(levels - 1, level));
 }
 
