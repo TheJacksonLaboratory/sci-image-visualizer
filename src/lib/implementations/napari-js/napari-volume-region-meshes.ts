@@ -1,12 +1,16 @@
 import { tintColormap } from 'napari-js';
 import type { SurfaceLayer, Viewer } from 'napari-js';
 
+import { MeshBox, meshBox, rayHitMesh, screenRay } from './napari-mesh-pick';
+
 /** A region's 3D reconstruction to show in the volume: a mesh in image px (x, y) and slices (z). */
 export interface RegionMesh3D {
   /** Identity (a class name): a mesh with the same key and arrays is kept, not rebuilt. */
   key: string;
   /** `#rrggbb`. */
   color: string;
+  /** What hovering it shows ("HPF · Hippocampal formation"); default: the key. */
+  label?: string;
   vertices: Float32Array;
   faces: Uint32Array;
 }
@@ -21,14 +25,25 @@ export interface VolumeFrame {
 
 /** Opacity of a region's surface in the volume. */
 export const REGION_MESH_OPACITY = 0.55;
+/** While some surfaces are highlighted: theirs (near opaque, so their shape reads) … */
+export const REGION_MESH_HIGHLIGHT_OPACITY = 0.9;
+/** … and the others' (ghosted: still there for context, not in the way). */
+export const REGION_MESH_DIMMED_OPACITY = 0.12;
 
 /**
  * The region reconstructions shown in a volume view: one translucent surface per region, in its
  * colour, placed in the volume's world box (pixel x, y and slice z mapped onto it the way the
  * volume maps its voxels) and re-placed when the volume's Z is stretched.
+ *
+ * Highlighting is focus + context: the highlighted surfaces turn near opaque and the others fade
+ * to a ghost, so the selection stands out while staying in place among its neighbours.
  */
 export class VolumeRegionMeshes {
-  private readonly layers = new Map<string, { mesh: RegionMesh3D; layer: SurfaceLayer }>();
+  private readonly layers = new Map<
+    string,
+    { mesh: RegionMesh3D; layer: SurfaceLayer; world: Float32Array; box: MeshBox }
+  >();
+  private highlighted: ReadonlySet<string> = new Set();
   /** The meshes to show (kept while the volume has no frame yet). */
   private wanted: readonly RegionMesh3D[] = [];
   private frame: VolumeFrame | null = null;
@@ -46,6 +61,32 @@ export class VolumeRegionMeshes {
     this.frame = frame;
     for (const [key, e] of [...this.layers]) this.remove(key, e.layer);
     this.sync();
+  }
+
+  /** Highlight the surfaces of these keys (none: every surface as usual). */
+  setHighlight(keys: Iterable<string>): void {
+    this.highlighted = new Set(keys);
+    for (const [key, e] of this.layers) e.layer.opacity = this.opacityOf(key);
+    this.viewer.requestRender();
+  }
+
+  /** The front-most surface under screen point (`x`, `y`) (canvas CSS px), or null. */
+  pickAt(x: number, y: number): RegionMesh3D | null {
+    if (!this.layers.size) return null;
+    const [vw, vh] = this.viewer.viewportSize();
+    if (vw <= 0 || vh <= 0) return null;
+    const ray = screenRay(this.viewer.camera3d.viewProjection(vw, vh), x, y, vw, vh);
+    if (!ray) return null;
+    let best: RegionMesh3D | null = null;
+    let bestT = Infinity;
+    for (const e of this.layers.values()) {
+      const t = rayHitMesh(ray, e.world, e.mesh.faces, e.box);
+      if (t < bestT) {
+        bestT = t;
+        best = e.mesh;
+      }
+    }
+    return best;
   }
 
   /** The meshes shown. */
@@ -78,11 +119,16 @@ export class VolumeRegionMeshes {
       name: `region ${mesh.key}`,
       colormap: tintColormap(mesh.color),
       contrastLimits: [0, 1],
-      opacity: REGION_MESH_OPACITY,
+      opacity: this.opacityOf(mesh.key),
       blending: 'translucent',
       fit: 'never',
     });
-    this.layers.set(mesh.key, { mesh, layer });
+    this.layers.set(mesh.key, { mesh, layer, world, box: meshBox(world) });
+  }
+
+  private opacityOf(key: string): number {
+    if (!this.highlighted.size) return REGION_MESH_OPACITY;
+    return this.highlighted.has(key) ? REGION_MESH_HIGHLIGHT_OPACITY : REGION_MESH_DIMMED_OPACITY;
   }
 
   private remove(key: string, layer: SurfaceLayer): void {

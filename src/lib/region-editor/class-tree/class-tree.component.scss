@@ -59,6 +59,11 @@
     background: var(--highlight-bg, rgba(51, 153, 255, 0.15));
   }
 
+  /* A class with a selected region. */
+  &.marked {
+    box-shadow: inset 3px 0 0 var(--primary-color);
+  }
+
   /* A class with no region on this slice, as the atlas viewer greys it. */
   &.absent {
     color: var(--text-color-secondary, #8a8a8a);

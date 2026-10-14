@@ -159,6 +159,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected volumeView = false;
   /** Classes shown in 3D in the volume view, each with the classes its surface covers. */
   protected shown3d = new Map<string, string[]>();
+  /** The classes of the class tree's pick (it and its subtree), as long as the pick holds. */
+  private pickedClasses: readonly string[] = [];
+  /** The selected rows' classes, marked in the class lists. */
+  protected markedClasses: ReadonlySet<string> = new Set();
+  /** The surfaces highlighted in the volume view (their keys, joined). */
+  private highlighted3d = '';
   /** The colour each shown surface was last drawn in. */
   private colors3d = new Map<string, string>();
   /** Their names, for the class lists' toggles (a new set per change, for OnPush). */
@@ -310,8 +316,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       .subscribe((groups) => {
         this.shown3d = new Map(groups.map((g) => [g.key, [...g.classes]]));
         this.shown3dNames = new Set(this.shown3d.keys());
+        this.highlighted3d = '';
+        this.updateSelectionHighlight();
         this.changed();
       });
+
+    // A surface clicked in the volume view (with the selection tool) picks its class.
+    this.regionApi
+      .getRegionPicked3d$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ key, additive }) => this.onPicked3d(key, additive));
 
     this.persistence
       .fileExists(this.saveAsCheck$)
@@ -341,6 +355,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
           next.length === this.selectedRegions.length &&
           next.every((r, i) => r.id === this.selectedRegions[i]?.id);
         if (!same) this.selectedRegions = next;
+        this.updateSelectionHighlight();
         // Scroll the paginator so the most-recently-selected row is visible.
         if (next.length > 0) {
           const lastIdx = this.regions.findIndex((r) => r.id === next[next.length - 1].id);
@@ -368,6 +383,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    */
   protected onSelectionChanged() {
     const selected = this.selectedRegions ?? [];
+    // Rows picked in the table replace the class tree's pick.
+    this.pickedClasses = [];
+    this.updateSelectionHighlight();
     const fromSource = selected.filter((r) => this.standIns.has(r));
     this._suppressSelectionSyncToPlot = true;
     try {
@@ -478,11 +496,52 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.shown3dNames = new Set(next.keys());
     this.changed();
     this.show3d(this.groups3d());
+    this.updateSelectionHighlight();
   }
 
   /** The surfaces shown in 3D, in their classes' colours now. */
-  private groups3d(): Array<{ key: string; classes: string[]; color: string }> {
-    return [...this.shown3d].map(([key, classes]) => ({ key, classes, color: this.treeColor(key) }));
+  private groups3d(): Array<{ key: string; classes: string[]; color: string; label: string }> {
+    const titles = new Map((this.classHierarchy ?? []).map((n) => [n.name, n.title]));
+    return [...this.shown3d].map(([key, classes]) => {
+      const title = titles.get(key);
+      return { key, classes, color: this.treeColor(key), label: title ? `${key} · ${title}` : key };
+    });
+  }
+
+  /** The classes selected now: the class tree's pick (with its subtree) and the selected rows'. */
+  private selectedClassNames(): Set<string> {
+    const names = new Set(this.pickedClasses);
+    for (const r of this.selectedRegions ?? []) if (r.label) names.add(r.label);
+    return names;
+  }
+
+  /**
+   * Highlight, in the volume view, the surfaces holding a selected class (focus + context: they
+   * turn near opaque, the others fade), and mark the selected rows' classes in the class lists.
+   */
+  private updateSelectionHighlight(): void {
+    const names = this.selectedClassNames();
+    const marked = new Set((this.selectedRegions ?? []).map((r) => r.label).filter((l): l is string => !!l));
+    if ([...marked].join('\n') !== [...this.markedClasses].join('\n')) this.markedClasses = marked;
+    const keys = [...this.shown3d].filter(([, classes]) => classes.some((c) => names.has(c))).map(([k]) => k);
+    const id = keys.join('\n');
+    if (id === this.highlighted3d) return;
+    this.highlighted3d = id;
+    this.regionApi.highlightRegionClasses3d?.(keys);
+  }
+
+  /** A surface clicked in the volume view: pick its class as the tree would; beside them, clear. */
+  private onPicked3d(key: string | null, additive: boolean): void {
+    if (key === null) {
+      if (additive) return;
+      this.pickedClass = null;
+      this.pickedClasses = [];
+      this.selectedRegions = [];
+      this.onSelectionChanged();
+      this.changed();
+      return;
+    }
+    void this.pickClasses({ name: key, classes: this.shown3d.get(key) ?? [key], additive });
   }
 
   /** A class colour changed (its swatch, or Manage): repaint the surfaces shown in 3D whose colour it changed. */
@@ -502,6 +561,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Pick a class in the class tree: select its regions and its subclasses', the source's taken. */
   protected async pickClasses(pick: ClassTreePick): Promise<void> {
     this.pickedClass = pick.name;
+    this.pickedClasses = pick.additive ? [...new Set([...this.pickedClasses, ...pick.classes])] : pick.classes;
+    this.updateSelectionHighlight();
     this.changed();
     await this.regionApi.selectRegionClasses?.(pick.classes, pick.additive);
   }

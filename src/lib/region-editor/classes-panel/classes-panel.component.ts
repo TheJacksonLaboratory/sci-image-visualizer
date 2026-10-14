@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  EventEmitter,
+  Input,
+  OnChanges,
+  Output,
+  SimpleChanges,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { InputTextModule } from 'primeng/inputtext';
@@ -8,6 +17,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { ClassPreset, MatchMode } from '../../models/class-preset';
 import { presetKey } from '../../store/class-color.util';
 import { HexColorPickerComponent } from '../../hex-color-picker/hex-color-picker.component';
+import { scrollToPicked } from '../class-tree/class-tree.component';
 
 /** One class row as the template draws it, derived once per input change. */
 interface ClassRow {
@@ -45,6 +55,10 @@ export class ClassesPanelComponent implements OnChanges {
   @Input() matchMode: MatchMode = 'exact';
   /** The active class (highlighted), or null. */
   @Input() activeClass: string | null = null;
+  /** The class picked last (in the class tree, or a surface in 3D): highlighted, scrolled into view. */
+  @Input() picked: string | null = null;
+  /** Classes with a selected region (marked). */
+  @Input() marked: ReadonlySet<string> = new Set();
   /** Number of selected regions (changes what a row click does). */
   @Input() selectedCount = 0;
   /** The class regions revert to; it can't be removed while in use. */
@@ -79,7 +93,9 @@ export class ClassesPanelComponent implements OnChanges {
   /** The search box's text. */
   protected query = '';
 
-  ngOnChanges(): void {
+  constructor(private readonly el: ElementRef<HTMLElement>) {}
+
+  ngOnChanges(changes: SimpleChanges = {}): void {
     this.rows = this.classes.map((c) => ({
       name: c.name,
       color: c.color,
@@ -89,6 +105,8 @@ export class ClassesPanelComponent implements OnChanges {
       removeTooltip: this.removeTooltip(c.name),
     }));
     this.filter();
+    if (changes['picked'] && this.picked)
+      setTimeout(() => scrollToPicked(this.el.nativeElement, '.class-row.picked'));
   }
 
   protected onQuery(value: string): void {

@@ -138,6 +138,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionMeshes: readonly RegionMesh3D[] = [];
   /** The image (file name) {@link regionMeshes} were built from. */
   private regionMeshesImage: string | undefined;
+  /** The keys of the reconstructions highlighted. */
+  private regionHighlight: readonly string[] = [];
+  /** Clicks on the reconstructions (see {@link getRegionMeshPick$}). */
+  private readonly regionMeshPick$ = new Subject<{ key: string | null; additive: boolean }>();
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -254,6 +258,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       fitCameraSoon: () => this.fitCameraSoon(),
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
       inZone: (fn) => this.inZone(fn),
+      regionMeshPicked: (key, additive) => this.regionMeshPick$.next({ key, additive }),
     };
   }
 
@@ -347,6 +352,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // Another image's surfaces would land in this volume's frame at the wrong size: drop them.
       if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
       this.scene.setRegionMeshes?.(this.regionMeshes);
+      this.scene.setRegionHighlight?.(this.regionHighlight);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -414,6 +420,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.regionMeshes = meshes;
     this.regionMeshesImage = image;
     this.scene?.setRegionMeshes?.(meshes);
+  }
+
+  /** Highlight the reconstructions of these keys (none: all as usual). */
+  setRegionHighlight(keys: readonly string[]): void {
+    this.regionHighlight = keys;
+    this.scene?.setRegionHighlight?.(keys);
+  }
+
+  /** A reconstruction clicked with the selection tool (its key), or the volume beside them (null). */
+  getRegionMeshPick$(): Observable<{ key: string | null; additive: boolean }> {
+    return this.regionMeshPick$.asObservable();
   }
 
   /** Image px per voxel of the volume on screen, in-plane; null outside a volume view. */

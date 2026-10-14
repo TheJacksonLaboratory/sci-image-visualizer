@@ -595,6 +595,17 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.classes3d$.next([]);
     this.classes3dImage = undefined;
     this.napari.setRegionMeshes([], undefined);
+    this.napari.setRegionHighlight([]);
+  }
+
+  /** Highlight the surfaces of these group keys in the volume view (none: all as usual). */
+  highlightRegionClasses3d(keys: readonly string[]): void {
+    this.napari.setRegionHighlight(keys);
+  }
+
+  /** A surface clicked in the volume view with the selection tool (its group key), or none (null). */
+  getRegionPicked3d$(): Observable<{ key: string | null; additive: boolean }> {
+    return this.napari.getRegionMeshPick$();
   }
 
   /**
@@ -603,7 +614,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * Reconstructed from every slice's outlines at the volume's resolution, cached per image.
    */
   async showRegionClasses3d(
-    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
+    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }>,
   ): Promise<void> {
     const request = ++this.meshRequest;
     this.classes3dImage = this.plottedFileName;
@@ -631,7 +642,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.napari.setRegionMeshes(
       groups.map((g) => {
         const mesh = this.meshCache.get(cacheKey(g))!;
-        return { key: g.key, color: g.color, vertices: mesh.vertices, faces: mesh.faces };
+        return { key: g.key, color: g.color, label: g.label, vertices: mesh.vertices, faces: mesh.faces };
       }),
       this.plottedFileName,
     );

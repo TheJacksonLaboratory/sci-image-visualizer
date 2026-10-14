@@ -58,6 +58,14 @@
 .class-row:hover {
   background: var(--surface-hover, rgba(0, 0, 0, 0.04));
 }
+/* The class picked last (in the class tree, or a surface in 3D). */
+.class-row.picked {
+  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
+}
+/* A class with a selected region. */
+.class-row.marked {
+  box-shadow: inset 3px 0 0 var(--primary-color);
+}
 .class-row.active {
   background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
   border-left-color: var(--primary-color);

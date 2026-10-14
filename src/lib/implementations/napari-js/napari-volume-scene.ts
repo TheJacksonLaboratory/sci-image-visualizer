@@ -24,6 +24,7 @@ import {
 } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
 import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { RegionMeshPointer } from './napari-region-mesh-pointer';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
 function channelHistogram(data: Map<number, Uint8Array>, channel: number, bins: number): IHistogram | null {
@@ -73,6 +74,10 @@ export class VolumeScene implements NapariScene {
   private readonly regionMeshes: VolumeRegionMeshes;
   /** The image's full size (px, px, slices), which reconstructions are in. */
   private fullSize: [number, number, number] | null = null;
+  /** Clicks and hover on the reconstructions (with the selection tool). */
+  private meshPointer: RegionMeshPointer | null = null;
+  private toolSub: Subscription | null = null;
+  private selecting = false;
 
   constructor(
     private readonly ctx: SceneContext,
@@ -85,6 +90,29 @@ export class VolumeScene implements NapariScene {
   /** Show these region reconstructions in the volume (replacing the ones shown). */
   setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
     this.regionMeshes.set(meshes);
+  }
+
+  setRegionHighlight(keys: readonly string[]): void {
+    this.regionMeshes.setHighlight(keys);
+  }
+
+  /**
+   * Picking the reconstructions: with the selection tool armed, a click on one selects its class
+   * (null beside them); resting over one names it, whatever the tool.
+   */
+  private listenToRegionMeshes(): void {
+    const { ctx } = this;
+    if (this.meshPointer) return;
+    this.toolSub = ctx.store.getActiveTool$().subscribe((tool) => (this.selecting = tool === 'select'));
+    this.meshPointer = ctx.outsideZone(
+      () =>
+        new RegionMeshPointer(ctx.canvas, ctx.host, {
+          pickAt: (x, y) => this.regionMeshes.pickAt(x, y),
+          active: () => this.selecting && this.regionMeshes.shown.length > 0,
+          hoverable: () => this.regionMeshes.shown.length > 0,
+          onPick: (key, additive) => ctx.inZone(() => ctx.regionMeshPicked(key, additive)),
+        }),
+    );
   }
 
   /** Image px per voxel of the assembled volume (in-plane), or null before it is assembled. */
@@ -159,6 +187,7 @@ export class VolumeScene implements NapariScene {
     });
     this.followDisplayState();
     this.frameRegionMeshes();
+    this.listenToRegionMeshes();
   }
 
   /**
@@ -315,6 +344,10 @@ export class VolumeScene implements NapariScene {
     this.zHandle?.destroy();
     this.zHandle = null;
     this.regionMeshes.clear();
+    this.meshPointer?.destroy();
+    this.meshPointer = null;
+    this.toolSub?.unsubscribe();
+    this.toolSub = null;
     this.worldBase = null;
   }
 

@@ -1859,11 +1859,13 @@ describe('RegionEditorComponent with a region source', () => {
     (component as any).toggleClass3d('grey', ['grey', 'CTX', 'MB']);
     (component as any).toggleClass3d('MB');
     expect(show).toHaveBeenLastCalledWith([
-      { key: 'grey', classes: ['grey', 'CTX', 'MB'], color: expect.any(String) },
-      { key: 'MB', classes: ['MB'], color: expect.any(String) },
+      { key: 'grey', classes: ['grey', 'CTX', 'MB'], color: expect.any(String), label: 'grey' },
+      { key: 'MB', classes: ['MB'], color: expect.any(String), label: 'MB' },
     ]);
     (component as any).toggleClass3d('grey');
-    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: expect.any(String) }]);
+    expect(show).toHaveBeenLastCalledWith([
+      { key: 'MB', classes: ['MB'], color: expect.any(String), label: 'MB' },
+    ]);
     expect([...(component as any).shown3dNames]).toEqual(['MB']);
   });
 
@@ -1874,11 +1876,45 @@ describe('RegionEditorComponent with a region source', () => {
     expect(show).toHaveBeenCalledTimes(1);
 
     presets$.next({ ...presets$.value, classes: [{ name: 'MB', color: '#ff00aa' }] });
-    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: '#ff00aa' }]);
+    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: '#ff00aa', label: 'MB' }]);
     expect((component as any).treeColor('MB')).toBe('#ff00aa');
 
     // Another class's colour: the surface is left alone.
     presets$.next({ ...presets$.value, classes: [...presets$.value.classes, { name: 'CTX', color: '#00aaff' }] });
     expect(show).toHaveBeenCalledTimes(2);
+  });
+
+  it('highlights the surfaces holding the selected classes, and a surface click picks its class', async () => {
+    const highlight = jest.fn();
+    const picked$ = new Subject<{ key: string | null; additive: boolean }>();
+    Object.assign(api, {
+      showRegionClasses3d: jest.fn(async () => undefined),
+      highlightRegionClasses3d: highlight,
+    });
+    (component as any).toggleClass3d('grey', ['grey', 'CTX', 'MB']);
+    (component as any).toggleClass3d('CTX');
+    expect(highlight).not.toHaveBeenCalled();
+
+    // A pick in the tree: every surface holding one of its classes.
+    await (component as any).pickClasses({ name: 'MB', classes: ['MB'], additive: false });
+    expect(highlight).toHaveBeenLastCalledWith(['grey']);
+
+    // Rows picked in the table replace the pick: their classes count.
+    (component as any).selectedRegions = [Object.assign(new Region(), { id: 7, label: 'CTX' })];
+    (component as any).onSelectionChanged();
+    expect(highlight).toHaveBeenLastCalledWith(['grey', 'CTX']);
+    expect([...(component as any).markedClasses]).toEqual(['CTX']);
+
+    // A click on a surface in 3D picks its class with its subtree, as the tree does.
+    (component as any).onPicked3d('grey', false);
+    expect((component as any).pickedClass).toBe('grey');
+    expect(api.selectRegionClasses).toHaveBeenLastCalledWith(['grey', 'CTX', 'MB'], false);
+
+    // A click beside the surfaces clears the selection and the highlight.
+    (component as any).onPicked3d(null, false);
+    expect((component as any).pickedClass).toBeNull();
+    expect((component as any).selectedRegions).toEqual([]);
+    expect(highlight).toHaveBeenLastCalledWith([]);
+    picked$.complete();
   });
 });

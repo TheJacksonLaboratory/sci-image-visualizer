@@ -48,6 +48,8 @@
         *ngFor="let c of shownRows; trackBy: trackByName"
         class="class-row"
         [class.active]="activeClass === c.name"
+        [class.picked]="picked === c.name"
+        [class.marked]="marked.has(c.name)"
         (click)="pick.emit(c.name)"
         [pTooltip]="c.rowTooltip"
         tooltipPosition="bottom"

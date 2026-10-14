@@ -193,6 +193,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     napari.beginTask = jest.fn().mockReturnValue(() => undefined);
     napari.regionVoxelStep = jest.fn().mockReturnValue(2);
     napari.setRegionMeshes = jest.fn();
+    napari.setRegionHighlight = jest.fn();
     const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
     jest
       .spyOn(regionStore, 'reconstructClasses')
@@ -210,6 +211,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'merfish.zarr' }, 600, PlotType.NAPARI_VOLUME);
     expect(shown[shown.length - 1]).toEqual([]);
     expect(napari.setRegionMeshes).toHaveBeenLastCalledWith([], undefined);
+    expect(napari.setRegionHighlight).toHaveBeenLastCalledWith([]);
   });
 
   // ── backend selection per plot type ───────────────────────────────────

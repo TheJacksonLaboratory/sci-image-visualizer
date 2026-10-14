@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   EventEmitter,
   Input,
   OnChanges,
@@ -45,8 +46,10 @@ export class ClassTreeComponent implements OnChanges {
   @Input() counts: ReadonlyMap<string, number> = new Map();
   /** A class's colour (a new function when the colours change, so the rows repaint). */
   @Input() colorOf: (name: string) => string = () => '#999999';
-  /** The class picked last (highlighted, its path expanded). */
+  /** The class picked last (highlighted, its path expanded, scrolled into view). */
   @Input() picked: string | null = null;
+  /** Classes with a selected region (marked). */
+  @Input() marked: ReadonlySet<string> = new Set();
   /** Whether a volume view is on screen: each class can then be shown in 3D. */
   @Input() volume = false;
   /** The classes shown in 3D. */
@@ -63,6 +66,8 @@ export class ClassTreeComponent implements OnChanges {
   protected query = '';
   private expanded = new Set<string>();
 
+  constructor(private readonly el: ElementRef<HTMLElement>) {}
+
   ngOnChanges(changes: SimpleChanges): void {
     const fresh = !!changes['nodes'];
     if (fresh || changes['counts']) this.tree = buildClassTree(this.nodes, this.counts);
@@ -70,6 +75,9 @@ export class ClassTreeComponent implements OnChanges {
     if (fresh) this.expanded = new Set(this.tree.roots);
     if (changes['picked'] && this.picked) for (const a of ancestors(this.tree, this.picked)) this.expanded.add(a);
     this.refresh();
+    // A pick from elsewhere (a surface clicked in 3D) may be off screen: bring its row into view.
+    if (changes['picked'] && this.picked)
+      setTimeout(() => scrollToPicked(this.el.nativeElement, '.tree-row.picked'));
   }
 
   protected node(name: string): RegionClassNode | undefined {
@@ -116,4 +124,10 @@ export class ClassTreeComponent implements OnChanges {
   private refresh(): void {
     this.rows = visibleRows(this.tree, this.expanded, this.query);
   }
+}
+
+/** Scroll the row matching `selector` inside `host` into view, if it is out of it. */
+export function scrollToPicked(host: HTMLElement, selector: string): void {
+  const row = host.querySelector(selector) as HTMLElement | null;
+  row?.scrollIntoView?.({ block: 'nearest' });
 }

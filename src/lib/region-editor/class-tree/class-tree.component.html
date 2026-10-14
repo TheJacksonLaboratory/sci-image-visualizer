@@ -24,6 +24,7 @@
       [attr.aria-expanded]="row.hasChildren ? row.expanded : null"
       [class.absent]="total(row.name) === 0"
       [class.picked]="row.name === picked"
+      [class.marked]="marked.has(row.name)"
       [style.padding-left.rem]="0.35 + row.depth * 0.9"
       [pTooltip]="node(row.name)?.title || row.name"
       tooltipPosition="left"

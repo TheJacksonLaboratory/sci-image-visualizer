@@ -39,6 +39,8 @@ export interface NapariScene {
   screenProjection?(obs: SpatialObservations): Float32Array | null;
   /** Show these region reconstructions in the 3D view (volume scenes only). */
   setRegionMeshes?(meshes: readonly RegionMesh3D[]): void;
+  /** Highlight the reconstructions of these keys (none: all as usual). */
+  setRegionHighlight?(keys: readonly string[]): void;
   /** Image px per voxel of the assembled volume, in-plane (volume scenes only). */
   voxelStep?(): number | null;
   /** Remove everything the scene added; called before the viewer is disposed. */
@@ -97,4 +99,6 @@ export interface SceneContext {
   fitCameraSoon(): void;
   outsideZone<T>(fn: () => T): T;
   inZone<T>(fn: () => T): T;
+  /** A region reconstruction was clicked (its key), or the volume beside them (null). */
+  regionMeshPicked(key: string | null, additive: boolean): void;
 }

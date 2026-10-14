@@ -128,8 +128,12 @@ export interface IRegionEditorApi {
    * in its colour), and only these; [] hides them.
    */
   showRegionClasses3d?(
-    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>,
+    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }>,
   ): Promise<void>;
+  /** Highlight the surfaces of these group keys in the volume view (none: all as usual). */
+  highlightRegionClasses3d?(keys: readonly string[]): void;
+  /** A surface clicked in the volume view with the selection tool (its group key), or none (null). */
+  getRegionPicked3d$?(): Observable<{ key: string | null; additive: boolean }>;
   /** The class groups shown in 3D on the image on screen; emits [] when another image is plotted. */
   getRegionClasses3d$?(): Observable<ReadonlyArray<{ key: string; classes: readonly string[] }>>;
   /** Select every region of these classes on the slice, the source's included (taken). */
