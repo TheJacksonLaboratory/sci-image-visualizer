@@ -145,7 +145,7 @@ export class OsdRegionOverlay implements IRegionOverlay {
         styleRegionShape(el, region, selected, this.store.getShapeColor(), this.store.getRegionStyle?.()),
       // The class label, when the Region Editor's "show labels" is on.
       decorate: (region, _i, _selected, layer) => {
-        if (this.store.getShowShapeLabel()) {
+        if (this.store.getShowShapeLabel() && !this.store.isLabelCovered?.(region.label)) {
           drawRegionLabel(layer, region, this.store.getShapeColor(), this.store.getRegionStyle?.());
         }
       },

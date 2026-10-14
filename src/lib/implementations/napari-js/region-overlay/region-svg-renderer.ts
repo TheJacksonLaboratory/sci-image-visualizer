@@ -103,7 +103,7 @@ export class NapariRegionSvgRenderer {
 
   /** Draw a region's classification label at its top-left, when labels are enabled (matches OSD). */
   private drawLabel(region: Region, layer: ScreenLayer): void {
-    if (!this.store.getShowShapeLabel() || region.isProfile?.()) return;
+    if (!this.store.getShowShapeLabel() || region.isProfile?.() || this.store.isLabelCovered(region.label)) return;
     const label = region.label;
     // The filled (atlas) look labels each part inside it, where it fits.
     if (label && isFilled(this.store.getRegionStyle())) {

@@ -873,6 +873,31 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
 
   // ── Region look ────────────────────────────────────────────────────────
 
+  /**
+   * Whether a region of class `label` goes unlabelled because a subclass of it (by the region
+   * source's class hierarchy) is among the regions too — an atlas's "Isocortex" under its areas.
+   * False without a hierarchy.
+   */
+  isLabelCovered(label: string | undefined): boolean {
+    if (!label) return false;
+    const hierarchy = this.sourceView$.value?.source.info.hierarchy;
+    if (!hierarchy) return false;
+    if (this.coveredFor?.regions !== this.regions || this.coveredFor.hierarchy !== hierarchy) {
+      const parent = new Map(hierarchy.filter((n) => n.parent).map((n) => [n.name, n.parent as string]));
+      const covered = new Set<string>();
+      for (const r of this.regions) {
+        let p = r.label ? parent.get(r.label) : undefined;
+        while (p && !covered.has(p)) {
+          covered.add(p);
+          p = parent.get(p);
+        }
+      }
+      this.coveredFor = { regions: this.regions, hierarchy, covered };
+    }
+    return this.coveredFor.covered.has(label);
+  }
+  private coveredFor: { regions: Region[]; hierarchy: readonly object[]; covered: Set<string> } | null = null;
+
   /** The region look: outlines, or filled (an atlas's look); see `region-style`. */
   getRegionStyle(): RegionStyle {
     return this.regionStyle$.value;

@@ -111,4 +111,6 @@ export interface IRegionSourceApi {
   selectSourceFeatures(ids: readonly string[], additive?: boolean): Promise<number[]>;
   /** The region look (outlines, or filled with inside labels). */
   getRegionStyle(): RegionStyle;
+  /** Whether a class's label is left out because a subclass of it is drawn too. */
+  isLabelCovered(label: string | undefined): boolean;
 }
