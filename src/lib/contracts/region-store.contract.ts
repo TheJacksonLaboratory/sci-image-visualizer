@@ -2,6 +2,7 @@ import { Rectangle, Polygon, MultiPolygon } from '../models/region';
 import { Region } from '../models/region';
 import type { Observable } from 'rxjs';
 import type { RegionSourceView } from '../region-source/region-source';
+import type { RegionStyle } from '../region-overlay/region-style';
 
 /**
  * Region-native editing surface — typed geometry operations on the neutral
@@ -108,4 +109,6 @@ export interface IRegionSourceApi {
   /** Take source features into the working set as regions and select them (added to the
    *  selection with `additive`). Resolves the region ids. */
   selectSourceFeatures(ids: readonly string[], additive?: boolean): Promise<number[]>;
+  /** The region look (outlines, or filled with inside labels). */
+  getRegionStyle(): RegionStyle;
 }

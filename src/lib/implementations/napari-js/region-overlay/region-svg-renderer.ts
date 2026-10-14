@@ -2,6 +2,13 @@ import { Polygon, Rectangle, Region } from '../../../models/region';
 import type { RegionStore } from '../../../store/region-store.service';
 import { regionBBox, ringHandles, ringOf } from '../../../region-overlay/region-geometry';
 import { Affine, ScreenLayer, SvgRegionRenderer, svgEl } from '../../../region-overlay/svg-region-renderer';
+import {
+  applyPaint,
+  isFilled,
+  placeInsideLabel,
+  regionLabelSpots,
+  shapePaint,
+} from '../../../region-overlay/region-style';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Rendered handle size (screen px). */
@@ -98,6 +105,11 @@ export class NapariRegionSvgRenderer {
   private drawLabel(region: Region, layer: ScreenLayer): void {
     if (!this.store.getShowShapeLabel() || region.isProfile?.()) return;
     const label = region.label;
+    // The filled (atlas) look labels each part inside it, where it fits.
+    if (label && isFilled(this.store.getRegionStyle())) {
+      for (const spot of regionLabelSpots(region)) placeInsideLabel(layer, label, spot);
+      return;
+    }
     const bb = label ? regionBBox(region) : null;
     if (!label || !bb) return;
     const text = svgEl('text');
@@ -171,6 +183,11 @@ export class NapariRegionSvgRenderer {
   }
 
   private style(el: SVGElement, stroke: string, isSelected: boolean): void {
+    const style = this.store.getRegionStyle();
+    if (isFilled(style)) {
+      applyPaint(el, shapePaint(stroke, isSelected, style));
+      return;
+    }
     el.setAttribute('stroke', stroke);
     el.setAttribute('stroke-width', isSelected ? '4' : '2');
     el.setAttribute('fill', isSelected ? stroke : 'none');

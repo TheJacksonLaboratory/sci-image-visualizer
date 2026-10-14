@@ -25,7 +25,7 @@
 //   GET  /regions/:id/tile/:z/:level/:gx/:gy  -> { features: [...] }
 //   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
-//   GET  /regions/:id/classes/:z              -> { <class>: count }
+//   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
 //   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
@@ -688,10 +688,11 @@ app.post('/regions/:id/index', (req, res) => {
   };
   return withRegionSet(req, res, (set) => set.index(intParam(b.z, 0), query));
 });
-app.get('/regions/:id/classes/:z', (req, res) => {
-  const z = intParam(req.params.z, NaN);
+app.post('/regions/:id/classes', (req, res) => {
+  const z = intParam(req.body?.z, NaN);
   if (!Number.isFinite(z) || z < 0) return res.status(400).json({ error: 'bad plane' });
-  return withRegionSet(req, res, (set) => set.classes(z));
+  const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
+  return withRegionSet(req, res, (set) => set.classes(z, exclude));
 });
 app.post('/regions/:id/export', (req, res) => {
   const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];

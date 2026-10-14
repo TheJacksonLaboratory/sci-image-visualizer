@@ -15,6 +15,7 @@ import type {
   RegionTileKey,
   TileFeature,
 } from './region-tiles';
+import type { RegionStyle } from '../region-overlay/region-style';
 
 /** A feature's exact GeoJSON with the source's id for it. */
 export interface SourceFeature {
@@ -32,8 +33,8 @@ export interface RegionSource {
   getFeatures(ids: readonly string[]): Promise<SourceFeature[]>;
   /** A page of plane `z`'s feature index. */
   getIndex(z: number, query: RegionIndexQuery): Promise<RegionIndexPage>;
-  /** How many features of each class plane `z` has. */
-  getClassCounts(z: number): Promise<Record<string, number>>;
+  /** How many features of each class plane `z` has, without the `exclude`d ids. */
+  getClassCounts(z: number, exclude?: readonly string[]): Promise<Record<string, number>>;
   /**
    * The whole set as a GeoJSON FeatureCollection string, through the working set: `exclude`d
    * features (taken for editing, or deleted) left out, `extra` features appended.
@@ -52,6 +53,10 @@ export interface RegionSourceView {
   taken: ReadonlySet<string>;
   /** The colour a feature is drawn in (its class colour, as a region of that class gets). */
   colorOf(feature: Pick<TileFeature, 'label' | 'color'>): string;
+  /** The region look, the regions' own (so a feature looks the same once taken). */
+  style: RegionStyle;
+  /** Whether class labels are shown. */
+  labels: boolean;
 }
 
 /**

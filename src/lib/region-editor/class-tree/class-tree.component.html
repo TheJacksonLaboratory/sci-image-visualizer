@@ -1,0 +1,49 @@
+<div class="class-tree">
+  <div class="tree-header">
+    <span class="tree-title">Classes</span>
+    <span class="tree-picked" *ngIf="picked as p">
+      <b>{{ p }}</b
+      ><span *ngIf="node(p)?.title as t"> · {{ t }}</span>
+    </span>
+  </div>
+  <input
+    type="text"
+    pInputText
+    class="p-inputtext-sm tree-search"
+    placeholder="Search by name"
+    aria-label="Search the classes"
+    [ngModel]="query"
+    (ngModelChange)="onQuery($event)"
+    (keydown.enter)="pickFirstMatch($event)"
+  />
+  <div class="tree-body" role="tree">
+    <div
+      *ngFor="let row of rows; trackBy: trackRow"
+      class="tree-row"
+      role="treeitem"
+      tabindex="0"
+      [attr.aria-expanded]="row.hasChildren ? row.expanded : null"
+      [class.absent]="total(row.name) === 0"
+      [class.picked]="row.name === picked"
+      [style.padding-left.rem]="0.35 + row.depth * 0.9"
+      [pTooltip]="node(row.name)?.title || row.name"
+      tooltipPosition="left"
+      [showDelay]="600"
+      (click)="choose(row.name, $event)"
+      (keydown.enter)="choose(row.name, $event)"
+    >
+      <i
+        class="pi tree-toggle"
+        [class.pi-minus-circle]="row.hasChildren && row.expanded"
+        [class.pi-plus-circle]="row.hasChildren && !row.expanded"
+        [attr.aria-label]="row.expanded ? 'Collapse' : 'Expand'"
+        (click)="row.hasChildren && toggle(row, $event)"
+      ></i>
+      <span class="tree-swatch" [style.background]="colorOf(row.name)"></span>
+      <span class="tree-name">{{ row.name }}</span>
+      <span class="tree-long">{{ node(row.name)?.title }}</span>
+      <span class="tree-count" *ngIf="total(row.name) > 0">{{ total(row.name) }}</span>
+    </div>
+    <div *ngIf="!rows.length" class="tree-empty">No class matches.</div>
+  </div>
+</div>

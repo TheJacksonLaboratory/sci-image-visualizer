@@ -141,10 +141,13 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.viewer.canvas.appendChild(this.svg);
     this.renderer = new SvgRegionRenderer(this.svg, {
       rectElement: 'polygon',
-      styleShape: (el, region, selected) => styleRegionShape(el, region, selected, this.store.getShapeColor()),
+      styleShape: (el, region, selected) =>
+        styleRegionShape(el, region, selected, this.store.getShapeColor(), this.store.getRegionStyle?.()),
       // The class label, when the Region Editor's "show labels" is on.
       decorate: (region, _i, _selected, layer) => {
-        if (this.store.getShowShapeLabel()) drawRegionLabel(layer, region, this.store.getShapeColor());
+        if (this.store.getShowShapeLabel()) {
+          drawRegionLabel(layer, region, this.store.getShapeColor(), this.store.getRegionStyle?.());
+        }
       },
     });
     this.sourceLayer = this.store.getRegionSourceView$

@@ -2,6 +2,15 @@ import { Region, Rectangle, Polygon } from '../../models/region';
 import { parseCssColor } from '../../contracts/color';
 import { regionBBox, ringHandles, ringOf } from '../../region-overlay/region-geometry';
 import { ScreenLayer, svgEl } from '../../region-overlay/svg-region-renderer';
+import {
+  DEFAULT_REGION_STYLE,
+  RegionStyle,
+  applyPaint,
+  isFilled,
+  placeInsideLabel,
+  regionLabelSpots,
+  shapePaint,
+} from '../../region-overlay/region-style';
 
 /**
  * The OpenSeadragon region overlay's look: region stroke/fill, labels, the
@@ -18,12 +27,22 @@ export function rgba(color: string, alpha: number): string {
   return rgb ? `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})` : color;
 }
 
-/** Stroke/fill for a region shape (drawn in image coordinates by the renderer). */
-export function styleRegionShape(el: SVGElement, region: Region, selected: boolean, shapeColor: string): void {
+/** Stroke/fill for a region shape (drawn in image coordinates by the renderer), in `style`. */
+export function styleRegionShape(
+  el: SVGElement,
+  region: Region,
+  selected: boolean,
+  shapeColor: string,
+  style: RegionStyle = DEFAULT_REGION_STYLE,
+): void {
   const color = region.color || shapeColor;
-  el.setAttribute('fill', selected ? rgba(color, 0.35) : 'none');
-  el.setAttribute('stroke', color);
-  el.setAttribute('stroke-width', selected ? '4' : '2');
+  if (!isFilled(style)) {
+    el.setAttribute('fill', selected ? rgba(color, 0.35) : 'none');
+    el.setAttribute('stroke', color);
+    el.setAttribute('stroke-width', selected ? '4' : '2');
+    return;
+  }
+  applyPaint(el, shapePaint(color, selected, style));
 }
 
 /**
@@ -31,9 +50,19 @@ export function styleRegionShape(el: SVGElement, region: Region, selected: boole
  * per-shape label, drawn in the region's colour. region.label is restored from
  * the shape's legend in getRegion().
  */
-export function drawRegionLabel(layer: ScreenLayer, region: Region, shapeColor: string): void {
+export function drawRegionLabel(
+  layer: ScreenLayer,
+  region: Region,
+  shapeColor: string,
+  style: RegionStyle = DEFAULT_REGION_STYLE,
+): void {
   const label = region.label;
   if (label == null || `${label}`.length === 0) return;
+  // The filled (atlas) look labels each part inside it, where it fits.
+  if (isFilled(style)) {
+    for (const spot of regionLabelSpots(region)) placeInsideLabel(layer, `${label}`, spot);
+    return;
+  }
   // The loop-based bbox, not Math.min(...spread): spreading a large imported
   // annotation's vertices as arguments throws RangeError (OSD-PLOTLY-34).
   const bb = regionBBox(region);

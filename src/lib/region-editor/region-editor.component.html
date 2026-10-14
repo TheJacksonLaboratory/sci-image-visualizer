@@ -190,25 +190,35 @@
   </div>
 </p-toolbar>
 
-<region-classes-panel
-  [classes]="displayClasses"
-  [counts]="classCounts"
-  [matchMode]="presetSet.matchMode"
-  [activeClass]="activeClass"
-  [selectedCount]="selectedRegions?.length || 0"
-  [defaultClassName]="defaultClassName"
-  (pick)="selectActiveClass($event)"
-  (recolor)="setClassColor($event.name, $event.color)"
-  (remove)="deleteClass($event)"
-  (manage)="openManageDialog()"
+<!-- A region set with a class hierarchy (an atlas ontology) shows its classes as a tree. -->
+<region-class-tree
+  *ngIf="classHierarchy as hierarchy; else flatClasses"
+  [nodes]="hierarchy"
+  [counts]="treeCounts"
+  [colorOf]="treeColor"
+  [picked]="pickedClass"
+  (pick)="pickClasses($event)"
 >
-</region-classes-panel>
-
-<region-source-list></region-source-list>
+</region-class-tree>
+<ng-template #flatClasses>
+  <region-classes-panel
+    [classes]="displayClasses"
+    [counts]="classCounts"
+    [matchMode]="presetSet.matchMode"
+    [activeClass]="activeClass"
+    [selectedCount]="selectedRegions?.length || 0"
+    [defaultClassName]="defaultClassName"
+    (pick)="selectActiveClass($event)"
+    (recolor)="setClassColor($event.name, $event.color)"
+    (remove)="deleteClass($event)"
+    (manage)="openManageDialog()"
+  >
+  </region-classes-panel>
+</ng-template>
 
 <region-table
   [page]="pagedRegions"
-  [total]="regions.length"
+  [total]="tableTotal"
   [first]="paginatorFirst"
   [rows]="paginatorRows"
   [rowsPerPageOptions]="rowsPerPageOptions"

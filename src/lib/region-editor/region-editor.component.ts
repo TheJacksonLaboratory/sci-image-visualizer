@@ -35,7 +35,9 @@ import { RegionPersistenceService, SliceGeoJson } from './region-persistence.ser
 import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialog/region-color-dialog.component';
 import { ClassesPanelComponent } from './classes-panel/classes-panel.component';
 import { RegionTableComponent } from './region-table/region-table.component';
-import { RegionSourceListComponent } from './region-source-list/region-source-list.component';
+import { ClassTreeComponent, ClassTreePick } from './class-tree/class-tree.component';
+import type { RegionSourceView } from '../region-source/region-source';
+import type { RegionClassNode, RegionIndexRow } from '../region-source/region-tiles';
 import { SaveRegionsDialogComponent } from './save-regions-dialog/save-regions-dialog.component';
 import { SaveMaskDialogComponent } from './save-mask-dialog/save-mask-dialog.component';
 import { ManageClassesDialogComponent } from './manage-classes-dialog/manage-classes-dialog.component';
@@ -54,6 +56,9 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
  * API's region / selection / preset / image-meta streams, save and mask-export
  * progress, file reads) marks it for check.
  */
+/** "Select all" takes at most this many region-source features into the regions. */
+const SELECT_ALL_SOURCE_LIMIT = 5000;
+
 @Component({
   selector: 'region-editor',
   standalone: true,
@@ -70,7 +75,7 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
     TooltipModule,
     ClassesPanelComponent,
     RegionTableComponent,
-    RegionSourceListComponent,
+    ClassTreeComponent,
     SaveRegionsDialogComponent,
     SaveMaskDialogComponent,
     RegionColorDialogComponent,
@@ -125,9 +130,29 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected editingLabelRegions = new Map<Region, string>();
 
   protected showSaveAsDialog = false;
-  /** Whether the slice shown has a region source (a large region set drawn by level of
-   *  detail): it then has regions to save even with an empty table. */
-  protected hasRegionSource = false;
+  /**
+   * The slice's region source (a large region set drawn by level of detail), or null. Its
+   * features are rows of the table after the regions — stand-ins until one is selected or edited,
+   * which takes it into the regions — and its classes count in the classes panel.
+   */
+  protected sourceView: RegionSourceView | null = null;
+  /** Features still in the source (the table's rows after the regions). */
+  private sourceTotal = 0;
+  /** Stand-in rows for the source features on the current page. */
+  private sourceRows: Region[] = [];
+  /** Features per class still in the source. */
+  private sourceClassCounts: Record<string, number> = {};
+  /** The stand-in rows (rows of a source feature, not of a region). */
+  private readonly standIns = new WeakSet<Region>();
+  private standInSeq = 0;
+  /** Bumped per source refresh, so a late answer is dropped. */
+  private sourceRequest = 0;
+  /** The class picked last in the class tree. */
+  protected pickedClass: string | null = null;
+  /** Regions per class (the regions' and the source's), for the class tree. */
+  protected treeCounts = new Map<string, number>();
+  /** A class's colour, for the class tree. */
+  protected readonly treeColor = (name: string): string => colorForLabel(name, this.presetSet);
   protected saveAsFilename = '';
   protected saveAsFileExists = false;
   /** True while a GeoJSON persist is serializing/uploading — drives the dialog's
@@ -230,14 +255,16 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.syncClassesFromRegions(updated);
         this.recomputeClassCounts();
         this.changed();
+        void this.refreshSource();
       });
 
     this.regionApi
       .getRegionSourceView$?.()
       ?.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((view) => {
-        this.hasRegionSource = !!view;
-        this.changed();
+        if (view?.source !== this.sourceView?.source) this.pickedClass = null;
+        this.sourceView = view;
+        void this.refreshSource();
       });
 
     this.persistence
@@ -294,12 +321,105 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * intensity-profile lines the editor never sees).
    */
   protected onSelectionChanged() {
+    const selected = this.selectedRegions ?? [];
+    const fromSource = selected.filter((r) => this.standIns.has(r));
     this._suppressSelectionSyncToPlot = true;
     try {
-      this.regionApi.setSelectedRegions(this.selectedRegions ?? []);
+      this.regionApi.setSelectedRegions(selected.filter((r) => !this.standIns.has(r)));
     } finally {
       this._suppressSelectionSyncToPlot = false;
     }
+    // A selected source row is taken into the regions (and so selected on the image too).
+    if (fromSource.length) void this.regionApi.selectSourceFeatures?.(this.sourceIds(fromSource), true);
+  }
+
+  // ── The region source's features as table rows ───────────────────────
+
+  /** Whether the slice has a region source: it then has regions to save even with an empty table. */
+  protected get hasRegionSource(): boolean {
+    return !!this.sourceView;
+  }
+
+  /** Rows in the table: the regions, then the features still in the region source. */
+  protected get tableTotal(): number {
+    return this.regions.length + this.sourceTotal;
+  }
+
+  /** The class hierarchy of the slice's region source, when it has one (the classes as a tree). */
+  protected get classHierarchy(): RegionClassNode[] | null {
+    return this.sourceView?.source.info.hierarchy ?? null;
+  }
+
+  /** Whether `row` is a region-source feature's stand-in rather than a region. */
+  protected isSourceRow(row: Region): boolean {
+    return this.standIns.has(row);
+  }
+
+  private sourceIds(rows: Region[]): string[] {
+    return rows.map((r) => r.sourceId).filter((id): id is string => !!id);
+  }
+
+  /** A table row for a source feature: no geometry until it is taken. */
+  private standIn(row: RegionIndexRow): Region {
+    const r = Object.assign(new Region(), {
+      id: -++this.standInSeq,
+      name: row.label ?? row.id,
+      label: row.label ?? undefined,
+      color: this.sourceView?.colorOf(row) ?? row.color ?? this.shapeColor,
+      sourceId: row.id,
+      bounds: null,
+    });
+    this.standIns.add(r);
+    return r;
+  }
+
+  /**
+   * Re-read the source part of the table (the stand-ins on the current page, the count) and the
+   * source's class counts. The page holds regions first, so its source rows start at
+   * `max(first, regions)` − regions.
+   */
+  private async refreshSource(): Promise<void> {
+    const request = ++this.sourceRequest;
+    const view = this.sourceView;
+    let rows: RegionIndexRow[] = [];
+    let total = 0;
+    let counts: Record<string, number> = {};
+    if (view && this.regionApi.getRegionSourceIndex) {
+      const own = this.regions.length;
+      const start = Math.max(this.paginatorFirst, own);
+      const limit = Math.max(0, this.paginatorFirst + this.paginatorRows - start);
+      try {
+        const [page, perClass] = await Promise.all([
+          this.regionApi.getRegionSourceIndex({ offset: start - own, limit }),
+          this.regionApi.getRegionSourceClassCounts?.(),
+        ]);
+        rows = page?.rows ?? [];
+        total = page?.total ?? 0;
+        counts = perClass ?? {};
+      } catch (err) {
+        console.warn('[regions] could not list the region source', err);
+      }
+    }
+    if (request !== this.sourceRequest) return;
+    this.sourceTotal = total;
+    this.sourceRows = rows.map((r) => this.standIn(r));
+    this.sourceClassCounts = counts;
+    this.recomputeClassCounts();
+    this.changed();
+  }
+
+  /** Take a source row's feature into the regions, then run `then` on the region it became. */
+  private async takeThen(row: Region, then: (region: Region) => void): Promise<void> {
+    const [id] = (await this.regionApi.selectSourceFeatures?.(this.sourceIds([row]))) ?? [];
+    const region = this.regions.find((r) => r.id === id);
+    if (region) then(region);
+  }
+
+  /** Pick a class in the class tree: select its regions and its subclasses', the source's taken. */
+  protected async pickClasses(pick: ClassTreePick): Promise<void> {
+    this.pickedClass = pick.name;
+    this.changed();
+    await this.regionApi.selectRegionClasses?.(pick.classes, pick.additive);
   }
 
   /**
@@ -392,28 +512,49 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    *  change detection doesn't hand p-table a new array every tick (RT-20). */
   protected get pagedRegions(): Region[] {
     const key = this._pageKey;
-    if (key.regions !== this.regions || key.first !== this.paginatorFirst || key.rows !== this.paginatorRows) {
-      this._pageKey = { regions: this.regions, first: this.paginatorFirst, rows: this.paginatorRows };
-      this._page = this.regions.slice(this.paginatorFirst, this.paginatorFirst + this.paginatorRows);
+    if (
+      key.regions !== this.regions ||
+      key.source !== this.sourceRows ||
+      key.first !== this.paginatorFirst ||
+      key.rows !== this.paginatorRows
+    ) {
+      this._pageKey = {
+        regions: this.regions,
+        source: this.sourceRows,
+        first: this.paginatorFirst,
+        rows: this.paginatorRows,
+      };
+      const own = this.regions.slice(this.paginatorFirst, this.paginatorFirst + this.paginatorRows);
+      this._page =
+        own.length >= this.paginatorRows
+          ? own
+          : [...own, ...this.sourceRows.slice(0, this.paginatorRows - own.length)];
     }
     return this._page;
   }
-  private _pageKey: { regions?: Region[]; first?: number; rows?: number } = {};
+  private _pageKey: { regions?: Region[]; source?: Region[]; first?: number; rows?: number } = {};
   private _page: Region[] = [];
 
   protected onPageChange(event: { first?: number; rows?: number }) {
     this.paginatorFirst = event.first ?? 0;
     this.paginatorRows = event.rows ?? this.paginatorRows;
+    void this.refreshSource();
   }
 
-  /** Select every region in the table (and highlight them on the diagram). */
-  protected selectAllRegions() {
+  /** Select every region in the table (and highlight them on the diagram), the source's taken. */
+  protected async selectAllRegions() {
     this.selectedRegions = [...this.regions];
     this.onSelectionChanged();
+    if (!this.sourceTotal || !this.regionApi.getRegionSourceIndex) return;
+    const page = await this.regionApi.getRegionSourceIndex({ offset: 0, limit: SELECT_ALL_SOURCE_LIMIT });
+    const ids = (page?.rows ?? []).map((r) => r.id);
+    if (ids.length) await this.regionApi.selectSourceFeatures?.(ids, true);
   }
 
   protected deleteSelectedRegions() {
     if (this.selectedRegions && this.selectedRegions.length > 0) {
+      const fromSource = this.selectedRegions.filter((r) => this.standIns.has(r));
+      if (fromSource.length) this.regionApi.deleteSourceFeatures?.(this.sourceIds(fromSource));
       // Filter by id — object identity isn't reliable across re-parses,
       // and name is a user-editable label that may collide.
       const removed = new Set(this.selectedRegions.map((r) => r.id));
@@ -448,6 +589,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   protected deleteRegion(shapeIdx: number) {
+    // A row past the regions is a source feature: delete it from the source.
+    if (shapeIdx >= this.regions.length) {
+      const row = this.sourceRows[shapeIdx - Math.max(this.paginatorFirst, this.regions.length)];
+      if (row) this.regionApi.deleteSourceFeatures?.(this.sourceIds([row]));
+      return;
+    }
     const removed = this.regions[shapeIdx];
     if (removed) {
       this.selectedRegions = this.selectedRegions.filter((r) => r.id !== removed.id);
@@ -460,7 +607,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   private clampPaginatorFirst() {
-    const maxFirst = Math.max(0, Math.floor((this.regions.length - 1) / this.paginatorRows) * this.paginatorRows);
+    const maxFirst = Math.max(0, Math.floor((this.tableTotal - 1) / this.paginatorRows) * this.paginatorRows);
     if (this.paginatorFirst > maxFirst) {
       this.paginatorFirst = maxFirst;
     }
@@ -475,6 +622,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   protected startEditLabel(region: Region, event?: Event): void {
     event?.stopPropagation(); // don't toggle row selection
+    if (this.standIns.has(region)) {
+      void this.takeThen(region, (r) => this.startEditLabel(r));
+      return;
+    }
     // A new map per start/stop, so the OnPush table sees the change.
     this.editingLabelRegions = new Map(this.editingLabelRegions).set(region, region.label ?? '');
   }
@@ -599,18 +750,32 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Rebuild the per-class region counts shown in the panel. */
   private recomputeClassCounts(): void {
     const counts = new Map<string, number>();
-    for (const r of this.regions) {
-      if (!r.label) continue;
-      const k = presetKey(this.presetSet, r.label);
-      counts.set(k, (counts.get(k) ?? 0) + 1);
-    }
+    const tree = new Map<string, number>();
+    const add = (label: string, n: number) => {
+      const k = presetKey(this.presetSet, label);
+      counts.set(k, (counts.get(k) ?? 0) + n);
+      tree.set(label, (tree.get(label) ?? 0) + n);
+    };
+    for (const r of this.regions) if (r.label) add(r.label, 1);
+    // The region source's classes count too (its features are rows of the table).
+    for (const [label, n] of Object.entries(this.sourceClassCounts)) add(label, n);
     this.classCounts = counts;
+    this.treeCounts = tree;
     this.updateDisplayClasses();
   }
 
-  /** Rebuild the panel's display order — most-used classes first, then by name. */
+  /** Rebuild the panel's display order — most-used classes first, then by name. A class only
+   *  the region source has is listed too, in its colour. */
   private updateDisplayClasses(): void {
-    this.displayClasses = [...this.presetSet.classes].sort((a, b) => {
+    const known = new Set(this.presetSet.classes.map((c) => presetKey(this.presetSet, c.name)));
+    const fromSource: ClassPreset[] = [];
+    for (const label of Object.keys(this.sourceClassCounts)) {
+      const k = presetKey(this.presetSet, label);
+      if (known.has(k)) continue;
+      known.add(k);
+      fromSource.push({ name: label, color: colorForLabel(label, this.presetSet) });
+    }
+    this.displayClasses = [...this.presetSet.classes, ...fromSource].sort((a, b) => {
       const d = this.classCount(b.name) - this.classCount(a.name);
       return d !== 0 ? d : a.name.localeCompare(b.name);
     });
@@ -657,6 +822,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Stamp a class (and its preset/fallback colour) onto one region from the Class
    *  dropdown; choosing a class opts the region back into the preset colour. */
   protected applyPresetToRegion(region: Region, className: string): void {
+    if (this.standIns.has(region)) {
+      void this.takeThen(region, (r) => this.applyPresetToRegion(r, className));
+      return;
+    }
     const name = (className ?? '').trim();
     const patch: Partial<Region> = { label: name, colorOverridden: false };
     if (name) patch.color = colorForLabel(name, this.presetSet);

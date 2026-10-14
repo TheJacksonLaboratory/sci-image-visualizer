@@ -1,11 +1,12 @@
 import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { EMPTY, NEVER, Subject, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, Subject, of, throwError, BehaviorSubject } from 'rxjs';
 
 import { RegionEditorComponent } from './region-editor.component';
 import { RoutingVisualizerService } from '../routing-visualizer.service';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
+import type { RegionSourceView } from '../region-source/region-source';
 import { MockService } from 'ng-mocks';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
@@ -1740,5 +1741,107 @@ describe('RegionEditorComponent — OnPush', () => {
     host.detectChanges();
     expect(total()).toBe(2);
     host.destroy();
+  });
+});
+
+describe('RegionEditorComponent with a region source', () => {
+  let component: RegionEditorComponent;
+  let api: RoutingVisualizerService;
+  const rows = Array.from({ length: 12 }, (_, i) => ({
+    id: `f${i}`,
+    label: i < 3 ? 'CTX' : 'MB',
+    color: '#00ff00',
+    bbox: [0, 0, 1, 1] as [number, number, number, number],
+  }));
+  const view = {
+    source: {
+      info: { hierarchy: [{ name: 'grey' }, { name: 'CTX', parent: 'grey' }, { name: 'MB', parent: 'grey' }] },
+    },
+    plane: 0,
+    taken: new Set<string>(),
+    colorOf: () => '#00ff00',
+    style: { fillOpacity: 0, stroke: null, strokeWidth: null, highlight: null },
+    labels: false,
+  } as unknown as RegionSourceView;
+  const settle = () => new Promise((r) => setTimeout(r));
+
+  beforeEach(async () => {
+    const drawn = Object.assign(new Region(), { id: 1, name: 'shape1', label: 'MB', color: '#f00' });
+    api = MockService(RoutingVisualizerService, {
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => EMPTY,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      setSelectedRegions: jest.fn(),
+      getAnnotationRegions: () => [drawn],
+      setAnnotationRegions: jest.fn(),
+      getRegionSourceView$: () => new BehaviorSubject<RegionSourceView | null>(view),
+      getRegionSourceIndex: jest.fn(async (q: { offset: number; limit: number }) => ({
+        total: rows.length,
+        rows: rows.slice(q.offset, q.offset + q.limit),
+      })),
+      getRegionSourceClassCounts: async () => ({ CTX: 3, MB: 9 }),
+      selectSourceFeatures: jest.fn(async () => []),
+      deleteSourceFeatures: jest.fn(),
+      selectRegionClasses: jest.fn(async () => undefined),
+    });
+    shallowEditor();
+    await TestBed.configureTestingModule({
+      imports: [RegionEditorComponent, FormsModule],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: MockService(MessageService) },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        {
+          provide: REGION_IO_PORT,
+          useValue: {
+            getSelectedFileName: () => undefined,
+            roiFileExists: () => of(false),
+            saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
+          } as RegionIoPort,
+        },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+    component = TestBed.createComponent(RegionEditorComponent).componentInstance;
+    component.ngOnInit();
+    await settle();
+  });
+
+  const page = (): Region[] => (component as any).pagedRegions;
+
+  it('lists the regions, then the source features, in one table', () => {
+    expect((component as any).tableTotal).toBe(13);
+    expect(page().map((r) => r.sourceId ?? r.name)).toEqual(['shape1', ...rows.slice(0, 9).map((r) => r.id)]);
+    expect((api.getRegionSourceIndex as jest.Mock).mock.calls.at(-1)[0]).toEqual({ offset: 0, limit: 9 });
+  });
+
+  it('pages into the source past the regions', async () => {
+    (component as any).onPageChange({ first: 10, rows: 10 });
+    await settle();
+    expect((api.getRegionSourceIndex as jest.Mock).mock.calls.at(-1)[0]).toEqual({ offset: 9, limit: 10 });
+    expect(page().map((r) => r.sourceId)).toEqual(['f9', 'f10', 'f11']);
+  });
+
+  it('takes selected source rows into the regions, and deletes source rows from the source', () => {
+    component['selectedRegions'] = [page()[0], page()[2]];
+    (component as any).onSelectionChanged();
+    expect(api.setSelectedRegions).toHaveBeenCalledWith([page()[0]]);
+    expect(api.selectSourceFeatures).toHaveBeenCalledWith(['f1'], true);
+    (component as any).deleteRegion(3);
+    expect(api.deleteSourceFeatures).toHaveBeenCalledWith(['f2']);
+  });
+
+  it('counts the source in the classes, as a tree, and a tree pick selects the subtree', async () => {
+    expect((component as any).classHierarchy).toHaveLength(3);
+    expect((component as any).treeCounts.get('MB')).toBe(10);
+    expect((component as any).classCount('CTX')).toBe(3);
+    await (component as any).pickClasses({ name: 'grey', classes: ['grey', 'CTX', 'MB'], additive: false });
+    expect(api.selectRegionClasses).toHaveBeenCalledWith(['grey', 'CTX', 'MB'], false);
+    expect((component as any).pickedClass).toBe('grey');
   });
 });

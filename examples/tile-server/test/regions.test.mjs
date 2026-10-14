@@ -101,7 +101,8 @@ test('a folder set: one slice per file, ids qualified by slice', async () => {
   assert.deepEqual(info.planes, [0, 1]);
   assert.deepEqual(info.hierarchy[1], { name: 'grey', parent: 'root', color: '#010203', order: 1 });
   assert.deepEqual(info.style, { fillOpacity: 1, labels: true });
-  assert.deepEqual((await get('/regions/plates/classes/1')).body, { root: 1, grey: 1 });
+  assert.deepEqual((await post('/regions/plates/classes', { z: 1 })).body, { root: 1, grey: 1 });
+  assert.deepEqual((await post('/regions/plates/classes', { z: 1, exclude: ['1:8', '0:997'] })).body, { root: 1 });
   const labelled = (await get('/regions/plates/tile/1/0/0/0')).body.features[0];
   assert.equal(labelled.labels.length, 3);
   assert.deepEqual((await post('/regions/plates/index', { z: 1, offset: 0, limit: 9, classes: ['grey'] })).body.rows.map((r) => r.id), ['1:8']);

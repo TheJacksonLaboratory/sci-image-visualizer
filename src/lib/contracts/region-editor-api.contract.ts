@@ -114,6 +114,10 @@ export interface IRegionEditorApi {
   selectSourceFeatures?(ids: readonly string[], additive?: boolean): Promise<number[]>;
   /** Delete source features without taking them (one undo step). */
   deleteSourceFeatures?(ids: readonly string[]): void;
+  /** Features per class still in the slice's region source (not taken). */
+  getRegionSourceClassCounts?(): Promise<Record<string, number>>;
+  /** Select every region of these classes on the slice, the source's included (taken). */
+  selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see
    *  `RegionStore.getGeoJsonWithSource`); `slice` names a folder stack's slice. */
   getGeoJsonStringWithSource?(regions: Region[], slice?: number): Promise<string>;

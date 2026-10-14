@@ -152,8 +152,8 @@ class FileRegionSet {
     return (await this.table()).index(z, query);
   }
 
-  async classes(z) {
-    return (await this.table()).classCounts(z);
+  async classes(z, exclude) {
+    return (await this.table()).classCounts(z, exclude);
   }
 
   async export(exclude, extra) {
@@ -263,9 +263,11 @@ class FolderRegionSet {
     return out.sort((a, b) => at.get(a.id) - at.get(b.id));
   }
 
-  async classes(z) {
+  async classes(z, exclude) {
     const entry = await this.table(z);
-    return entry ? entry.table.classCounts(entry.plane) : {};
+    if (!entry) return {};
+    const own = exclude.map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
+    return entry.table.classCounts(entry.plane, own);
   }
 
   async index(z, query) {

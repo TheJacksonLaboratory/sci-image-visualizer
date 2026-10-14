@@ -27,7 +27,8 @@ import {
   regionTileId,
   regionTilesInRect,
 } from '../region-source/region-tiles';
-import { Affine, IDENTITY_AFFINE, svgEl } from './svg-region-renderer';
+import { Affine, IDENTITY_AFFINE, ScreenLayer, applyAffine, svgEl } from './svg-region-renderer';
+import { isFilled, placeInsideLabel, shapePaint } from './region-style';
 
 /** Wait this long after the last camera change before planning tiles (ms). */
 export const SOURCE_REPLAN_MS = 90;
@@ -48,6 +49,10 @@ export type SvgSize = () => { width: number; height: number };
 export class RegionSourceLayer {
   private readonly group = svgEl('g');
   private camera: Affine = IDENTITY_AFFINE;
+  /** Class labels inside the features, in screen space over the outlines. */
+  private readonly labelLayer = new ScreenLayer(svgEl('g'), (x, y) => applyAffine(this.camera, x, y));
+  /** Class name → depth in the source's class hierarchy (parents draw under their children). */
+  private depthOf = new Map<string, number>();
   private view: RegionSourceView | null = null;
   private visible = true;
   private readonly sub: Subscription;
@@ -68,6 +73,7 @@ export class RegionSourceLayer {
   ) {
     this.group.setAttribute('data-layer', 'region-source');
     this.group.setAttribute('pointer-events', 'none');
+    this.labelLayer.group.setAttribute('data-layer', 'region-source-labels');
     this.sub = view$.subscribe((view) => this.setView(view));
   }
 
@@ -77,6 +83,7 @@ export class RegionSourceLayer {
     if (affine.every((v, i) => v === this.camera[i])) return;
     this.camera = affine;
     this.applyCamera();
+    this.labelLayer.reproject();
     if (!this.view) return;
     if (this.replanTimer) clearTimeout(this.replanTimer);
     this.replanTimer = setTimeout(() => {
@@ -113,6 +120,7 @@ export class RegionSourceLayer {
     if (this.replanTimer) clearTimeout(this.replanTimer);
     if (this.drawFrame !== null) cancelFrame(this.drawFrame);
     this.group.parentNode?.removeChild(this.group);
+    this.labelLayer.group.parentNode?.removeChild(this.labelLayer.group);
   }
 
   private setView(view: RegionSourceView | null): void {
@@ -123,6 +131,7 @@ export class RegionSourceLayer {
       this.loading?.abort();
       this.loading = null;
     }
+    if (view && prev?.source !== view.source) this.depthOf = hierarchyDepths(view.source.info.hierarchy);
     this.attach();
     if (view) this.replan();
     else this.draw();
@@ -131,11 +140,14 @@ export class RegionSourceLayer {
   /** The layer is the svg's first child (under the regions) while it shows a source. */
   private attach(): void {
     const show = !!this.view && this.visible;
+    const labels = this.labelLayer.group;
     if (!show) {
       this.group.parentNode?.removeChild(this.group);
+      labels.parentNode?.removeChild(labels);
       return;
     }
     if (this.svg.firstChild !== this.group) this.svg.insertBefore(this.group, this.svg.firstChild);
+    if (this.group.nextSibling !== labels) this.svg.insertBefore(labels, this.group.nextSibling);
   }
 
   private applyCamera(): void {
@@ -246,28 +258,80 @@ export class RegionSourceLayer {
       }
     }
     this.drawn = drawn;
-    const byColor = new Map<string, string[]>();
-    for (const f of drawn.values()) {
-      const color = view?.colorOf(f) ?? '#00FFFF';
-      let parts = byColor.get(color);
-      if (!parts) byColor.set(color, (parts = []));
-      for (const ring of f.rings) parts.push(ringD(ring, !f.open));
-    }
+    const filled = !!view && isFilled(view.style);
     const frag = document.createDocumentFragment();
-    for (const [color, parts] of byColor) {
+    for (const run of this.runs(drawn, filled)) {
       const path = svgEl('path');
-      path.setAttribute('d', parts.join(''));
-      path.setAttribute('fill', 'none');
+      path.setAttribute('d', run.features.flatMap((f) => f.rings.map((r) => ringD(r, !f.open))).join(''));
       path.setAttribute('fill-rule', 'evenodd');
-      path.setAttribute('stroke', color);
-      path.setAttribute('stroke-width', `${SOURCE_STROKE_PX}`);
       path.setAttribute('stroke-linejoin', 'round');
       path.setAttribute('vector-effect', 'non-scaling-stroke');
+      if (filled && view) {
+        const paint = shapePaint(run.color, false, view.style);
+        path.setAttribute('fill', paint.fill);
+        path.setAttribute('fill-opacity', `${paint.fillOpacity}`);
+        path.setAttribute('stroke', paint.stroke);
+        path.setAttribute('stroke-width', `${paint.strokeWidth}`);
+      } else {
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', run.color);
+        path.setAttribute('stroke-width', `${SOURCE_STROKE_PX}`);
+      }
       frag.appendChild(path);
     }
     while (this.group.firstChild) this.group.removeChild(this.group.firstChild);
     this.group.appendChild(frag);
     this.applyCamera();
+    this.drawLabels(filled);
+  }
+
+  /**
+   * The drawn features as paths: one per colour when outlined; filled, in paint order — parents
+   * (by the class hierarchy) and then larger features first, so what lies inside paints over
+   * them — one path per run of a colour.
+   */
+  private runs(
+    drawn: Map<string, TileFeature>,
+    filled: boolean,
+  ): Array<{ color: string; features: TileFeature[] }> {
+    const view = this.view;
+    const colorOf = (f: TileFeature) => view?.colorOf(f) ?? '#00FFFF';
+    if (!filled) {
+      const byColor = new Map<string, TileFeature[]>();
+      for (const f of drawn.values()) {
+        const color = colorOf(f);
+        const list = byColor.get(color);
+        if (list) list.push(f);
+        else byColor.set(color, [f]);
+      }
+      return Array.from(byColor, ([color, features]) => ({ color, features }));
+    }
+    const area = (f: TileFeature) => (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]);
+    const depth = (f: TileFeature) => this.depthOf.get(f.label ?? '') ?? 0;
+    const order = Array.from(drawn.values()).sort((a, b) => depth(a) - depth(b) || area(b) - area(a));
+    const runs: Array<{ color: string; features: TileFeature[] }> = [];
+    for (const f of order) {
+      const color = colorOf(f);
+      const last = runs[runs.length - 1];
+      if (last && last.color === color) last.features.push(f);
+      else runs.push({ color, features: [f] });
+    }
+    return runs;
+  }
+
+  /** Class labels inside the drawn features (each part where it fits), when labels are on. */
+  private drawLabels(filled: boolean): void {
+    this.labelLayer.clear();
+    const view = this.view;
+    if (!view?.labels) return;
+    for (const f of this.drawn.values()) {
+      const at = f.labels;
+      if (!at || !f.label) continue;
+      const color = filled ? '#111' : view.colorOf(f);
+      for (let k = 0; k + 2 < at.length; k += 3) {
+        placeInsideLabel(this.labelLayer, f.label, { x: at[k], y: at[k + 1], room: at[k + 2] }, color);
+      }
+    }
   }
 
   /** The loaded tile for `key`, else its nearest loaded coarser ancestor. */
@@ -310,3 +374,24 @@ const requestFrame = (fn: () => void): number =>
 
 const cancelFrame = (id: number): void =>
   typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : clearTimeout(id);
+
+/** Depth of each class in a class hierarchy (a root is 0); empty without one. */
+function hierarchyDepths(
+  hierarchy: ReadonlyArray<{ name: string; parent?: string | null }> | undefined,
+): Map<string, number> {
+  const depths = new Map<string, number>();
+  if (!hierarchy) return depths;
+  const parent = new Map(hierarchy.map((n) => [n.name, n.parent ?? null]));
+  for (const n of hierarchy) {
+    let d = 0;
+    let p = parent.get(n.name);
+    const seen = new Set<string>([n.name]);
+    while (p && !seen.has(p)) {
+      seen.add(p);
+      d++;
+      p = parent.get(p) ?? null;
+    }
+    depths.set(n.name, d);
+  }
+  return depths;
+}

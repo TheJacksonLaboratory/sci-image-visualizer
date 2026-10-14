@@ -23,7 +23,11 @@ import { RegionSelection } from './region-selection';
 import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
 import { RegionSourceOpener, RegionSourceScope, RegionSourceSlices } from './region-source-scope';
 import type { RegionSource, RegionSourceView } from '../region-source/region-source';
-import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-tiles';
+import type { RegionIndexPage, RegionIndexQuery, RegionSourceStyle } from '../region-source/region-tiles';
+import { DEFAULT_REGION_STYLE, RegionStyle } from '../region-overlay/region-style';
+
+/** Selecting classes takes at most this many region-source features into the regions. */
+export const SELECT_CLASSES_LIMIT = 5000;
 
 /** One undo step: the region set and, for a slice with a region source, what was taken from it. */
 interface RegionSnapshot {
@@ -120,6 +124,11 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    */
   private readonly sources = new RegionSourceScope();
   private readonly sourceView$ = new BehaviorSubject<RegionSourceView | null>(null);
+  /** The region look the user chose (overrides the source's hint), field by field. */
+  private userStyle: Partial<RegionStyle> = {};
+  /** The current source's style hint. */
+  private hintStyle: RegionSourceStyle | undefined;
+  private readonly regionStyle$ = new BehaviorSubject<RegionStyle>(DEFAULT_REGION_STYLE);
   /** Bumped on every change of the slice's source, so a late open is dropped. */
   private sourceGeneration = 0;
 
@@ -155,7 +164,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.isRegionSavedOn = isRegionSaveOn;
     if (isRegionSaveOn) {
       this.recordUndoSnapshot();
-      this.showShapeLabel = showRegionLabel;
+      if (this.showShapeLabel !== showRegionLabel) {
+        this.showShapeLabel = showRegionLabel;
+        this.republishView();
+      }
       this.fillColor = fillColor;
       if (append) {
         // Reject by id collision (already tracked) or geometry equality (same
@@ -408,6 +420,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    *  @deprecated Nothing in the library calls it; will be removed next minor. */
   setShowShapeLabel(show: boolean): void {
     this.showShapeLabel = show;
+    this.republishView();
   }
 
   getClassificationColors(): Map<string, string> {
@@ -789,6 +802,36 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return taken;
   }
 
+  /** Features per class still in the slice's region source (not taken); {} without one. */
+  async getRegionSourceClassCounts(): Promise<Record<string, number>> {
+    const view = this.sourceView$.value;
+    if (!view) return {};
+    return view.source.getClassCounts(view.plane, Array.from(view.taken));
+  }
+
+  /**
+   * Select every region of these classes on the slice — the regions', and the region source's,
+   * which are taken into the regions (at most {@link SELECT_CLASSES_LIMIT} of them). Added to the
+   * selection with `additive`. Resolves the selected region ids.
+   */
+  async selectClasses(classes: readonly string[], additive = false): Promise<number[]> {
+    const wanted = new Set(classes);
+    const view = this.sourceView$.value;
+    if (view && classes.length) {
+      const page = await view.source.getIndex(view.plane, {
+        offset: 0,
+        limit: SELECT_CLASSES_LIMIT,
+        classes,
+        exclude: Array.from(view.taken),
+      });
+      if (page.rows.length) await this.takeSourceFeatures(page.rows.map((r) => r.id));
+    }
+    const ids = this.regions.filter((r) => !r.isProfile?.() && r.label && wanted.has(r.label)).map((r) => r.id);
+    this.selection.replace(additive ? [...new Set([...this.selection.ids, ...ids])] : ids);
+    this.emitSelection();
+    return ids;
+  }
+
   /** Delete source features without taking them (one undo step). */
   deleteSourceFeatures(ids: readonly string[]): void {
     const taken = this.currentTaken();
@@ -828,6 +871,58 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return binding.source.exportGeoJson(exclude, features);
   }
 
+  // ── Region look ────────────────────────────────────────────────────────
+
+  /** The region look: outlines, or filled (an atlas's look); see `region-style`. */
+  getRegionStyle(): RegionStyle {
+    return this.regionStyle$.value;
+  }
+
+  /** {@link getRegionStyle} and every change of it. */
+  getRegionStyle$(): Observable<RegionStyle> {
+    return this.regionStyle$.asObservable();
+  }
+
+  /**
+   * Choose the region look, field by field; it overrides a region source's hint for the session.
+   * The overlays redraw.
+   */
+  setRegionStyle(patch: Partial<RegionStyle>): void {
+    this.userStyle = { ...this.userStyle, ...patch };
+    this.restyle();
+  }
+
+  /** The look now: the user's choice, else the source's hint, else outlines. */
+  private effectiveStyle(): RegionStyle {
+    const hint = this.hintStyle ?? {};
+    return {
+      fillOpacity: this.userStyle.fillOpacity ?? hint.fillOpacity ?? DEFAULT_REGION_STYLE.fillOpacity,
+      stroke: this.userStyle.stroke !== undefined ? this.userStyle.stroke : (hint.stroke ?? null),
+      strokeWidth:
+        this.userStyle.strokeWidth !== undefined ? this.userStyle.strokeWidth : (hint.strokeWidth ?? null),
+      highlight: this.userStyle.highlight !== undefined ? this.userStyle.highlight : (hint.highlight ?? null),
+    };
+  }
+
+  /** Publish the look when it changed: the overlays redraw the regions, the source layer its features. */
+  private restyle(redraw = false): void {
+    const next = this.effectiveStyle();
+    const cur = this.regionStyle$.value;
+    const same = (Object.keys(next) as Array<keyof RegionStyle>).every((k) => next[k] === cur[k]);
+    if (!same) this.regionStyle$.next(next);
+    const view = this.sourceView$.value;
+    if (redraw || !same || (view && view.labels !== this.showShapeLabel)) {
+      this.republishView();
+      this.regionUpdate$.next(this.getRegions());
+    }
+  }
+
+  /** Re-emit the source view with the current look and label setting. */
+  private republishView(): void {
+    const view = this.sourceView$.value;
+    if (view) this.sourceView$.next({ ...view, style: this.regionStyle$.value, labels: this.showShapeLabel });
+  }
+
   /** The slice a region source is keyed by: the display slice in stack mode, else 0. */
   private get sourceSlice(): number {
     return this.scope.stackMode ? this.scope.displaySlice : 0;
@@ -852,6 +947,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     const slice = this.sourceSlice;
     if (!this.sources.has(image, slice)) {
       if (this.sourceView$.value) this.sourceView$.next(null);
+      this.hintStyle = undefined;
+      this.restyle();
       return;
     }
     this.sources.binding(image, slice).then(
@@ -861,15 +958,24 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
           this.sourceView$.next(null);
           return;
         }
-        const classColors = Object.entries(binding.source.info.classColors);
+        const info = binding.source.info;
+        const classColors = Object.entries(info.classColors);
         if (classColors.length) this.store.rememberImportedClassColors(new Map(classColors));
+        // A source that asks for labels gets them when it opens (the toggle still turns them off).
+        const labelsOn =
+          !!info.style?.labels && !this.showShapeLabel && this.sourceView$.value?.source !== binding.source;
+        if (labelsOn) this.showShapeLabel = true;
+        this.hintStyle = info.style;
         this.sourceView$.next({
           source: binding.source,
           plane: binding.plane,
           taken: this.sources.taken(image, slice),
           colorOf: (f) =>
             f.label ? colorForLabel(f.label, this.store.getPresetSet()) : f.color || this.shapeColor,
+          style: this.regionStyle$.value,
+          labels: this.showShapeLabel,
         });
+        this.restyle(labelsOn);
       },
       (err) => {
         if (generation !== this.sourceGeneration) return;

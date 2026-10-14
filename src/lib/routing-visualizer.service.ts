@@ -552,6 +552,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   deleteSourceFeatures(ids: readonly string[]): void {
     this.regionStore.deleteSourceFeatures(ids);
   }
+  getRegionSourceClassCounts(): Promise<Record<string, number>> {
+    return this.regionStore.getRegionSourceClassCounts();
+  }
+  async selectRegionClasses(classes: readonly string[], additive?: boolean): Promise<void> {
+    await this.regionStore.selectClasses(classes, additive);
+  }
   getGeoJsonStringWithSource(regions: Region[], slice?: number): Promise<string> {
     return this.regionStore.getGeoJsonWithSource(regions, slice);
   }

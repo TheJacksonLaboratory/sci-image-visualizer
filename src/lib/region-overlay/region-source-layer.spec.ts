@@ -4,6 +4,7 @@ import { RegionSource, RegionSourceView } from '../region-source/region-source';
 import { RegionFeatureTable, RegionTileKey } from '../region-source/region-tiles';
 import { RegionSourceLayer, SOURCE_REPLAN_MS } from './region-source-layer';
 import { Affine } from './svg-region-renderer';
+import { DEFAULT_REGION_STYLE } from './region-style';
 
 /** A ring with `perSide` points per side, so coarse levels have something to drop. */
 function square(x: number, y: number, s: number, perSide = 20): number[][] {
@@ -73,6 +74,8 @@ describe('RegionSourceLayer', () => {
     plane: 0,
     taken: new Set(taken),
     colorOf: (f) => (f.label === 'A' ? '#ff0000' : '#0000ff'),
+    style: DEFAULT_REGION_STYLE,
+    labels: false,
   });
   /** Screen px per image px `s`, image point (ox, oy) at the svg's top-left. */
   const camera = (s: number, ox = 0, oy = 0): Affine => [s, 0, 0, s, -ox * s, -oy * s];
@@ -179,5 +182,28 @@ describe('RegionSourceLayer', () => {
     expect(layer.featureAt(300, 300)).toBeNull();
     layer.setVisible(true);
     expect(svg.firstChild).toBe(svg.querySelector('[data-layer="region-source"]'));
+  });
+
+  it('fills parents first in the filled look, and labels what fits', async () => {
+    layer.setCamera(camera(1));
+    view$.next({
+      ...viewOf(),
+      style: { ...DEFAULT_REGION_STYLE, fillOpacity: 0.6, stroke: '#333' },
+      labels: true,
+    });
+    await wait();
+    const filled = paths();
+    // The big square and the cell in view are both red: one run, larger first.
+    expect(filled.map((p) => p.getAttribute('fill'))).toEqual(['#ff0000']);
+    expect(filled[0].getAttribute('d')!.indexOf('M100 100')).toBe(0);
+    expect(filled[0].getAttribute('fill-opacity')).toBe('0.6');
+    expect(filled[0].getAttribute('stroke')).toBe('#333');
+    const labels = Array.from(
+      svg.querySelectorAll('[data-layer="region-source-labels"] text'),
+    ) as SVGTextElement[];
+    const shown = labels.filter((t) => t.style.display !== 'none').map((t) => t.textContent);
+    // The 400 px square's label fits; the 3 px cell's does not.
+    expect(shown).toEqual(['A']);
+    expect(labels.length).toBe(2);
   });
 });

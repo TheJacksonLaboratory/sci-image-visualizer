@@ -38,7 +38,7 @@ function tableSource(features: object[]): RegionSource & { disposed: boolean; as
       return table.features(ids);
     },
     getIndex: async (z: number, q: never) => table.index(z, q),
-    getClassCounts: async (z: number) => table.classCounts(z),
+    getClassCounts: async (z: number, exclude?: readonly string[]) => table.classCounts(z, exclude),
     exportGeoJson: async (exclude: readonly string[], extra: readonly object[]) =>
       table.exportGeoJson(exclude, extra),
     dispose: () => {
@@ -279,5 +279,40 @@ describe('RegionStore region sources', () => {
     await flush();
     const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
     expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
+  });
+
+  it('counts the classes still in the source and selects whole classes', async () => {
+    store.attachRegionSource(tableSource([feature('a', 0, 'X'), feature('b', 20, 'X'), feature('c', 40, 'Y')]));
+    await flush();
+    expect(await store.getRegionSourceClassCounts()).toEqual({ X: 2, Y: 1 });
+    const ids = await store.selectClasses(['X']);
+    expect(ids).toHaveLength(2);
+    expect(store.getRegions().map((r) => r.sourceId)).toEqual(['a', 'b']);
+    expect(store.getSelectedShapeIndices()).toEqual([0, 1]);
+    expect(await store.getRegionSourceClassCounts()).toEqual({ Y: 1 });
+    await store.selectClasses(['Y'], true);
+    expect(store.getSelectedShapeIndices()).toEqual([0, 1, 2]);
+  });
+
+  it("applies the source's style hint, and the user's choice over it", async () => {
+    const styled = tableSource([feature('a', 0)]);
+    (styled.info as { style?: object }).style = { fillOpacity: 0.8, labels: true, stroke: '#222' };
+    store.attachRegionSource(styled);
+    await flush();
+    expect(store.getRegionStyle()).toEqual({
+      fillOpacity: 0.8,
+      stroke: '#222',
+      strokeWidth: null,
+      highlight: null,
+    });
+    expect(store.getShowShapeLabel()).toBe(true);
+    expect(view?.style.fillOpacity).toBe(0.8);
+    expect(view?.labels).toBe(true);
+    store.setRegionStyle({ fillOpacity: 0 });
+    expect(store.getRegionStyle().fillOpacity).toBe(0);
+    expect(view?.style.fillOpacity).toBe(0);
+    store.setActiveImage(image('b.tif'));
+    await flush();
+    expect(store.getRegionStyle()).toEqual({ fillOpacity: 0, stroke: null, strokeWidth: null, highlight: null });
   });
 });

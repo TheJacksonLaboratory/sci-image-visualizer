@@ -6,7 +6,7 @@
  *  - `GET  tile/{z}/{level}/{gx}/{gy}` → `{ features: WireTileFeature[] }`
  *  - `POST features` `{ ids }`         → `{ features: SourceFeature[] }`
  *  - `POST index` `{ z, ...query }`    → {@link RegionIndexPage}
- *  - `GET  classes/{z}`                → features per class on plane z
+ *  - `POST classes` `{ z, exclude }`    → features per class on plane z
  *  - `POST export` `{ exclude, extra }`→ a GeoJSON FeatureCollection
  *
  * Tile rings travel as flat `[x, y, x, y, …]` arrays, label points as flat `[x, y, room, …]`.
@@ -111,8 +111,8 @@ class HttpRegionSource implements RegionSource {
     return this.http.json<RegionIndexPage>('index', { z, ...query });
   }
 
-  getClassCounts(z: number): Promise<Record<string, number>> {
-    return this.http.json<Record<string, number>>(`classes/${z}`);
+  getClassCounts(z: number, exclude: readonly string[] = []): Promise<Record<string, number>> {
+    return this.http.json<Record<string, number>>('classes', { z, exclude });
   }
 
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): Promise<string> {

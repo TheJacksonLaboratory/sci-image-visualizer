@@ -19,7 +19,7 @@ export type RegionSourceRequest =
   | { op: 'tile'; handle: number; z: number; level: number; gx: number; gy: number }
   | { op: 'features'; handle: number; ids: readonly string[] }
   | { op: 'index'; handle: number; z: number; query: RegionIndexQuery }
-  | { op: 'classes'; handle: number; z: number }
+  | { op: 'classes'; handle: number; z: number; exclude?: readonly string[] }
   | { op: 'export'; handle: number; exclude: readonly string[]; extra: readonly object[] }
   | { op: 'close'; handle: number };
 
@@ -62,7 +62,7 @@ export class RegionSourceTables {
       case 'index':
         return this.table(r.handle).index(r.z, r.query);
       case 'classes':
-        return this.table(r.handle).classCounts(r.z);
+        return this.table(r.handle).classCounts(r.z, r.exclude);
       case 'export':
         return this.table(r.handle).exportGeoJson(r.exclude, r.extra);
       case 'close':
