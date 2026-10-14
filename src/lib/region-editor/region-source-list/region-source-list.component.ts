@@ -4,6 +4,7 @@ import {
   Component,
   DestroyRef,
   Inject,
+  NgZone,
   OnInit,
   inject,
 } from '@angular/core';
@@ -18,6 +19,7 @@ import { Subject, debounceTime } from 'rxjs';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../../contracts/region-editor-api.contract';
 import type { RegionSourceView } from '../../region-source/region-source';
 import type { RegionIndexRow } from '../../region-source/region-tiles';
+import { markForCheckInZone } from '../../util/mark-for-check';
 
 /** Rows per page of the list. */
 export const SOURCE_LIST_ROWS = 25;
@@ -52,6 +54,7 @@ export class RegionSourceListComponent implements OnInit {
   constructor(
     @Inject(REGION_EDITOR_API) private readonly api: IRegionEditorApi,
     private readonly cdr: ChangeDetectorRef,
+    private readonly zone: NgZone,
   ) {}
 
   ngOnInit(): void {
@@ -102,16 +105,21 @@ export class RegionSourceListComponent implements OnInit {
     return Math.min(this.first + this.pageSize, this.total);
   }
 
+  /** The source answers outside the zone (its worker, an overlay's pointer handler). */
+  private changed(): void {
+    markForCheckInZone(this.cdr, this.zone);
+  }
+
   private async load(): Promise<void> {
     const request = ++this.request;
     if (!this.view || !this.api.getRegionSourceIndex) {
       this.rows = [];
       this.total = 0;
-      this.cdr.markForCheck();
+      this.changed();
       return;
     }
     this.loading = true;
-    this.cdr.markForCheck();
+    this.changed();
     try {
       const page = await this.api.getRegionSourceIndex({
         offset: this.first,
@@ -134,6 +142,6 @@ export class RegionSourceListComponent implements OnInit {
       this.total = 0;
     }
     this.loading = false;
-    this.cdr.markForCheck();
+    this.changed();
   }
 }
