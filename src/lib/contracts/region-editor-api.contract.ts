@@ -5,6 +5,7 @@ import { ClassPreset, PresetSet } from '../models/class-preset';
 import { IImageMetadata } from './image.contract';
 import type { RegionSourceView } from '../region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-tiles';
+import type { RegionStyle } from '../region-overlay/region-style';
 
 /**
  * Public, implementation-agnostic surface that the Region Editor (an *external*
@@ -116,6 +117,10 @@ export interface IRegionEditorApi {
   deleteSourceFeatures?(ids: readonly string[]): void;
   /** Features per class still in the slice's region source (not taken). */
   getRegionSourceClassCounts?(): Promise<Record<string, number>>;
+  /** The region look (outlines, or filled with labels inside) and every change of it. */
+  getRegionStyle$?(): Observable<RegionStyle>;
+  /** Choose the region look, field by field (overrides a region source's hint). */
+  setRegionStyle?(patch: Partial<RegionStyle>): void;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see

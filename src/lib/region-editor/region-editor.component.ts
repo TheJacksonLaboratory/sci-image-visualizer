@@ -56,6 +56,9 @@ import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
  * API's region / selection / preset / image-meta streams, save and mask-export
  * progress, file reads) marks it for check.
  */
+/** The opacity the fill toggle fills regions at. */
+const REGION_FILL_OPACITY = 0.6;
+
 /** "Select all" takes at most this many region-source features into the regions. */
 const SELECT_ALL_SOURCE_LIMIT = 5000;
 
@@ -147,6 +150,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   private standInSeq = 0;
   /** Bumped per source refresh, so a late answer is dropped. */
   private sourceRequest = 0;
+  /** Whether regions are drawn filled (the atlas look) rather than outlined. */
+  protected regionsFilled = false;
   /** The class picked last in the class tree. */
   protected pickedClass: string | null = null;
   /** Regions per class (the regions' and the source's), for the class tree. */
@@ -265,6 +270,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         if (view?.source !== this.sourceView?.source) this.pickedClass = null;
         this.sourceView = view;
         void this.refreshSource();
+      });
+
+    this.regionApi
+      .getRegionStyle$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((style) => {
+        this.regionsFilled = style.fillOpacity > 0;
+        this.changed();
       });
 
     this.persistence
@@ -413,6 +426,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     const [id] = (await this.regionApi.selectSourceFeatures?.(this.sourceIds([row]))) ?? [];
     const region = this.regions.find((r) => r.id === id);
     if (region) then(region);
+  }
+
+  /** Toggle the filled (atlas) look: each region filled in its colour, labels inside. */
+  protected toggleFill(): void {
+    this.regionApi.setRegionStyle?.({ fillOpacity: this.regionsFilled ? 0 : REGION_FILL_OPACITY });
   }
 
   /** Pick a class in the class tree: select its regions and its subclasses', the source's taken. */

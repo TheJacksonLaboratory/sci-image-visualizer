@@ -36,6 +36,7 @@ import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
 import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
+import type { RegionStyle } from './region-overlay/region-style';
 import { openGeoJsonRegionSource } from './region-source/worker-region-source';
 import type { RegionSourceOpener, RegionSourceSlices } from './store/region-source-scope';
 import { SpatialSelectionStore } from './store/spatial-selection.service';
@@ -551,6 +552,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   deleteSourceFeatures(ids: readonly string[]): void {
     this.regionStore.deleteSourceFeatures(ids);
+  }
+  getRegionStyle$(): Observable<RegionStyle> {
+    return this.regionStore.getRegionStyle$();
+  }
+  setRegionStyle(patch: Partial<RegionStyle>): void {
+    this.regionStore.setRegionStyle(patch);
   }
   getRegionSourceClassCounts(): Promise<Record<string, number>> {
     return this.regionStore.getRegionSourceClassCounts();

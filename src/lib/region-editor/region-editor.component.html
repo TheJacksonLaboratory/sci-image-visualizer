@@ -9,6 +9,16 @@
       (onClick)="showShapeLabel = !showShapeLabel; changeShowShapeLabel(showShapeLabel)"
     >
     </p-button>
+    <p-button
+      icon="pi pi-stop-circle"
+      size="small"
+      [text]="!regionsFilled"
+      pTooltip="Fill regions in their colour (an atlas's look); labels sit inside."
+      tooltipPosition="bottom"
+      ariaLabel="Fill regions"
+      (onClick)="toggleFill()"
+    >
+    </p-button>
     <span class="toolbar-separator"></span>
     <!-- New regions are now created from the diagram toolbar
          (rectangle, polyline, freeform, wand). -->
