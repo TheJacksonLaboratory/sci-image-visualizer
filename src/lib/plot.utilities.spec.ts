@@ -182,9 +182,14 @@ describe('PlotUtilities', () => {
     region1.bounds.width = 52;
     region1.bounds.height = 39;
     region1.color = '#0000ff';
+    // QuPath's feature id and its other properties travel with the region (written back on save).
+    region1.sourceId = '188c53c6-acfc-4088-8099-1831971e3632';
+    region1.properties = { objectType: 'annotation' };
     const region2 = new Region();
     region2.label = 'Two-cell-embryo';
     region2.name = 'shape1';
+    region2.sourceId = 'a829812c-a03b-4a92-937f-88d9e12ad6a0';
+    region2.properties = { objectType: 'annotation' };
     region2.bounds = new Polygon();
     region2.bounds.npoints = 8;
     region2.bounds.xpoints = [352, 352, 350, 349, 343, 340, 340, 343];
