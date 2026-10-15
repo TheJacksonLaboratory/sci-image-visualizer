@@ -215,6 +215,42 @@ describe('RegionStore region sources', () => {
     expect(store.getRegions()).toEqual([]);
   });
 
+  it("takes nothing from the outgoing slice's source while the incoming one opens", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    // Both slices' sources have a feature 'a', in different places.
+    store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 });
+    let open!: (s: RegionSource) => void;
+    const next = tableSource([feature('a', 50)]);
+    store.attachRegionSource(() => new Promise<RegionSource>((r) => (open = r)), { slice: 1 });
+    await flush();
+    expect(view?.plane).toBe(0);
+    store.setDisplaySlice(1);
+    // The outgoing view is gone at once: nothing can be taken from it into slice 1.
+    expect(view).toBeNull();
+    expect(await store.selectSourceFeatures(['a'])).toEqual([]);
+    store.deleteSourceFeatures(['a']);
+    open(next);
+    await flush();
+    expect(view?.source).toBe(next);
+    expect(view?.taken.size).toBe(0);
+    const [id] = await store.takeSourceFeatures(['a']);
+    expect((store.getRegions().find((r) => r.id === id)?.bounds as Rectangle).x).toBe(50);
+  });
+
+  it('keeps the labels the user turned off when the same source shows again', async () => {
+    const plain = tableSource([feature('a', 0)]);
+    const source = { ...plain, info: { ...plain.info, style: { labels: true } } };
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(source, 'planes');
+    await flush();
+    expect(view?.labels).toBe(true);
+    store.setShowShapeLabel(false);
+    store.setDisplaySlice(1);
+    await flush();
+    expect(view?.source).toBe(source);
+    expect(view?.labels).toBe(false);
+  });
+
   it('detaches the image sources', async () => {
     const source = tableSource([feature('a', 0)]);
     store.attachRegionSource(source);

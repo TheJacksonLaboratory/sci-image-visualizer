@@ -161,6 +161,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   private readonly regionStyle$ = new BehaviorSubject<RegionStyle>(DEFAULT_REGION_STYLE);
   /** Bumped on every change of the slice's source, so a late open is dropped. */
   private sourceGeneration = 0;
+  /** The source last published as the view: a source shown again does not turn the labels back on. */
+  private shownSource: RegionSource | null = null;
   /** Bumped when a region source is attached or dropped: what is read from the sources is stale. */
   private sourcesVersion = 0;
 
@@ -1231,13 +1233,17 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     if (view) this.sourceView$.next({ ...view, taken });
   }
 
-  /** Look up (opening it if needed) the slice's source and publish it as the source view. */
+  /**
+   * Look up (opening it if needed) the slice's source and publish it as the source view. The view
+   * is withdrawn at once: until the incoming source opens, nothing reads, takes or deletes from the
+   * outgoing one into the slice now shown.
+   */
   private refreshSourceView(): void {
     const generation = ++this.sourceGeneration;
     const image = this.scope.activeImage;
     const slice = this.sourceSlice;
+    if (this.sourceView$.value) this.sourceView$.next(null);
     if (!this.sources.has(image, slice)) {
-      if (this.sourceView$.value) this.sourceView$.next(null);
       this.hintStyle = undefined;
       this.restyle();
       return;
@@ -1253,9 +1259,9 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
         const classColors = Object.entries(info.classColors);
         if (classColors.length) this.store.rememberImportedClassColors(new Map(classColors));
         // A source that asks for labels gets them when it opens (the toggle still turns them off).
-        const labelsOn =
-          !!info.style?.labels && !this.showShapeLabel && this.sourceView$.value?.source !== binding.source;
+        const labelsOn = !!info.style?.labels && !this.showShapeLabel && this.shownSource !== binding.source;
         if (labelsOn) this.showShapeLabel = true;
+        this.shownSource = binding.source;
         this.hintStyle = info.style;
         this.sourceView$.next({
           source: binding.source,
