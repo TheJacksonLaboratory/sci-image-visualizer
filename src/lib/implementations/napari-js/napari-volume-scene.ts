@@ -22,8 +22,9 @@ import {
   toNapariGamma,
   volumeResolutionFor,
 } from './napari-helpers';
-import type { NapariScene, SceneContext } from './napari-scene';
-import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import type { NapariScene, SceneContext, VolumeVoxelsOnScreen } from './napari-scene';
+import { RegionMesh3D, VolumeFrame, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { SlicePlanes, VolumeSlicePlanes } from './napari-volume-slice-planes';
 import { RegionMeshPointer } from './napari-region-mesh-pointer';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
@@ -72,6 +73,8 @@ export class VolumeScene implements NapariScene {
   private displaySub: Subscription | null = null;
   /** Regions' 3D reconstructions shown in the volume (see {@link setRegionMeshes}). */
   private readonly regionMeshes: VolumeRegionMeshes;
+  /** The planes of the sections shown beside the volume, marked and draggable in it. */
+  private readonly slicePlanes: VolumeSlicePlanes;
   /** The image's full size (px, px, slices), which reconstructions are in. */
   private fullSize: [number, number, number] | null = null;
   /** Clicks and hover on the reconstructions (with the selection tool). */
@@ -85,6 +88,9 @@ export class VolumeScene implements NapariScene {
     private readonly rendering: 'iso' | 'mip',
   ) {
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, ctx.viewer.camera3d, {
+      onMove: (axis, value) => ctx.inZone(() => ctx.slicePlaneMoved(axis, value)),
+    });
   }
 
   /** Show these region reconstructions in the volume (replacing the ones shown). */
@@ -98,6 +104,28 @@ export class VolumeScene implements NapariScene {
 
   setRegionHidden(keys: readonly string[]): void {
     this.regionMeshes.setHidden(keys);
+  }
+
+  /** Show the planes of the sections beside the volume where they are (null: hide one). */
+  setSlicePlanes(planes: SlicePlanes): void {
+    this.slicePlanes.set(planes);
+  }
+
+  /**
+   * The assembled volume's voxels per channel (key 0: the grayscale one), its frame, and whether
+   * it is a multichannel composite — what the sections beside it are cut from. Null before it is
+   * assembled.
+   */
+  volumeVoxels(): VolumeVoxelsOnScreen | null {
+    const base = this.worldBase;
+    if (!this.dims || !base || !this.fullSize || !this.channelData.size) return null;
+    const depth = base.depth * this.ctx.settings.volumeZScale;
+    return {
+      ...this.dims,
+      channels: this.channelData,
+      multichannel: this.multichannel,
+      frame: { size: this.fullSize, world: [base.width, base.height, depth] },
+    };
   }
 
   /**
@@ -129,7 +157,9 @@ export class VolumeScene implements NapariScene {
     const base = this.worldBase;
     if (!base || !this.fullSize) return;
     const depth = base.depth * this.ctx.settings.volumeZScale;
-    this.regionMeshes.setFrame({ size: this.fullSize, world: [base.width, base.height, depth] });
+    const frame: VolumeFrame = { size: this.fullSize, world: [base.width, base.height, depth] };
+    this.regionMeshes.setFrame(frame);
+    this.slicePlanes.setFrame(frame);
   }
 
   /**
@@ -348,6 +378,7 @@ export class VolumeScene implements NapariScene {
     this.zHandle?.destroy();
     this.zHandle = null;
     this.regionMeshes.clear();
+    this.slicePlanes.destroy();
     this.meshPointer?.destroy();
     this.meshPointer = null;
     this.toolSub?.unsubscribe();

@@ -23,7 +23,13 @@ export type RegionSourceRequest =
   | { op: 'features'; handle: number; ids: readonly string[] }
   | { op: 'index'; handle: number; z: number; query: RegionIndexQuery }
   | { op: 'classes'; handle: number; z: number; exclude?: readonly string[] }
-  | { op: 'outlines'; handle: number; classes: readonly string[]; level: number; exclude?: readonly string[] }
+  | {
+      op: 'outlines';
+      handle: number;
+      classes: readonly string[] | null;
+      level: number;
+      exclude?: readonly string[];
+    }
   | { op: 'mesh'; slices: readonly SliceOutlines[]; options?: ReconstructOptions }
   | { op: 'export'; handle: number; exclude: readonly string[]; extra: readonly object[] }
   | { op: 'close'; handle: number };

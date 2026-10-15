@@ -117,6 +117,10 @@ function mockBackend(): any {
     getOsdViewOptions: jest.fn().mockReturnValue(null),
     getVolumeResolution: jest.fn().mockReturnValue(null),
     getIntensitySampling: jest.fn().mockReturnValue(null),
+    // NapariVisualizerService-only: the slice editor's planes and the volume they cut.
+    setSlicePlanes: jest.fn(),
+    getSlicePlaneMove$: jest.fn().mockReturnValue(new Subject()),
+    volumeVoxels: jest.fn().mockReturnValue(null),
   };
 }
 
@@ -212,6 +216,249 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(shown[shown.length - 1]).toEqual([]);
     expect(napari.setRegionMeshes).toHaveBeenLastCalledWith([], undefined);
     expect(napari.setRegionHighlight).toHaveBeenLastCalledWith([]);
+  });
+
+  // ── the split volume view (slice editor) ─────────────────────────────
+  const STACK: any = { ...IMAGE_INFO, isStack: true, urls: ['s0', 's1', 's2'] };
+
+  it('splits a volume view: OSD shows the displayed slice beside it and takes the region tools', async () => {
+    osd.getRegionOverlay.mockReturnValue({ kind: 'slice overlay' });
+    napari.getRegionOverlay.mockReturnValue({ kind: '3d overlay' });
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    router.setZIndex(2);
+    router.setActiveTool('brush');
+    expect(napari.setActiveTool).toHaveBeenLastCalledWith('brush', undefined);
+
+    await expect(router.setSliceEditor('div-slice')).resolves.toBe(true);
+    expect(osd.load).toHaveBeenCalledWith(STACK, 2);
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, STACK, 600, PlotType.IMAGE, false);
+
+    // Region, tool and overlay calls act on the slice; view calls stay with the 3D view.
+    router.setActiveTool('wand', { sensitivity: 3 });
+    expect(osd.setActiveTool).toHaveBeenLastCalledWith('wand', { sensitivity: 3 });
+    expect(router.getRegionOverlay()).toEqual({ kind: 'slice overlay' });
+    router.setBrushOptions({ size: 9 });
+    expect(osd.setBrushOptions).toHaveBeenCalledWith({ size: 9 });
+    router.zoomIn();
+    expect(napari.zoomIn).toHaveBeenCalled();
+    expect(osd.zoomIn).not.toHaveBeenCalled();
+
+    // One slice for both panes.
+    router.setZIndex(1);
+    expect(osd.setZIndex).toHaveBeenLastCalledWith(1);
+
+    await router.setSliceEditor(null);
+    expect(osd.reset).toHaveBeenCalled();
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: null, y: null, z: null });
+    router.setActiveTool('select');
+    expect(napari.setActiveTool).toHaveBeenLastCalledWith('select', undefined);
+    expect(router.getRegionOverlay()).toEqual({ kind: '3d overlay' });
+  });
+
+  it('cuts the sections through x and y from the volume, and moves the planes with the slice and drags', async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    // A 4 × 3 × 2 volume of an 8 × 6 px image with 2 slices.
+    napari.volumeVoxels.mockReturnValue({
+      width: 4,
+      height: 3,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(24).fill(100)]]),
+      multichannel: false,
+      frame: { size: [8, 6, 2], world: [8, 6, 4] },
+    });
+    // The plane drags the router subscribed to when it was made.
+    const moves = napari.getSlicePlaneMove$.mock.results[0].value as Subject<{ axis: string; value: number }>;
+    const views: any[] = [];
+    router.getSectionViews$().subscribe((v) => views.push(v));
+    const drags: number[] = [];
+    router.getSliceDrag$().subscribe((z) => drags.push(z));
+
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    router.setZIndex(1);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    // The planes start through the middle of the image.
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 4, y: 3, z: 1 });
+    const { x, y } = views[views.length - 1];
+    expect(x.size).toEqual([2, 6]); // slices across, y down
+    expect(x.scale).toEqual([2, 1]); // a slice is twice a pixel deep in the volume
+    expect([x.image.width, x.image.height]).toEqual([2, 3]);
+    expect(x.crosshair).toEqual({ u: 1.5, v: 3 });
+    expect(y.size).toEqual([8, 2]);
+    expect(y.crosshair).toEqual({ u: 4, v: 1.5 });
+
+    // A plane dragged in the volume: x moves its section, z picks the slice through the host.
+    moves.next({ axis: 'x', value: 6.4 });
+    moves.next({ axis: 'z', value: 0.4 });
+    await settle();
+    expect(drags).toEqual([0]);
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 6.4, y: 3, z: 1 });
+    router.setSectionPlane('y', 99); // clamped into the image
+    router.setZIndex(0);
+    await settle();
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 6.4, y: 5, z: 0 });
+    expect(views[views.length - 1].y.at).toBe(5);
+
+    await router.setSliceEditor(null);
+    expect(views[views.length - 1]).toEqual({ x: null, y: null });
+  });
+
+  it('takes the slice pane down for another plot type and brings it back with the volume view', async () => {
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    osd.plot.mockClear();
+
+    await router.plot('div', {}, STACK, 600, PlotType.HEATMAP);
+    expect(osd.reset).toHaveBeenCalled();
+    expect(osd.plot).not.toHaveBeenCalled();
+    router.setZIndex(1);
+    expect(osd.setZIndex).not.toHaveBeenCalledWith(1);
+
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await Promise.resolve();
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, STACK, 600, PlotType.IMAGE, false);
+  });
+
+  it('shows another image in the slice pane when the volume view plots it, and nothing without a stack', async () => {
+    await expect(router.setSliceEditor('div-slice')).resolves.toBe(false); // nothing plotted yet
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    osd.plot.mockClear();
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME); // a re-plot of the same image
+    await Promise.resolve();
+    expect(osd.plot).not.toHaveBeenCalled();
+    const other = { ...STACK, fileName: 'other.tif' };
+    await router.plot('div', {}, other, 600, PlotType.NAPARI_VOLUME);
+    await Promise.resolve();
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, other, 600, PlotType.IMAGE, false);
+  });
+
+  it('rebuilds the 3D surfaces of the classes an edit touched once edits pause, not on a slice switch', async () => {
+    jest.useFakeTimers();
+    try {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+      napari.setRegionMeshes = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      const build = jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+      const square = (label: string, x: number) =>
+        Object.assign(new Region(), {
+          label,
+          bounds: Object.assign(new Rectangle(), { x, y: 0, width: 10, height: 10 }),
+        });
+      regionStore.enterStackMode(new Map([[0, [square('HPF', 0)]]]), 0, 'combined');
+      await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+      await router.showRegionClasses3d([
+        { key: 'HPF', classes: ['HPF', 'CA1'], color: '#7ed04b' },
+        { key: 'CB', classes: ['CB'], color: '#f0f080' },
+      ]);
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // Drawing CA1 (in HPF's group) twice in a row: one rebuild, of HPF only, after the pause.
+      regionStore.addRegion(square('CA1', 20));
+      regionStore.addRegion(square('CA1', 40));
+      await jest.advanceTimersByTimeAsync(300);
+      expect(build).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(400);
+      expect(build).toHaveBeenCalledTimes(2);
+      expect(build.mock.calls[1][0].map((g) => g.key)).toEqual([expect.stringContaining('HPF,CA1')]);
+
+      // A class not shown in 3D, or another slice coming up: nothing to rebuild.
+      regionStore.addRegion(square('MB', 60));
+      regionStore.setDisplaySlice(1);
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(build).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("cuts another image's sections from its own outlines, with the planes back through its middle", async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    const volume = (size: number) => ({
+      width: 4,
+      height: 4,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(32)]]),
+      multichannel: false,
+      frame: { size: [size, size, 2], world: [size, size, 2] },
+    });
+    const read = jest.spyOn(regionStore, 'outlinesByClass').mockResolvedValue(new Map());
+    napari.volumeVoxels.mockReturnValue(volume(100));
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    router.setSectionPlane('x', 90);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(1);
+
+    napari.volumeVoxels.mockReturnValue(volume(40));
+    await router.plot('div', {}, { ...STACK, fileName: 'other.tif' }, 600, PlotType.NAPARI_VOLUME);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 20, y: 20, z: 0 });
+  });
+
+  it('reads the outlines again on the next cut when a read fails', async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    napari.volumeVoxels.mockReturnValue({
+      width: 4,
+      height: 4,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(32)]]),
+      multichannel: false,
+      frame: { size: [8, 8, 2], world: [8, 8, 2] },
+    });
+    const read = jest
+      .spyOn(regionStore, 'outlinesByClass')
+      .mockRejectedValueOnce(new Error('503'))
+      .mockResolvedValue(new Map());
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    expect(warn).toHaveBeenCalled();
+    router.setSectionPlane('x', 2);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it('takes the sections and planes down when the view is detached', async () => {
+    const views: any[] = [];
+    router.getSectionViews$().subscribe((v) => views.push(v));
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    router.detach();
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: null, y: null, z: null });
+    expect(views[views.length - 1]).toEqual({ x: null, y: null });
+  });
+
+  it('rebuilds every shown surface when source features are deleted (no live region changes)', async () => {
+    jest.useFakeTimers();
+    try {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+      napari.setRegionMeshes = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      const build = jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+      const sources = jest.spyOn(regionStore, 'getSourceStateKey').mockReturnValue('before');
+      await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+      await router.showRegionClasses3d([{ key: 'CB', classes: ['CB'], color: '#f0f080' }]);
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // The update a delete makes: the sources hold less, the live regions are as they were.
+      sources.mockReturnValue('after');
+      regionStore.addRegion(new Region());
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(build).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   // ── backend selection per plot type ───────────────────────────────────

@@ -414,4 +414,42 @@ describe('RegionStore region sources', () => {
     expect(reads).toHaveBeenCalledTimes(3);
     reads.mockRestore();
   });
+
+  it('reads every class at once for a section, by class and slice, the drawn regions included', async () => {
+    const at = (id: string, z: number, label: string, geometry: object) => ({
+      type: 'Feature',
+      id,
+      properties: { classification: { name: label } },
+      geometry: { ...geometry, plane: { z } },
+    });
+    const poly = { type: 'Polygon', coordinates: [square(0, 0, 10)] };
+    const line = {
+      type: 'LineString',
+      coordinates: [
+        [0, 5],
+        [10, 5],
+      ],
+    };
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(
+      tableSource([at('a0', 0, 'A', poly), at('a1', 1, 'A', poly), at('l1', 1, 'ILM', line)]),
+      'planes',
+    );
+    await flush();
+    store.setDisplaySlice(2);
+    store.addRegion(
+      Object.assign(new Region(), {
+        label: 'B',
+        bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 4, height: 4 }),
+      }),
+    );
+    const byClass = await store.outlinesByClass(0);
+    expect([...byClass.keys()].sort()).toEqual(['A', 'B', 'ILM']);
+    expect(byClass.get('A')!.map((s) => [s.z, s.rings.length])).toEqual([
+      [0, 1],
+      [1, 1],
+    ]);
+    expect(byClass.get('ILM')!.map((s) => [s.z, s.rings.length, s.lines?.length])).toEqual([[1, 0, 1]]);
+    expect(byClass.get('B')!.map((s) => s.z)).toEqual([2]);
+  });
 });

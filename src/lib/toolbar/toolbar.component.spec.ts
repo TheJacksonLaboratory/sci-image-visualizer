@@ -94,6 +94,44 @@ describe('ToolbarComponent', () => {
     }
   });
 
+  it('splits a volume view with the slice editor: its toggle, then every region tool and the slice slider', () => {
+    const set = (inputs: Record<string, unknown>) => {
+      for (const [k, v] of Object.entries(inputs)) fixture.componentRef.setInput(k, v);
+      fixture.detectChanges();
+    };
+    set({
+      selectedPlotType: PlotType.NAPARI_VOLUME,
+      isHeatmap: false,
+      isVolumeView: true,
+      imageInfo: { isStack: true, urls: ['a', 'b'] },
+    });
+    const el: HTMLElement = fixture.nativeElement;
+    const toggle = () => el.querySelector('p-button[ariaLabel="Slice editor"]') as HTMLElement | null;
+    const regionTools = () =>
+      Array.from(el.querySelectorAll('toolbar-region-tools')) as Array<HTMLElement & { selectOnly?: boolean }>;
+    expect(toggle()).not.toBeNull();
+    expect(toggle()!.getAttribute('aria-pressed')).toBe('false');
+    expect(regionTools().map((t) => !!t.selectOnly)).toEqual([true]); // select only: picks surfaces
+    expect(el.querySelector('toolbar-segmentation-tools')).toBeNull();
+    expect(component['showsLiveSliceScrubber']).toBe(false);
+
+    const toggled = jest.fn();
+    component.toggleSliceEditor.subscribe(toggled);
+    toggle()!.dispatchEvent(new Event('onClick'));
+    expect(toggled).toHaveBeenCalledTimes(1);
+
+    set({ sliceEditor: true });
+    expect(toggle()!.getAttribute('aria-pressed')).toBe('true');
+    expect(regionTools().map((t) => !!t.selectOnly)).toEqual([false]);
+    expect((regionTools()[0] as unknown as { vertexTools: boolean }).vertexTools).toBe(true);
+    expect(el.querySelector('toolbar-segmentation-tools')).not.toBeNull();
+    expect(component['showsLiveSliceScrubber']).toBe(true);
+
+    // Not a volume view: no toggle, whatever the flag says.
+    set({ selectedPlotType: PlotType.HEATMAP, isHeatmap: true, isVolumeView: false });
+    expect(toggle()).toBeNull();
+  });
+
   it('isNapariSurfaceMode is true only for the napari surface, isNapari3dMode for all napari 3D', () => {
     component.selectedPlotType = PlotType.NAPARI_SURFACE;
     expect(component['isNapariSurfaceMode']).toBe(true);

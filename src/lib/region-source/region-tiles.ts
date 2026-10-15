@@ -102,12 +102,15 @@ export interface TileFeature {
 
 /**
  * A class's outlines on one plane: rings as interleaved `x, y` image px (holes included), and its
- * open features' polylines, likewise (absent from a server that predates them).
+ * open features' polylines, likewise (absent from a server that predates them). Read for every
+ * class at once, each ring's and line's class comes with it (`ringLabels`, `lineLabels`).
  */
 export interface ClassOutlines {
   z: number;
   rings: Float32Array[];
   lines?: Float32Array[];
+  ringLabels?: string[];
+  lineLabels?: string[];
 }
 
 /** One tile of one level of one plane. */
@@ -478,21 +481,32 @@ export class RegionFeatureTable {
   /**
    * The outlines of every feature of these classes, plane by plane, simplified for `level` (what a
    * 3D reconstruction of the classes stacks), without the `exclude`d ids: closed features' rings,
-   * open features' polylines as `lines`. Planes without one are left out.
+   * open features' polylines as `lines`. Planes without one are left out. `classes` null reads
+   * every labelled feature, each outline with its class (`ringLabels`, `lineLabels`).
    */
-  classOutlines(classes: readonly string[], level: number, exclude: readonly string[] = []): ClassOutlines[] {
-    const wanted = new Set(classes);
+  classOutlines(
+    classes: readonly string[] | null,
+    level: number,
+    exclude: readonly string[] = [],
+  ): ClassOutlines[] {
+    const wanted = classes ? new Set(classes) : null;
     const skip = new Set(exclude);
     const byPlane = new Map<number, ClassOutlines>();
     for (let i = 0; i < this.ids.length; i++) {
-      if (!wanted.has(this.labels[i] ?? '') || skip.has(this.ids[i])) continue;
+      const label = this.labels[i];
+      if (!label || (wanted && !wanted.has(label)) || skip.has(this.ids[i])) continue;
       const rings = this.ringsAt(i, level);
       if (!rings.length) continue;
       const z = this.planes[i];
       let plane = byPlane.get(z);
       if (!plane) byPlane.set(z, (plane = { z, rings: [] }));
-      if (this.open[i]) (plane.lines ??= []).push(...rings);
-      else plane.rings.push(...rings);
+      if (this.open[i]) {
+        (plane.lines ??= []).push(...rings);
+        if (!wanted) (plane.lineLabels ??= []).push(...rings.map(() => label));
+      } else {
+        plane.rings.push(...rings);
+        if (!wanted) (plane.ringLabels ??= []).push(...rings.map(() => label));
+      }
     }
     return Array.from(byPlane.values()).sort((a, b) => a.z - b.z);
   }

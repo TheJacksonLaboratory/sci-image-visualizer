@@ -26,7 +26,8 @@
 //   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
 //   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
-//   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings, lines? }] }
+//   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings, lines?, … }] }
+//        (classes null: every class, each outline labelled in ringLabels / lineLabels)
 //   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
@@ -696,7 +697,9 @@ app.post('/regions/:id/classes', (req, res) => {
   return withRegionSet(req, res, (set) => set.classes(z, exclude));
 });
 app.post('/regions/:id/outlines', (req, res) => {
-  const classes = Array.isArray(req.body?.classes) ? req.body.classes.map(String) : [];
+  // null: every class, each outline labelled.
+  const classes =
+    req.body?.classes === null ? null : Array.isArray(req.body?.classes) ? req.body.classes.map(String) : [];
   const level = Math.max(0, intParam(req.body?.level, 0));
   const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
   return withRegionSet(req, res, (set) => set.outlines(classes, level, exclude));

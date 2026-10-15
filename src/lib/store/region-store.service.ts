@@ -38,6 +38,9 @@ import { DEFAULT_REGION_STYLE, RegionStyle } from '../region-overlay/region-styl
 
 /** Selecting classes takes at most this many region-source features into the regions. */
 export const SELECT_CLASSES_LIMIT = 5000;
+/** A region source's outlines on a slice, each ring's and line's class with it when read for all. */
+type LabelledOutlines = SliceOutlines & { ringLabels?: string[]; lineLabels?: string[] };
+
 /** Class sets whose region-source outlines are kept for rebuilding their surfaces. */
 const SOURCE_OUTLINE_CACHE_SIZE = 8;
 
@@ -168,7 +171,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    */
   private readonly sourceVolumeCache = new Map<string, Promise<number>>();
   /** The region sources' outlines of the class sets reconstructed last (see {@link sourceOutlines}). */
-  private readonly sourceOutlineCache = new Map<string, Promise<SliceOutlines[]>>();
+  private readonly sourceOutlineCache = new Map<string, Promise<LabelledOutlines[]>>();
 
   /** The classes hidden from view (names as given); every class is shown at first. */
   private readonly hiddenClasses$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
@@ -935,8 +938,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * deleted. The last few class sets are kept until what the sources hold changes: rebuilding a
    * surface after an edit reads nothing again.
    */
-  private sourceOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
-    const key = `${this.sourceStateKey()}\n${level}\n${classes.join('\n')}`;
+  private sourceOutlines(classes: readonly string[] | null, level: number): Promise<LabelledOutlines[]> {
+    const key = `${this.sourceStateKey()}\n${level}\n${classes ? classes.join('\n') : '*'}`;
     const cached = this.sourceOutlineCache.get(key);
     if (cached) {
       // Most recently used last.
@@ -953,8 +956,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return read;
   }
 
-  private async readSourceOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
-    const out: SliceOutlines[] = [];
+  private async readSourceOutlines(classes: readonly string[] | null, level: number): Promise<LabelledOutlines[]> {
+    const out: LabelledOutlines[] = [];
     const image = this.scope.activeImage;
     if (this.sources.hasPlanesSource(image)) {
       const binding = await this.sources.binding(image, this.sourceSlice);
@@ -974,21 +977,70 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return out;
   }
 
+  /**
+   * Every class's outlines on every slice, by class: the region sources' (one read for all, kept
+   * like {@link sourceOutlines}) and the drawn and taken regions'. What a section through the
+   * stack cuts (see `geometry/section`).
+   */
+  async outlinesByClass(level: number): Promise<Map<string, SliceOutlines[]>> {
+    const byClass = new Map<string, Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>>();
+    const slot = (label: string, z: number) => {
+      let slices = byClass.get(label);
+      if (!slices) byClass.set(label, (slices = new Map()));
+      let slice = slices.get(z);
+      if (!slice) slices.set(z, (slice = { rings: [], lines: [] }));
+      return slice;
+    };
+    for (const s of await this.sourceOutlines(null, level)) {
+      s.rings.forEach((r, i) => {
+        const label = s.ringLabels?.[i];
+        if (label) slot(label, s.z).rings.push(r);
+      });
+      (s.lines ?? []).forEach((l, i) => {
+        const label = s.lineLabels?.[i];
+        if (label) slot(label, s.z).lines.push(l);
+      });
+    }
+    for (const { label, outlines } of this.labelledRegionOutlines(null)) {
+      const slice = slot(label, outlines.z);
+      slice.rings.push(...outlines.rings);
+      slice.lines.push(...(outlines.lines ?? []));
+    }
+    return new Map(
+      Array.from(byClass, ([label, slices]) => [
+        label,
+        Array.from(slices, ([z, s]) => ({ z, rings: s.rings, ...(s.lines.length ? { lines: s.lines } : {}) })),
+      ]),
+    );
+  }
+
   /** The drawn and taken regions' outlines of these classes, by slice. */
   private regionOutlines(classes: readonly string[]): SliceOutlines[] {
-    const wanted = new Set(classes);
-    const out: SliceOutlines[] = [];
+    return this.labelledRegionOutlines(new Set(classes)).map((o) => o.outlines);
+  }
+
+  /** Each drawn or taken region's outlines (of the `wanted` classes; null: every class) with its class. */
+  private labelledRegionOutlines(
+    wanted: ReadonlySet<string> | null,
+  ): Array<{ label: string; outlines: SliceOutlines }> {
+    const out: Array<{ label: string; outlines: SliceOutlines }> = [];
     for (const r of this.scope.stackMode ? this.getSliceRegions() : this.regions) {
-      if (r.isProfile?.() || !r.label || !wanted.has(r.label)) continue;
+      if (r.isProfile?.() || !r.label || (wanted && !wanted.has(r.label))) continue;
       const rings: Float64Array[] = [];
       for (const p of regionPolygons(r)) {
         rings.push(Float64Array.from(p.xpoints.flatMap((x, i) => [x, p.ypoints[i]])));
         for (const hole of p.holes ?? []) rings.push(Float64Array.from(hole.flat()));
       }
       const lines = regionPolylines(r);
-      out.push({ z: r.z ?? 0, rings, ...(lines.length ? { lines } : {}) });
+      out.push({ label: r.label, outlines: { z: r.z ?? 0, rings, ...(lines.length ? { lines } : {}) } });
     }
     return out;
+  }
+
+  /** What the region sources of the image hold (see {@link sourceStateKey}): it changes when a
+   *  feature is taken or deleted, or that is undone. */
+  getSourceStateKey(): string {
+    return this.sourceStateKey();
   }
 
   /**

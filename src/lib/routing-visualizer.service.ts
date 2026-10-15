@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
-import { EMPTY, Observable, combineLatest, merge, BehaviorSubject } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, combineLatest, merge, BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -50,9 +50,16 @@ import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/cha
 import { autoWindowFromHistogram } from './contracts/intensity';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
+import { volumeRamp } from './implementations/napari-js/napari-display-state';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
+import { changedClasses, classSignatures } from './store/class-signatures';
+import { VolumeSections } from './visualizer/volume-sections';
+import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
+
+/** How long after the last edit the surfaces of the classes it touched are rebuilt (ms). */
+export const REGION_SURFACE_REBUILD_MS = 600;
 
 /** Intensity-profile line ROIs are owned by the intensity tool, not the editor.
  *  Package-internal predicate (property-based so it also matches plain objects
@@ -101,8 +108,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private plotDiv = '';
   /** Whether a napari volume view is the current plot type. */
   private readonly volumeView$ = new BehaviorSubject<boolean>(false);
-  /** Region reconstructions built so far, by image, resolution and classes. */
-  private readonly meshCache = new Map<string, Mesh>();
+  /** Region reconstructions built so far, by image, resolution and classes (with those classes). */
+  private readonly meshCache = new Map<string, { mesh: Mesh; classes: readonly string[] }>();
   /** Bumped per {@link showRegionClasses3d} (and per new image), so only the latest one shows. */
   private meshRequest = 0;
   /** The class groups shown in 3D, and the image they belong to. */
@@ -110,6 +117,35 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     [],
   );
   private classes3dImage: string | undefined;
+  /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
+  private shown3d: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }> = [];
+  /**
+   * Each class's fingerprint on the live slice (see classSignatures), which image and slice, and
+   * what the region sources hold (see RegionStore.getSourceStateKey). Null while nothing follows
+   * the edits (no surface built, no sections).
+   */
+  private liveClasses: { at: string; signatures: Map<string, number>; sources: string } | null = null;
+  /** The pending rebuild of the surfaces an edit touched. */
+  private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly regionUpdates: Subscription;
+
+  // ── The slice pane (the volume view's split): OSD editing one slice beside the 3D view ──
+  /** The div the slice pane renders into while it is wanted (null: no split). */
+  private sliceDiv: string | null = null;
+  /** Whether OSD is mounted in the slice pane: region, tool and overlay calls go to it. */
+  private sliceMounted = false;
+  /** The image the slice pane shows. */
+  private sliceFile: string | undefined;
+  /** Bumped per slice-pane mount or teardown, so only the latest one lands. */
+  private sliceRequest = 0;
+  /** The sections beside the split volume view (the planes x and y through the stack). */
+  private readonly sections: VolumeSections;
+  /** The z plane dragged in the volume: the slice to show (see {@link getSliceDrag$}). */
+  private readonly sliceDrag$ = new Subject<number>();
+  private readonly sectionSubs = new Subscription();
+  /** The image info and screen height of the last plot (what the slice pane mounts). */
+  private plottedInfo: IImageInfo | null = null;
+  private plottedHeight = 0;
 
   constructor(
     private plotly: PlotlyService,
@@ -125,7 +161,62 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     @Optional()
     @Inject(SPATIAL_DATA_PORT)
     private spatialData: SpatialDataPort | null = null,
-  ) {}
+  ) {
+    this.regionUpdates = this.regionStore.getRegionUpdateEvent().subscribe(() => this.onRegionsChanged());
+    this.sections = new VolumeSections({
+      volume: () => this.napari.volumeVoxels(),
+      image: () => this.plottedFileName,
+      showPlanes: (planes) => this.napari.setSlicePlanes(planes),
+      outlinesByClass: (level) => this.regionStore.outlinesByClass(level),
+      isClassHidden: (label) => this.regionStore.isClassHidden(label),
+      colorOf: (label) => this.classColor(label),
+      channelStates: () => this.store.currentChannelStates(),
+      ramp: (color) =>
+        volumeRamp(color, {
+          colormap: this.store.currentColormap(),
+          reverse: this.store.currentReverseScale(),
+          invert: false,
+        }),
+      invert: () => this.store.currentInvert(),
+      slice: () => this.currentZIndex,
+    });
+    // A plane dragged in the volume: the z plane picks the slice (through the host's slider, so
+    // the store and the slice pane follow), the others move their section.
+    this.sectionSubs.add(
+      this.napari.getSlicePlaneMove$().subscribe(({ axis, value }) => {
+        if (axis === 'z') this.sliceDrag$.next(Math.round(value));
+        else this.sections.setPlane(axis, value);
+      }),
+    );
+    this.sectionSubs.add(this.store.getChannelStates().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getInvert().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getColormap().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getReverseScale().subscribe(() => this.sections.schedule()));
+  }
+
+  /** A class's colour: its classification colour, else its region source's, else a default. */
+  private classColor(label: string): string {
+    return (
+      this.store.getClassificationColors().get(label) ??
+      this.regionStore.getRegionSourceView()?.colorOf({ label, color: null }) ??
+      '#ffcc00'
+    );
+  }
+
+  /** The sections beside the split volume view (nulls while it is not split). */
+  getSectionViews$(): Observable<SectionViews> {
+    return this.sections.getViews$();
+  }
+
+  /** Move a section's plane to `at` (image px). */
+  setSectionPlane(axis: SectionAxis, at: number): void {
+    this.sections.setPlane(axis, at);
+  }
+
+  /** The slice picked by dragging the z plane in the volume: the host shows it (its slider). */
+  getSliceDrag$(): Observable<number> {
+    return this.sliceDrag$.asObservable();
+  }
 
   private isImageType(t: PlotType): boolean {
     return t === PlotType.IMAGE;
@@ -178,6 +269,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Backend currently on screen — what ongoing zoom/tool/region ops act on. */
   private renderer(): IViewerBackend {
     return this.lastRendered ?? this.plotly;
+  }
+
+  /**
+   * Backend region, tool and overlay calls act on: the slice pane's OSD while the volume view is
+   * split (regions are edited there), else the backend on screen. View calls (zoom, fit, colour,
+   * export) stay with {@link renderer}.
+   */
+  private regionBackend(): IViewerBackend {
+    return this.sliceMounted ? this.osd : this.renderer();
   }
 
   // System capabilities are Plotly's (the full-featured backend) so the UI
@@ -242,6 +342,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.currentPlotType = plotType;
     this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
     this.plottedFileName = imageInfo?.fileName;
+    this.plottedInfo = imageInfo ?? null;
+    this.plottedHeight = screenHeight;
+    // The slice pane belongs to the volume view: another plot type takes it down (OSD may be
+    // about to draw the main view, which must not find the pane's viewer still mounted).
+    if (!this.volumeView$.value) this.unmountSlice();
     // Region surfaces belong to the image they were built from: another image drops them.
     if (this.classes3d$.value.length && this.plottedFileName !== this.classes3dImage) this.clearRegionClasses3d();
     this.plotDiv = plotDiv;
@@ -259,7 +364,69 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       else this.lastRendered.reset();
     }
     this.lastRendered = next;
-    return next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
+    const plotted = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
+    if (!this.sliceDiv || !this.volumeView$.value) return plotted;
+    // The split volume view: the slice pane follows the image (a new one, or its sharper pass).
+    return plotted.then((ok) => {
+      if (ok && (!this.sliceMounted || this.sliceFile !== imageInfo?.fileName || inPlace)) {
+        void this.mountSlice(!!inPlace && this.sliceMounted && this.sliceFile === imageInfo?.fileName);
+      }
+      // The volume was assembled again (another image, or resolution): cut the sections from it.
+      if (ok) this.sections.schedule();
+      return ok;
+    });
+  }
+
+  /**
+   * Split the volume view: show the slice being edited in `div` (OpenSeadragon, with every region
+   * tool) beside the 3D view, or stop (null). Kept across re-plots of a volume view; another plot
+   * type takes the pane down and a volume view brings it back. Resolves whether the pane shows.
+   */
+  async setSliceEditor(div: string | null): Promise<boolean> {
+    this.sliceDiv = div;
+    if (!div) {
+      this.unmountSlice();
+      return false;
+    }
+    return this.mountSlice(false);
+  }
+
+  /** Mount (or refresh in place) OSD in the slice pane on the displayed slice. */
+  private async mountSlice(inPlace: boolean): Promise<boolean> {
+    const div = this.sliceDiv;
+    const info = this.plottedInfo;
+    if (!div || !info?.urls?.length || !this.volumeView$.value) return false;
+    const request = ++this.sliceRequest;
+    try {
+      const loaded = await this.osd.load(info, this.currentZIndex);
+      if (request !== this.sliceRequest) return false;
+      const ok = await this.osd.plot(div, loaded, info, this.plottedHeight, PlotType.IMAGE, inPlace);
+      if (request !== this.sliceRequest) return false;
+      this.sliceMounted = ok;
+      this.sliceFile = info.fileName;
+      if (ok) {
+        // The slice may have moved while the pane loaded.
+        this.osd.setZIndex(this.currentZIndex);
+        this.trackLiveClasses();
+        this.sections.start();
+      }
+      return ok;
+    } catch (err) {
+      if (request === this.sliceRequest)
+        console.warn('[visualizer] The slice pane could not show the image.', err);
+      return false;
+    }
+  }
+
+  /** Take the slice pane's viewer down (the split stays wanted while {@link sliceDiv} is set). */
+  private unmountSlice(): void {
+    this.sliceRequest++;
+    if (this.sliceMounted) {
+      this.osd.reset();
+      this.sections.stop();
+    }
+    this.sliceMounted = false;
+    this.sliceFile = undefined;
   }
   reloadAndPlot(): void {
     this.plotly.reloadAndPlot();
@@ -292,6 +459,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   setDragMode(mode: string | false): void {
     this.renderer().setDragMode(mode);
+    if (this.sliceMounted) this.osd.setDragMode(mode);
   }
   /** Every backend, on screen or not. */
   private backends(): IViewerBackend[] {
@@ -329,6 +497,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setZIndex(zIndex: number): void {
     this.currentZIndex = zIndex;
     this.renderer().setZIndex(zIndex);
+    if (this.sliceMounted) {
+      this.osd.setZIndex(zIndex);
+      this.sections.schedule();
+    }
   }
   getTrueImageSize(): { width: number; height: number } | null {
     return this.renderer().getTrueImageSize();
@@ -592,6 +764,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Hide every region surface and forget them (a build still running is dropped). */
   private clearRegionClasses3d(): void {
     this.meshRequest++;
+    this.shown3d = [];
     this.classes3d$.next([]);
     this.classes3dImage = undefined;
     this.napari.setRegionMeshes([], undefined);
@@ -618,6 +791,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   ): Promise<void> {
     const request = ++this.meshRequest;
     this.classes3dImage = this.plottedFileName;
+    this.shown3d = groups;
+    // What an edit from now on is compared with (the live slice may not have changed yet).
+    this.liveClasses = null;
+    this.trackLiveClasses();
     this.classes3d$.next(groups.map((g) => ({ key: g.key, classes: g.classes })));
     const width = this.getTrueImageSize()?.width ?? 1024;
     const step = this.napari.regionVoxelStep() ?? Math.max(1, width / 256);
@@ -633,7 +810,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
           missing.map((g) => ({ key: cacheKey(g), classes: g.classes })),
           step,
         );
-        for (const b of built) this.meshCache.set(b.key, b.mesh);
+        const classesOf = new Map(missing.map((g) => [cacheKey(g), g.classes]));
+        for (const b of built) this.meshCache.set(b.key, { mesh: b.mesh, classes: classesOf.get(b.key) ?? [] });
       } finally {
         done();
       }
@@ -641,11 +819,62 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (request !== this.meshRequest) return;
     this.napari.setRegionMeshes(
       groups.map((g) => {
-        const mesh = this.meshCache.get(cacheKey(g))!;
+        const mesh = this.meshCache.get(cacheKey(g))!.mesh;
         return { key: g.key, color: g.color, label: g.label, vertices: mesh.vertices, faces: mesh.faces };
       }),
       this.plottedFileName,
     );
+  }
+
+  /**
+   * The regions changed: when the live slice's regions of some classes did (an edit, an undo, not
+   * a slice or image switch), their reconstructions are stale. They are dropped, and those shown
+   * in 3D are rebuilt once the edits pause.
+   */
+  private onRegionsChanged(): void {
+    // Nothing follows the edits (no surface built or shown, no sections): skip the fingerprints.
+    if (!this.sliceMounted && !this.shown3d.length && !this.meshCache.size) {
+      this.liveClasses = null;
+      return;
+    }
+    const before = this.liveClasses;
+    this.liveClasses = null;
+    const now = this.trackLiveClasses();
+    // Another slice or image came up: no region changed (the sections recut for the slice).
+    if (!before || before.at !== now.at) return;
+    const changed = changedClasses(before.signatures, now.signatures);
+    // Source features deleted (or that undone) change no live region, and which classes they were
+    // is not known here: every class is stale. A feature taken shows as its class's change.
+    const everyClass = !changed.size && before.sources !== now.sources;
+    if (!changed.size && !everyClass) return;
+    const touched = (c: string) => everyClass || changed.has(c);
+    if (this.sliceMounted) this.sections.regionsChanged();
+    for (const [key, entry] of [...this.meshCache]) {
+      if (entry.classes.some(touched)) this.meshCache.delete(key);
+    }
+    if (!this.shown3d.some((g) => g.classes.some(touched))) return;
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      if (this.shown3d.length && this.classes3dImage === this.plottedFileName) {
+        void this.showRegionClasses3d(this.shown3d);
+      }
+    }, REGION_SURFACE_REBUILD_MS);
+  }
+
+  /** Fingerprint the live slice's classes, unless already: what the next edit is compared with. */
+  private trackLiveClasses(): { at: string; signatures: Map<string, number>; sources: string } {
+    this.liveClasses ??= {
+      at: this.liveSliceKey(),
+      signatures: classSignatures(this.regionStore.getRegions()),
+      sources: this.regionStore.getSourceStateKey(),
+    };
+    return this.liveClasses;
+  }
+
+  /** Which slice of which image the live regions are. */
+  private liveSliceKey(): string {
+    return `${this.regionStore.getDisplaySlice()}\n${this.plottedFileName ?? ''}`;
   }
 
   /** Each class's volume over the whole stack, in px² × slices (see RegionStore.classVolumes). */
@@ -663,6 +892,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.regionStore.setClassesHidden(classes, hidden);
     // A surface is its class's (its group key is the class name).
     this.napari.setRegionHidden([...this.regionStore.getHiddenClasses()]);
+    this.sections.schedule();
   }
   async selectRegionClasses(classes: readonly string[], additive?: boolean): Promise<void> {
     await this.regionStore.selectClasses(classes, additive);
@@ -777,56 +1007,56 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   // ── tools → active renderer (run on either backend) ─────────────────
   // The wand, vertex eraser and zoom-to-box are implemented on both backends
   // via ICoordinateTransform (+ a viewport pixel readback for the wand), so they
-  // follow the active renderer.
+  // follow the active renderer — the slice pane's while the volume view is split.
   setActiveTool(id: string | null, options?: CanvasToolOptions): void {
-    this.renderer().setActiveTool(id, options);
+    this.regionBackend().setActiveTool(id, options);
   }
   /** @deprecated Use {@link setActiveTool}. */
   setWandMode(active: boolean, options?: IWandOptions): void {
-    this.renderer().setWandMode(active, options);
+    this.regionBackend().setWandMode(active, options);
   }
   setWandOptions(options: IWandOptions): void {
-    this.renderer().setWandOptions(options);
+    this.regionBackend().setWandOptions(options);
   }
   clearActiveWandRegion(): void {
-    this.renderer().clearActiveWandRegion();
+    this.regionBackend().clearActiveWandRegion();
   }
   /** @deprecated Use {@link setActiveTool}. */
   setBrushMode(active: boolean, options?: IBrushOptions): void {
-    this.renderer().setBrushMode(active, options);
+    this.regionBackend().setBrushMode(active, options);
   }
   setBrushOptions(options: IBrushOptions): void {
-    this.renderer().setBrushOptions(options);
+    this.regionBackend().setBrushOptions(options);
   }
   /** @deprecated Use {@link setActiveTool}. */
   setVertexEraserMode(active: boolean): void {
-    this.renderer().setVertexEraserMode(active);
+    this.regionBackend().setVertexEraserMode(active);
   }
   setVertexEraserRadius(radius: number): void {
-    this.renderer().setVertexEraserRadius(radius);
+    this.regionBackend().setVertexEraserRadius(radius);
   }
   /** @deprecated Use {@link setActiveTool}. */
   setZoomToBoxMode(active: boolean): void {
-    this.renderer().setZoomToBoxMode(active);
+    this.regionBackend().setZoomToBoxMode(active);
   }
   segmentRectangles(): Promise<number> {
-    return this.renderer().segmentRectangles();
+    return this.regionBackend().segmentRectangles();
   }
   segmentRectanglesCellpose(): Promise<number> {
-    return this.renderer().segmentRectanglesCellpose();
+    return this.regionBackend().segmentRectanglesCellpose();
   }
   setSamModel(id: string): void {
-    this.renderer().setSamModel(id);
+    this.regionBackend().setSamModel(id);
   }
   /** @deprecated Use {@link setActiveTool}. */
   setSamPointMode(active: boolean): void {
-    this.renderer().setSamPointMode(active);
+    this.regionBackend().setSamPointMode(active);
   }
   commitSamPoints(): void {
-    this.renderer().commitSamPoints();
+    this.regionBackend().commitSamPoints();
   }
   clearSamPoints(): void {
-    this.renderer().clearSamPoints();
+    this.regionBackend().clearSamPoints();
   }
 
   // ── display options ──────────────────────────────────────────────────
@@ -908,12 +1138,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /**
-   * The active backend's region overlay. Falls back to Plotly's when the active backend
+   * The active backend's region overlay (the slice pane's while the volume view is split). Falls
+   * back to Plotly's when the active backend
    * (OSD or napari-js) is selected but a plot isn't mounted yet, so callers always get a
    * usable overlay.
    */
   getRegionOverlay(): IRegionOverlay {
-    const r = this.renderer();
+    const r = this.regionBackend();
     if (r === this.osd) {
       return this.osd.getRegionOverlay() ?? this.plotly.getRegionOverlay();
     }
@@ -971,6 +1202,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   ngOnDestroy(): void {
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
+    this.regionUpdates.unsubscribe();
+    this.sectionSubs.unsubscribe();
+    this.sections.stop();
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
   }
 
   /**
@@ -1022,6 +1257,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  buffers would otherwise outlive the view (for a component-scoped chain, forever).
    *  Nothing is on screen afterwards, so the next plot starts from the default backend. */
   detach(): void {
+    this.sliceRequest++;
+    this.sections.stop();
+    this.sliceMounted = false;
+    this.sliceDiv = null;
     this.plotly.detach();
     this.osd.detach();
     this.napari.detach();

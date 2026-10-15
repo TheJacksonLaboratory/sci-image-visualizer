@@ -7,13 +7,99 @@
   overflow: hidden;
 }
 
-.viz-plot {
+.viz-panes {
   flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.viz-plot {
+  // A basis of 0, not the w-full width: the plot takes what the slice pane leaves.
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   // Guard against utility classes re-imposing height:100% (the docked-toolbar
   // clipping bug): the flex row above (toolbar) plus height:100% pushed the
   // plot's bottom strip out of the overflow:hidden host.
   height: auto !important;
+}
+
+// The slice editor: a 2 × 2 grid (track sizes set inline) — the volume (the plot) top left, the
+// slice being edited top right, the sections through x and y below — and the dividers between.
+.viz-panes.viz-quad {
+  display: grid;
+
+  > .viz-plot {
+    grid-area: 1 / 1 / 2 / 2;
+    // A grid item is at least as tall as its content by default: the 3D canvas, sized for the
+    // whole area before the split, would keep its cell that tall and cover the section below.
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+.viz-cell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.viz-cell-z {
+  grid-area: 1 / 3 / 2 / 4;
+}
+
+.viz-cell-x {
+  grid-area: 3 / 1 / 4 / 2;
+}
+
+.viz-cell-y {
+  grid-area: 3 / 3 / 4 / 4;
+}
+
+.viz-slice-pane {
+  position: absolute;
+  inset: 0;
+}
+
+.viz-pane-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 10;
+  padding: 1px 8px;
+  border-radius: 4px;
+  color: #fff;
+  font:
+    600 12px/1.6 system-ui,
+    sans-serif;
+  pointer-events: none;
+}
+
+// The axis colours of the volume's planes (napari-volume-slice-planes).
+.viz-pane-badge-z {
+  background: #668cff;
+}
+
+.viz-pane-divider {
+  background: var(--surface-border, #cccccc);
+  touch-action: none;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--primary-color, #3b82f6);
+    outline: none;
+  }
+}
+
+.viz-pane-divider-v {
+  grid-area: 1 / 2 / 4 / 3;
+  cursor: col-resize;
+}
+
+.viz-pane-divider-h {
+  grid-area: 2 / 1 / 3 / 4;
+  cursor: row-resize;
 }
 
 // ── Toolbar dock ──────────────────────────────────────────────────────

@@ -60,6 +60,7 @@ function mockPlotService(): any {
     isStackMode: jest.fn().mockReturnValue(false),
     getSliceRegions: jest.fn().mockReturnValue([]),
     setPlotType: jest.fn(),
+    relayout: jest.fn(),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
     // ── handler delegations exercised by the toolbar/region tests ──
     setReverseScale: jest.fn(),
@@ -1088,6 +1089,69 @@ describe('VisualizerComponent (UI shell)', () => {
       jest.advanceTimersByTime(120);
       expect(plotService.setDisplaySlice).toHaveBeenCalledTimes(1);
       expect(plotService.setDisplaySlice).toHaveBeenCalledWith(3);
+    });
+  });
+
+  describe('the slice editor (a split volume view)', () => {
+    beforeEach(() => {
+      plotService.setSliceEditor = jest.fn().mockResolvedValue(true);
+      component['selectedPlotTypeId'] = PlotType.NAPARI_VOLUME;
+      component['zIndex'] = 3;
+    });
+
+    it('is off by default, and opens on the displayed slice with the armed tool acting in it', async () => {
+      expect(component['sliceEditorShown']).toBe(false);
+      component.toggleDragMode('brush');
+      plotService.setActiveTool.mockClear();
+
+      await component['toggleSliceEditor']();
+      expect(component['sliceEditorShown']).toBe(true);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledWith(3);
+      expect(plotService.setSliceEditor).toHaveBeenCalledWith(`${component['plotDivName']}-slice`);
+      expect(plotService.setActiveTool).toHaveBeenLastCalledWith('brush', expect.objectContaining({ size: 40 }));
+    });
+
+    it('closes keeping the selection tool (it picks surfaces in 3D) but no drawing tool', async () => {
+      await component['toggleSliceEditor']();
+      component.toggleDragMode('select');
+      await component['toggleSliceEditor']();
+      expect(plotService.setSliceEditor).toHaveBeenLastCalledWith(null);
+      expect(component['activeDragMode']).toBe('select');
+
+      await component['toggleSliceEditor']();
+      component.toggleDragMode('brush');
+      await component['toggleSliceEditor']();
+      expect(component['activeDragMode']).toBeNull();
+    });
+
+    it('picks in a section: the slice and the other section move there', async () => {
+      plotService.setSectionPlane = jest.fn();
+      component['maxIndex'] = 9;
+      // Through x: across is the slice, down is y.
+      component['onSectionPick']('x', { u: 4.7, v: 120 });
+      expect(plotService.setSectionPlane).toHaveBeenLastCalledWith('y', 120);
+      expect(plotService.setZIndex).toHaveBeenLastCalledWith(4);
+      // Through y: across is x, down is the slice (clamped to the stack).
+      component['onSectionPick']('y', { u: 33, v: 12.2 });
+      expect(plotService.setSectionPlane).toHaveBeenLastCalledWith('x', 33);
+      expect(plotService.setZIndex).toHaveBeenLastCalledWith(9);
+    });
+
+    it('shows only in a volume view, and its dividers keep every pane at least a fifth wide', async () => {
+      await component['toggleSliceEditor']();
+      component['selectedPlotTypeId'] = PlotType.IMAGE;
+      expect(component['sliceEditorShown']).toBe(false);
+      component['selectedPlotTypeId'] = PlotType.NAPARI_ISOSURFACE;
+      expect(component['sliceEditorShown']).toBe(true);
+
+      const key = (k: string) => new KeyboardEvent('keydown', { key: k });
+      for (let i = 0; i < 10; i++) component['nudgePaneSize'](key('ArrowRight'), 'x');
+      expect(component['splitX']).toBe(80);
+      for (let i = 0; i < 20; i++) component['nudgePaneSize'](key('ArrowLeft'), 'x');
+      expect(component['splitX']).toBe(20);
+      component['nudgePaneSize'](key('ArrowDown'), 'y');
+      component['nudgePaneSize'](key('ArrowRight'), 'y'); // not this divider's key
+      expect(component['splitY']).toBe(55);
     });
   });
 

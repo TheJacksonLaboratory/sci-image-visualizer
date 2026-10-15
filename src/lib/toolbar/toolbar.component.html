@@ -159,9 +159,32 @@
     </toolbar-view-controls>
 
     <!-- A volume view draws no regions; the Region Editor shows them in it in 3D, and the
-         selection tool picks their surfaces there. -->
+         selection tool picks their surfaces there. The slice editor splits the view: the slice,
+         with every region tool, beside the 3D view. -->
     <ng-container *ngIf="isVolumeView && !isHeatmap && !is3dRegions && tools.regionTools">
+      <span class="toolbar-separator"></span>
+      <p-button
+        size="small"
+        [text]="!sliceEditor"
+        ariaLabel="Slice editor"
+        [attr.aria-pressed]="sliceEditor"
+        [pTooltip]="
+          sliceEditor
+            ? 'Close the slice editor'
+            : 'Slice editor: the slice and the sections through x and y beside the 3D view'
+        "
+        tooltipPosition="bottom"
+        (onClick)="toggleSliceEditor.emit()"
+      >
+        <img
+          src="assets/plotting/slice.svg"
+          style="width: 1rem"
+          alt=""
+          [class]="sliceEditor ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        />
+      </p-button>
       <toolbar-region-tools
+        *ngIf="!sliceEditor"
         [activeDragMode]="activeDragMode"
         [selectOnly]="true"
         [canUndo]="canUndo"
@@ -174,11 +197,11 @@
       >
       </toolbar-region-tools>
     </ng-container>
-    <ng-container *ngIf="(isHeatmap || is3dRegions) && tools.regionTools">
+    <ng-container *ngIf="(isHeatmap || is3dRegions || (isVolumeView && sliceEditor)) && tools.regionTools">
       <toolbar-region-tools
         [activeDragMode]="activeDragMode"
         [is3dRegions]="is3dRegions"
-        [vertexTools]="supportsRegionVertexTools"
+        [vertexTools]="supportsRegionVertexTools || (isVolumeView && sliceEditor)"
         [wandSensitivity]="wandSensitivity"
         [brushSize]="brushSize"
         [vertexEraserRadius]="vertexEraserRadius"
