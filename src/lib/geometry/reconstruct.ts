@@ -5,6 +5,8 @@
  *
  * Pure: usable from workers.
  */
+import { pointInRing, ringArea } from 'napari-js/geometry';
+
 import { loftLines } from './loft';
 import { Mesh, smoothMesh, surfaceNets } from './surface-nets';
 
@@ -179,9 +181,9 @@ export function ringsArea(rings: readonly ArrayLike<number>[]): number {
       if (j === i) continue;
       const b = boxes[j];
       if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
-      if (insideRing(rings[j], x, y)) depth++;
+      if (pointInRing(x, y, rings[j])) depth++;
     }
-    area += (depth % 2 ? -1 : 1) * Math.abs(shoelace(r));
+    area += (depth % 2 ? -1 : 1) * Math.abs(ringArea(r));
   }
   return Math.max(0, area);
 }
@@ -322,13 +324,6 @@ function featureBox(rings: readonly ArrayLike<number>[]): [number, number, numbe
   return box;
 }
 
-function shoelace(r: ArrayLike<number>): number {
-  const n = r.length >> 1;
-  let a = 0;
-  for (let i = 0, j = n - 1; i < n; j = i++) a += (r[2 * j] + r[2 * i]) * (r[2 * j + 1] - r[2 * i + 1]);
-  return a / 2;
-}
-
 function ringBox(r: ArrayLike<number>): [number, number, number, number] {
   let x0 = Infinity,
     y0 = Infinity,
@@ -341,15 +336,4 @@ function ringBox(r: ArrayLike<number>): [number, number, number, number] {
     if (r[i + 1] > y1) y1 = r[i + 1];
   }
   return [x0, y0, x1, y1];
-}
-
-function insideRing(r: ArrayLike<number>, x: number, y: number): boolean {
-  let inside = false;
-  const n = r.length >> 1;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const yi = r[2 * i + 1],
-      yj = r[2 * j + 1];
-    if (yi > y !== yj > y && x < ((r[2 * j] - r[2 * i]) * (y - yi)) / (yj - yi) + r[2 * i]) inside = !inside;
-  }
-  return inside;
 }
