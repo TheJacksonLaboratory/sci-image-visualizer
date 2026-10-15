@@ -43,6 +43,8 @@ export interface NapariScene {
   setRegionHighlight?(keys: readonly string[]): void;
   /** Hide the reconstructions of these keys. */
   setRegionHidden?(keys: readonly string[]): void;
+  /** Mark slice `z` in the 3D view (the one edited beside it), or none (volume scenes only). */
+  setSlicePlane?(z: number | null): void;
   /** Image px per voxel of the assembled volume, in-plane (volume scenes only). */
   voxelStep?(): number | null;
   /** Remove everything the scene added; called before the viewer is disposed. */

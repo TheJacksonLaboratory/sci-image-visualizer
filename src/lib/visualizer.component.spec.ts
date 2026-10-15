@@ -1091,6 +1091,53 @@ describe('VisualizerComponent (UI shell)', () => {
     });
   });
 
+  describe('the slice editor (a split volume view)', () => {
+    beforeEach(() => {
+      plotService.setSliceEditor = jest.fn().mockResolvedValue(true);
+      component['selectedPlotTypeId'] = PlotType.NAPARI_VOLUME;
+      component['zIndex'] = 3;
+    });
+
+    it('is off by default, and opens on the displayed slice with the armed tool acting in it', async () => {
+      expect(component['sliceEditorShown']).toBe(false);
+      component.toggleDragMode('brush');
+      plotService.setActiveTool.mockClear();
+
+      await component['toggleSliceEditor']();
+      expect(component['sliceEditorShown']).toBe(true);
+      expect(plotService.setDisplaySlice).toHaveBeenCalledWith(3);
+      expect(plotService.setSliceEditor).toHaveBeenCalledWith(`${component['plotDivName']}-slice`);
+      expect(plotService.setActiveTool).toHaveBeenLastCalledWith('brush', expect.objectContaining({ size: 40 }));
+    });
+
+    it('closes keeping the selection tool (it picks surfaces in 3D) but no drawing tool', async () => {
+      await component['toggleSliceEditor']();
+      component.toggleDragMode('select');
+      await component['toggleSliceEditor']();
+      expect(plotService.setSliceEditor).toHaveBeenLastCalledWith(null);
+      expect(component['activeDragMode']).toBe('select');
+
+      await component['toggleSliceEditor']();
+      component.toggleDragMode('brush');
+      await component['toggleSliceEditor']();
+      expect(component['activeDragMode']).toBeNull();
+    });
+
+    it('shows only in a volume view, and its divider keeps both panes at least a fifth wide', async () => {
+      await component['toggleSliceEditor']();
+      component['selectedPlotTypeId'] = PlotType.IMAGE;
+      expect(component['sliceEditorShown']).toBe(false);
+      component['selectedPlotTypeId'] = PlotType.NAPARI_ISOSURFACE;
+      expect(component['sliceEditorShown']).toBe(true);
+
+      const key = (k: string) => new KeyboardEvent('keydown', { key: k });
+      for (let i = 0; i < 10; i++) component['nudgePaneSize'](key('ArrowRight'));
+      expect(component['slicePaneSize']).toBe(80);
+      for (let i = 0; i < 20; i++) component['nudgePaneSize'](key('ArrowLeft'));
+      expect(component['slicePaneSize']).toBe(20);
+    });
+  });
+
   it('openChannelHistogram shows the dialog; dockToolbar re-docks it', () => {
     expect(component['showChannelHistogram']).toBe(false);
     component['openChannelHistogram']();

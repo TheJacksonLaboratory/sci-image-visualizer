@@ -463,6 +463,75 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     return isNapariVolume(this.basePlotType) || isNapariIsosurface(this.basePlotType);
   }
 
+  /** Whether the user split the volume view with the slice editor (off by default; kept while
+   *  the view shows other plot types, so a volume view opens split again). */
+  protected sliceEditor = false;
+  /** The slice editor's pane: the displayed slice, with every region tool, left of the 3D view. */
+  protected readonly sliceDivName = `${this.plotDivName}-slice`;
+  /** The slice pane's share of the width (%). */
+  protected slicePaneSize = 50;
+  protected get sliceEditorShown(): boolean {
+    return this.sliceEditor && this.isVolumeView;
+  }
+
+  /**
+   * Split the volume view with the slice editor, or close it. The pane opens on the displayed
+   * slice and takes the drawing tools; closing it leaves the selection tool armed (it picks the
+   * surfaces in 3D) and disarms any other.
+   */
+  protected async toggleSliceEditor(): Promise<void> {
+    this.sliceEditor = !this.sliceEditor;
+    this.cdr.detectChanges(); // the pane's div, before the backend looks it up
+    if (!this.sliceEditor) {
+      await this.plotService.setSliceEditor?.(null);
+      if (this.tools.active !== null && this.tools.active !== 'select') this.tools.apply(null);
+      this.changed();
+      return;
+    }
+    // The regions edited are the displayed slice's.
+    this.plotService.setDisplaySlice(this.zIndex);
+    const shown = await this.plotService.setSliceEditor?.(this.sliceDivName);
+    // The armed tool now acts in the pane.
+    if (shown && this.tools.active !== null) this.tools.apply(this.tools.active);
+    this.changed();
+  }
+
+  /** Drag the divider between the slice pane and the 3D view. */
+  protected startPaneResize(event: PointerEvent): void {
+    const divider = event.currentTarget as HTMLElement;
+    const panes = divider.parentElement;
+    if (!panes) return;
+    event.preventDefault();
+    divider.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent) => {
+      const box = panes.getBoundingClientRect();
+      if (box.width <= 0) return;
+      this.setSlicePaneSize(((e.clientX - box.left) / box.width) * 100);
+    };
+    const end = () => {
+      divider.removeEventListener('pointermove', move);
+      divider.removeEventListener('pointerup', end);
+      divider.removeEventListener('pointercancel', end);
+    };
+    divider.addEventListener('pointermove', move);
+    divider.addEventListener('pointerup', end);
+    divider.addEventListener('pointercancel', end);
+  }
+
+  /** The divider's keyboard: ← and → move it by 5%. */
+  protected nudgePaneSize(event: KeyboardEvent): void {
+    const step = event.key === 'ArrowLeft' ? -5 : event.key === 'ArrowRight' ? 5 : 0;
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation(); // not a slice step
+    this.setSlicePaneSize(this.slicePaneSize + step);
+  }
+
+  private setSlicePaneSize(percent: number): void {
+    this.slicePaneSize = Math.round(Math.min(80, Math.max(20, percent)));
+    this.changed();
+  }
+
   /** True for the Image plot type, which renders as a natively pan/zoom-able
    *  raster — so the backend-agnostic zoom/pan toolbar tools are hidden. The
    *  component drives this off the plot type, not the active backend. */
@@ -797,7 +866,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       plotDivName: this.plotDivName,
       hostElement: this.hostRef?.nativeElement ?? null,
       activeDragMode: () => this.activeDragMode,
-      canStepSlice: () => !!this.imageInfo?.isStack && this.isImageView,
+      canStepSlice: () => !!this.imageInfo?.isStack && (this.isImageView || this.sliceEditorShown),
       wheelZooms: () => !rendererOwnsWheel(this.basePlotType) && this.isHeatmap,
       stepSlice: marked((delta: number) => this.stepSlice(delta)),
       resolveSamPrompt: marked((commit: boolean) => {

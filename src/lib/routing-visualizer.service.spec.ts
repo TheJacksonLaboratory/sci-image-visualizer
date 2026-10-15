@@ -117,6 +117,7 @@ function mockBackend(): any {
     getOsdViewOptions: jest.fn().mockReturnValue(null),
     getVolumeResolution: jest.fn().mockReturnValue(null),
     getIntensitySampling: jest.fn().mockReturnValue(null),
+    setSlicePlane: jest.fn(), // NapariVisualizerService-only
   };
 }
 
@@ -212,6 +213,117 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(shown[shown.length - 1]).toEqual([]);
     expect(napari.setRegionMeshes).toHaveBeenLastCalledWith([], undefined);
     expect(napari.setRegionHighlight).toHaveBeenLastCalledWith([]);
+  });
+
+  // ── the split volume view (slice editor) ─────────────────────────────
+  const STACK: any = { ...IMAGE_INFO, isStack: true, urls: ['s0', 's1', 's2'] };
+
+  it('splits a volume view: OSD shows the displayed slice beside it and takes the region tools', async () => {
+    osd.getRegionOverlay.mockReturnValue({ kind: 'slice overlay' });
+    napari.getRegionOverlay.mockReturnValue({ kind: '3d overlay' });
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    router.setZIndex(2);
+    router.setActiveTool('brush');
+    expect(napari.setActiveTool).toHaveBeenLastCalledWith('brush', undefined);
+
+    await expect(router.setSliceEditor('div-slice')).resolves.toBe(true);
+    expect(osd.load).toHaveBeenCalledWith(STACK, 2);
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, STACK, 600, PlotType.IMAGE, false);
+    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(2);
+
+    // Region, tool and overlay calls act on the slice; view calls stay with the 3D view.
+    router.setActiveTool('wand', { sensitivity: 3 });
+    expect(osd.setActiveTool).toHaveBeenLastCalledWith('wand', { sensitivity: 3 });
+    expect(router.getRegionOverlay()).toEqual({ kind: 'slice overlay' });
+    router.setBrushOptions({ size: 9 });
+    expect(osd.setBrushOptions).toHaveBeenCalledWith({ size: 9 });
+    router.zoomIn();
+    expect(napari.zoomIn).toHaveBeenCalled();
+    expect(osd.zoomIn).not.toHaveBeenCalled();
+
+    // One slice for both panes: the slice shown and the plane marking it in 3D.
+    router.setZIndex(1);
+    expect(osd.setZIndex).toHaveBeenLastCalledWith(1);
+    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(1);
+
+    await router.setSliceEditor(null);
+    expect(osd.reset).toHaveBeenCalled();
+    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(null);
+    router.setActiveTool('select');
+    expect(napari.setActiveTool).toHaveBeenLastCalledWith('select', undefined);
+    expect(router.getRegionOverlay()).toEqual({ kind: '3d overlay' });
+  });
+
+  it('takes the slice pane down for another plot type and brings it back with the volume view', async () => {
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    osd.plot.mockClear();
+
+    await router.plot('div', {}, STACK, 600, PlotType.HEATMAP);
+    expect(osd.reset).toHaveBeenCalled();
+    expect(osd.plot).not.toHaveBeenCalled();
+    router.setZIndex(1);
+    expect(osd.setZIndex).not.toHaveBeenCalledWith(1);
+
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await Promise.resolve();
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, STACK, 600, PlotType.IMAGE, false);
+  });
+
+  it('shows another image in the slice pane when the volume view plots it, and nothing without a stack', async () => {
+    await expect(router.setSliceEditor('div-slice')).resolves.toBe(false); // nothing plotted yet
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    osd.plot.mockClear();
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME); // a re-plot of the same image
+    await Promise.resolve();
+    expect(osd.plot).not.toHaveBeenCalled();
+    const other = { ...STACK, fileName: 'other.tif' };
+    await router.plot('div', {}, other, 600, PlotType.NAPARI_VOLUME);
+    await Promise.resolve();
+    expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, other, 600, PlotType.IMAGE, false);
+  });
+
+  it('rebuilds the 3D surfaces of the classes an edit touched once edits pause, not on a slice switch', async () => {
+    jest.useFakeTimers();
+    try {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+      napari.setRegionMeshes = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      const build = jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+      const square = (label: string, x: number) =>
+        Object.assign(new Region(), {
+          label,
+          bounds: Object.assign(new Rectangle(), { x, y: 0, width: 10, height: 10 }),
+        });
+      regionStore.enterStackMode(new Map([[0, [square('HPF', 0)]]]), 0, 'combined');
+      await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+      await router.showRegionClasses3d([
+        { key: 'HPF', classes: ['HPF', 'CA1'], color: '#7ed04b' },
+        { key: 'CB', classes: ['CB'], color: '#f0f080' },
+      ]);
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // Drawing CA1 (in HPF's group) twice in a row: one rebuild, of HPF only, after the pause.
+      regionStore.addRegion(square('CA1', 20));
+      regionStore.addRegion(square('CA1', 40));
+      await jest.advanceTimersByTimeAsync(300);
+      expect(build).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(400);
+      expect(build).toHaveBeenCalledTimes(2);
+      expect(build.mock.calls[1][0].map((g) => g.key)).toEqual([expect.stringContaining('HPF,CA1')]);
+
+      // A class not shown in 3D, or another slice coming up: nothing to rebuild.
+      regionStore.addRegion(square('MB', 60));
+      regionStore.setDisplaySlice(1);
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(build).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   // ── backend selection per plot type ───────────────────────────────────

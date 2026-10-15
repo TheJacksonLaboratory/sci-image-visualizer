@@ -23,7 +23,8 @@ import {
   volumeResolutionFor,
 } from './napari-helpers';
 import type { NapariScene, SceneContext } from './napari-scene';
-import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { RegionMesh3D, VolumeFrame, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { VolumeSlicePlane } from './napari-volume-slice-plane';
 import { RegionMeshPointer } from './napari-region-mesh-pointer';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
@@ -72,6 +73,8 @@ export class VolumeScene implements NapariScene {
   private displaySub: Subscription | null = null;
   /** Regions' 3D reconstructions shown in the volume (see {@link setRegionMeshes}). */
   private readonly regionMeshes: VolumeRegionMeshes;
+  /** The slice edited beside the volume, marked in it (see {@link setSlicePlane}). */
+  private readonly slicePlane: VolumeSlicePlane;
   /** The image's full size (px, px, slices), which reconstructions are in. */
   private fullSize: [number, number, number] | null = null;
   /** Clicks and hover on the reconstructions (with the selection tool). */
@@ -85,6 +88,7 @@ export class VolumeScene implements NapariScene {
     private readonly rendering: 'iso' | 'mip',
   ) {
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    this.slicePlane = new VolumeSlicePlane(ctx.viewer);
   }
 
   /** Show these region reconstructions in the volume (replacing the ones shown). */
@@ -98,6 +102,11 @@ export class VolumeScene implements NapariScene {
 
   setRegionHidden(keys: readonly string[]): void {
     this.regionMeshes.setHidden(keys);
+  }
+
+  /** Mark slice `z` in the volume (the one edited beside it), or none (null). */
+  setSlicePlane(z: number | null): void {
+    this.slicePlane.setZ(z);
   }
 
   /**
@@ -129,7 +138,9 @@ export class VolumeScene implements NapariScene {
     const base = this.worldBase;
     if (!base || !this.fullSize) return;
     const depth = base.depth * this.ctx.settings.volumeZScale;
-    this.regionMeshes.setFrame({ size: this.fullSize, world: [base.width, base.height, depth] });
+    const frame: VolumeFrame = { size: this.fullSize, world: [base.width, base.height, depth] };
+    this.regionMeshes.setFrame(frame);
+    this.slicePlane.setFrame(frame);
   }
 
   /**
@@ -348,6 +359,7 @@ export class VolumeScene implements NapariScene {
     this.zHandle?.destroy();
     this.zHandle = null;
     this.regionMeshes.clear();
+    this.slicePlane.clear();
     this.meshPointer?.destroy();
     this.meshPointer = null;
     this.toolSub?.unsubscribe();

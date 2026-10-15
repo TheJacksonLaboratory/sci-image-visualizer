@@ -142,6 +142,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionHighlight: readonly string[] = [];
   /** The keys of the reconstructions hidden. */
   private regionHidden: readonly string[] = [];
+  /** The slice marked in a volume view (the one edited beside it), or none. */
+  private slicePlane: number | null = null;
   /** Clicks on the reconstructions (see {@link getRegionMeshPick$}). */
   private readonly regionMeshPick$ = new Subject<{ key: string | null; additive: boolean }>();
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
@@ -356,6 +358,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
+      this.scene.setSlicePlane?.(this.slicePlane);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -435,6 +438,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   setRegionHidden(keys: readonly string[]): void {
     this.regionHidden = keys;
     this.scene?.setRegionHidden?.(keys);
+  }
+
+  /** Mark slice `z` in a volume view (the one edited beside it), or none (null); kept across plots. */
+  setSlicePlane(z: number | null): void {
+    this.slicePlane = z;
+    this.scene?.setSlicePlane?.(z);
   }
 
   /** A reconstruction clicked with the selection tool (its key), or the volume beside them (null). */

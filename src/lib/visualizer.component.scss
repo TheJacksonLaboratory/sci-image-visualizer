@@ -7,13 +7,40 @@
   overflow: hidden;
 }
 
-.viz-plot {
+.viz-panes {
   flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.viz-plot {
+  // A basis of 0, not the w-full width: the plot takes what the slice pane leaves.
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   // Guard against utility classes re-imposing height:100% (the docked-toolbar
   // clipping bug): the flex row above (toolbar) plus height:100% pushed the
   // plot's bottom strip out of the overflow:hidden host.
   height: auto !important;
+}
+
+// The split volume view's slice pane (its width set inline) and the divider beside it.
+.viz-slice-pane {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.viz-pane-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--surface-border, #cccccc);
+  touch-action: none;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--primary-color, #3b82f6);
+    outline: none;
+  }
 }
 
 // ── Toolbar dock ──────────────────────────────────────────────────────
