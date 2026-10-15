@@ -1170,8 +1170,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Replace the regions with an imported GeoJSON file's. A large file becomes the slice's region
-   * source instead (drawn by level of detail; listed above the table), the table emptied.
+   * Replace the regions with an imported GeoJSON file's, and the slice's region source with them.
+   * A large file becomes the slice's region source instead (drawn by level of detail; listed above
+   * the table), the table emptied.
    */
   private async applyImportedRois(text: string): Promise<void> {
     try {
@@ -1182,7 +1183,10 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.onSelectionChanged();
         return;
       }
-      this.regions = this.regionApi.importRegions(text);
+      // Parsed first: a file that is not GeoJSON leaves the source alone.
+      const regions = this.regionApi.importRegions(text);
+      await this.regionApi.dropRegionSource?.();
+      this.regions = regions;
       this.fillClassColors();
       this.commit();
     } catch (err) {

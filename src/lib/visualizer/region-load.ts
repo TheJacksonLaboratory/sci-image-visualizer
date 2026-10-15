@@ -13,7 +13,12 @@ export type RegionLoadTarget = Pick<
   'importRegions' | 'enterStackMode' | 'setRegions' | 'resetUndoHistory'
 > & {
   attachRegionSource?(source: RegionSource | RegionSourceOpener, slices?: RegionSourceSlices): void;
+  /** The slice shown now (what a stack's source, laid out once it opens, makes live). */
+  getDisplaySlice?(): number;
 };
+
+/** Per target, the latest {@link applyImageRois}: a stack source that opens after a later load is dropped. */
+const loads = new WeakMap<RegionLoadTarget, number>();
 
 /**
  * Apply an image's saved ROIs once its render has landed, choosing the region
@@ -37,7 +42,9 @@ export type RegionLoadTarget = Pick<
  *
  * Large ROI files (`minSourceChars` and up) and a server-side source (`regionSourceUrl`)
  * become tiled region sources instead of regions; a z-indexed one serves each slice its own
- * plane. A folder stack's sources open lazily, the first time their slice is shown.
+ * plane. On a single-file stack the source is opened first, to tell which: one on the default
+ * plane only stays global, as its regions would. A folder stack's sources open lazily, the first
+ * time their slice is shown.
  *
  * `z` is the slice shown now; entering stack mode makes it live and resets undo.
  */
@@ -48,6 +55,8 @@ export function applyImageRois(
   minSourceChars = REGION_SOURCE_MIN_CHARS,
 ): void {
   const attach = target.attachRegionSource?.bind(target);
+  const load = (loads.get(target) ?? 0) + 1;
+  loads.set(target, load);
   const asSource = (json: string | null | undefined): json is string =>
     !!attach && !!json && json.length >= minSourceChars;
 
@@ -73,14 +82,39 @@ export function applyImageRois(
       ? () => openHttpRegionSource(url)
       : () => openGeoJsonRegionSource(roiJson as string);
     // As loading a file of regions replaces the regions, a source starts the image afresh.
-    if (info.isStack) {
-      target.enterStackMode(new Map(), z, 'combined');
-      attach(open, 'planes');
-    } else {
-      target.setRegions([]);
-      attach(open, { slice: 0 });
-    }
+    target.setRegions([]);
     target.resetUndoHistory();
+    if (!info.isStack) {
+      attach(open, { slice: 0 });
+      return;
+    }
+    // A stack: per slice when the source is z-indexed, else global (as its regions would be).
+    let first: Promise<RegionSource> | null = open();
+    const reuse: RegionSourceOpener = () => {
+      const opening = first;
+      first = null;
+      return opening ?? open();
+    };
+    const lay = (zIndexed: boolean) => {
+      if (loads.get(target) !== load) {
+        void first?.then(
+          (source) => source.dispose(),
+          () => undefined,
+        );
+        return;
+      }
+      if (zIndexed) {
+        target.enterStackMode(new Map(), target.getDisplaySlice?.() ?? z, 'combined');
+        attach(reuse, 'planes');
+      } else {
+        attach(reuse, { slice: 0 });
+      }
+    };
+    // One that cannot be opened is attached as a single plane (its slice reports the failure).
+    first.then(
+      (source) => lay(source.info.planes.some((p) => p !== 0)),
+      () => lay(false),
+    );
     return;
   }
   if (info.isStack) {

@@ -13,7 +13,7 @@ export interface RegionSourceBinding {
   plane: number;
 }
 
-/** Sources held open, past which the least recently shown unbusy one is closed. */
+/** Sources held open, past which the least recently used one is closed (never the one shown). */
 export const OPEN_REGION_SOURCES = 6;
 
 interface Entry {
@@ -40,14 +40,18 @@ const NONE: ReadonlySet<string> = new Set<string>();
  * the source features taken out of the source (into the working set, or deleted) — those the
  * source no longer draws and an export leaves out.
  *
- * Sources open lazily, the first time their slice is shown, and at most
- * {@link OPEN_REGION_SOURCES} stay open: the least recently shown are closed and re-opened from
- * their opener when shown again (a source's ids are stable, so what was taken stays taken).
+ * Sources open lazily, the first time their slice is shown or read, and at most
+ * {@link OPEN_REGION_SOURCES} stay open: the least recently used are closed and re-opened from
+ * their opener when used again (a source's ids are stable, so what was taken stays taken). The
+ * source of the slice on screen ({@link show}) is never closed for another: a read across every
+ * slice must not close the source the viewer draws and takes from.
  */
 export class RegionSourceScope {
   private readonly images = new Map<string, ImageSources>();
-  /** Open entries, least recently shown first. */
+  /** Open entries, least recently used first. */
   private readonly openOrder: Entry[] = [];
+  /** The entry of the slice on screen: kept open. */
+  private shown: Entry | null = null;
 
   /** Attach `open` to `image` for `slices`, replacing (and closing) what was there. */
   attach(image: string, open: RegionSourceOpener, slices: RegionSourceSlices): void {
@@ -87,9 +91,19 @@ export class RegionSourceScope {
     sources.taken.delete(slice);
   }
 
+  /** The slice on screen (null: none): its source stays open while others are read. */
+  show(image: string | undefined, slice: number | null): void {
+    this.shown = image && slice !== null ? this.entry(image, slice) : null;
+  }
+
   /** Whether `image` has a source for `slice`. */
   has(image: string | undefined, slice: number): boolean {
     return !!image && !!this.entry(image, slice);
+  }
+
+  /** Whether `slice` of `image` has a source of its own (not a `'planes'` source's plane). */
+  hasOwnSource(image: string | undefined, slice: number): boolean {
+    return !!image && !!this.images.get(image)?.perSlice.has(slice);
   }
 
   /** Every slice of `image` with a source of its own (not counting a `'planes'` source). */
@@ -172,7 +186,10 @@ export class RegionSourceScope {
       );
     }
     while (this.openOrder.length > OPEN_REGION_SOURCES) {
-      const oldest = this.openOrder.shift() as Entry;
+      const [oldest] = this.openOrder.splice(
+        this.openOrder.findIndex((e) => e !== this.shown),
+        1,
+      );
       this.closeSource(oldest);
     }
     return entry.source;

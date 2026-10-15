@@ -293,6 +293,28 @@ describe('RegionEditorComponent', () => {
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
   });
 
+  it("replaces the slice's region source with a small imported file's regions", async () => {
+    const api = mockVisualizer as unknown as { importRegionSource: jest.Mock; dropRegionSource: jest.Mock };
+    const order: string[] = [];
+    api.importRegionSource = jest.fn().mockResolvedValue(false);
+    api.dropRegionSource = jest.fn(async () => {
+      order.push('drop');
+    });
+    (mockVisualizer.importRegions as jest.Mock).mockReturnValue([]);
+    (mockVisualizer.setAnnotationRegions as jest.Mock).mockImplementation(() => order.push('commit'));
+    await (component as any).applyImportedRois('{"type":"FeatureCollection","features":[]}');
+    expect(order).toEqual(['drop', 'commit']);
+
+    // A file that does not parse leaves the source alone.
+    api.dropRegionSource.mockClear();
+    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
+      throw new Error('bad geojson');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await (component as any).applyImportedRois('garbage');
+    expect(api.dropRegionSource).not.toHaveBeenCalled();
+  });
+
   it('stops the save-as exists check on destroy (RT-32)', fakeAsync(() => {
     const io = (component as any).persistence.io as RegionIoPort;
     const exists = jest.fn(() => of(true));

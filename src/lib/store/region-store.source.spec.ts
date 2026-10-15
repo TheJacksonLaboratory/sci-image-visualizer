@@ -205,6 +205,18 @@ describe('RegionStore region sources', () => {
     expect(view?.source).toBe(sources[0]);
   });
 
+  it("keeps the displayed slice's source open while every slice is read", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    const sources = Array.from({ length: OPEN_REGION_SOURCES + 2 }, (_, z) => tableSource([feature(`s${z}`, 0)]));
+    sources.forEach((s, z) => store.attachRegionSource(async () => s, { slice: z }));
+    await flush();
+    expect(view?.source).toBe(sources[0]);
+    await store.outlinesByClass(0);
+    expect(sources[0].disposed).toBe(false);
+    expect(sources.filter((s) => s.disposed)).toHaveLength(2);
+    expect(await store.takeSourceFeatures(['s0'])).toHaveLength(1);
+  });
+
   it('drops a take that resolves after the slice changed', async () => {
     store.enterStackMode(new Map(), 0, 'per-slice-file');
     store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 });
@@ -213,6 +225,42 @@ describe('RegionStore region sources', () => {
     store.setDisplaySlice(1);
     expect(await pending).toEqual([]);
     expect(store.getRegions()).toEqual([]);
+  });
+
+  it("takes nothing from the outgoing slice's source while the incoming one opens", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    // Both slices' sources have a feature 'a', in different places.
+    store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 });
+    let open!: (s: RegionSource) => void;
+    const next = tableSource([feature('a', 50)]);
+    store.attachRegionSource(() => new Promise<RegionSource>((r) => (open = r)), { slice: 1 });
+    await flush();
+    expect(view?.plane).toBe(0);
+    store.setDisplaySlice(1);
+    // The outgoing view is gone at once: nothing can be taken from it into slice 1.
+    expect(view).toBeNull();
+    expect(await store.selectSourceFeatures(['a'])).toEqual([]);
+    store.deleteSourceFeatures(['a']);
+    open(next);
+    await flush();
+    expect(view?.source).toBe(next);
+    expect(view?.taken.size).toBe(0);
+    const [id] = await store.takeSourceFeatures(['a']);
+    expect((store.getRegions().find((r) => r.id === id)?.bounds as Rectangle).x).toBe(50);
+  });
+
+  it('keeps the labels the user turned off when the same source shows again', async () => {
+    const plain = tableSource([feature('a', 0)]);
+    const source = { ...plain, info: { ...plain.info, style: { labels: true } } };
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(source, 'planes');
+    await flush();
+    expect(view?.labels).toBe(true);
+    store.setShowShapeLabel(false);
+    store.setDisplaySlice(1);
+    await flush();
+    expect(view?.source).toBe(source);
+    expect(view?.labels).toBe(false);
   });
 
   it('detaches the image sources', async () => {
@@ -280,6 +328,40 @@ describe('RegionStore region sources', () => {
     store.deleteSourceFeatures(['b']);
     store.setDisplaySlice(0);
     await flush();
+    const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
+    expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
+  });
+
+  it("drops the slice's own source for regions imported in its place, and keeps the other slices'", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    const kept = tableSource([feature('k', 0)]);
+    const replaced = tableSource([feature('a', 0), feature('b', 20)]);
+    store.attachRegionSource(kept, { slice: 0 });
+    store.attachRegionSource(replaced, { slice: 1 });
+    store.setDisplaySlice(1);
+    await flush();
+    await store.dropSliceRegionSource();
+    store.setRegions([]);
+    await flush();
+    expect(view).toBeNull();
+    expect(replaced.disposed).toBe(true);
+    expect(JSON.parse(await store.getGeoJsonWithSource(store.getRegions(), 1)).features).toEqual([]);
+    store.setDisplaySlice(0);
+    await flush();
+    expect(view?.source).toBe(kept);
+  });
+
+  it("takes a slice's features out of a z-indexed source for regions imported in its place", async () => {
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(
+      tableSource([feature('a', 0, 'A', 0), feature('b', 0, 'A', 1), feature('c', 20, 'A', 1)]),
+      'planes',
+    );
+    store.setDisplaySlice(1);
+    await flush();
+    await store.dropSliceRegionSource();
+    expect([...(view?.taken ?? [])].sort()).toEqual(['b', 'c']);
+    expect(store.hasRegionSource()).toBe(true); // slice 0 still draws 'a'
     const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
     expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
   });

@@ -731,6 +731,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     });
     return true;
   }
+  dropRegionSource(): Promise<void> {
+    return this.regionStore.dropSliceRegionSource();
+  }
   getRegionSourceView$(): Observable<RegionSourceView | null> {
     return this.regionStore.getRegionSourceView$();
   }
@@ -914,6 +917,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   isStackMode(): boolean {
     return this.regionStore.isStackMode();
+  }
+  /** The slice the regions are shown for (recorded outside stack mode too). */
+  getDisplaySlice(): number {
+    return this.regionStore.getDisplaySlice();
   }
   getStackSaveLayout(): 'combined' | 'per-slice-file' {
     return this.regionStore.getStackSaveLayout();

@@ -3,6 +3,9 @@ import { IImageInfo } from '../contracts/image.contract';
 import { Region } from '../models/region';
 
 /** The layout table is pinned end-to-end in visualizer.component.spec.ts; these cover the pure function. */
+/** Long enough for a GeoJSON source to open (in the main thread, without workers). */
+const flush = () => new Promise((r) => setTimeout(r, 20));
+
 describe('applyImageRois', () => {
   const region = (z?: number): Region => Object.assign(new Region(), z === undefined ? {} : { z });
   const fixtures: Record<string, Region[]> = { A: [region()], Z: [region(1), region(0)] };
@@ -74,10 +77,53 @@ describe('applyImageRois', () => {
       expect(target.resetUndoHistory).toHaveBeenCalled();
     });
 
-    it('serves a large z-indexed stack file slice by slice from its planes', () => {
-      applyImageRois(info({ roiJsonStr: BIG }), target, 1, 10);
-      expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 1, 'combined');
-      expect(attach.mock.calls[0][1]).toBe('planes');
+    const onPlanes = (...zs: Array<number | undefined>) =>
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: zs.map((z, i) => ({
+          type: 'Feature',
+          id: `f${i}`,
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [
+              [
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 0],
+              ],
+            ],
+            ...(z === undefined ? {} : { plane: { z } }),
+          },
+        })),
+      });
+
+    it('serves a large z-indexed stack file slice by slice from its planes', async () => {
+      target.getDisplaySlice = jest.fn(() => 2);
+      applyImageRois(info({ roiJsonStr: onPlanes(0, 1) }), target, 1, 10);
+      await flush();
+      expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 2, 'combined');
+      const [open, slices] = attach.mock.calls[0];
+      expect(slices).toBe('planes');
+      expect((await open()).info.planes).toEqual([0, 1]);
+    });
+
+    it('keeps a large legacy stack file on the default plane global, as its regions would be', async () => {
+      applyImageRois(info({ roiJsonStr: onPlanes(undefined, 0) }), target, 1, 10);
+      await flush();
+      expect(target.enterStackMode).not.toHaveBeenCalled();
+      expect(target.setRegions).toHaveBeenCalledWith([]);
+      expect(attach.mock.calls[0][1]).toEqual({ slice: 0 });
+      expect(target.resetUndoHistory).toHaveBeenCalled();
+    });
+
+    it('drops a stack source that opens after another image loaded', async () => {
+      applyImageRois(info({ roiJsonStr: onPlanes(0, 1) }), target, 0, 10);
+      applyImageRois(info({ isStack: false, roiJsonStr: 'A' }), target, 0, 10);
+      await flush();
+      expect(attach).not.toHaveBeenCalled();
+      expect(target.enterStackMode).not.toHaveBeenCalled();
     });
 
     it('gives each large slice file of a folder stack its own lazy source', () => {
