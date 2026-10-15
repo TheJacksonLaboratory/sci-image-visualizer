@@ -107,6 +107,11 @@ export interface IRegionEditorApi {
    * and should be imported as regions; rejects when it is not a GeoJSON FeatureCollection.
    */
   importRegionSource?(geoJsonStr: string): Promise<boolean>;
+  /**
+   * Drop the slice's region source, for regions imported in its place (a small file replacing a
+   * large one). The other slices keep theirs.
+   */
+  dropRegionSource?(): Promise<void>;
   /** The slice's region source (null without one) and every change of it. */
   getRegionSourceView$?(): Observable<RegionSourceView | null>;
   /** A page of the slice source's features that were not taken from it. */

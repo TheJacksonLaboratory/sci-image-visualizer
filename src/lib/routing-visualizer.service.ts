@@ -731,6 +731,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     });
     return true;
   }
+  dropRegionSource(): Promise<void> {
+    return this.regionStore.dropSliceRegionSource();
+  }
   getRegionSourceView$(): Observable<RegionSourceView | null> {
     return this.regionStore.getRegionSourceView$();
   }

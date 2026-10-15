@@ -92,6 +92,11 @@ export class RegionSourceScope {
     return !!image && !!this.entry(image, slice);
   }
 
+  /** Whether `slice` of `image` has a source of its own (not a `'planes'` source's plane). */
+  hasOwnSource(image: string | undefined, slice: number): boolean {
+    return !!image && !!this.images.get(image)?.perSlice.has(slice);
+  }
+
   /** Every slice of `image` with a source of its own (not counting a `'planes'` source). */
   slicesWithSource(image: string | undefined): number[] {
     if (!image) return [];

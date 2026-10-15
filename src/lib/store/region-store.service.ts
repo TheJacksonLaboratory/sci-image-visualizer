@@ -793,6 +793,32 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.refreshSourceView();
   }
 
+  /**
+   * Drop the slice's region source, for regions imported in place of the slice's (a small file
+   * replacing a large one): a source of the slice's own is detached; a z-indexed source over every
+   * slice has this slice's features taken out (as deleted). The other slices keep theirs.
+   */
+  async dropSliceRegionSource(): Promise<void> {
+    const image = this.scope.activeImage;
+    const slice = this.sourceSlice;
+    if (!image || !this.sources.has(image, slice)) return;
+    if (this.sources.hasOwnSource(image, slice)) {
+      this.sources.detachSlice(image, slice);
+      this.sourcesVersion++;
+      this.refreshSourceView();
+      return;
+    }
+    const generation = this.sourceGeneration;
+    const binding = await this.sources.binding(image, slice);
+    if (!binding || generation !== this.sourceGeneration) return;
+    const all = await binding.source.getIndex(binding.plane, {
+      offset: 0,
+      limit: binding.source.info.featureCount,
+    });
+    if (generation !== this.sourceGeneration) return;
+    this.setTaken(new Set([...this.currentTaken(), ...all.rows.map((r) => r.id)]));
+  }
+
   /** Whether the slice shown has a region source. */
   hasRegionSource(): boolean {
     return this.sources.has(this.scope.activeImage, this.sourceSlice);

@@ -320,6 +320,40 @@ describe('RegionStore region sources', () => {
     expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
   });
 
+  it("drops the slice's own source for regions imported in its place, and keeps the other slices'", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    const kept = tableSource([feature('k', 0)]);
+    const replaced = tableSource([feature('a', 0), feature('b', 20)]);
+    store.attachRegionSource(kept, { slice: 0 });
+    store.attachRegionSource(replaced, { slice: 1 });
+    store.setDisplaySlice(1);
+    await flush();
+    await store.dropSliceRegionSource();
+    store.setRegions([]);
+    await flush();
+    expect(view).toBeNull();
+    expect(replaced.disposed).toBe(true);
+    expect(JSON.parse(await store.getGeoJsonWithSource(store.getRegions(), 1)).features).toEqual([]);
+    store.setDisplaySlice(0);
+    await flush();
+    expect(view?.source).toBe(kept);
+  });
+
+  it("takes a slice's features out of a z-indexed source for regions imported in its place", async () => {
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(
+      tableSource([feature('a', 0, 'A', 0), feature('b', 0, 'A', 1), feature('c', 20, 'A', 1)]),
+      'planes',
+    );
+    store.setDisplaySlice(1);
+    await flush();
+    await store.dropSliceRegionSource();
+    expect([...(view?.taken ?? [])].sort()).toEqual(['b', 'c']);
+    expect(store.hasRegionSource()).toBe(true); // slice 0 still draws 'a'
+    const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
+    expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
+  });
+
   it('counts the classes still in the source and selects whole classes', async () => {
     store.attachRegionSource(tableSource([feature('a', 0, 'X'), feature('b', 20, 'X'), feature('c', 40, 'Y')]));
     await flush();
