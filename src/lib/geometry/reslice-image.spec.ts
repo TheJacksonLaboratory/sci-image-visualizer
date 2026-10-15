@@ -1,3 +1,5 @@
+import { colormapFromLut, reverseColormap, tintColormap } from 'napari-js';
+
 import { VolumeVoxels, resliceImage } from './reslice-image';
 
 /** A 4 × 3 × 2 volume whose voxel (x, y, z) is 10·x + 50·y + 100·z. */
@@ -10,7 +12,15 @@ function volume(channels: Partial<VolumeVoxels['channels'][number]>[] = [{}]): V
     height: 3,
     depth: 2,
     invert: false,
-    channels: channels.map((c) => ({ data, color: '#ffffff', min: 0, max: 255, gamma: 1, visible: true, ...c })),
+    channels: channels.map((c) => ({
+      data,
+      colormap: tintColormap('#ffffff'),
+      min: 0,
+      max: 255,
+      gamma: 1,
+      visible: true,
+      ...c,
+    })),
   };
 }
 
@@ -33,8 +43,8 @@ describe('resliceImage', () => {
 
   it('windows, inverts and tints each channel, adding the visible ones', () => {
     const vol = volume([
-      { color: '#ff0000', min: 100, max: 200 },
-      { color: '#00ff00', visible: false },
+      { colormap: tintColormap('#ff0000'), min: 100, max: 200 },
+      { colormap: tintColormap('#00ff00'), visible: false },
     ]);
     const img = resliceImage(vol, 'x', 0);
     // Column z, row y: 0, 100 | 50, 150 | 100, 200, windowed over 100..200.
@@ -44,11 +54,19 @@ describe('resliceImage', () => {
     expect(red(inverted)[0]).toBe(255);
   });
 
-  it("maps the displayed value through a channel's colour ramp in place of its tint", () => {
+  it("colours each channel through its colormap's LUT, as the 3D view does (reversed, gamma)", () => {
     // Red falls as the value rises; green is the value.
-    const ramp = Array.from({ length: 256 }, (_, i) => [255 - i, i, 0] as [number, number, number]);
-    const img = resliceImage(volume([{ color: '#0000ff', min: 100, max: 200, ramp }]), 'x', 0);
+    const ramp = colormapFromLut(
+      'down',
+      Array.from({ length: 256 }, (_, i) => [255 - i, i, 0] as [number, number, number]),
+    );
+    const img = resliceImage(volume([{ colormap: ramp, min: 100, max: 200 }]), 'x', 0);
     expect(red(img)).toEqual([255, 255, 255, 127, 255, 0]);
     expect(Array.from(img.data.filter((_, i) => i % 4 === 2))).toEqual([0, 0, 0, 0, 0, 0]);
+    // Reverse-scale flips the ramp; napari gamma 2 shows the window's middle at a quarter.
+    const reversed = resliceImage(volume([{ colormap: reverseColormap(tintColormap('#ffffff')) }]), 'x', 0);
+    expect(red(reversed)[0]).toBe(255);
+    const gamma = resliceImage(volume([{ min: 100, max: 200, gamma: 2 }]), 'x', 0);
+    expect(red(gamma)[3]).toBe(64);
   });
 });

@@ -3,7 +3,6 @@ import { colormapFromLut, reverseColormap, tintColormap } from 'napari-js';
 import type { Colormap } from 'napari-js';
 
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
-import { parseCssColor } from '../../contracts/color';
 import { buildColormapLut, Rgb } from '../../contracts/colormap-lut';
 import { ColormapNode, SpatialViewState } from '../../contracts/display-types';
 import { spatialContinuousLut } from '../../spatial/spatial-encoding';
@@ -53,27 +52,6 @@ export function channelTintColormap(color: string, s: DisplaySnapshot): Colormap
  * `invert` (window → invert → gamma → colormap), not a second flip — the two differ once gamma ≠ 1.
  */
 export function volumeColormap(st: IChannelState | undefined, s: DisplaySnapshot): Colormap | string {
-  const lut = volumeColormapLut(s);
-  let cmap: Colormap | string = lut ? colormapFromLut('vol-cmap', lut) : tintColormap(st?.color ?? '#ffffff');
-  if (s.reverse) cmap = reverseColormap(cmap);
-  return cmap;
-}
-
-/**
- * {@link volumeColormap} as 256 colours (0..255 each), for drawing the volume outside napari-js
- * (the sections beside the split volume view): the colormap, else the channel's tint, reversed
- * for reverse-scale.
- */
-export function volumeRamp(color: string, s: DisplaySnapshot): Rgb[] {
-  const lut = volumeColormapLut(s);
-  if (lut) return s.reverse ? lut.slice().reverse() : lut;
-  const [r, g, b] = parseCssColor(color) ?? [255, 255, 255];
-  const ramp: Rgb[] = Array.from({ length: 256 }, (_, i) => [(r * i) / 255, (g * i) / 255, (b * i) / 255]);
-  return s.reverse ? ramp.reverse() : ramp;
-}
-
-/** The selected colormap's LUT when it drives the volume, else null (the channel's colour does). */
-function volumeColormapLut(s: DisplaySnapshot): Rgb[] | null {
   const node = s.colormap;
   // A colored colormap (viridis/magma/…) drives the volume; the default grayscale family
   // (gray / Greys / Greys Inv) yields to the channel's colour so the dialog colour swatch
@@ -81,7 +59,10 @@ function volumeColormapLut(s: DisplaySnapshot): Rgb[] | null {
   const label = (node?.label ?? '').toLowerCase();
   const grayFamily = label === '' || label.includes('grey') || label.includes('gray');
   const value = node?.data?.value;
-  return !grayFamily && value != null ? buildColormapLut(value, false) : null;
+  const lut = !grayFamily && value != null ? buildColormapLut(value, false) : null;
+  let cmap: Colormap | string = lut ? colormapFromLut('vol-cmap', lut) : tintColormap(st?.color ?? '#ffffff');
+  if (s.reverse) cmap = reverseColormap(cmap);
+  return cmap;
 }
 
 /** The LUT a continuous spatial layer draws with: the view's own choice, else the display

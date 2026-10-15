@@ -1,11 +1,13 @@
 import { BehaviorSubject, Observable } from 'rxjs';
 
 import type { IChannelState } from '../contracts/channel-histogram-api.contract';
-import type { Rgb } from '../contracts/colormap-lut';
+import type { Colormap } from 'napari-js';
+
 import type { SectionAxis, SectionRegions, SectionView, SectionViews } from '../contracts/section-view.contract';
 import type { SliceOutlines } from '../geometry/reconstruct';
 import { VolumeVoxels, resliceImage } from '../geometry/reslice-image';
 import { SectionIndex, indexOutlines, sectionOutlines } from '../geometry/section';
+import { toNapariGamma } from '../implementations/napari-js/napari-helpers';
 import type { VolumeVoxelsOnScreen } from '../implementations/napari-js/napari-scene';
 import type { SlicePlanes } from '../implementations/napari-js/napari-volume-slice-planes';
 
@@ -22,8 +24,8 @@ export interface VolumeSectionsDeps {
   isClassHidden(label: string): boolean;
   colorOf(label: string): string;
   channelStates(): IChannelState[];
-  /** A single-channel volume's colours, as the 3D view ramps it (see volumeColormap). */
-  ramp(color: string): Rgb[];
+  /** The colormap the 3D view draws a channel with: its tint in a multichannel volume, else the volume's. */
+  colormap(channel: IChannelState | undefined, multichannel: boolean): Colormap;
   invert(): boolean;
   /** The slice shown and edited. */
   slice(): number;
@@ -190,21 +192,20 @@ export class VolumeSections {
           const st = states.find((s) => s.index === c);
           return {
             data,
-            color: st?.color ?? '#ffffff',
+            colormap: this.deps.colormap(st, true),
             min: st?.min ?? 0,
             max: st?.max ?? 255,
-            gamma: st?.gamma ?? 1,
+            gamma: toNapariGamma(st?.gamma),
             visible: st?.visible ?? true,
           };
         })
       : [
           {
             data: vol.channels.get(0) as Uint8Array,
-            color: '#ffffff',
-            ramp: this.deps.ramp(states[0]?.color ?? '#ffffff'),
+            colormap: this.deps.colormap(states[0], false),
             min: states[0]?.min ?? 0,
             max: states[0]?.max ?? 255,
-            gamma: states[0]?.gamma ?? 1,
+            gamma: toNapariGamma(states[0]?.gamma),
             visible: true,
           },
         ];

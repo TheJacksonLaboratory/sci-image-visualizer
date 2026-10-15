@@ -1,24 +1,26 @@
 /**
  * An image of a plane through a volume (the X or Y section beside the 3D view), cut from the
- * volume's voxels and displayed the way the 2D view displays a slice: each channel windowed,
- * inverted, gamma-corrected (napari-js's order) and tinted, the channels added.
+ * volume's voxels and displayed the way napari-js displays the volume: each channel windowed,
+ * inverted and gamma-corrected (napari-js's `windowGamma`) and coloured by its colormap's LUT
+ * (`buildLut`), the channels added (an additive composite, clamped).
  *
- * Pure: usable from workers.
+ * Pure: no DOM, no GPU.
  */
+import { buildLut, windowGamma } from 'napari-js';
+import type { Colormap } from 'napari-js';
+
 import type { SectionAxis } from './section';
 
 /** One channel of a volume as it is displayed. */
 export interface VolumeChannelVoxels {
   /** uint8 voxels, x fastest, then y, then z. */
   data: Uint8Array;
-  /** Tint, `#rrggbb` (white: grayscale). */
-  color: string;
-  /** The colours the displayed value 0..255 maps to (256 RGB, 0..255 each), in place of the tint. */
-  ramp?: ReadonlyArray<readonly [number, number, number]>;
+  /** The colormap the 3D view draws the channel with (a tint, or the display colormap). */
+  colormap: Colormap;
   /** Display window over 0..255. */
   min: number;
   max: number;
-  /** ImageJ gamma: the windowed value t shows as t^(1/γ). */
+  /** napari-js gamma (see `toNapariGamma`): the windowed value t shows as t^γ. */
   gamma: number;
   visible: boolean;
 }
@@ -74,33 +76,14 @@ export function resliceImage(vol: VolumeVoxels, axis: SectionAxis, index: number
 
 /** Voxel value (0..255) → displayed RGB (0..255 each), as 256 RGB triples. */
 function channelLut(ch: VolumeChannelVoxels, invert: boolean): Float32Array {
-  const [r, g, b] = rgbOf(ch.color);
-  const ramp = ch.ramp?.length === 256 ? ch.ramp : null;
-  const span = ch.max - ch.min;
-  const invGamma = ch.gamma > 0 ? 1 / ch.gamma : 1;
+  const colors = buildLut(ch.colormap); // RGBA8 × 256
+  const last = colors.length / 4 - 1;
   const lut = new Float32Array(256 * 3);
   for (let v = 0; v < 256; v++) {
-    let t = span > 0 ? Math.min(1, Math.max(0, (v - ch.min) / span)) : 0;
-    if (invert) t = 1 - t;
-    t = Math.pow(t, invGamma) * 255;
-    if (ramp) {
-      const [cr, cg, cb] = ramp[Math.round(t)];
-      lut[3 * v] = cr;
-      lut[3 * v + 1] = cg;
-      lut[3 * v + 2] = cb;
-      continue;
-    }
-    lut[3 * v] = t * r;
-    lut[3 * v + 1] = t * g;
-    lut[3 * v + 2] = t * b;
+    const i = 4 * Math.round(windowGamma(v, ch.min, ch.max, ch.gamma, invert) * last);
+    lut[3 * v] = colors[i];
+    lut[3 * v + 1] = colors[i + 1];
+    lut[3 * v + 2] = colors[i + 2];
   }
   return lut;
-}
-
-/** `#rrggbb` → [0..1] × 3; white for anything else. */
-function rgbOf(color: string): [number, number, number] {
-  const m = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!m) return [1, 1, 1];
-  const n = parseInt(m[1], 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }

@@ -2,6 +2,7 @@ import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
 import { EMPTY, Observable, Subject, Subscription, combineLatest, merge, BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
+import { resolveColormap } from 'napari-js';
 
 import { IImageInfo, IImageMetadata } from './contracts/image.contract';
 import { Polygon, Region } from './models/region';
@@ -50,7 +51,7 @@ import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/cha
 import { autoWindowFromHistogram } from './contracts/intensity';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
-import { volumeRamp } from './implementations/napari-js/napari-display-state';
+import { channelTintColormap, volumeColormap } from './implementations/napari-js/napari-display-state';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
@@ -171,12 +172,17 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       isClassHidden: (label) => this.regionStore.isClassHidden(label),
       colorOf: (label) => this.classColor(label),
       channelStates: () => this.store.currentChannelStates(),
-      ramp: (color) =>
-        volumeRamp(color, {
+      colormap: (st, multichannel) => {
+        // As the volume scene colours the channel (invert is applied before the colormap).
+        const display = {
           colormap: this.store.currentColormap(),
           reverse: this.store.currentReverseScale(),
           invert: false,
-        }),
+        };
+        return resolveColormap(
+          multichannel ? channelTintColormap(st?.color ?? '#ffffff', display) : volumeColormap(st, display),
+        );
+      },
       invert: () => this.store.currentInvert(),
       slice: () => this.currentZIndex,
     });
