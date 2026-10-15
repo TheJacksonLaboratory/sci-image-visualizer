@@ -13,7 +13,7 @@ file was added.
 
 - **Large region sets drawn by level of detail.** An image's ROI GeoJSON of at least
   `VizConfig.regionSourceMinChars` characters (default 1 000 000) no longer loads as regions: it
-  opens as a *region source*, parsed and tiled in a Web Worker, and OpenSeadragon and napari draw
+  opens as a _region source_, parsed and tiled in a Web Worker, and OpenSeadragon and napari draw
   only the tiles in view — outlines simplified to under a screen pixel when zoomed out, exact at
   1:1 and closer (as the spatial views draw cell outlines). A feature joins the regions, as an
   ordinary editable region, when it is clicked, caught in a rubber band or picked in the Region

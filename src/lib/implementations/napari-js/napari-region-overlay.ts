@@ -484,10 +484,12 @@ export class NapariRegionOverlay implements IRegionOverlay {
       return;
     }
     const regions = this.store.getRegions();
-    this.store.setSelectedShapeIndices(regionsInRect(regions, x0, y0, x1, y1, {
+    this.store.setSelectedShapeIndices(
+      regionsInRect(regions, x0, y0, x1, y1, {
         skipProfiles: true,
         skip: (r) => this.store.isClassHidden(r.label),
-      }));
+      }),
+    );
     const features = this.sourceLayer?.featuresInRect(x0, y0, x1, y1) ?? [];
     if (features.length) {
       void this.store.selectSourceFeatures(

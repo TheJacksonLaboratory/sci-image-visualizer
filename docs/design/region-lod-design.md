@@ -42,7 +42,7 @@ outlines do), and keep every region editable.
   implementations behind one contract: a **worker source** built from a GeoJSON string (the worker
   holds the parsed features; the main thread only ever sees tiles and index pages) and an **HTTP
   source** (a server that serves the same tiles; the example tile server does).
-- **Tiles.** Level 0 is exact. Level *k* covers `tileSize · 2ᵏ` image pixels per tile and its
+- **Tiles.** Level 0 is exact. Level _k_ covers `tileSize · 2ᵏ` image pixels per tile and its
   outlines are simplified (Douglas–Peucker) to `2ᵏ⁻¹` image pixels, half a screen pixel when the
   view shows about `2ᵏ` image pixels per screen pixel. A feature smaller than the tolerance is left
   out of that level. A tile holds the **whole** simplified feature (not clipped) for every feature
@@ -91,7 +91,7 @@ The model above, with these decisions taken while building it:
   a step of its own, so undoing past it returns the feature to the source.
 - **Levels.** Exact at 1:1 and closer; level k for zooms in [2⁻ᵏ, 2¹⁻ᵏ), so a level's tolerance
   (`2ᵏ⁻¹` image px) is half to one screen pixel and the features it drops are under one to two.
-- **Store scope.** `RegionSourceScope` holds per image and slice an *opener*, not a source: a
+- **Store scope.** `RegionSourceScope` holds per image and slice an _opener_, not a source: a
   folder stack's per-slice sources open the first time their slice is shown and at most six stay
   open (re-opened on demand; ids are stable, so `taken` survives).
 - **Ids.** A feature's `id`, else `properties.id`, else `#<index>`; duplicates fall back to the

@@ -60,7 +60,13 @@ describe('RegionTableComponent', () => {
   });
 
   it("shows a region source row's area from the source's index (it has no geometry)", () => {
-    const standIn = Object.assign(new Region(), { id: -1, label: 'CA1', bounds: null, sourceId: 'f1', sourceArea: 64 });
+    const standIn = Object.assign(new Region(), {
+      id: -1,
+      label: 'CA1',
+      bounds: null,
+      sourceId: 'f1',
+      sourceArea: 64,
+    });
     fixture.componentRef.setInput('page', [standIn]);
     fixture.componentRef.setInput('mpp', { mppX: 25, mppY: 25 });
     fixture.detectChanges();

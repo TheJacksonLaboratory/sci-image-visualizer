@@ -57,11 +57,11 @@ feature, select it first.
 
 ## Loading one
 
-| How | When |
-|---|---|
+| How                                                                                                                    | When                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `IImageInfo.roiJsonStr` (or a folder stack's `roiJsonStrs[z]`) of at least `VizConfig.regionSourceMinChars` characters | Default 1 000 000. The GeoJSON is parsed and tiled in a Web Worker; the main thread only sees tiles. |
-| A Region Editor import of a file that large | Becomes the slice's source, replacing its regions. |
-| `IImageInfo.regionSourceUrl` | A server serves the tiles itself; the browser never downloads the set. |
+| A Region Editor import of a file that large                                                                            | Becomes the slice's source, replacing its regions.                                                   |
+| `IImageInfo.regionSourceUrl`                                                                                           | A server serves the tiles itself; the browser never downloads the set.                               |
 
 ```ts
 provideVisualization(),
@@ -79,13 +79,13 @@ A host can also open one itself: `openGeoJsonRegionSource(text)` and
 
 `openHttpRegionSource(base)` reads, relative to `base`:
 
-| Request | Answer |
-|---|---|
-| `GET info` | `RegionSourceInfo`: feature count, bounds, tile size, levels, planes, class colours |
-| `GET tile/{z}/{level}/{gx}/{gy}` | `{ features: [{ id, label, color, bbox, rings, open? }] }`, rings as flat `[x, y, …]` |
-| `POST features` `{ ids }` | `{ features: [{ id, feature }] }`, the exact GeoJSON features |
-| `POST index` `{ z, offset, limit, label?, exclude? }` | `{ total, rows: [{ id, label, color, bbox }] }` |
-| `POST export` `{ exclude, extra }` | a GeoJSON FeatureCollection: the set without `exclude`, then `extra` |
+| Request                                               | Answer                                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET info`                                            | `RegionSourceInfo`: feature count, bounds, tile size, levels, planes, class colours   |
+| `GET tile/{z}/{level}/{gx}/{gy}`                      | `{ features: [{ id, label, color, bbox, rings, open? }] }`, rings as flat `[x, y, …]` |
+| `POST features` `{ ids }`                             | `{ features: [{ id, feature }] }`, the exact GeoJSON features                         |
+| `POST index` `{ z, offset, limit, label?, exclude? }` | `{ total, rows: [{ id, label, color, bbox }] }`                                       |
+| `POST export` `{ exclude, extra }`                    | a GeoJSON FeatureCollection: the set without `exclude`, then `extra`                  |
 
 Level 0 is exact. A level-k tile covers `tileSize · 2ᵏ` image pixels and holds every feature
 whose box meets it, whole (not clipped), simplified by Douglas–Peucker to `2ᵏ⁻¹` pixels, without
