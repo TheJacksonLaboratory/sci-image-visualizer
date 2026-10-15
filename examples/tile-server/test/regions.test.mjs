@@ -45,7 +45,15 @@ const post = async (p, body) => {
 before(async () => {
   server = await startServer();
   const dir = path.join(server.dir, 'regions');
-  await writeFile(path.join(dir, 'cells.geojson'), collection([feature('a', 0, 'A'), feature('b', 600, 'B'), feature('c', 0, 'A', 1)]));
+  await writeFile(
+    path.join(dir, 'cells.geojson'),
+    JSON.stringify({
+      type: 'FeatureCollection',
+      classHierarchy: [{ name: 'A' }, { name: 'B', parent: 'A' }],
+      style: { labels: true },
+      features: [feature('a', 0, 'A'), feature('b', 600, 'B'), feature('c', 0, 'A', 1)],
+    }),
+  );
   await mkdir(path.join(dir, 'plates'));
   await writeFile(path.join(dir, 'plates', '001.geojson'), collection([feature('997', 0, 'root')]));
   await writeFile(path.join(dir, 'plates', '002.geojson'), collection([feature('997', 0, 'root'), feature('8', 200, 'grey')]));
@@ -93,6 +101,8 @@ test('a file set: info, tiles per plane, exact features, the index and the expor
 
   const out = (await post('/regions/cells/export', { exclude: ['b'], extra: [{ type: 'Feature', id: 'new', geometry: null }] })).body;
   assert.deepEqual(out.features.map((f) => f.id), ['a', 'c', 'new']);
+  assert.deepEqual(out.classHierarchy, [{ name: 'A' }, { name: 'B', parent: 'A' }]);
+  assert.deepEqual(out.style, { labels: true });
 });
 
 test('a folder set: one slice per file, ids qualified by slice', async () => {
@@ -120,6 +130,9 @@ test('a folder set: one slice per file, ids qualified by slice', async () => {
   const out = (await post('/regions/plates/export', { exclude: ['0:997'], extra: [] })).body;
   assert.deepEqual(out.features.map((f) => f.id), ['1:997', '1:8']);
   assert.equal(out.features[0].geometry.plane.z, 1);
+  // The set's hierarchy and style go with it, from regionset.json, as a single file carries them.
+  assert.deepEqual(out.classHierarchy, info.hierarchy);
+  assert.deepEqual(out.style, info.style);
 });
 
 test('refuses ids that are not one name, and answers 404 for an unknown set', async () => {
