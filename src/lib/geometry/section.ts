@@ -1,7 +1,8 @@
 /**
  * A section through a stack of slices' outlines: where a plane across the slices (x = const or
- * y = const) cuts each class's regions. A class's closed shapes cut into one interval per slice
- * they cross; stacked one slice thick, the intervals are traced into outlines. Its open lines
+ * y = const) cuts each class's regions. A class's closed shapes cut into intervals on each slice
+ * they cross (each feature even-odd, the features as their union); stacked one slice thick, the
+ * intervals are traced into outlines. Its open lines
  * (a layer boundary on each B-scan, say) cut into one point per slice they cross, joined slice to
  * slice into the line the boundary draws across the stack (a slice without it breaks the line).
  *
@@ -11,7 +12,7 @@
  * Pure: usable from workers.
  */
 import { maskToPolygons } from './contour';
-import type { SliceOutlines } from './reconstruct';
+import { SliceOutlines, featureRings } from './reconstruct';
 
 /** The plane: x = const (a section along y and the slices) or y = const (along x and the slices). */
 export type SectionAxis = 'x' | 'y';
@@ -47,6 +48,8 @@ interface Indexed {
 interface IndexedSlice {
   z: number;
   rings: Indexed[];
+  /** Each ring's feature (see SliceOutlines.ringGroups); absent: one feature. */
+  ringGroups?: ArrayLike<number>;
   lines: Indexed[];
 }
 
@@ -66,6 +69,7 @@ export function indexOutlines(byClass: ReadonlyMap<string, readonly SliceOutline
     const indexed = slices.map((s) => ({
       z: s.z,
       rings: s.rings.map((points) => withBox(points, box)),
+      ...(s.ringGroups ? { ringGroups: s.ringGroups } : {}),
       lines: (s.lines ?? []).map((points) => withBox(points, box)),
     }));
     if (box[0] <= box[2]) classes.set(label, { box, slices: indexed });
@@ -130,16 +134,25 @@ function cutShapes(
   let mask: Uint8Array | null = null;
   for (const s of slices) {
     if (!s.rings.length || s.z < 0 || s.z >= depth) continue;
-    const crossed = s.rings.filter((r) => spans(r.box, axis, at)).map((r) => r.points);
+    const crossed: ArrayLike<number>[] = [];
+    const groups: number[] = [];
+    s.rings.forEach((r, i) => {
+      if (!spans(r.box, axis, at)) return;
+      crossed.push(r.points);
+      groups.push(s.ringGroups?.[i] ?? 0);
+    });
     if (!crossed.length) continue;
-    const crossings = ringCrossings(crossed, axis, at);
-    for (let c = 0; c + 1 < crossings.length; c += 2) {
-      // Cells whose centre lies in the interval (the pixel-centre rule).
-      const from = Math.max(0, Math.ceil(crossings[c] / step - 0.5));
-      const to = Math.min(cells - 1, Math.floor(crossings[c + 1] / step - 0.5));
-      if (to < from) continue;
-      mask ??= new Uint8Array(w * h);
-      for (let k = from; k <= to; k++) mask[axis === 'x' ? k * w + s.z : s.z * w + k] = 1;
+    // Each feature's intervals, set into the mask: the features as their union.
+    for (const feature of featureRings(crossed, s.ringGroups ? groups : undefined)) {
+      const crossings = ringCrossings(feature, axis, at);
+      for (let c = 0; c + 1 < crossings.length; c += 2) {
+        // Cells whose centre lies in the interval (the pixel-centre rule).
+        const from = Math.max(0, Math.ceil(crossings[c] / step - 0.5));
+        const to = Math.min(cells - 1, Math.floor(crossings[c + 1] / step - 0.5));
+        if (to < from) continue;
+        mask ??= new Uint8Array(w * h);
+        for (let k = from; k <= to; k++) mask[axis === 'x' ? k * w + s.z : s.z * w + k] = 1;
+      }
     }
   }
   if (!mask) return [];

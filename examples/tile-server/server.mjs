@@ -27,7 +27,8 @@
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
 //   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
 //   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings, lines?, … }] }
-//        (classes null: every class, each outline labelled in ringLabels / lineLabels)
+//        (each ring's feature in ringGroups; classes null: every class, each outline labelled
+//        in ringLabels / lineLabels)
 //   POST /regions/:id/export { exclude, extra } -> GeoJSON FeatureCollection
 //
 // The `info` param is an OPAQUE, URL-safe base64 token minted by the browser
@@ -49,37 +50,83 @@ const pathJoin = path.join;
 const sharpFor = (raw, width, height) => sharp(raw, { raw: { width, height, channels: 3 } });
 import { loadDescriptor, readTile, readRegion, readPreview, listImages } from './lib/cog.mjs';
 import {
-  listSpatialDatasets, loadManifest, openWireFile, readIds, readColumn,
+  listSpatialDatasets,
+  loadManifest,
+  openWireFile,
+  readIds,
+  readColumn,
   readEmbedding,
-  readFeatureVector, searchFeatures,
+  readFeatureVector,
+  searchFeatures,
 } from './lib/spatial.mjs';
 import {
-  listZarrDatasets, zarrManifest, zarrCoords, zarrRadius, zarrIds, zarrColumn, zarrEmbedding,
-  zarrFeature, zarrFeatureSearch, zarrPolygons, zarrImageSource,
+  listZarrDatasets,
+  zarrManifest,
+  zarrCoords,
+  zarrRadius,
+  zarrIds,
+  zarrColumn,
+  zarrEmbedding,
+  zarrFeature,
+  zarrFeatureSearch,
+  zarrPolygons,
+  zarrImageSource,
 } from './lib/spatial-zarr.mjs';
 import {
-  listStDatasets, stManifest, stCoords, stIds, stColumn, stFeature, stFeatureSearch, stImage,
+  listStDatasets,
+  stManifest,
+  stCoords,
+  stIds,
+  stColumn,
+  stFeature,
+  stFeatureSearch,
+  stImage,
 } from './lib/spatial-st.mjs';
 import { writePyramid } from './lib/pyramid.mjs';
 import {
-  listH5adDatasets, h5adManifest, h5adCoords, h5adIds, h5adColumn, h5adFeature,
-  h5adFeatureSearch, h5adEmbedding, h5adImageSource, h5adHas,
+  listH5adDatasets,
+  h5adManifest,
+  h5adCoords,
+  h5adIds,
+  h5adColumn,
+  h5adFeature,
+  h5adFeatureSearch,
+  h5adEmbedding,
+  h5adImageSource,
+  h5adHas,
 } from './lib/spatial-h5ad.mjs';
 import {
-  listAbcDatasets, abcManifest, abcCoords, abcColumn, abcFeature, abcFeatureSearch, abcVolume,
+  listAbcDatasets,
+  abcManifest,
+  abcCoords,
+  abcColumn,
+  abcFeature,
+  abcFeatureSearch,
+  abcVolume,
 } from './lib/spatial-abc.mjs';
 import { readArray } from './lib/zarr3.mjs';
 import { listRegionSets, openRegionSet } from './lib/regions.mjs';
 import {
-  listXeniumDatasets, xeniumManifest, xeniumCoords, xeniumRadius, xeniumColumn, xeniumFeature,
-  xeniumFeatureSearch, xeniumPolygonTile, xeniumTranscriptTile, xeniumTranscriptBins, xeniumDensity,
-  xeniumTranscriptSummary, xeniumImportGroups, xeniumTranscriptCounts, xeniumMarkerGenes, xeniumGeneBins,
+  listXeniumDatasets,
+  xeniumManifest,
+  xeniumCoords,
+  xeniumRadius,
+  xeniumColumn,
+  xeniumFeature,
+  xeniumFeatureSearch,
+  xeniumPolygonTile,
+  xeniumTranscriptTile,
+  xeniumTranscriptBins,
+  xeniumDensity,
+  xeniumTranscriptSummary,
+  xeniumImportGroups,
+  xeniumTranscriptCounts,
+  xeniumMarkerGenes,
+  xeniumGeneBins,
 } from './lib/spatial-xenium.mjs';
 
 const PORT = Number(process.env.PORT || 8090);
-const COG_DIR = process.env.COG_DIR
-  ? process.env.COG_DIR
-  : new URL('./cogs', import.meta.url).pathname;
+const COG_DIR = process.env.COG_DIR ? process.env.COG_DIR : new URL('./cogs', import.meta.url).pathname;
 const SPATIAL_DIR = process.env.SPATIAL_DIR
   ? process.env.SPATIAL_DIR
   : new URL('./spatial', import.meta.url).pathname;
@@ -87,27 +134,17 @@ const SPATIAL_DIR = process.env.SPATIAL_DIR
 // (store, table, region) triple becomes a dataset.
 // A plain `.h5ad` dropped in here is served with no conversion command: CSC directly,
 // CSR through a bundle built on first open. See lib/spatial-h5ad.mjs.
-const H5AD_DIR = process.env.H5AD_DIR
-  ? process.env.H5AD_DIR
-  : new URL('./h5ad', import.meta.url).pathname;
-const ZARR_DIR = process.env.ZARR_DIR
-  ? process.env.ZARR_DIR
-  : new URL('./stores', import.meta.url).pathname;
+const H5AD_DIR = process.env.H5AD_DIR ? process.env.H5AD_DIR : new URL('./h5ad', import.meta.url).pathname;
+const ZARR_DIR = process.env.ZARR_DIR ? process.env.ZARR_DIR : new URL('./stores', import.meta.url).pathname;
 // Directory of LEGACY Spatial Transcriptomics bundles (gzipped TSV counts +
 // HE JPEGs + spot-selection tables), one sub-directory each. See lib/spatial-st.mjs.
-const ST_DIR = process.env.ST_DIR
-  ? process.env.ST_DIR
-  : new URL('./st', import.meta.url).pathname;
+const ST_DIR = process.env.ST_DIR ? process.env.ST_DIR : new URL('./st', import.meta.url).pathname;
 // Allen Brain Cell Atlas CSVs — the only 3D source here (see lib/spatial-abc.mjs
 // and scripts/fetch-abc.mjs). Absent unless someone has run the fetch script.
-const ABC_DIR = process.env.ABC_DIR
-  ? process.env.ABC_DIR
-  : new URL('./abc', import.meta.url).pathname;
+const ABC_DIR = process.env.ABC_DIR ? process.env.ABC_DIR : new URL('./abc', import.meta.url).pathname;
 // 10x Xenium output bundles read IN PLACE — a local `*_xe_outs.zip`, an unzipped `outs/`,
 // or a `<id>.json` pointing at an HTTP(S)/gs:// URL. See lib/spatial-xenium.mjs.
-const XENIUM_DIR = process.env.XENIUM_DIR
-  ? process.env.XENIUM_DIR
-  : new URL('./xenium', import.meta.url).pathname;
+const XENIUM_DIR = process.env.XENIUM_DIR ? process.env.XENIUM_DIR : new URL('./xenium', import.meta.url).pathname;
 // Large GeoJSON region sets served as level-of-detail tiles: `<id>.geojson`, or a folder of
 // per-slice `*.geojson`. See lib/regions.mjs.
 const REGION_DIR = process.env.REGION_DIR
@@ -142,7 +179,7 @@ function allowGroupImport(req, res) {
     const a = Buffer.from(sent);
     const b = Buffer.from(GROUP_IMPORT_TOKEN);
     if (a.length === b.length && timingSafeEqual(a, b)) return true;
-    res.status(401).json({ error: 'group import needs the server\'s import token' });
+    res.status(401).json({ error: "group import needs the server's import token" });
     return false;
   }
   if (GROUP_IMPORT_OPEN) return true;
@@ -172,58 +209,67 @@ async function ensureZarrImage(imageId) {
   try {
     await loadDescriptor(COG_DIR, imageId);
     return; // already built
-  } catch { /* fall through and build */ }
+  } catch {
+    /* fall through and build */
+  }
 
   // One build per image, even under concurrent tile requests.
   if (!pyramidJobs.has(imageId)) {
-    pyramidJobs.set(imageId, (async () => {
-      // A Zarr store holds the image as a cyx array; a legacy ST bundle holds a
-      // JPEG. Try each, and let the error surface if neither owns this id.
-      let source;
-      try {
-        source = { kind: 'zarr', ...(await zarrImageSource(ZARR_DIR, datasetId)) };
-      } catch {
+    pyramidJobs.set(
+      imageId,
+      (async () => {
+        // A Zarr store holds the image as a cyx array; a legacy ST bundle holds a
+        // JPEG. Try each, and let the error surface if neither owns this id.
+        let source;
         try {
-          source = { kind: 'st', ...(await stImage(ST_DIR, datasetId)) };
+          source = { kind: 'zarr', ...(await zarrImageSource(ZARR_DIR, datasetId)) };
         } catch {
-          // A Visium `.h5ad` carries its tissue image in `uns/spatial/<lib>/images`.
-          source = { kind: 'h5ad', ...(await h5adImageSource(H5AD_DIR, datasetId)) };
+          try {
+            source = { kind: 'st', ...(await stImage(ST_DIR, datasetId)) };
+          } catch {
+            // A Visium `.h5ad` carries its tissue image in `uns/spatial/<lib>/images`.
+            source = { kind: 'h5ad', ...(await h5adImageSource(H5AD_DIR, datasetId)) };
+          }
         }
-      }
-      console.log(`[tile-server] building pyramid for ${imageId} from ${source.kind}`);
+        console.log(`[tile-server] building pyramid for ${imageId} from ${source.kind}`);
 
-      let input;
-      let width;
-      let height;
-      if (source.kind === 'zarr') {
-        const img = await readArray(source.root, `images/${source.imageName}/${source.levelPath}`);
-        const [bands, h, w] = img.shape;
-        width = w;
-        height = h;
-        const rgb = Buffer.allocUnsafe(width * height * 3);
-        const plane = width * height;
-        for (let p = 0; p < plane; p++) {
-          rgb[p * 3] = img.data[p];
-          rgb[p * 3 + 1] = bands > 1 ? img.data[plane + p] : img.data[p];
-          rgb[p * 3 + 2] = bands > 2 ? img.data[2 * plane + p] : img.data[p];
+        let input;
+        let width;
+        let height;
+        if (source.kind === 'zarr') {
+          const img = await readArray(source.root, `images/${source.imageName}/${source.levelPath}`);
+          const [bands, h, w] = img.shape;
+          width = w;
+          height = h;
+          const rgb = Buffer.allocUnsafe(width * height * 3);
+          const plane = width * height;
+          for (let p = 0; p < plane; p++) {
+            rgb[p * 3] = img.data[p];
+            rgb[p * 3 + 1] = bands > 1 ? img.data[plane + p] : img.data[p];
+            rgb[p * 3 + 2] = bands > 2 ? img.data[2 * plane + p] : img.data[p];
+          }
+          input = sharpFor(rgb, width, height);
+        } else if (source.kind === 'h5ad') {
+          // Already RGB bytes from `uns/spatial/<lib>/images/hires`, not an encoded file, so
+          // it goes to sharp as a raw buffer the way the zarr planes do.
+          width = source.width;
+          height = source.height;
+          input = sharpFor(source.rgb, width, height);
+        } else {
+          input = sharp(source.bytes, { limitInputPixels: false });
+          const meta = await input.metadata();
+          width = meta.width;
+          height = meta.height;
         }
-        input = sharpFor(rgb, width, height);
-      } else if (source.kind === 'h5ad') {
-        // Already RGB bytes from `uns/spatial/<lib>/images/hires`, not an encoded file, so
-        // it goes to sharp as a raw buffer the way the zarr planes do.
-        width = source.width;
-        height = source.height;
-        input = sharpFor(source.rgb, width, height);
-      } else {
-        input = sharp(source.bytes, { limitInputPixels: false });
-        const meta = await input.metadata();
-        width = meta.width;
-        height = meta.height;
-      }
-      await writePyramid(pathJoin(COG_DIR, imageId), input,
-        { width, height, mppX: source.mpp, mppY: source.mpp });
-      console.log(`[tile-server] pyramid ready: ${imageId} (${width}x${height})`);
-    })().finally(() => pyramidJobs.delete(imageId)));
+        await writePyramid(pathJoin(COG_DIR, imageId), input, {
+          width,
+          height,
+          mppX: source.mpp,
+          mppY: source.mpp,
+        });
+        console.log(`[tile-server] pyramid ready: ${imageId} (${width}x${height})`);
+      })().finally(() => pyramidJobs.delete(imageId)),
+    );
   }
   await pyramidJobs.get(imageId);
 }
@@ -260,9 +306,7 @@ app.get('/tile', async (req, res) => {
       // Slice index for a z-stack (ignored for a single-slice image).
       intParam(req.query.z, 0),
     );
-    res.set('Content-Type', 'image/png')
-      .set('Cache-Control', 'public, max-age=86400')
-      .send(png);
+    res.set('Content-Type', 'image/png').set('Cache-Control', 'public, max-age=86400').send(png);
   } catch (err) {
     if (err instanceof RangeError) return res.status(404).end();
     res.status(400).json({ error: String(err?.message || err) });
@@ -279,9 +323,7 @@ app.get('/preview', async (req, res) => {
       String(req.query.tier || ''),
       req.query.z === undefined ? undefined : intParam(req.query.z, 0),
     );
-    res.set('Content-Type', 'image/png')
-      .set('Cache-Control', 'public, max-age=86400')
-      .send(png);
+    res.set('Content-Type', 'image/png').set('Cache-Control', 'public, max-age=86400').send(png);
   } catch (err) {
     res.status(400).json({ error: String(err?.message || err) });
   }
@@ -336,9 +378,7 @@ function spatialError(res, err) {
  */
 const REVALIDATE = 'no-cache';
 
-const octet = (res) => res
-  .set('Content-Type', 'application/octet-stream')
-  .set('Cache-Control', REVALIDATE);
+const octet = (res) => res.set('Content-Type', 'application/octet-stream').set('Cache-Control', REVALIDATE);
 
 /**
  * Which source owns an id, resolved by asking each for a manifest in priority
@@ -371,9 +411,12 @@ async function resolveSource(id) {
     ['xenium', () => xeniumManifest(XENIUM_DIR, id)],
     // Probed by whether the file exists, NOT by building its manifest: for a CSR file
     // that would start the conversion just to answer "is this yours?".
-    ['h5ad', async () => {
-      if (!(await h5adHas(H5AD_DIR, id))) throw new RangeError(`not an h5ad: ${id}`);
-    }],
+    [
+      'h5ad',
+      async () => {
+        if (!(await h5adHas(H5AD_DIR, id))) throw new RangeError(`not an h5ad: ${id}`);
+      },
+    ],
   ]) {
     try {
       await probe();
@@ -434,8 +477,7 @@ app.get('/spatial/datasets', async (_req, res) => {
 app.get('/spatial/:id/manifest', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    bundle: async () => res.set('Cache-Control', REVALIDATE)
-      .json(await loadManifest(SPATIAL_DIR, id)),
+    bundle: async () => res.set('Cache-Control', REVALIDATE).json(await loadManifest(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrManifest(ZARR_DIR, id)),
     st: async () => res.json(await stManifest(ST_DIR, id)),
     abc: async () => res.json(await abcManifest(ABC_DIR, id)),
@@ -451,7 +493,11 @@ app.get('/spatial/:id/manifest', async (req, res) => {
 // only `coords` — `radius` and `polygons` legitimately 404 there.
 const WIRE_FILES = {
   coords: {
-    file: 'coords.bin', zarr: zarrCoords, st: stCoords, abc: abcCoords, h5ad: h5adCoords,
+    file: 'coords.bin',
+    zarr: zarrCoords,
+    st: stCoords,
+    abc: abcCoords,
+    h5ad: h5adCoords,
     xenium: xeniumCoords,
   },
   // The anatomical volume a 3D cloud sits inside: uint8 scalar field, x-fastest.
@@ -481,8 +527,7 @@ for (const [route, { file, zarr, st, abc, h5ad, xenium }] of Object.entries(WIRE
 app.get('/spatial/:id/ids', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    bundle: async () => res.set('Cache-Control', REVALIDATE)
-      .json(await readIds(SPATIAL_DIR, id)),
+    bundle: async () => res.set('Cache-Control', REVALIDATE).json(await readIds(SPATIAL_DIR, id)),
     zarr: async () => res.json(await zarrIds(ZARR_DIR, id)),
     st: async () => res.json(await stIds(ST_DIR, id)),
     h5ad: async () => res.json(await h5adIds(H5AD_DIR, id)),
@@ -532,12 +577,14 @@ app.get('/spatial/:id/features', async (req, res) => {
     zarr: async () => res.json({ names: await zarrFeatureSearch(ZARR_DIR, id, req.query.q, limit) }),
     st: async () => res.json({ names: await stFeatureSearch(ST_DIR, id, req.query.q, limit) }),
     abc: async () => res.json({ names: await abcFeatureSearch(ABC_DIR, id, req.query.q, limit) }),
-    h5ad: async () => res.json({
-      names: await h5adFeatureSearch(H5AD_DIR, id, req.query.q, limit),
-    }),
-    xenium: async () => res.json({
-      names: await xeniumFeatureSearch(XENIUM_DIR, id, req.query.q, limit),
-    }),
+    h5ad: async () =>
+      res.json({
+        names: await h5adFeatureSearch(H5AD_DIR, id, req.query.q, limit),
+      }),
+    xenium: async () =>
+      res.json({
+        names: await xeniumFeatureSearch(XENIUM_DIR, id, req.query.q, limit),
+      }),
   });
 });
 
@@ -555,7 +602,14 @@ app.get('/spatial/:id/polygon-tile/:set/:level/:gx/:gy', async (req, res) => {
 /** `?genes=A,B,C` — capped, since each gene is a separate row range per tile. */
 function genesParam(v) {
   // A set: a repeated gene would otherwise be counted or returned twice.
-  const genes = [...new Set(String(v ?? '').split(',').map((g) => g.trim()).filter(Boolean))];
+  const genes = [
+    ...new Set(
+      String(v ?? '')
+        .split(',')
+        .map((g) => g.trim())
+        .filter(Boolean),
+    ),
+  ];
   if (genes.length > 512) throw new RangeError('at most 512 genes per request');
   return genes;
 }
@@ -564,11 +618,14 @@ app.get('/spatial/:id/transcript-tile/:level/:gx/:gy', async (req, res) => {
   const { id } = req.params;
   const [level, gx, gy] = ['level', 'gx', 'gy'].map((k) => intParam(req.params[k], NaN));
   await fromSource(res, id, {
-    xenium: async () => octet(res).send(await xeniumTranscriptTile(XENIUM_DIR, id, level, gx, gy, {
-      genes: genesParam(req.query.genes),
-      quality: req.query.quality === 'all' ? 'all' : 'high',
-      box: boxParam(req.query.box),
-    })),
+    xenium: async () =>
+      octet(res).send(
+        await xeniumTranscriptTile(XENIUM_DIR, id, level, gx, gy, {
+          genes: genesParam(req.query.genes),
+          quality: req.query.quality === 'all' ? 'all' : 'high',
+          box: boxParam(req.query.box),
+        }),
+      ),
   });
 });
 
@@ -593,23 +650,31 @@ app.get('/spatial/:id/transcript-bins/:level/:tx/:ty', async (req, res) => {
 // What a transcript marker or grouped bin stands for — hover details. JSON, small.
 app.get('/spatial/:id/transcript-summary', async (req, res) => {
   const { id } = req.params;
-  const cells = String(req.query.cells ?? '').split(',').filter(Boolean).map(Number)
-    .filter(Number.isInteger).slice(0, 32);
+  const cells = String(req.query.cells ?? '')
+    .split(',')
+    .filter(Boolean)
+    .map(Number)
+    .filter(Number.isInteger)
+    .slice(0, 32);
   await fromSource(res, id, {
-    xenium: async () => res.set('Cache-Control', REVALIDATE).json(await xeniumTranscriptSummary(XENIUM_DIR, id, {
-      box: boxParam(req.query.box),
-      genes: req.query.genes ? genesParam(req.query.genes) : undefined,
-      cells,
-    })),
+    xenium: async () =>
+      res.set('Cache-Control', REVALIDATE).json(
+        await xeniumTranscriptSummary(XENIUM_DIR, id, {
+          box: boxParam(req.query.box),
+          genes: req.query.genes ? genesParam(req.query.genes) : undefined,
+          cells,
+        }),
+      ),
   });
 });
 
 app.get('/spatial/:id/density', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    xenium: async () => octet(res).send(await xeniumDensity(
-      XENIUM_DIR, id, genesParam(req.query.genes), intParam(req.query.bin, 10),
-    )),
+    xenium: async () =>
+      octet(res).send(
+        await xeniumDensity(XENIUM_DIR, id, genesParam(req.query.genes), intParam(req.query.bin, 10)),
+      ),
   });
 });
 
@@ -626,8 +691,10 @@ app.post('/spatial/:id/groups', async (req, res) => {
 app.get('/spatial/:id/transcript-counts', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    xenium: async () => res.set('Cache-Control', REVALIDATE)
-      .json(await xeniumTranscriptCounts(XENIUM_DIR, id, genesParam(req.query.genes))),
+    xenium: async () =>
+      res
+        .set('Cache-Control', REVALIDATE)
+        .json(await xeniumTranscriptCounts(XENIUM_DIR, id, genesParam(req.query.genes))),
   });
 });
 
@@ -635,8 +702,17 @@ app.get('/spatial/:id/transcript-counts', async (req, res) => {
 app.get('/spatial/:id/gene-bins/:level/:tx/:ty', async (req, res) => {
   const { id } = req.params;
   await fromSource(res, id, {
-    xenium: async () => octet(res).send(await xeniumGeneBins(XENIUM_DIR, id, intParam(req.params.level, 0),
-      intParam(req.params.tx, 0), intParam(req.params.ty, 0), genesParam(req.query.genes))),
+    xenium: async () =>
+      octet(res).send(
+        await xeniumGeneBins(
+          XENIUM_DIR,
+          id,
+          intParam(req.params.level, 0),
+          intParam(req.params.tx, 0),
+          intParam(req.params.ty, 0),
+          genesParam(req.query.genes),
+        ),
+      ),
   });
 });
 
@@ -644,8 +720,10 @@ app.get('/spatial/:id/gene-bins/:level/:tx/:ty', async (req, res) => {
 app.get('/spatial/:id/markers/:column', async (req, res) => {
   const { id, column } = req.params;
   await fromSource(res, id, {
-    xenium: async () => res.set('Cache-Control', REVALIDATE)
-      .json(await xeniumMarkerGenes(XENIUM_DIR, id, column, intParam(req.query.n, 5))),
+    xenium: async () =>
+      res
+        .set('Cache-Control', REVALIDATE)
+        .json(await xeniumMarkerGenes(XENIUM_DIR, id, column, intParam(req.query.n, 5))),
   });
 });
 
