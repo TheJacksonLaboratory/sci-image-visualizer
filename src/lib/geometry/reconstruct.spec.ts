@@ -1,5 +1,4 @@
 import { outlinedVolume, outlinesArea, reconstruct, ringsArea } from './reconstruct';
-import { smoothMesh, surfaceNets } from './surface-nets';
 
 /** Signed volume of a closed triangle mesh (positive when its faces point outward). */
 function volume(vertices: Float32Array, faces: Uint32Array): number {
@@ -64,44 +63,6 @@ function closed(faces: Uint32Array): boolean {
   }
   return [...edges.values()].every((n) => n === 2);
 }
-
-describe('surfaceNets', () => {
-  it('meshes a single voxel as a closed, outward surface around its centre', () => {
-    const { vertices, faces } = surfaceNets(Uint8Array.of(1), 1, 1, 1);
-    expect(vertices.length / 3).toBe(8);
-    expect(faces.length / 3).toBe(12);
-    expect(closed(faces)).toBe(true);
-    expect(volume(vertices, faces)).toBeGreaterThan(0);
-    for (const v of vertices) {
-      expect(v).toBeGreaterThan(0);
-      expect(v).toBeLessThan(1);
-    }
-  });
-
-  it('meshes a 4³ block with a volume close to its own', () => {
-    const mask = new Uint8Array(6 * 6 * 6);
-    for (let z = 1; z < 5; z++)
-      for (let y = 1; y < 5; y++) for (let x = 1; x < 5; x++) mask[x + 6 * (y + 6 * z)] = 1;
-    const mesh = surfaceNets(mask, 6, 6, 6);
-    expect(closed(mesh.faces)).toBe(true);
-    expect(volume(mesh.vertices, mesh.faces)).toBeGreaterThan(27);
-    expect(volume(mesh.vertices, mesh.faces)).toBeLessThan(64);
-  });
-
-  it('meshes nothing for an empty mask', () => {
-    expect(surfaceNets(new Uint8Array(8), 2, 2, 2).faces.length).toBe(0);
-  });
-
-  it('smooths without moving an isolated vertex', () => {
-    const m = smoothMesh(
-      { vertices: Float32Array.of(0, 0, 0, 2, 0, 0, 0, 2, 0, 9, 9, 9), faces: Uint32Array.of(0, 1, 2) },
-      1,
-      1,
-    );
-    expect(Array.from(m.vertices.subarray(9))).toEqual([9, 9, 9]);
-    expect(m.vertices[0]).toBeCloseTo(1);
-  });
-});
 
 describe('reconstruct', () => {
   const square = (x: number, y: number, s: number) => Float32Array.of(x, y, x + s, y, x + s, y + s, x, y + s);

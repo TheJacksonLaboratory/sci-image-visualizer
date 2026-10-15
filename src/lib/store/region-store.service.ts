@@ -23,7 +23,7 @@ import {
   regionPolylines,
   replaceBounds,
 } from '../models/polygon-factory';
-import type { Mesh } from '../geometry/surface-nets';
+import type { Mesh } from 'napari-js/geometry';
 import { SliceOutlines, outlinesArea } from '../geometry/reconstruct';
 import { reconstructInWorker } from '../region-source/worker-region-source';
 import * as edit from '../models/polygon-edit';

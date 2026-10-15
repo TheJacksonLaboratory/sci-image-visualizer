@@ -5,10 +5,10 @@
  *
  * Pure: usable from workers.
  */
-import { pointInRing, ringArea } from 'napari-js/geometry';
+import { pointInRing, ringArea, smoothMesh, surfaceNets } from 'napari-js/geometry';
+import type { Mesh } from 'napari-js/geometry';
 
 import { loftLines } from './loft';
-import { Mesh, smoothMesh, surfaceNets } from './surface-nets';
 
 /**
  * A region's outlines on one slice: rings as interleaved `x, y` image pixels (holes included), and
@@ -87,7 +87,10 @@ function fill(slices: readonly SliceOutlines[], opts: ReconstructOptions): Mesh 
     }
   }
 
-  const mesh = smoothMesh(surfaceNets(mask, nx, ny, nz), opts.smooth ?? 2);
+  // Voxel i spanning [i, i + 1) (napari-js centres it on i): the scaling below maps cell edges to px.
+  const mesh = smoothMesh(surfaceNets(mask, [nx, ny, nz], { origin: [0.5, 0.5, 0.5] }), {
+    iterations: opts.smooth ?? 2,
+  });
   const v = mesh.vertices;
   for (let i = 0; i < v.length; i += 3) {
     v[i] = x0 + v[i] * step;

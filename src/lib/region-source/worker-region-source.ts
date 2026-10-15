@@ -23,7 +23,7 @@ import type {
   RegionTileKey,
 } from './region-tiles';
 import type { ReconstructOptions, SliceOutlines } from '../geometry/reconstruct';
-import type { Mesh } from '../geometry/surface-nets';
+import type { Mesh } from 'napari-js/geometry';
 
 /** Makes the worker; may be async, as the default one is (it imports the factory on demand). */
 export type RegionSourceWorkerFactory = () => Worker | Promise<Worker>;

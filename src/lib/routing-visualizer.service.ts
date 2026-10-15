@@ -40,7 +40,7 @@ import { RegionStore } from './store/region-store.service';
 import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
 import type { RegionStyle } from './region-overlay/region-style';
-import type { Mesh } from './geometry/surface-nets';
+import type { Mesh } from 'napari-js/geometry';
 import { openGeoJsonRegionSource } from './region-source/worker-region-source';
 import type { RegionSourceOpener, RegionSourceSlices } from './store/region-source-scope';
 import { SpatialSelectionStore } from './store/spatial-selection.service';

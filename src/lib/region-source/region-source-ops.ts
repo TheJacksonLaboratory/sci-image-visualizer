@@ -6,7 +6,7 @@
  * Protocol: `{ id, op, ...args }` → `{ id, ok: true, result }` | `{ id, ok: false, error }`.
  */
 import { ReconstructOptions, SliceOutlines, reconstruct } from '../geometry/reconstruct';
-import type { Mesh } from '../geometry/surface-nets';
+import type { Mesh } from 'napari-js/geometry';
 import {
   ClassOutlines,
   RegionFeatureTable,

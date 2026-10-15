@@ -5,7 +5,7 @@
  *
  * Pure: usable from workers.
  */
-import type { Mesh } from './surface-nets';
+import type { Mesh } from 'napari-js/geometry';
 
 /** A class's open polylines on one slice: interleaved `x, y` image pixels. */
 export interface SliceLines {
