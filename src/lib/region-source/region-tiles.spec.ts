@@ -273,6 +273,14 @@ describe('region-tiles', () => {
       expect(info.style).toEqual({ fillOpacity: 1, labels: true, stroke: '#333' });
     });
 
+    it('keeps the hierarchy and style through an edited export', () => {
+      const out = table.exportGeoJson(['a'], [{ type: 'Feature', id: 'new', geometry: null }]);
+      const reopened = RegionFeatureTable.fromGeoJson(out).info();
+      expect(reopened.hierarchy).toEqual(table.info().hierarchy);
+      expect(reopened.style).toEqual(table.info().style);
+      expect(JSON.parse(out).features.map((f: { id: string }) => f.id)).toEqual(['b', 'two', 'new']);
+    });
+
     it('counts features per class on a plane', () => {
       expect(table.classCounts(0)).toEqual({ CTX: 2, root: 1 });
       expect(table.classCounts(3)).toEqual({});

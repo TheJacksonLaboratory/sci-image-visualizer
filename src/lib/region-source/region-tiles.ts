@@ -610,7 +610,7 @@ export class RegionFeatureTable {
   /**
    * The source as a GeoJSON FeatureCollection string, through the working set: features whose
    * id is in `exclude` (taken for editing, or deleted) are left out, `extra` (the working set's
-   * features) appended. Every feature keeps an `id`.
+   * features) appended. Every feature keeps an `id`; the set keeps its hierarchy and style.
    */
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): string {
     const skip = new Set(exclude);
@@ -621,7 +621,7 @@ export class RegionFeatureTable {
       parts.push(JSON.stringify(feature.id === undefined ? { type: 'Feature', id, ...feature } : feature));
     });
     for (const f of extra) parts.push(JSON.stringify(f));
-    return `{"type":"FeatureCollection","features":[${parts.join(',')}]}`;
+    return featureCollectionJson(parts, this.hierarchy, this.style);
   }
 
   /**
@@ -738,6 +738,22 @@ function ringsOf(feature: GeoJsonFeatureLike): { rings: Float64Array[]; open: bo
     default:
       return { rings: [], open: false, parts: [] };
   }
+}
+
+/**
+ * A FeatureCollection string of `features` (each a feature's JSON), with the set's class hierarchy
+ * and style as its `classHierarchy` and `style` members when it has them: what
+ * {@link RegionFeatureTable.fromGeoJson} reads back.
+ */
+export function featureCollectionJson(
+  features: readonly string[],
+  hierarchy?: readonly RegionClassNode[],
+  style?: RegionSourceStyle,
+): string {
+  const head = ['"type":"FeatureCollection"'];
+  if (hierarchy?.length) head.push(`"classHierarchy":${JSON.stringify(hierarchy)}`);
+  if (style) head.push(`"style":${JSON.stringify(style)}`);
+  return `{${head.join(',')},"features":[${features.join(',')}]}`;
 }
 
 /** A well-formed class hierarchy from a file (colours as `#rrggbb` or `[r, g, b]`), else undefined. */

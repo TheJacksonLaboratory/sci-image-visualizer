@@ -305,8 +305,12 @@ class FolderRegionSet {
     return { total: page.total, rows: page.rows.map((r) => ({ ...r, id: `${z}:${r.id}` })) };
   }
 
-  /** Every slice's features (on plane z, ids qualified) through the working set, then `extra`. */
+  /**
+   * Every slice's features (on plane z, ids qualified) through the working set, then `extra`; the
+   * set's hierarchy and style (regionset.json) as the collection's members, as a single file has them.
+   */
   async export(exclude, extra) {
+    const [{ featureCollectionJson }, { hierarchy, style }] = await Promise.all([loadTiler(), this.info()]);
     const skip = new Set(exclude);
     const parts = [];
     for (let z = 0; z < this.files.length; z++) {
@@ -320,7 +324,7 @@ class FolderRegionSet {
       });
     }
     for (const f of extra) parts.push(JSON.stringify(f));
-    return `{"type":"FeatureCollection","features":[${parts.join(',')}]}`;
+    return featureCollectionJson(parts, hierarchy, style);
   }
 }
 
