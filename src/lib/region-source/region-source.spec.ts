@@ -140,6 +140,51 @@ describe('openGeoJsonRegionSource', () => {
     warn.mockRestore();
   });
 
+  it('re-opens a source that was idle when the worker died, and never reads another source by its old handle', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const worker = new FakeWorker();
+    const client = new RegionSourceWorkerClient(() => worker as unknown as Worker);
+    const first = await openGeoJsonRegionSource(GEOJSON, client);
+    const other = JSON.stringify({
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          id: 'a',
+          properties: {},
+          geometry: { type: 'Polygon', coordinates: [square(5, 5, 1)] },
+        },
+      ],
+    });
+    const second = await openGeoJsonRegionSource(other, client);
+    // Nothing in flight: no call is told the worker is gone.
+    worker.crash();
+    // A source opened since lives in the main-thread tables, under a handle the old ones may share.
+    const third = await openGeoJsonRegionSource(GEOJSON, client);
+    const [a1, a2, a3] = await Promise.all([first, second, third].map((s) => s.getFeatures(['a'])));
+    expect(a1).toEqual(a3);
+    expect(a2).not.toEqual(a1);
+    // Concurrent calls after the crash share one re-open.
+    const opens = () => worker.posted.filter((m) => m.op === 'open').length;
+    const before = opens();
+    await Promise.all([second.getFeatures(['a']), second.getIndex(0, { offset: 0, limit: 5 })]);
+    expect(opens()).toBe(before);
+    warn.mockRestore();
+  });
+
+  it('opens on the main thread when the worker dies under the open', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const worker = new FakeWorker();
+    const client = new RegionSourceWorkerClient(() => worker as unknown as Worker);
+    worker.hold = true;
+    const opening = openGeoJsonRegionSource(GEOJSON, client);
+    await new Promise((r) => setTimeout(r));
+    worker.crash();
+    const source = await opening;
+    expect((await source.getFeatures(['b']))[0].id).toBe('b');
+    warn.mockRestore();
+  });
+
   it('closes its table on dispose', async () => {
     const worker = new FakeWorker();
     const source = await openGeoJsonRegionSource(

@@ -3,7 +3,8 @@
  *
  * One worker serves every open source. Where no worker can start (jsdom, SSR, a blocked worker
  * URL) the same tables run on the main thread; if the worker dies, each source re-opens itself
- * there from its text (which the host holds anyway: it handed it over) and carries on.
+ * there from its text (which the host holds anyway: it handed it over) and carries on — whether
+ * it had a call in flight then or not (see {@link RegionSourceWorkerClient.generation}).
  */
 import { RegionSource, RegionTileCache, SourceFeature, abortable } from './region-source';
 import {
@@ -49,6 +50,7 @@ export class RegionSourceWorkerClient {
   private readonly pending = new Map<number, PendingCall>();
   /** The main-thread tables, once anything runs here. */
   private local: RegionSourceTables | null = null;
+  private tables = 0;
 
   /**
    * `factory` is optional: without one the real worker module is imported on demand —
@@ -62,15 +64,34 @@ export class RegionSourceWorkerClient {
     return this.unavailable;
   }
 
+  /**
+   * Which table set calls run on: bumped when the worker is lost. A handle opened under another
+   * names a table that is gone (or, here, another source's), so its source must open again.
+   */
+  get generation(): number {
+    return this.tables;
+  }
+
   /** Run `request` in the worker, or here when there is none. */
   async call<R extends RegionSourceRequest>(request: R): Promise<RegionSourceResults[R['op']]> {
-    const worker = await this.ensureWorker();
-    if (!worker) return (this.local ??= new RegionSourceTables()).run(request);
+    return (await this.run(request)).result;
+  }
+
+  /** {@link call}, with the {@link generation} the request ran on. */
+  async run<R extends RegionSourceRequest>(
+    request: R,
+  ): Promise<{ result: RegionSourceResults[R['op']]; generation: number }> {
+    const started = await this.ensureWorker();
+    // The worker may have been lost while this waited for it.
+    const worker = started === this.worker ? started : null;
+    const generation = this.tables;
+    if (!worker) return { result: (this.local ??= new RegionSourceTables()).run(request), generation };
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    const result = await new Promise<RegionSourceResults[R['op']]>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       worker.postMessage({ ...request, id } as RegionSourceMessage);
     });
+    return { result, generation };
   }
 
   /** Terminate the worker; calls in flight reject. */
@@ -127,6 +148,7 @@ export class RegionSourceWorkerClient {
 
   /** Stop the worker for good: every later call runs here, every call in flight is lost. */
   private lose(): void {
+    if (this.worker) this.tables++;
     this.unavailable = true;
     this.worker?.terminate();
     this.worker = null;
@@ -151,8 +173,12 @@ export async function openGeoJsonRegionSource(
   text: string,
   client: RegionSourceWorkerClient = sharedRegionSourceClient(),
 ): Promise<RegionSource> {
-  const { handle, info } = await client.call({ op: 'open', text });
-  return new WorkerRegionSource(client, text, handle, info);
+  // The worker lost under the open: open on the main thread instead.
+  const opened = await client
+    .run({ op: 'open', text })
+    .catch((err) => (err instanceof WorkerLostError ? client.run({ op: 'open', text }) : Promise.reject(err)));
+  const { handle, info } = opened.result;
+  return new WorkerRegionSource(client, text, handle, opened.generation, info);
 }
 
 /**
@@ -170,13 +196,15 @@ export function reconstructInWorker(
 class WorkerRegionSource implements RegionSource {
   private readonly cache = new RegionTileCache();
   private disposed = false;
-  /** The main-thread re-open after the worker died, shared by the calls it interrupted. */
-  private reopening: Promise<number> | null = null;
+  /** The main-thread re-open after the worker died, shared by every call that finds it so. */
+  private reopening: Promise<void> | null = null;
 
   constructor(
     private readonly client: RegionSourceWorkerClient,
     private readonly text: string,
     private handle: number,
+    /** The client's {@link RegionSourceWorkerClient.generation} {@link handle} was opened under. */
+    private generation: number,
     readonly info: RegionSourceInfo,
   ) {}
 
@@ -215,27 +243,37 @@ class WorkerRegionSource implements RegionSource {
     if (this.disposed) return;
     this.disposed = true;
     this.cache.clear();
+    // A handle from a lost worker's tables names nothing here, or another source's table.
+    if (this.generation !== this.client.generation) return;
     void this.client.call({ op: 'close', handle: this.handle }).catch(() => undefined);
   }
 
-  /** Run a request on this source's table; when the worker died, re-open here and retry. */
+  /**
+   * Run a request on this source's table; when the worker died (under this call or before it),
+   * re-open here and run it there.
+   */
   private async call<R extends RegionSourceRequest>(
     make: (handle: number) => R,
   ): Promise<RegionSourceResults[R['op']]> {
-    const lost = this.handle;
-    try {
-      return await this.client.call(make(lost));
-    } catch (err) {
-      if (!(err instanceof WorkerLostError)) throw err;
-      if (this.handle === lost) {
-        this.reopening ??= this.client.call({ op: 'open', text: this.text }).then(({ handle }) => {
-          this.handle = handle;
-          this.reopening = null;
-          return handle;
-        });
-        await this.reopening;
+    for (let attempt = 0; ; attempt++) {
+      if (this.generation !== this.client.generation) await this.reopen();
+      try {
+        return await this.client.call(make(this.handle));
+      } catch (err) {
+        if (!(err instanceof WorkerLostError) || attempt > 0) throw err;
       }
-      return this.client.call(make(this.handle));
     }
+  }
+
+  /** Open this source's text again on the client's current tables, once for every call waiting. */
+  private reopen(): Promise<void> {
+    this.reopening ??= this.client
+      .run({ op: 'open', text: this.text })
+      .then(({ result, generation }) => {
+        this.handle = result.handle;
+        this.generation = generation;
+      })
+      .finally(() => (this.reopening = null));
+    return this.reopening;
   }
 }
