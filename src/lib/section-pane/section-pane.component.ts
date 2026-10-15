@@ -32,6 +32,9 @@ const FILL_ALPHA = 0.25;
  * double-click fits; a click picks that point (`pick`, in section coordinates) — the host moves
  * the other planes there.
  */
+/** Section coordinates (u, v) → canvas px. */
+type ToCanvas = (u: number, v: number) => [number, number];
+
 @Component({
   selector: 'viz-section-pane',
   standalone: true,
@@ -125,6 +128,7 @@ export class SectionPaneComponent implements AfterViewInit, OnChanges, OnDestroy
   ngAfterViewInit(): void {
     if (typeof ResizeObserver !== 'undefined') {
       this.zone.runOutsideAngular(() => {
+        this.resize?.disconnect();
         this.resize = new ResizeObserver(() => this.draw());
         this.resize.observe(this.canvasRef.nativeElement);
       });
@@ -255,6 +259,12 @@ export class SectionPaneComponent implements AfterViewInit, OnChanges, OnDestroy
     ctx.drawImage(this.imageCanvas(view.image), t.ox, t.oy, U * t.sx, V * t.sy);
 
     const px = (u: number, v: number): [number, number] => [t.ox + u * t.sx, t.oy + v * t.sy];
+    this.paintRegions(ctx, view, px);
+    this.paintCrosshair(ctx, view, t, px);
+  }
+
+  /** Each class's cut: its outlines filled and stroked, its lines drawn (a dot for one point). */
+  private paintRegions(ctx: CanvasRenderingContext2D, view: SectionView, px: ToCanvas): void {
     for (const r of view.regions) {
       if (r.rings.length) {
         ctx.beginPath();
@@ -294,8 +304,16 @@ export class SectionPaneComponent implements AfterViewInit, OnChanges, OnDestroy
         ctx.stroke();
       }
     }
+  }
 
-    // The other planes: across (u) and down (v), in their axis colours.
+  /** The other planes: across (u) and down (v), dashed in their axis colours. */
+  private paintCrosshair(
+    ctx: CanvasRenderingContext2D,
+    view: SectionView,
+    t: { ox: number; oy: number; sx: number; sy: number },
+    px: ToCanvas,
+  ): void {
+    const [U, V] = view.size;
     const across: keyof typeof SLICE_PLANE_COLORS = this.axis === 'x' ? 'z' : 'x';
     const down: keyof typeof SLICE_PLANE_COLORS = this.axis === 'x' ? 'y' : 'z';
     ctx.setLineDash([6, 4]);
