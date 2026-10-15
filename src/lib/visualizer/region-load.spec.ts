@@ -111,6 +111,41 @@ describe('applyImageRois', () => {
       expect((await open()).info.planes).toEqual([0, 1]);
     });
 
+    describe('on the slice the stack opened on', () => {
+      // A store whose slice is still the last image's (0) when a stack arrives on slice 1.
+      let slice: number;
+      beforeEach(() => {
+        slice = 0;
+        target.isStackMode = jest.fn(() => false);
+        target.setDisplaySlice = jest.fn((z: number) => {
+          slice = z;
+        });
+        target.getDisplaySlice = jest.fn(() => slice);
+      });
+
+      it('lays the source out on that slice', async () => {
+        applyImageRois(info({ roiJsonStr: onPlanes(0, 1) }), target, 1, 10);
+        await flush();
+        expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 1, 'combined');
+      });
+
+      it('or on the slice scrubbed to while the source opened, the first one too', async () => {
+        applyImageRois(info({ roiJsonStr: onPlanes(0, 1) }), target, 1, 10);
+        target.setDisplaySlice!(0);
+        await flush();
+        expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 0, 'combined');
+      });
+
+      it('leaves a stack already in stack mode on its own slice', async () => {
+        target.isStackMode = jest.fn(() => true);
+        slice = 1;
+        applyImageRois(info({ roiJsonStr: onPlanes(0, 1) }), target, 0, 10);
+        await flush();
+        expect(target.setDisplaySlice).not.toHaveBeenCalled();
+        expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 1, 'combined');
+      });
+    });
+
     it('keeps a large legacy stack file on the default plane global, as its regions would be', async () => {
       applyImageRois(info({ roiJsonStr: onPlanes(undefined, 0) }), target, 1, 10);
       await flush();

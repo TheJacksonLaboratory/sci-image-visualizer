@@ -16,6 +16,9 @@ export type RegionLoadTarget = Pick<
   attachRegionSource?(source: RegionSource | RegionSourceOpener, slices?: RegionSourceSlices): void;
   /** The slice shown now (what a stack's source, laid out once it opens, makes live). */
   getDisplaySlice?(): number;
+  /** Record the slice shown (outside stack mode it only records it): see {@link applyImageRois}. */
+  setDisplaySlice?(z: number): void;
+  isStackMode?(): boolean;
 };
 
 /** Per target, the latest {@link applyImageRois}: a stack source that opens after a later load is dropped. */
@@ -93,6 +96,10 @@ export function applyImageRois(
       return;
     }
     // A stack: per slice when the source is z-indexed, else global (as its regions would be).
+    // The store learns the slice the image opened on (a host may open a stack on any slice), so
+    // the source, laid out on the store's slice once it opens, shows that one; a scrub meanwhile
+    // records its own, which then wins.
+    if (!target.isStackMode?.()) target.setDisplaySlice?.(z);
     let first: Promise<RegionSource> | null = open();
     const reuse: RegionSourceOpener = () => {
       const opening = first;
