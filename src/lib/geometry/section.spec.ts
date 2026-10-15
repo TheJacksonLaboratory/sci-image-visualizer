@@ -1,4 +1,4 @@
-import { sectionOutlines } from './section';
+import { indexOutlines, sectionOutlines } from './section';
 
 const square = (x: number, y: number, s: number) => Float64Array.of(x, y, x + s, y, x + s, y + s, x, y + s);
 
@@ -80,5 +80,15 @@ describe('sectionOutlines', () => {
     expect(cut.get('L')!.lines.map((l) => l.length)).toEqual([2, 2]);
     // Along y the line lies in the plane's direction: through y = 10 it is not crossed (half-open).
     expect(sectionOutlines(lines, 'y', 50, { depth: 2, extent: 100 }).size).toBe(0);
+  });
+
+  it('cuts the same from an index made once as from the outlines', () => {
+    const index = indexOutlines(stack);
+    for (const at of [0, 15, 20, 29, 105, 500]) {
+      expect(sectionOutlines(index, 'x', at, { depth: 10, extent: 100 })).toEqual(
+        sectionOutlines(stack, 'x', at, { depth: 10, extent: 100 }),
+      );
+    }
+    expect([...indexOutlines(new Map([['empty', [{ z: 0, rings: [] }]]])).classes.keys()]).toEqual([]);
   });
 });

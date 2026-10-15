@@ -60,6 +60,7 @@ function mockPlotService(): any {
     isStackMode: jest.fn().mockReturnValue(false),
     getSliceRegions: jest.fn().mockReturnValue([]),
     setPlotType: jest.fn(),
+    relayout: jest.fn(),
     ensureIntensitySampling: jest.fn().mockResolvedValue(undefined),
     // ── handler delegations exercised by the toolbar/region tests ──
     setReverseScale: jest.fn(),

@@ -816,14 +816,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * in 3D are rebuilt once the edits pause.
    */
   private onRegionsChanged(): void {
-    if (this.sliceMounted) this.sections.regionsChanged();
     const at = this.liveSliceKey();
     const signatures = classSignatures(this.regionStore.getRegions());
     const before = this.liveClasses;
     this.liveClasses = { at, signatures };
+    // Another slice or image came up: no region changed (the sections recut for the slice).
     if (!before || before.at !== at) return;
     const touched = changedClasses(before.signatures, signatures);
     if (!touched.size) return;
+    if (this.sliceMounted) this.sections.regionsChanged();
     for (const [key, entry] of [...this.meshCache]) {
       if (entry.classes.some((c) => touched.has(c))) this.meshCache.delete(key);
     }

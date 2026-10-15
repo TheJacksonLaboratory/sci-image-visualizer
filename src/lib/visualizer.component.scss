@@ -31,6 +31,10 @@
 
   > .viz-plot {
     grid-area: 1 / 1 / 2 / 2;
+    // A grid item is at least as tall as its content by default: the 3D canvas, sized for the
+    // whole area before the split, would keep its cell that tall and cover the section below.
+    min-height: 0;
+    overflow: hidden;
   }
 }
 

@@ -488,6 +488,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   protected async toggleSliceEditor(): Promise<void> {
     this.sliceEditor = !this.sliceEditor;
     this.cdr.detectChanges(); // the pane's div, before the backend looks it up
+    this.plotService.relayout(); // the 3D view is a quarter of the area now, or all of it again
     if (!this.sliceEditor) {
       await this.plotService.setSliceEditor?.(null);
       if (this.tools.active !== null && this.tools.active !== 'select') this.tools.apply(null);
@@ -548,7 +549,15 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     if (axis === 'x') this.splitX = value;
     else this.splitY = value;
     this.changed();
+    // The 3D view follows its cell once the grid has its new tracks.
+    if (this.relayoutFrame === null && typeof requestAnimationFrame !== 'undefined') {
+      this.relayoutFrame = requestAnimationFrame(() => {
+        this.relayoutFrame = null;
+        this.plotService.relayout();
+      });
+    }
   }
+  private relayoutFrame: number | null = null;
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
    *  raster — so the backend-agnostic zoom/pan toolbar tools are hidden. The

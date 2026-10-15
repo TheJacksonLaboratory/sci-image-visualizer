@@ -491,7 +491,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.canvas = null;
   }
 
+  /**
+   * The plot area changed size (the slice editor split it, a divider moved): fit the canvas, whose
+   * height was fixed at plot time, to it again.
+   */
   relayout(_trueImageSize?: number[]): void {
+    const { canvas, host } = this;
+    if (canvas && host) {
+      // Let the host take its height from the layout, not from the canvas inside it.
+      canvas.style.height = '0px';
+      const height = host.clientHeight;
+      canvas.style.height = height > 0 ? `${height}px` : '100%';
+    }
     this.viewer?.requestRender();
   }
 

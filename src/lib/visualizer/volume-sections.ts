@@ -4,7 +4,7 @@ import type { IChannelState } from '../contracts/channel-histogram-api.contract'
 import type { SectionAxis, SectionRegions, SectionView, SectionViews } from '../contracts/section-view.contract';
 import type { SliceOutlines } from '../geometry/reconstruct';
 import { VolumeVoxels, resliceImage } from '../geometry/reslice-image';
-import { sectionOutlines } from '../geometry/section';
+import { SectionIndex, indexOutlines, sectionOutlines } from '../geometry/section';
 import type { VolumeVoxelsOnScreen } from '../implementations/napari-js/napari-scene';
 import type { SlicePlanes } from '../implementations/napari-js/napari-volume-slice-planes';
 
@@ -25,6 +25,8 @@ export interface VolumeSectionsDeps {
 }
 
 const NONE: SectionViews = { x: null, y: null };
+/** How long the regions must rest after an edit before the sections cut them again (ms). */
+const REGIONS_SETTLE_MS = 150;
 
 /**
  * The sections beside a split volume view: the planes x = const and y = const (image px), each cut
@@ -37,8 +39,8 @@ export class VolumeSections {
   private readonly views$ = new BehaviorSubject<SectionViews>(NONE);
   private open = false;
   private planes: { x: number | null; y: number | null } = { x: null, y: null };
-  /** Every class's outlines at a level, read once until the regions change. */
-  private outlines: { level: number; read: Promise<Map<string, SliceOutlines[]>> } | null = null;
+  /** Every class's outlines at a level, read and indexed once until the regions change. */
+  private outlines: { level: number; read: Promise<SectionIndex> } | null = null;
   private scheduled: ReturnType<typeof setTimeout> | null = null;
   /** Bumped per cut, so a cut that waited on the outlines is dropped when a newer one starts. */
   private request = 0;
@@ -78,10 +80,15 @@ export class VolumeSections {
     return { ...this.planes, z: this.open ? this.deps.slice() : null };
   }
 
-  /** The regions changed: their outlines are read again for the next cut. */
+  /** The regions changed (an edit): their outlines are read again, once the edits pause. */
   regionsChanged(): void {
     this.outlines = null;
-    this.schedule();
+    if (!this.open) return;
+    if (this.scheduled) clearTimeout(this.scheduled);
+    this.scheduled = setTimeout(() => {
+      this.scheduled = null;
+      void this.cut();
+    }, REGIONS_SETTLE_MS);
   }
 
   /** Something the sections show changed (the slice, the display, the visible classes, the volume). */
@@ -108,21 +115,23 @@ export class VolumeSections {
     const step = w / Math.max(1, vol.width);
     const level = Math.max(0, Math.floor(Math.log2(Math.max(1, step))));
     if (!this.outlines || this.outlines.level !== level) {
-      this.outlines = { level, read: this.deps.outlinesByClass(level) };
+      this.outlines = { level, read: this.deps.outlinesByClass(level).then(indexOutlines) };
     }
-    let byClass: Map<string, SliceOutlines[]>;
+    let index: SectionIndex;
     try {
-      byClass = await this.outlines.read;
+      index = await this.outlines.read;
     } catch (err) {
       console.warn('[visualizer] The regions could not be cut for the sections.', err);
-      byClass = new Map();
+      index = indexOutlines(new Map());
     }
     if (request !== this.request || !this.open) return;
-    for (const label of byClass.keys()) if (this.deps.isClassHidden(label)) byClass.delete(label);
+    const shown: SectionIndex = {
+      classes: new Map([...index.classes].filter(([label]) => !this.deps.isClassHidden(label))),
+    };
     const voxels = this.voxels(vol);
     this.views$.next({
-      x: this.view('x', vol, voxels, byClass, step),
-      y: this.view('y', vol, voxels, byClass, step),
+      x: this.view('x', vol, voxels, shown, step),
+      y: this.view('y', vol, voxels, shown, step),
     });
   }
 
@@ -130,14 +139,14 @@ export class VolumeSections {
     axis: SectionAxis,
     vol: VolumeVoxelsOnScreen,
     voxels: VolumeVoxels,
-    byClass: ReadonlyMap<string, SliceOutlines[]>,
+    index: SectionIndex,
     step: number,
   ): SectionView {
     const [w, h, d] = vol.frame.size;
     const [ww, wh, wd] = vol.frame.world;
     const at = this.planes[axis] as number;
     const voxel = axis === 'x' ? (at / w) * vol.width : (at / h) * vol.height;
-    const cut = sectionOutlines(byClass, axis, at, { depth: d, extent: axis === 'x' ? h : w, step });
+    const cut = sectionOutlines(index, axis, at, { depth: d, extent: axis === 'x' ? h : w, step });
     const regions: SectionRegions[] = Array.from(cut, ([label, c]) => ({
       label,
       color: this.deps.colorOf(label),

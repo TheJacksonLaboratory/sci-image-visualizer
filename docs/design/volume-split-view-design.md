@@ -51,6 +51,28 @@ region tool next to the 3D volume, both live.
 
 ## As built
 
+### The orthogonal slice editor (follow-up, asked by the user)
+
+- **Layout:** a 2 × 2 grid: the volume top left, the slice being edited (Z) top right, the sections
+  through x and y bottom left and bottom right, with a vertical and a horizontal divider.
+- **Planes in the volume:** three translucent planes in their axis colours (x red, y green, z
+  blue, as the axes gizmo). Each has a grip, a DOM handle on one of its edges, that drags it along
+  its axis. The planes themselves don't take the pointer: one facing the camera covers the whole
+  volume, which must still orbit. Dragging the z plane picks the slice through the host's slider.
+- **Sections:** each is cut from the assembled volume (`geometry/reslice-image`), displayed like
+  the 2D view displays a slice, in the volume's proportions (the slices' depth included). Every
+  class's regions are cut by the same plane (`geometry/section`). Closed shapes are cut into an
+  interval per slice, stacked one slice thick and traced. Open lines, such as a layer boundary on
+  each B-scan, are cut into a point per slice and joined into the line they draw across the stack.
+  The other planes show as a dashed crosshair. A click in a section moves the slice and the other
+  plane there. The wheel zooms, a drag pans and a double-click fits.
+- **Region sources** read every class at once, each outline labelled (`getClassOutlines(null, …)`).
+  The read is indexed by extent once, so a cut visits only the outlines its plane crosses (about
+  0.1 s on the CCFv3 atlas), and it's read again only after an edit, not on a slice switch.
+- **Resolution:** the sections are as sharp as the volume's resolution (the **Res** control).
+
+### The split view
+
 - The pane is a plain flex sibling of the plot div with a divider, not a `p-splitter`: the splitter
   wraps its panels in templates, which would re-create the plot div (and the 3D viewer in it) on
   toggling. The plot div keeps its place in the DOM.

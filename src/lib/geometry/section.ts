@@ -35,15 +35,78 @@ export interface SectionOptions {
   maxJump?: number;
 }
 
-/** Each class's cut by the plane `axis = at`; classes the plane misses are left out. */
+/** `[x0, y0, x1, y1]`, image px. */
+type Box = [number, number, number, number];
+
+/** A ring or line with its extent. */
+interface Indexed {
+  points: ArrayLike<number>;
+  box: Box;
+}
+
+interface IndexedSlice {
+  z: number;
+  rings: Indexed[];
+  lines: Indexed[];
+}
+
+/**
+ * Every class's outlines with each ring's and line's extent (and the class's): made once, it cuts
+ * any number of sections visiting only the outlines a plane crosses.
+ */
+export interface SectionIndex {
+  readonly classes: ReadonlyMap<string, { box: Box; slices: readonly IndexedSlice[] }>;
+}
+
+/** Index every class's outlines for cutting (see {@link SectionIndex}). */
+export function indexOutlines(byClass: ReadonlyMap<string, readonly SliceOutlines[]>): SectionIndex {
+  const classes = new Map<string, { box: Box; slices: IndexedSlice[] }>();
+  for (const [label, slices] of byClass) {
+    const box: Box = [Infinity, Infinity, -Infinity, -Infinity];
+    const indexed = slices.map((s) => ({
+      z: s.z,
+      rings: s.rings.map((points) => withBox(points, box)),
+      lines: (s.lines ?? []).map((points) => withBox(points, box)),
+    }));
+    if (box[0] <= box[2]) classes.set(label, { box, slices: indexed });
+  }
+  return { classes };
+}
+
+function withBox(points: ArrayLike<number>, total: Box): Indexed {
+  const box: Box = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    if (points[i] < box[0]) box[0] = points[i];
+    if (points[i] > box[2]) box[2] = points[i];
+    if (points[i + 1] < box[1]) box[1] = points[i + 1];
+    if (points[i + 1] > box[3]) box[3] = points[i + 1];
+  }
+  total[0] = Math.min(total[0], box[0]);
+  total[1] = Math.min(total[1], box[1]);
+  total[2] = Math.max(total[2], box[2]);
+  total[3] = Math.max(total[3], box[3]);
+  return { points, box };
+}
+
+/** Whether a box spans the plane `axis = at`. */
+function spans(box: Box, axis: SectionAxis, at: number): boolean {
+  return axis === 'x' ? box[0] <= at && at <= box[2] : box[1] <= at && at <= box[3];
+}
+
+/**
+ * Each class's cut by the plane `axis = at`; classes the plane misses are left out. Pass an
+ * {@link indexOutlines} index to cut many sections of the same outlines.
+ */
 export function sectionOutlines(
-  byClass: ReadonlyMap<string, readonly SliceOutlines[]>,
+  outlines: SectionIndex | ReadonlyMap<string, readonly SliceOutlines[]>,
   axis: SectionAxis,
   at: number,
   opts: SectionOptions,
 ): Map<string, ClassSection> {
+  const index = outlines instanceof Map ? indexOutlines(outlines) : (outlines as SectionIndex);
   const out = new Map<string, ClassSection>();
-  for (const [label, slices] of byClass) {
+  for (const [label, { box, slices }] of index.classes) {
+    if (!spans(box, axis, at)) continue;
     const rings = cutShapes(slices, axis, at, opts);
     const lines = cutLines(slices, axis, at, opts);
     if (rings.length || lines.length) out.set(label, { rings, lines });
@@ -53,7 +116,7 @@ export function sectionOutlines(
 
 /** The closed shapes' cut: intervals per slice, rasterised one slice thick and traced. */
 function cutShapes(
-  slices: readonly SliceOutlines[],
+  slices: readonly IndexedSlice[],
   axis: SectionAxis,
   at: number,
   opts: SectionOptions,
@@ -67,7 +130,9 @@ function cutShapes(
   let mask: Uint8Array | null = null;
   for (const s of slices) {
     if (!s.rings.length || s.z < 0 || s.z >= depth) continue;
-    const crossings = ringCrossings(s.rings, axis, at);
+    const crossed = s.rings.filter((r) => spans(r.box, axis, at)).map((r) => r.points);
+    if (!crossed.length) continue;
+    const crossings = ringCrossings(crossed, axis, at);
     for (let c = 0; c + 1 < crossings.length; c += 2) {
       // Cells whose centre lies in the interval (the pixel-centre rule).
       const from = Math.max(0, Math.ceil(crossings[c] / step - 0.5));
@@ -110,14 +175,21 @@ function ringCrossings(rings: readonly ArrayLike<number>[], axis: SectionAxis, a
 
 /** The open lines' cut: a point per crossing, joined slice to slice (nearest first, each once). */
 function cutLines(
-  slices: readonly SliceOutlines[],
+  slices: readonly IndexedSlice[],
   axis: SectionAxis,
   at: number,
   opts: SectionOptions,
 ): Float64Array[] {
   const maxJump = opts.maxJump ?? opts.extent / 10;
   const stack = slices
-    .map((s) => ({ z: s.z, hits: lineCrossings(s.lines ?? [], axis, at) }))
+    .map((s) => ({
+      z: s.z,
+      hits: lineCrossings(
+        s.lines.filter((l) => spans(l.box, axis, at)).map((l) => l.points),
+        axis,
+        at,
+      ),
+    }))
     .filter((s) => s.hits.length)
     .sort((p, q) => p.z - q.z);
   const done: number[][] = [];
