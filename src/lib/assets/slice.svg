@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- A knife cutting a slice off a block: the slice editor (a volume cut into sections). -->
+  <!-- Handle, with its rivets, and the bolster. -->
+  <path fill="#000000" fill-rule="evenodd" d="M39 3.5a3.5 3.5 0 0 1 3.5-3.5h5a3.5 3.5 0 0 1 3.5 3.5V19H39Z M43 6.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z M43 13.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"/>
+  <rect x="37.5" y="20" width="15" height="3.5" rx="1" fill="#000000"/>
+  <!-- Blade: a straight spine, the edge curving to the tip. -->
+  <path fill="#000000" d="M39.5 25H51V56.5C46 54 41 47 39.5 38Z"/>
+  <!-- The block, and the slice cut off it. -->
+  <path fill="#000000" d="M4 36a4 4 0 0 1 4-4h26v28H8a4 4 0 0 1-4-4Z"/>
+  <path fill="#000000" d="M54 32h4a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-4Z"/>
+</svg>

@@ -164,15 +164,24 @@
     <ng-container *ngIf="isVolumeView && !isHeatmap && !is3dRegions && tools.regionTools">
       <span class="toolbar-separator"></span>
       <p-button
-        icon="pi pi-pencil"
         size="small"
         [text]="!sliceEditor"
         ariaLabel="Slice editor"
         [attr.aria-pressed]="sliceEditor"
-        [pTooltip]="sliceEditor ? 'Close the slice editor' : 'Slice editor: draw on a slice beside the 3D view'"
+        [pTooltip]="
+          sliceEditor
+            ? 'Close the slice editor'
+            : 'Slice editor: the slice and the sections through x and y beside the 3D view'
+        "
         tooltipPosition="bottom"
         (onClick)="toggleSliceEditor.emit()"
       >
+        <img
+          src="assets/plotting/slice.svg"
+          style="width: 1rem"
+          alt=""
+          [class]="sliceEditor ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        />
       </p-button>
       <toolbar-region-tools
         *ngIf="!sliceEditor"

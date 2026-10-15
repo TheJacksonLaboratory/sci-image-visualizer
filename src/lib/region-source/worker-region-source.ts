@@ -196,7 +196,7 @@ class WorkerRegionSource implements RegionSource {
   }
 
   getClassOutlines(
-    classes: readonly string[],
+    classes: readonly string[] | null,
     level: number,
     exclude?: readonly string[],
   ): Promise<ClassOutlines[]> {

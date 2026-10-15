@@ -56,7 +56,8 @@ import { NapariDisplayState } from './napari-display-state';
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
 import { cameraDragMode } from './napari-axes-gizmo';
-import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
+import { NapariScene, NapariSettings, SceneContext, VolumeVoxelsOnScreen } from './napari-scene';
+import type { PlaneAxis, SlicePlanes } from './napari-volume-slice-planes';
 import type { RegionMesh3D } from './napari-volume-region-meshes';
 import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
@@ -142,8 +143,10 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionHighlight: readonly string[] = [];
   /** The keys of the reconstructions hidden. */
   private regionHidden: readonly string[] = [];
-  /** The slice marked in a volume view (the one edited beside it), or none. */
-  private slicePlane: number | null = null;
+  /** The planes of the sections beside a volume view, or none. */
+  private slicePlanes: SlicePlanes = { x: null, y: null, z: null };
+  /** A section's plane dragged in the volume (see {@link getSlicePlaneMove$}). */
+  private readonly slicePlaneMove$ = new Subject<{ axis: PlaneAxis; value: number }>();
   /** Clicks on the reconstructions (see {@link getRegionMeshPick$}). */
   private readonly regionMeshPick$ = new Subject<{ key: string | null; additive: boolean }>();
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
@@ -263,6 +266,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
       inZone: (fn) => this.inZone(fn),
       regionMeshPicked: (key, additive) => this.regionMeshPick$.next({ key, additive }),
+      slicePlaneMoved: (axis, value) => this.slicePlaneMove$.next({ axis, value }),
     };
   }
 
@@ -358,7 +362,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
-      this.scene.setSlicePlane?.(this.slicePlane);
+      this.scene.setSlicePlanes?.(this.slicePlanes);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -440,10 +444,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.scene?.setRegionHidden?.(keys);
   }
 
-  /** Mark slice `z` in a volume view (the one edited beside it), or none (null); kept across plots. */
-  setSlicePlane(z: number | null): void {
-    this.slicePlane = z;
-    this.scene?.setSlicePlane?.(z);
+  /** Show the planes of the sections beside a volume view (null: hide one); kept across plots. */
+  setSlicePlanes(planes: SlicePlanes): void {
+    this.slicePlanes = planes;
+    this.scene?.setSlicePlanes?.(planes);
+  }
+
+  /** A section's plane dragged in the volume view, to `value` along its axis (image px, or a slice). */
+  getSlicePlaneMove$(): Observable<{ axis: PlaneAxis; value: number }> {
+    return this.slicePlaneMove$.asObservable();
+  }
+
+  /** The volume on screen, as assembled (see VolumeScene.volumeVoxels); null outside a volume view. */
+  volumeVoxels(): VolumeVoxelsOnScreen | null {
+    return this.scene?.volumeVoxels?.() ?? null;
   }
 
   /** A reconstruction clicked with the selection tool (its key), or the volume beside them (null). */

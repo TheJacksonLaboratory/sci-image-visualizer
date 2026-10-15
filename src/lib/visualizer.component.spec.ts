@@ -1123,7 +1123,20 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(component['activeDragMode']).toBeNull();
     });
 
-    it('shows only in a volume view, and its divider keeps both panes at least a fifth wide', async () => {
+    it('picks in a section: the slice and the other section move there', async () => {
+      plotService.setSectionPlane = jest.fn();
+      component['maxIndex'] = 9;
+      // Through x: across is the slice, down is y.
+      component['onSectionPick']('x', { u: 4.7, v: 120 });
+      expect(plotService.setSectionPlane).toHaveBeenLastCalledWith('y', 120);
+      expect(plotService.setZIndex).toHaveBeenLastCalledWith(4);
+      // Through y: across is x, down is the slice (clamped to the stack).
+      component['onSectionPick']('y', { u: 33, v: 12.2 });
+      expect(plotService.setSectionPlane).toHaveBeenLastCalledWith('x', 33);
+      expect(plotService.setZIndex).toHaveBeenLastCalledWith(9);
+    });
+
+    it('shows only in a volume view, and its dividers keep every pane at least a fifth wide', async () => {
       await component['toggleSliceEditor']();
       component['selectedPlotTypeId'] = PlotType.IMAGE;
       expect(component['sliceEditorShown']).toBe(false);
@@ -1131,10 +1144,13 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(component['sliceEditorShown']).toBe(true);
 
       const key = (k: string) => new KeyboardEvent('keydown', { key: k });
-      for (let i = 0; i < 10; i++) component['nudgePaneSize'](key('ArrowRight'));
-      expect(component['slicePaneSize']).toBe(80);
-      for (let i = 0; i < 20; i++) component['nudgePaneSize'](key('ArrowLeft'));
-      expect(component['slicePaneSize']).toBe(20);
+      for (let i = 0; i < 10; i++) component['nudgePaneSize'](key('ArrowRight'), 'x');
+      expect(component['splitX']).toBe(80);
+      for (let i = 0; i < 20; i++) component['nudgePaneSize'](key('ArrowLeft'), 'x');
+      expect(component['splitX']).toBe(20);
+      component['nudgePaneSize'](key('ArrowDown'), 'y');
+      component['nudgePaneSize'](key('ArrowRight'), 'y'); // not this divider's key
+      expect(component['splitY']).toBe(55);
     });
   });
 

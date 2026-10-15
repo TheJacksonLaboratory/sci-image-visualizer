@@ -91,6 +91,8 @@ import { ToolModes } from './visualizer/tool-modes';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
 import { FloatingDragDirective, FloatingPos } from './visualizer/floating-drag.directive';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
+import { SectionPaneComponent } from './section-pane/section-pane.component';
+import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
 import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
@@ -134,6 +136,7 @@ let plotInstanceSeq = 0;
     FloatingDragDirective,
     ToolbarComponent,
     IntensityInsetComponent,
+    SectionPaneComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,
     RegionEditorComponent,
@@ -466,16 +469,19 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   /** Whether the user split the volume view with the slice editor (off by default; kept while
    *  the view shows other plot types, so a volume view opens split again). */
   protected sliceEditor = false;
-  /** The slice editor's pane: the displayed slice, with every region tool, left of the 3D view. */
+  /** The slice editor's pane: the displayed slice, with every region tool, top right. */
   protected readonly sliceDivName = `${this.plotDivName}-slice`;
-  /** The slice pane's share of the width (%). */
-  protected slicePaneSize = 50;
+  /** The left column's and the top row's shares of the slice editor (%). */
+  protected splitX = 50;
+  protected splitY = 50;
+  /** The sections through x and y shown below (nulls until the volume is cut). */
+  protected sections: SectionViews = { x: null, y: null };
   protected get sliceEditorShown(): boolean {
     return this.sliceEditor && this.isVolumeView;
   }
 
   /**
-   * Split the volume view with the slice editor, or close it. The pane opens on the displayed
+   * Split the volume view with the slice editor, or close it. The editor opens on the displayed
    * slice and takes the drawing tools; closing it leaves the selection tool armed (it picks the
    * surfaces in 3D) and disarms any other.
    */
@@ -496,8 +502,17 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.changed();
   }
 
-  /** Drag the divider between the slice pane and the 3D view. */
-  protected startPaneResize(event: PointerEvent): void {
+  /** A point picked in a section: the slice and the other section's plane move there. */
+  protected onSectionPick(axis: SectionAxis, at: { u: number; v: number }): void {
+    // Through x, across is the slice and down is y; through y, across is x and down the slice.
+    const slice = Math.floor(axis === 'x' ? at.u : at.v);
+    if (axis === 'x') this.plotService.setSectionPlane?.('y', at.v);
+    else this.plotService.setSectionPlane?.('x', at.u);
+    this.onZSlide(Math.min(this.maxIndex, Math.max(0, slice)));
+  }
+
+  /** Drag a divider of the slice editor: the vertical one sets the columns, the horizontal one the rows. */
+  protected startPaneResize(event: PointerEvent, axis: 'x' | 'y'): void {
     const divider = event.currentTarget as HTMLElement;
     const panes = divider.parentElement;
     if (!panes) return;
@@ -505,8 +520,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     divider.setPointerCapture(event.pointerId);
     const move = (e: PointerEvent) => {
       const box = panes.getBoundingClientRect();
-      if (box.width <= 0) return;
-      this.setSlicePaneSize(((e.clientX - box.left) / box.width) * 100);
+      if (axis === 'x' && box.width > 0) this.setSplit('x', ((e.clientX - box.left) / box.width) * 100);
+      if (axis === 'y' && box.height > 0) this.setSplit('y', ((e.clientY - box.top) / box.height) * 100);
     };
     const end = () => {
       divider.removeEventListener('pointermove', move);
@@ -518,17 +533,20 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     divider.addEventListener('pointercancel', end);
   }
 
-  /** The divider's keyboard: ← and → move it by 5%. */
-  protected nudgePaneSize(event: KeyboardEvent): void {
-    const step = event.key === 'ArrowLeft' ? -5 : event.key === 'ArrowRight' ? 5 : 0;
+  /** A divider's keyboard: ← → move the vertical one, ↑ ↓ the horizontal one, by 5%. */
+  protected nudgePaneSize(event: KeyboardEvent, axis: 'x' | 'y'): void {
+    const keys = axis === 'x' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    const step = event.key === keys[0] ? -5 : event.key === keys[1] ? 5 : 0;
     if (!step) return;
     event.preventDefault();
     event.stopPropagation(); // not a slice step
-    this.setSlicePaneSize(this.slicePaneSize + step);
+    this.setSplit(axis, (axis === 'x' ? this.splitX : this.splitY) + step);
   }
 
-  private setSlicePaneSize(percent: number): void {
-    this.slicePaneSize = Math.round(Math.min(80, Math.max(20, percent)));
+  private setSplit(axis: 'x' | 'y', percent: number): void {
+    const value = Math.round(Math.min(80, Math.max(20, percent)));
+    if (axis === 'x') this.splitX = value;
+    else this.splitY = value;
     this.changed();
   }
 
@@ -721,6 +739,16 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.mirror(this.state.isImageLoading$(), (v) => this.imgLoading.set(v));
     this.mirror(this.plotService.getStackLoadingProgress(), (v) => this.loadingPercentage.set(v));
     this.mirror(this.plotService.isStackLoading(), (v) => this.stackLoading.set(v));
+    // The slice editor: its sections, and the slice picked by dragging the z plane in the volume.
+    const sections$ = this.plotService.getSectionViews$?.();
+    if (sections$) {
+      this.mirror(sections$, (v) => {
+        this.sections = v;
+        this.changed();
+      });
+    }
+    const sliceDrag$ = this.plotService.getSliceDrag$?.();
+    if (sliceDrag$) this.mirror(sliceDrag$, (z) => this.onZScrub(Math.min(this.maxIndex, Math.max(0, z))));
     this.mirror(this.state.getImageLoadingMessage$(), (v) => this.loadingMessage.set(v));
     this.mirror(this.state.getCacheProgress$(), (v) => this.cacheProgress.set(v));
     this.mirror(this.state.isZoom$(), (v) => this.zoom.set(v));

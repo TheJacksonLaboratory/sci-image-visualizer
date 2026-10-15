@@ -117,7 +117,10 @@ function mockBackend(): any {
     getOsdViewOptions: jest.fn().mockReturnValue(null),
     getVolumeResolution: jest.fn().mockReturnValue(null),
     getIntensitySampling: jest.fn().mockReturnValue(null),
-    setSlicePlane: jest.fn(), // NapariVisualizerService-only
+    // NapariVisualizerService-only: the slice editor's planes and the volume they cut.
+    setSlicePlanes: jest.fn(),
+    getSlicePlaneMove$: jest.fn().mockReturnValue(new Subject()),
+    volumeVoxels: jest.fn().mockReturnValue(null),
   };
 }
 
@@ -229,7 +232,6 @@ describe('RoutingVisualizerService (characterization)', () => {
     await expect(router.setSliceEditor('div-slice')).resolves.toBe(true);
     expect(osd.load).toHaveBeenCalledWith(STACK, 2);
     expect(osd.plot).toHaveBeenCalledWith('div-slice', { ok: true }, STACK, 600, PlotType.IMAGE, false);
-    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(2);
 
     // Region, tool and overlay calls act on the slice; view calls stay with the 3D view.
     router.setActiveTool('wand', { sensitivity: 3 });
@@ -241,17 +243,64 @@ describe('RoutingVisualizerService (characterization)', () => {
     expect(napari.zoomIn).toHaveBeenCalled();
     expect(osd.zoomIn).not.toHaveBeenCalled();
 
-    // One slice for both panes: the slice shown and the plane marking it in 3D.
+    // One slice for both panes.
     router.setZIndex(1);
     expect(osd.setZIndex).toHaveBeenLastCalledWith(1);
-    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(1);
 
     await router.setSliceEditor(null);
     expect(osd.reset).toHaveBeenCalled();
-    expect(napari.setSlicePlane).toHaveBeenLastCalledWith(null);
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: null, y: null, z: null });
     router.setActiveTool('select');
     expect(napari.setActiveTool).toHaveBeenLastCalledWith('select', undefined);
     expect(router.getRegionOverlay()).toEqual({ kind: '3d overlay' });
+  });
+
+  it('cuts the sections through x and y from the volume, and moves the planes with the slice and drags', async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    // A 4 × 3 × 2 volume of an 8 × 6 px image with 2 slices.
+    napari.volumeVoxels.mockReturnValue({
+      width: 4,
+      height: 3,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(24).fill(100)]]),
+      multichannel: false,
+      frame: { size: [8, 6, 2], world: [8, 6, 4] },
+    });
+    // The plane drags the router subscribed to when it was made.
+    const moves = napari.getSlicePlaneMove$.mock.results[0].value as Subject<{ axis: string; value: number }>;
+    const views: any[] = [];
+    router.getSectionViews$().subscribe((v) => views.push(v));
+    const drags: number[] = [];
+    router.getSliceDrag$().subscribe((z) => drags.push(z));
+
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    router.setZIndex(1);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    // The planes start through the middle of the image.
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 4, y: 3, z: 1 });
+    const { x, y } = views[views.length - 1];
+    expect(x.size).toEqual([2, 6]); // slices across, y down
+    expect(x.scale).toEqual([2, 1]); // a slice is twice a pixel deep in the volume
+    expect([x.image.width, x.image.height]).toEqual([2, 3]);
+    expect(x.crosshair).toEqual({ u: 1.5, v: 3 });
+    expect(y.size).toEqual([8, 2]);
+    expect(y.crosshair).toEqual({ u: 4, v: 1.5 });
+
+    // A plane dragged in the volume: x moves its section, z picks the slice through the host.
+    moves.next({ axis: 'x', value: 6.4 });
+    moves.next({ axis: 'z', value: 0.4 });
+    await settle();
+    expect(drags).toEqual([0]);
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 6.4, y: 3, z: 1 });
+    router.setSectionPlane('y', 99); // clamped into the image
+    router.setZIndex(0);
+    await settle();
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 6.4, y: 5, z: 0 });
+    expect(views[views.length - 1].y.at).toBe(5);
+
+    await router.setSliceEditor(null);
+    expect(views[views.length - 1]).toEqual({ x: null, y: null });
   });
 
   it('takes the slice pane down for another plot type and brings it back with the volume view', async () => {

@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
-import { EMPTY, Observable, Subscription, combineLatest, merge, BehaviorSubject } from 'rxjs';
+import { EMPTY, Observable, Subject, Subscription, combineLatest, merge, BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
 
@@ -54,6 +54,8 @@ import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
 import { changedClasses, classSignatures } from './store/class-signatures';
+import { VolumeSections } from './visualizer/volume-sections';
+import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
 
 /** How long after the last edit the surfaces of the classes it touched are rebuilt (ms). */
 export const REGION_SURFACE_REBUILD_MS = 600;
@@ -131,6 +133,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private sliceFile: string | undefined;
   /** Bumped per slice-pane mount or teardown, so only the latest one lands. */
   private sliceRequest = 0;
+  /** The sections beside the split volume view (the planes x and y through the stack). */
+  private readonly sections: VolumeSections;
+  /** The z plane dragged in the volume: the slice to show (see {@link getSliceDrag$}). */
+  private readonly sliceDrag$ = new Subject<number>();
+  private readonly sectionSubs = new Subscription();
   /** The image info and screen height of the last plot (what the slice pane mounts). */
   private plottedInfo: IImageInfo | null = null;
   private plottedHeight = 0;
@@ -151,6 +158,50 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     private spatialData: SpatialDataPort | null = null,
   ) {
     this.regionUpdates = this.regionStore.getRegionUpdateEvent().subscribe(() => this.onRegionsChanged());
+    this.sections = new VolumeSections({
+      volume: () => this.napari.volumeVoxels(),
+      showPlanes: (planes) => this.napari.setSlicePlanes(planes),
+      outlinesByClass: (level) => this.regionStore.outlinesByClass(level),
+      isClassHidden: (label) => this.regionStore.isClassHidden(label),
+      colorOf: (label) => this.classColor(label),
+      channelStates: () => this.store.currentChannelStates(),
+      invert: () => this.store.currentInvert(),
+      slice: () => this.currentZIndex,
+    });
+    // A plane dragged in the volume: the z plane picks the slice (through the host's slider, so
+    // the store and the slice pane follow), the others move their section.
+    this.sectionSubs.add(
+      this.napari.getSlicePlaneMove$().subscribe(({ axis, value }) => {
+        if (axis === 'z') this.sliceDrag$.next(Math.round(value));
+        else this.sections.setPlane(axis, value);
+      }),
+    );
+    this.sectionSubs.add(this.store.getChannelStates().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getInvert().subscribe(() => this.sections.schedule()));
+  }
+
+  /** A class's colour: its classification colour, else its region source's, else a default. */
+  private classColor(label: string): string {
+    return (
+      this.store.getClassificationColors().get(label) ??
+      this.regionStore.getRegionSourceView()?.colorOf({ label, color: null }) ??
+      '#ffcc00'
+    );
+  }
+
+  /** The sections beside the split volume view (nulls while it is not split). */
+  getSectionViews$(): Observable<SectionViews> {
+    return this.sections.getViews$();
+  }
+
+  /** Move a section's plane to `at` (image px). */
+  setSectionPlane(axis: SectionAxis, at: number): void {
+    this.sections.setPlane(axis, at);
+  }
+
+  /** The slice picked by dragging the z plane in the volume: the host shows it (its slider). */
+  getSliceDrag$(): Observable<number> {
+    return this.sliceDrag$.asObservable();
   }
 
   private isImageType(t: PlotType): boolean {
@@ -306,6 +357,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       if (ok && (!this.sliceMounted || this.sliceFile !== imageInfo?.fileName || inPlace)) {
         void this.mountSlice(!!inPlace && this.sliceMounted && this.sliceFile === imageInfo?.fileName);
       }
+      // The volume was assembled again (another image, or resolution): cut the sections from it.
+      if (ok) this.sections.schedule();
       return ok;
     });
   }
@@ -340,7 +393,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       if (ok) {
         // The slice may have moved while the pane loaded.
         this.osd.setZIndex(this.currentZIndex);
-        this.napari.setSlicePlane(this.currentZIndex);
+        this.sections.start();
       }
       return ok;
     } catch (err) {
@@ -355,7 +408,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.sliceRequest++;
     if (this.sliceMounted) {
       this.osd.reset();
-      this.napari.setSlicePlane(null);
+      this.sections.stop();
     }
     this.sliceMounted = false;
     this.sliceFile = undefined;
@@ -431,7 +484,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.renderer().setZIndex(zIndex);
     if (this.sliceMounted) {
       this.osd.setZIndex(zIndex);
-      this.napari.setSlicePlane(zIndex);
+      this.sections.schedule();
     }
   }
   getTrueImageSize(): { width: number; height: number } | null {
@@ -763,6 +816,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * in 3D are rebuilt once the edits pause.
    */
   private onRegionsChanged(): void {
+    if (this.sliceMounted) this.sections.regionsChanged();
     const at = this.liveSliceKey();
     const signatures = classSignatures(this.regionStore.getRegions());
     const before = this.liveClasses;
@@ -803,6 +857,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.regionStore.setClassesHidden(classes, hidden);
     // A surface is its class's (its group key is the class name).
     this.napari.setRegionHidden([...this.regionStore.getHiddenClasses()]);
+    this.sections.schedule();
   }
   async selectRegionClasses(classes: readonly string[], additive?: boolean): Promise<void> {
     await this.regionStore.selectClasses(classes, additive);
@@ -1113,6 +1168,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
     this.regionUpdates.unsubscribe();
+    this.sectionSubs.unsubscribe();
+    this.sections.stop();
     if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
   }
 

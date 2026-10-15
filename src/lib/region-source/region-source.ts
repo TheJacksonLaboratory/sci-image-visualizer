@@ -36,10 +36,11 @@ export interface RegionSource {
   getIndex(z: number, query: RegionIndexQuery): Promise<RegionIndexPage>;
   /**
    * Every plane's outlines of the features of these classes, simplified for `level`, without the
-   * `exclude`d ids: what a 3D reconstruction of the classes stacks.
+   * `exclude`d ids: what a 3D reconstruction of the classes stacks. `classes` null reads every
+   * class, each outline labelled with its own (what a section through the stack draws).
    */
   getClassOutlines(
-    classes: readonly string[],
+    classes: readonly string[] | null,
     level: number,
     exclude?: readonly string[],
   ): Promise<ClassOutlines[]>;

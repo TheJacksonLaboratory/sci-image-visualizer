@@ -142,20 +142,48 @@
 <!-- The plot, and while a volume view is split, the slice editor's pane on its left (its own
      viewer, with every region tool) with a divider to resize the two. The plot div keeps its
      place in the DOM either way: the backends find it by id, and a viewer mounted in it stays. -->
-<div class="viz-panes">
+<div
+  class="viz-panes"
+  [class.viz-quad]="sliceEditorShown"
+  [style.grid-template-columns]="sliceEditorShown ? splitX + '% 6px minmax(0, 1fr)' : null"
+  [style.grid-template-rows]="sliceEditorShown ? splitY + '% 6px minmax(0, 1fr)' : null"
+>
+  <!-- The slice editor: the volume (the plot) top left, the slice being edited (Z) top right,
+       the sections through x and y below, in their axis colours. -->
   <ng-container *ngIf="sliceEditorShown">
-    <div class="relative viz-slice-pane" [id]="sliceDivName" [style.flex-basis.%]="slicePaneSize"></div>
+    <div class="viz-cell viz-cell-z">
+      <div class="viz-slice-pane" [id]="sliceDivName"></div>
+      <span class="viz-pane-badge viz-pane-badge-z">Z · slice {{ zIndex }}</span>
+    </div>
+    <div class="viz-cell viz-cell-x">
+      <viz-section-pane axis="x" [view]="sections.x" (pick)="onSectionPick('x', $event)"></viz-section-pane>
+    </div>
+    <div class="viz-cell viz-cell-y">
+      <viz-section-pane axis="y" [view]="sections.y" (pick)="onSectionPick('y', $event)"></viz-section-pane>
+    </div>
     <div
-      class="viz-pane-divider"
+      class="viz-pane-divider viz-pane-divider-v"
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize the slice and 3D panes"
-      [attr.aria-valuenow]="slicePaneSize"
+      aria-label="Resize the panes across"
+      [attr.aria-valuenow]="splitX"
       aria-valuemin="20"
       aria-valuemax="80"
       tabindex="0"
-      (pointerdown)="startPaneResize($event)"
-      (keydown)="nudgePaneSize($event)"
+      (pointerdown)="startPaneResize($event, 'x')"
+      (keydown)="nudgePaneSize($event, 'x')"
+    ></div>
+    <div
+      class="viz-pane-divider viz-pane-divider-h"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize the panes down"
+      [attr.aria-valuenow]="splitY"
+      aria-valuemin="20"
+      aria-valuemax="80"
+      tabindex="0"
+      (pointerdown)="startPaneResize($event, 'y')"
+      (keydown)="nudgePaneSize($event, 'y')"
     ></div>
   </ng-container>
   <div class="w-full relative viz-plot" [id]="plotDivName">
