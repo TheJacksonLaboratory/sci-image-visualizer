@@ -135,6 +135,17 @@ test('a folder set: one slice per file, ids qualified by slice', async () => {
   assert.deepEqual(out.style, info.style);
 });
 
+test("a folder set's export puts the first file's features on the default plane", async () => {
+  // Each file's features on a plane of their own: the folder's slices are its files.
+  const dir = path.join(server.dir, 'regions', 'own-planes');
+  await mkdir(dir);
+  await writeFile(path.join(dir, 'a.geojson'), collection([feature('p', 0, 'A', 5)]));
+  await writeFile(path.join(dir, 'b.geojson'), collection([feature('q', 0, 'A', 7)]));
+  assert.deepEqual((await get('/regions/own-planes/tile/0/0/0/0')).body.features.map((f) => f.id), ['0:p']);
+  const out = (await post('/regions/own-planes/export', { exclude: [], extra: [] })).body;
+  assert.deepEqual(out.features.map((f) => [f.id, f.geometry.plane?.z ?? 0]), [['0:p', 0], ['1:q', 1]]);
+});
+
 test('refuses ids that are not one name, and answers 404 for an unknown set', async () => {
   assert.equal((await get('/regions/nope/info')).status, 404);
   assert.equal((await get(`/regions/${encodeURIComponent('../secret')}/info`)).status, 404);

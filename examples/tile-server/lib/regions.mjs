@@ -309,7 +309,8 @@ class FolderRegionSet {
   }
 
   /**
-   * Every slice's features (on plane z, ids qualified) through the working set, then `extra`; the
+   * Every slice's features (on plane z, ids qualified; the first slice's on the default plane)
+   * through the working set, then `extra`; the
    * set's hierarchy and style (regionset.json) as the collection's members, as a single file has them.
    */
   async export(exclude, extra) {
@@ -321,8 +322,16 @@ class FolderRegionSet {
       table.raw.forEach((feature, i) => {
         const id = `${z}:${table.ids[i]}`;
         if (skip.has(id)) return;
-        const plane = z ? { plane: { c: -1, z, t: 0 } } : {};
-        const geometry = feature.geometry ? { ...feature.geometry, ...plane } : feature.geometry;
+        let geometry = feature.geometry;
+        if (geometry && typeof geometry === 'object') {
+          if (z) geometry = { ...geometry, plane: { c: -1, z, t: 0 } };
+          else if (Number(geometry.plane?.z ?? 0) !== 0) {
+            // The first file's features are on slice 0 whatever plane the file gave them: the
+            // default plane, as a feature without one is.
+            geometry = { ...geometry };
+            delete geometry.plane;
+          }
+        }
         parts.push(JSON.stringify({ ...feature, type: 'Feature', id, geometry }));
       });
     }

@@ -426,7 +426,7 @@ export class RegionFeatureTable {
   private hierarchy?: RegionClassNode[];
   private style?: RegionSourceStyle;
   private readonly byId = new Map<string, number>();
-  private readonly buckets = new Map<string, Map<string, number[]>>();
+  private readonly buckets = new Map<string, LevelIndex>();
   private readonly simplified = new Map<string, Float32Array[]>();
   private readonly bounds: Bbox | null;
   private readonly levels: number;
@@ -441,7 +441,13 @@ export class RegionFeatureTable {
       y1 = -Infinity;
     raw.forEach((feature, i) => {
       const own = featureIdOf(feature);
-      const id = own === undefined || this.byId.has(own) ? `#${i}` : own;
+      let id = own;
+      if (id === undefined || this.byId.has(id)) {
+        // Its position, unless a feature already has that id (an explicit "#1", say): ids are unique,
+        // or a take, an exclusion or an export would act on both.
+        id = `#${i}`;
+        for (let k = 1; this.byId.has(id); k++) id = `#${i}-${k}`;
+      }
       this.byId.set(id, i);
       this.ids.push(id);
       const { label, color } = classificationOf(feature);
@@ -550,9 +556,20 @@ export class RegionFeatureTable {
 
   /** One tile of plane `z`. */
   tile(z: number, level: number, gx: number, gy: number): RegionTile {
-    const bucket = this.bucketsFor(z, level).get(`${gx}/${gy}`) ?? [];
+    const { cells, wide } = this.bucketsFor(z, level);
+    const bucket = cells.get(`${gx}/${gy}`) ?? [];
+    const size = levelTileSize(level, this.tileSize);
     const features: TileFeature[] = [];
-    for (const i of bucket) {
+    // The tile's cell features and the wide ones that meet it, merged back into file order.
+    const order: number[] = [];
+    for (let a = 0, w = 0; a < bucket.length || w < wide.length;) {
+      if (w >= wide.length || (a < bucket.length && bucket[a] < wide[w])) order.push(bucket[a++]);
+      else {
+        const i = wide[w++];
+        if (cellMeets(this.boxes[i], size, gx, gy)) order.push(i);
+      }
+    }
+    for (const i of order) {
       const rings = this.ringsAt(i, level);
       if (!rings.length) continue;
       const labels = this.labelsAt(i, level);
@@ -670,30 +687,78 @@ export class RegionFeatureTable {
     return rings;
   }
 
-  /** Plane `z`'s level-`level` buckets (`gx/gy` → feature indices), built on first use. */
-  private bucketsFor(z: number, level: number): Map<string, number[]> {
+  /** Entries in plane `z`'s level-`level` index: cell listings plus wide features (tests). */
+  indexEntries(z: number, level: number): number {
+    const { cells, wide } = this.bucketsFor(z, level);
+    let n = wide.length;
+    for (const list of cells.values()) n += list.length;
+    return n;
+  }
+
+  /**
+   * Plane `z`'s level-`level` index, built on first use: features by tile cell (`gx/gy` → feature
+   * indices), and the wide ones (more than {@link MAX_CELLS_PER_FEATURE} cells, or past the
+   * number range), tested against a tile when it is asked for.
+   */
+  private bucketsFor(z: number, level: number): LevelIndex {
     const key = `${z}/${level}`;
-    let buckets = this.buckets.get(key);
-    if (buckets) return buckets;
-    buckets = new Map();
+    let index = this.buckets.get(key);
+    if (index) return index;
+    const cells = new Map<string, number[]>();
+    const wide: number[] = [];
     const size = levelTileSize(level, this.tileSize);
     const minExtent = levelMinExtent(level);
     for (let i = 0; i < this.ids.length; i++) {
       if (this.planes[i] !== z || !this.rings[i].length) continue;
       const b = this.boxes[i];
       if (Math.max(b[2] - b[0], b[3] - b[1]) < minExtent) continue;
-      for (let gy = Math.floor(b[1] / size); gy <= Math.floor(b[3] / size); gy++) {
-        for (let gx = Math.floor(b[0] / size); gx <= Math.floor(b[2] / size); gx++) {
+      const gx0 = Math.floor(b[0] / size),
+        gx1 = Math.floor(b[2] / size),
+        gy0 = Math.floor(b[1] / size),
+        gy1 = Math.floor(b[3] / size);
+      // A box with a NaN coordinate meets no tile.
+      if ([gx0, gx1, gy0, gy1].some(Number.isNaN)) continue;
+      const count = (gx1 - gx0 + 1) * (gy1 - gy0 + 1);
+      if (!(count <= MAX_CELLS_PER_FEATURE) || ![gx0, gx1, gy0, gy1].every(Number.isSafeInteger)) {
+        wide.push(i);
+        continue;
+      }
+      for (let gy = gy0; gy <= gy1; gy++) {
+        for (let gx = gx0; gx <= gx1; gx++) {
           const id = `${gx}/${gy}`;
-          const list = buckets.get(id);
+          const list = cells.get(id);
           if (list) list.push(i);
-          else buckets.set(id, [i]);
+          else cells.set(id, [i]);
         }
       }
     }
-    this.buckets.set(key, buckets);
-    return buckets;
+    index = { cells, wide };
+    this.buckets.set(key, index);
+    return index;
   }
+}
+
+/**
+ * A feature spanning more tiles than this is not listed in each of them but kept aside and tested
+ * against a tile when one is asked for: one huge box (an outline around a whole slide, or a corrupt
+ * coordinate) must not make a plane's index millions of entries.
+ */
+export const MAX_CELLS_PER_FEATURE = 64;
+
+/** A plane's level: features by tile cell, and the wide ones (ascending), tested per tile. */
+interface LevelIndex {
+  cells: Map<string, number[]>;
+  wide: number[];
+}
+
+/** Whether box `b` meets cell (gx, gy) of tiles `size` pixels wide, as a cell lists it. */
+function cellMeets(b: Readonly<Bbox>, size: number, gx: number, gy: number): boolean {
+  return (
+    Math.floor(b[0] / size) <= gx &&
+    gx <= Math.floor(b[2] / size) &&
+    Math.floor(b[1] / size) <= gy &&
+    gy <= Math.floor(b[3] / size)
+  );
 }
 
 /** A feature's own id (`id`, else `properties.id`) as a string. */

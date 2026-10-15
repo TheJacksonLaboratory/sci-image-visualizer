@@ -300,4 +300,38 @@ describe('region-tiles', () => {
       expect(table.index(0, { offset: 0, limit: 9, classes: ['root'] }).rows.map((r) => r.id)).toEqual(['two']);
     });
   });
+
+  describe('what a plain reading would lose', () => {
+    const at = (id: string | undefined, x: number, size: number) => ({
+      type: 'Feature',
+      ...(id === undefined ? {} : { id }),
+      properties: {},
+      geometry: { type: 'Polygon', coordinates: [denseSquare(x, 0, size, 2)] },
+    });
+    const tableOf = (features: unknown[]) =>
+      RegionFeatureTable.fromGeoJson(JSON.stringify({ type: 'FeatureCollection', features }));
+
+    it('never gives two features one id', () => {
+      // An explicit "#1", then a feature without an id at position 1; a repeated explicit id at
+      // position 3 whose own fallback, "#3", is taken too.
+      const table = tableOf([at('#1', 0, 10), at(undefined, 20, 10), at('#3', 40, 10), at('#1', 60, 10)]);
+      expect(table.ids).toEqual(['#1', '#1-1', '#3', '#3-1']);
+      expect(table.features(['#1'])).toHaveLength(1);
+      expect((table.features(['#1'])[0].feature.geometry?.coordinates as number[][][])[0][0][0]).toBe(0);
+      expect(JSON.parse(table.exportGeoJson(['#1'], [])).features).toHaveLength(3);
+      expect(table.index(0, { offset: 0, limit: 10, exclude: ['#3'] }).total).toBe(3);
+    });
+
+    it('keeps a feature spanning many tiles out of their listings, and in its tiles', () => {
+      // A 1,000,000 px square with four vertices: listed in each tile, it would be 3.8 million entries.
+      const table = tableOf([at('a', 0, 10), at('huge', 0, 1_000_000), at('c', 30, 10), at('far', 1e300, 10)]);
+      expect(table.indexEntries(0, 0)).toBeLessThanOrEqual(4);
+      const ids = (gx: number, gy: number) => table.tile(0, 0, gx, gy).features.map((f) => f.id);
+      expect(ids(0, 0)).toEqual(['a', 'huge', 'c']);
+      expect(ids(1000, 1000)).toEqual(['huge']);
+      expect(ids(1953, 0)).toEqual(['huge']);
+      expect(ids(1954, 0)).toEqual([]);
+      expect(ids(-1, 0)).toEqual([]);
+    });
+  });
 });
