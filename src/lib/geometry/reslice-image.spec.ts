@@ -43,4 +43,12 @@ describe('resliceImage', () => {
     const inverted = resliceImage({ ...vol, invert: true }, 'x', 0);
     expect(red(inverted)[0]).toBe(255);
   });
+
+  it("maps the displayed value through a channel's colour ramp in place of its tint", () => {
+    // Red falls as the value rises; green is the value.
+    const ramp = Array.from({ length: 256 }, (_, i) => [255 - i, i, 0] as [number, number, number]);
+    const img = resliceImage(volume([{ color: '#0000ff', min: 100, max: 200, ramp }]), 'x', 0);
+    expect(red(img)).toEqual([255, 255, 255, 127, 255, 0]);
+    expect(Array.from(img.data.filter((_, i) => i % 4 === 2))).toEqual([0, 0, 0, 0, 0, 0]);
+  });
 });

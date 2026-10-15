@@ -375,6 +375,92 @@ describe('RoutingVisualizerService (characterization)', () => {
     }
   });
 
+  it("cuts another image's sections from its own outlines, with the planes back through its middle", async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    const volume = (size: number) => ({
+      width: 4,
+      height: 4,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(32)]]),
+      multichannel: false,
+      frame: { size: [size, size, 2], world: [size, size, 2] },
+    });
+    const read = jest.spyOn(regionStore, 'outlinesByClass').mockResolvedValue(new Map());
+    napari.volumeVoxels.mockReturnValue(volume(100));
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    router.setSectionPlane('x', 90);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(1);
+
+    napari.volumeVoxels.mockReturnValue(volume(40));
+    await router.plot('div', {}, { ...STACK, fileName: 'other.tif' }, 600, PlotType.NAPARI_VOLUME);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: 20, y: 20, z: 0 });
+  });
+
+  it('reads the outlines again on the next cut when a read fails', async () => {
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    napari.volumeVoxels.mockReturnValue({
+      width: 4,
+      height: 4,
+      depth: 2,
+      channels: new Map([[0, new Uint8Array(32)]]),
+      multichannel: false,
+      frame: { size: [8, 8, 2], world: [8, 8, 2] },
+    });
+    const read = jest
+      .spyOn(regionStore, 'outlinesByClass')
+      .mockRejectedValueOnce(new Error('503'))
+      .mockResolvedValue(new Map());
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    await settle();
+    expect(warn).toHaveBeenCalled();
+    router.setSectionPlane('x', 2);
+    await settle();
+    expect(read).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it('takes the sections and planes down when the view is detached', async () => {
+    const views: any[] = [];
+    router.getSectionViews$().subscribe((v) => views.push(v));
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+    router.detach();
+    expect(napari.setSlicePlanes).toHaveBeenLastCalledWith({ x: null, y: null, z: null });
+    expect(views[views.length - 1]).toEqual({ x: null, y: null });
+  });
+
+  it('rebuilds every shown surface when source features are deleted (no live region changes)', async () => {
+    jest.useFakeTimers();
+    try {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(2);
+      napari.setRegionMeshes = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      const build = jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+      const sources = jest.spyOn(regionStore, 'getSourceStateKey').mockReturnValue('before');
+      await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+      await router.showRegionClasses3d([{ key: 'CB', classes: ['CB'], color: '#f0f080' }]);
+      expect(build).toHaveBeenCalledTimes(1);
+
+      // The update a delete makes: the sources hold less, the live regions are as they were.
+      sources.mockReturnValue('after');
+      regionStore.addRegion(new Region());
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(build).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   // ── backend selection per plot type ───────────────────────────────────
   it('routes the IMAGE plot type to OpenSeadragon', async () => {
     await router.plot('div', {}, IMAGE_INFO, 600, PlotType.IMAGE);

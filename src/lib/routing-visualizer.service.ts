@@ -50,6 +50,7 @@ import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/cha
 import { autoWindowFromHistogram } from './contracts/intensity';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
+import { volumeRamp } from './implementations/napari-js/napari-display-state';
 import { VIZ_CONFIG, VizConfig } from './contracts/viz-config';
 import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
@@ -118,8 +119,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private classes3dImage: string | undefined;
   /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
   private shown3d: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }> = [];
-  /** Each class's fingerprint on the live slice (see classSignatures), and which image and slice. */
-  private liveClasses: { at: string; signatures: Map<string, number> } | null = null;
+  /**
+   * Each class's fingerprint on the live slice (see classSignatures), which image and slice, and
+   * what the region sources hold (see RegionStore.getSourceStateKey). Null while nothing follows
+   * the edits (no surface built, no sections).
+   */
+  private liveClasses: { at: string; signatures: Map<string, number>; sources: string } | null = null;
   /** The pending rebuild of the surfaces an edit touched. */
   private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly regionUpdates: Subscription;
@@ -160,11 +165,18 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.regionUpdates = this.regionStore.getRegionUpdateEvent().subscribe(() => this.onRegionsChanged());
     this.sections = new VolumeSections({
       volume: () => this.napari.volumeVoxels(),
+      image: () => this.plottedFileName,
       showPlanes: (planes) => this.napari.setSlicePlanes(planes),
       outlinesByClass: (level) => this.regionStore.outlinesByClass(level),
       isClassHidden: (label) => this.regionStore.isClassHidden(label),
       colorOf: (label) => this.classColor(label),
       channelStates: () => this.store.currentChannelStates(),
+      ramp: (color) =>
+        volumeRamp(color, {
+          colormap: this.store.currentColormap(),
+          reverse: this.store.currentReverseScale(),
+          invert: false,
+        }),
       invert: () => this.store.currentInvert(),
       slice: () => this.currentZIndex,
     });
@@ -178,6 +190,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     );
     this.sectionSubs.add(this.store.getChannelStates().subscribe(() => this.sections.schedule()));
     this.sectionSubs.add(this.store.getInvert().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getColormap().subscribe(() => this.sections.schedule()));
+    this.sectionSubs.add(this.store.getReverseScale().subscribe(() => this.sections.schedule()));
   }
 
   /** A class's colour: its classification colour, else its region source's, else a default. */
@@ -393,6 +407,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       if (ok) {
         // The slice may have moved while the pane loaded.
         this.osd.setZIndex(this.currentZIndex);
+        this.trackLiveClasses();
         this.sections.start();
       }
       return ok;
@@ -778,7 +793,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.classes3dImage = this.plottedFileName;
     this.shown3d = groups;
     // What an edit from now on is compared with (the live slice may not have changed yet).
-    this.liveClasses = { at: this.liveSliceKey(), signatures: classSignatures(this.regionStore.getRegions()) };
+    this.liveClasses = null;
+    this.trackLiveClasses();
     this.classes3d$.next(groups.map((g) => ({ key: g.key, classes: g.classes })));
     const width = this.getTrueImageSize()?.width ?? 1024;
     const step = this.napari.regionVoxelStep() ?? Math.max(1, width / 256);
@@ -816,19 +832,27 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * in 3D are rebuilt once the edits pause.
    */
   private onRegionsChanged(): void {
-    const at = this.liveSliceKey();
-    const signatures = classSignatures(this.regionStore.getRegions());
+    // Nothing follows the edits (no surface built or shown, no sections): skip the fingerprints.
+    if (!this.sliceMounted && !this.shown3d.length && !this.meshCache.size) {
+      this.liveClasses = null;
+      return;
+    }
     const before = this.liveClasses;
-    this.liveClasses = { at, signatures };
+    this.liveClasses = null;
+    const now = this.trackLiveClasses();
     // Another slice or image came up: no region changed (the sections recut for the slice).
-    if (!before || before.at !== at) return;
-    const touched = changedClasses(before.signatures, signatures);
-    if (!touched.size) return;
+    if (!before || before.at !== now.at) return;
+    const changed = changedClasses(before.signatures, now.signatures);
+    // Source features deleted (or that undone) change no live region, and which classes they were
+    // is not known here: every class is stale. A feature taken shows as its class's change.
+    const everyClass = !changed.size && before.sources !== now.sources;
+    if (!changed.size && !everyClass) return;
+    const touched = (c: string) => everyClass || changed.has(c);
     if (this.sliceMounted) this.sections.regionsChanged();
     for (const [key, entry] of [...this.meshCache]) {
-      if (entry.classes.some((c) => touched.has(c))) this.meshCache.delete(key);
+      if (entry.classes.some(touched)) this.meshCache.delete(key);
     }
-    if (!this.shown3d.some((g) => g.classes.some((c) => touched.has(c)))) return;
+    if (!this.shown3d.some((g) => g.classes.some(touched))) return;
     if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
@@ -836,6 +860,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         void this.showRegionClasses3d(this.shown3d);
       }
     }, REGION_SURFACE_REBUILD_MS);
+  }
+
+  /** Fingerprint the live slice's classes, unless already: what the next edit is compared with. */
+  private trackLiveClasses(): { at: string; signatures: Map<string, number>; sources: string } {
+    this.liveClasses ??= {
+      at: this.liveSliceKey(),
+      signatures: classSignatures(this.regionStore.getRegions()),
+      sources: this.regionStore.getSourceStateKey(),
+    };
+    return this.liveClasses;
   }
 
   /** Which slice of which image the live regions are. */
@@ -1224,6 +1258,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  Nothing is on screen afterwards, so the next plot starts from the default backend. */
   detach(): void {
     this.sliceRequest++;
+    this.sections.stop();
     this.sliceMounted = false;
     this.sliceDiv = null;
     this.plotly.detach();

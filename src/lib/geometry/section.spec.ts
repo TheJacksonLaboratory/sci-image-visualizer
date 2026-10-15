@@ -82,6 +82,17 @@ describe('sectionOutlines', () => {
     expect(sectionOutlines(lines, 'y', 50, { depth: 2, extent: 100 }).size).toBe(0);
   });
 
+  it('breaks a line at the slices without it, rather than bridging them', () => {
+    const lines = new Map([
+      ['L', [2, 3, 10].map((z) => ({ z, rings: [], lines: [Float64Array.of(0, 50, 100, 50)] }))],
+    ]);
+    const cut = sectionOutlines(lines, 'x', 40, { depth: 12, extent: 120 });
+    expect(cut.get('L')!.lines.map((l) => Array.from(l))).toEqual([
+      [2.5, 50, 3.5, 50],
+      [10.5, 50],
+    ]);
+  });
+
   it('cuts the same from an index made once as from the outlines', () => {
     const index = indexOutlines(stack);
     for (const at of [0, 15, 20, 29, 105, 500]) {

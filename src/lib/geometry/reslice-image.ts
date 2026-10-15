@@ -13,6 +13,8 @@ export interface VolumeChannelVoxels {
   data: Uint8Array;
   /** Tint, `#rrggbb` (white: grayscale). */
   color: string;
+  /** The colours the displayed value 0..255 maps to (256 RGB, 0..255 each), in place of the tint. */
+  ramp?: ReadonlyArray<readonly [number, number, number]>;
   /** Display window over 0..255. */
   min: number;
   max: number;
@@ -73,6 +75,7 @@ export function resliceImage(vol: VolumeVoxels, axis: SectionAxis, index: number
 /** Voxel value (0..255) → displayed RGB (0..255 each), as 256 RGB triples. */
 function channelLut(ch: VolumeChannelVoxels, invert: boolean): Float32Array {
   const [r, g, b] = rgbOf(ch.color);
+  const ramp = ch.ramp?.length === 256 ? ch.ramp : null;
   const span = ch.max - ch.min;
   const invGamma = ch.gamma > 0 ? 1 / ch.gamma : 1;
   const lut = new Float32Array(256 * 3);
@@ -80,6 +83,13 @@ function channelLut(ch: VolumeChannelVoxels, invert: boolean): Float32Array {
     let t = span > 0 ? Math.min(1, Math.max(0, (v - ch.min) / span)) : 0;
     if (invert) t = 1 - t;
     t = Math.pow(t, invGamma) * 255;
+    if (ramp) {
+      const [cr, cg, cb] = ramp[Math.round(t)];
+      lut[3 * v] = cr;
+      lut[3 * v + 1] = cg;
+      lut[3 * v + 2] = cb;
+      continue;
+    }
     lut[3 * v] = t * r;
     lut[3 * v + 1] = t * g;
     lut[3 * v + 2] = t * b;

@@ -757,7 +757,13 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       });
     }
     const sliceDrag$ = this.plotService.getSliceDrag$?.();
-    if (sliceDrag$) this.mirror(sliceDrag$, (z) => this.onZScrub(Math.min(this.maxIndex, Math.max(0, z))));
+    if (sliceDrag$) {
+      this.mirror(sliceDrag$, (z) => {
+        this.onZScrub(Math.min(this.maxIndex, Math.max(0, z)));
+        // From a DOM listener, not a template event: the slider and badge must be marked to follow.
+        this.changed();
+      });
+    }
     this.mirror(this.state.getImageLoadingMessage$(), (v) => this.loadingMessage.set(v));
     this.mirror(this.state.getCacheProgress$(), (v) => this.cacheProgress.set(v));
     this.mirror(this.state.isZoom$(), (v) => this.zoom.set(v));

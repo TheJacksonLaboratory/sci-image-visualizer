@@ -1,6 +1,7 @@
 import { BehaviorSubject, Observable } from 'rxjs';
 
 import type { IChannelState } from '../contracts/channel-histogram-api.contract';
+import type { Rgb } from '../contracts/colormap-lut';
 import type { SectionAxis, SectionRegions, SectionView, SectionViews } from '../contracts/section-view.contract';
 import type { SliceOutlines } from '../geometry/reconstruct';
 import { VolumeVoxels, resliceImage } from '../geometry/reslice-image';
@@ -12,6 +13,8 @@ import type { SlicePlanes } from '../implementations/napari-js/napari-volume-sli
 export interface VolumeSectionsDeps {
   /** The volume on screen as assembled, or null (not a volume view, or not assembled yet). */
   volume(): VolumeVoxelsOnScreen | null;
+  /** The image the volume is of: another one drops the outlines read and puts the planes back. */
+  image(): string | undefined;
   /** Show the planes in the volume (null: hide one). */
   showPlanes(planes: SlicePlanes): void;
   /** Every class's outlines on every slice (see RegionStore.outlinesByClass). */
@@ -19,6 +22,8 @@ export interface VolumeSectionsDeps {
   isClassHidden(label: string): boolean;
   colorOf(label: string): string;
   channelStates(): IChannelState[];
+  /** A single-channel volume's colours, as the 3D view ramps it (see volumeColormap). */
+  ramp(color: string): Rgb[];
   invert(): boolean;
   /** The slice shown and edited. */
   slice(): number;
@@ -39,6 +44,8 @@ export class VolumeSections {
   private readonly views$ = new BehaviorSubject<SectionViews>(NONE);
   private open = false;
   private planes: { x: number | null; y: number | null } = { x: null, y: null };
+  /** The image the planes and outlines are of. */
+  private image: string | undefined;
   /** Every class's outlines at a level, read and indexed once until the regions change. */
   private outlines: { level: number; read: Promise<SectionIndex> } | null = null;
   private scheduled: ReturnType<typeof setTimeout> | null = null;
@@ -61,6 +68,8 @@ export class VolumeSections {
   stop(): void {
     this.open = false;
     this.request++;
+    // Regions may change while closed with nothing told: read them again on the next start.
+    this.outlines = null;
     if (this.scheduled) clearTimeout(this.scheduled);
     this.scheduled = null;
     this.deps.showPlanes({ x: null, y: null, z: null });
@@ -107,9 +116,15 @@ export class VolumeSections {
       this.views$.next(NONE);
       return;
     }
+    const image = this.deps.image();
+    if (image !== this.image) {
+      this.image = image;
+      this.outlines = null;
+      this.planes = { x: null, y: null };
+    }
     const [w, h] = vol.frame.size;
-    this.planes.x ??= Math.floor(w / 2);
-    this.planes.y ??= Math.floor(h / 2);
+    this.planes.x = Math.min(w - 1, Math.max(0, this.planes.x ?? Math.floor(w / 2)));
+    this.planes.y = Math.min(h - 1, Math.max(0, this.planes.y ?? Math.floor(h / 2)));
     this.deps.showPlanes(this.getPlanes());
     // The outlines at the volume's resolution (image px per voxel).
     const step = w / Math.max(1, vol.width);
@@ -117,10 +132,13 @@ export class VolumeSections {
     if (!this.outlines || this.outlines.level !== level) {
       this.outlines = { level, read: this.deps.outlinesByClass(level).then(indexOutlines) };
     }
+    const outlines = this.outlines;
     let index: SectionIndex;
     try {
-      index = await this.outlines.read;
+      index = await outlines.read;
     } catch (err) {
+      // Not kept: the next cut reads them again.
+      if (this.outlines === outlines) this.outlines = null;
       console.warn('[visualizer] The regions could not be cut for the sections.', err);
       index = indexOutlines(new Map());
     }
@@ -183,6 +201,7 @@ export class VolumeSections {
           {
             data: vol.channels.get(0) as Uint8Array,
             color: '#ffffff',
+            ramp: this.deps.ramp(states[0]?.color ?? '#ffffff'),
             min: states[0]?.min ?? 0,
             max: states[0]?.max ?? 255,
             gamma: states[0]?.gamma ?? 1,

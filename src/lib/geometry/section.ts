@@ -3,7 +3,7 @@
  * y = const) cuts each class's regions. A class's closed shapes cut into one interval per slice
  * they cross; stacked one slice thick, the intervals are traced into outlines. Its open lines
  * (a layer boundary on each B-scan, say) cut into one point per slice they cross, joined slice to
- * slice into the line the boundary draws across the stack.
+ * slice into the line the boundary draws across the stack (a slice without it breaks the line).
  *
  * Section coordinates `(u, v)`: through `x = at`, u is the slice (slice k spans [k, k + 1)) and
  * v the image y; through `y = at`, u is the image x and v the slice.
@@ -194,7 +194,14 @@ function cutLines(
     .sort((p, q) => p.z - q.z);
   const done: number[][] = [];
   let open: Array<{ points: number[]; last: number }> = [];
+  let prevZ = -Infinity;
   for (const { z, hits } of stack) {
+    // A slice without the line between: the chains end there, not bridged across it.
+    if (z !== prevZ + 1) {
+      for (const c of open) done.push(c.points);
+      open = [];
+    }
+    prevZ = z;
     const pairs: Array<{ chain: number; hit: number; d: number }> = [];
     open.forEach((c, ci) => hits.forEach((q, hi) => pairs.push({ chain: ci, hit: hi, d: Math.abs(q - c.last) })));
     pairs.sort((p, q) => p.d - q.d);

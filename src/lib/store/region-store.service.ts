@@ -1037,6 +1037,12 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return out;
   }
 
+  /** What the region sources of the image hold (see {@link sourceStateKey}): it changes when a
+   *  feature is taken or deleted, or that is undone. */
+  getSourceStateKey(): string {
+    return this.sourceStateKey();
+  }
+
   /**
    * What the region sources of the image hold: the image, its sources (one attached or dropped
    * bumps the version) and the features taken from them. A key for what is read from them.
