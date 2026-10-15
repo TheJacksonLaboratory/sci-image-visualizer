@@ -22,7 +22,8 @@ file was added.
   the regions only, not the source.
 - **Server-side region sources**: `IImageInfo.regionSourceUrl` names a server that serves the
   tiles itself (`openHttpRegionSource`), so the browser never downloads the set; the example tile
-  server serves any GeoJSON file or folder of per-slice files under `REGION_DIR` this way.
+  server serves any GeoJSON file or folder of per-slice files under `REGION_DIR` this way. Its
+  requests go through the host's `HttpClient`, so the host's interceptors (its auth) apply.
 - **The Region Editor's table lists a region source's features** after the regions, paged by
   its paginator; selecting, reclassifying or recolouring a source row takes it into the regions,
   the bin deletes it. The classes panel counts the source's classes. A large import becomes the
@@ -45,6 +46,9 @@ file was added.
 
 ### Changed
 
+- **The heatmap's single-image mode slices with the slice bar** of the Image views, in place of
+  the slice-number field and its re-plot button: the slice the bar settles on (a drag let go, a
+  click on its track, or a pause in ← / → steps) is plotted.
 - **Imported GeoJSON keeps its class colours**: a class with no preset is drawn in the colour the
   file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
   preset colour, and a class colour set later recolours the class as before. The imported colours
