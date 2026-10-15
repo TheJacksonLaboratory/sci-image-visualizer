@@ -38,6 +38,23 @@ import { DEFAULT_REGION_STYLE, RegionStyle } from '../region-overlay/region-styl
 
 /** Selecting classes takes at most this many region-source features into the regions. */
 export const SELECT_CLASSES_LIMIT = 5000;
+/** Class sets whose region-source outlines are kept for rebuilding their surfaces. */
+const SOURCE_OUTLINE_CACHE_SIZE = 8;
+
+/** Outlines by slice merged into one entry per slice (rings, then lines), in slice order. */
+function mergeOutlines(parts: readonly SliceOutlines[]): SliceOutlines[] {
+  const byZ = new Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>();
+  for (const part of parts) {
+    if (!part.rings.length && !part.lines?.length) continue;
+    let slice = byZ.get(part.z);
+    if (!slice) byZ.set(part.z, (slice = { rings: [], lines: [] }));
+    slice.rings.push(...part.rings);
+    slice.lines.push(...(part.lines ?? []));
+  }
+  return Array.from(byZ, ([z, s]) => ({ z, rings: s.rings, ...(s.lines.length ? { lines: s.lines } : {}) })).sort(
+    (a, b) => a.z - b.z,
+  );
+}
 
 /** One undo step: the region set and, for a slice with a region source, what was taken from it. */
 interface RegionSnapshot {
@@ -141,9 +158,17 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   private readonly regionStyle$ = new BehaviorSubject<RegionStyle>(DEFAULT_REGION_STYLE);
   /** Bumped on every change of the slice's source, so a late open is dropped. */
   private sourceGeneration = 0;
+  /** Bumped when a region source is attached or dropped: what is read from the sources is stale. */
+  private sourcesVersion = 0;
 
-  /** {@link classVolumes} by image and class, until the regions change. */
-  private readonly volumeCache = new Map<string, Promise<number>>();
+  /**
+   * The region sources' part of {@link classVolumes}, by class and what the sources hold (see
+   * {@link sourceStateKey}): an edit of the regions leaves it, so the volumes of a slice being drawn
+   * on cost no source reads.
+   */
+  private readonly sourceVolumeCache = new Map<string, Promise<number>>();
+  /** The region sources' outlines of the class sets reconstructed last (see {@link sourceOutlines}). */
+  private readonly sourceOutlineCache = new Map<string, Promise<SliceOutlines[]>>();
 
   /** The classes hidden from view (names as given); every class is shown at first. */
   private readonly hiddenClasses$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
@@ -750,6 +775,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     if (!image) return;
     const open: RegionSourceOpener = typeof source === 'function' ? source : () => Promise.resolve(source);
     this.sources.attach(image, open, slices);
+    this.sourcesVersion++;
     this.refreshSourceView();
   }
 
@@ -758,6 +784,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     const image = this.scope.activeImage;
     if (!image) return;
     this.sources.detachImage(image);
+    this.sourcesVersion++;
     this.refreshSourceView();
   }
 
@@ -805,8 +832,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
       this.setTaken(new Set([...taken, ...fresh.map((f) => f.id)]));
       this.syncCache();
       this.emitSelection();
-      // Taken in as they were: the outlines, and so the volumes, did not change.
-      this.emit(true);
+      this.emit();
     }
     const bySource = new Map(this.regions.filter((r) => r.sourceId !== undefined).map((r) => [r.sourceId, r.id]));
     return ids.map((id) => bySource.get(id)).filter((id): id is number => id !== undefined);
@@ -874,22 +900,23 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
 
   /**
    * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice,
-   * one slice thick (Cavalieri's estimator), from the exact outlines. Cached per image and class
-   * until the regions change.
+   * one slice thick (Cavalieri's estimator), from the exact outlines. The region sources' part is
+   * cached until what they hold changes (a feature taken or deleted, another source); the drawn
+   * and taken regions' part is measured each time.
    */
   async classVolumes(classes: readonly string[]): Promise<Map<string, number>> {
-    const image = this.scope.activeImage;
+    const state = this.sourceStateKey();
     const out = new Map<string, number>();
     await Promise.all(
       [...new Set(classes)].map(async (name) => {
-        const key = `${image}\n${name}`;
-        let volume = this.volumeCache.get(key);
-        if (!volume) {
-          volume = this.classOutlines([name], 0).then(outlinedVolume);
-          this.volumeCache.set(key, volume);
-          volume.catch(() => this.volumeCache.delete(key));
+        const key = `${state}\n${name}`;
+        let source = this.sourceVolumeCache.get(key);
+        if (!source) {
+          source = this.sourceOutlines([name], 0).then(outlinedVolume);
+          this.sourceVolumeCache.set(key, source);
+          source.catch(() => this.sourceVolumeCache.delete(key));
         }
-        out.set(name, await volume);
+        out.set(name, (await source) + outlinedVolume(this.regionOutlines([name])));
       }),
     );
     return out;
@@ -900,20 +927,39 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * rings, and open polylines as `lines`.
    */
   private async classOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
-    const wanted = new Set(classes);
-    const byZ = new Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>();
-    const add = (z: number, rings: readonly ArrayLike<number>[], lines: readonly ArrayLike<number>[] = []) => {
-      if (!rings.length && !lines.length) return;
-      let slice = byZ.get(z);
-      if (!slice) byZ.set(z, (slice = { rings: [], lines: [] }));
-      slice.rings.push(...rings);
-      slice.lines.push(...lines);
-    };
+    return mergeOutlines([...(await this.sourceOutlines(classes, level)), ...this.regionOutlines(classes)]);
+  }
+
+  /**
+   * The region sources' outlines of these classes on every slice, without the features taken or
+   * deleted. The last few class sets are kept until what the sources hold changes: rebuilding a
+   * surface after an edit reads nothing again.
+   */
+  private sourceOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
+    const key = `${this.sourceStateKey()}\n${level}\n${classes.join('\n')}`;
+    const cached = this.sourceOutlineCache.get(key);
+    if (cached) {
+      // Most recently used last.
+      this.sourceOutlineCache.delete(key);
+      this.sourceOutlineCache.set(key, cached);
+      return cached;
+    }
+    const read = this.readSourceOutlines(classes, level);
+    this.sourceOutlineCache.set(key, read);
+    read.catch(() => this.sourceOutlineCache.delete(key));
+    while (this.sourceOutlineCache.size > SOURCE_OUTLINE_CACHE_SIZE) {
+      this.sourceOutlineCache.delete(this.sourceOutlineCache.keys().next().value as string);
+    }
+    return read;
+  }
+
+  private async readSourceOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
+    const out: SliceOutlines[] = [];
     const image = this.scope.activeImage;
     if (this.sources.hasPlanesSource(image)) {
       const binding = await this.sources.binding(image, this.sourceSlice);
       const outlines = await binding?.source.getClassOutlines(classes, level, this.sources.allTaken(image));
-      for (const s of outlines ?? []) add(s.z, s.rings, s.lines);
+      out.push(...(outlines ?? []));
     }
     for (const z of this.sources.slicesWithSource(image)) {
       const binding = await this.sources.binding(image, z);
@@ -923,8 +969,15 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
         level,
         Array.from(this.sources.taken(image, z)),
       );
-      for (const s of outlines) if (s.z === binding.plane) add(z, s.rings, s.lines);
+      for (const s of outlines) if (s.z === binding.plane) out.push({ ...s, z });
     }
+    return out;
+  }
+
+  /** The drawn and taken regions' outlines of these classes, by slice. */
+  private regionOutlines(classes: readonly string[]): SliceOutlines[] {
+    const wanted = new Set(classes);
+    const out: SliceOutlines[] = [];
     for (const r of this.scope.stackMode ? this.getSliceRegions() : this.regions) {
       if (r.isProfile?.() || !r.label || !wanted.has(r.label)) continue;
       const rings: Float64Array[] = [];
@@ -932,13 +985,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
         rings.push(Float64Array.from(p.xpoints.flatMap((x, i) => [x, p.ypoints[i]])));
         for (const hole of p.holes ?? []) rings.push(Float64Array.from(hole.flat()));
       }
-      add(r.z ?? 0, rings, regionPolylines(r));
+      const lines = regionPolylines(r);
+      out.push({ z: r.z ?? 0, rings, ...(lines.length ? { lines } : {}) });
     }
-    return Array.from(byZ, ([z, s]) => ({
-      z,
-      rings: s.rings,
-      ...(s.lines.length ? { lines: s.lines } : {}),
-    })).sort((a, b) => a.z - b.z);
+    return out;
+  }
+
+  /**
+   * What the region sources of the image hold: the image, its sources (one attached or dropped
+   * bumps the version) and the features taken from them. A key for what is read from them.
+   */
+  private sourceStateKey(): string {
+    const image = this.scope.activeImage;
+    let taken = 2166136261;
+    for (const z of this.sources.slicesWithTaken(image)) {
+      for (const id of [...this.sources.taken(image, z)].sort()) {
+        const s = `${z}:${id};`;
+        for (let i = 0; i < s.length; i++) taken = Math.imul(taken ^ s.charCodeAt(i), 16777619) >>> 0;
+      }
+    }
+    return `${image}\n${this.sourcesVersion}\n${taken}`;
   }
 
   /** Delete source features without taking them (one undo step). */
@@ -1194,9 +1260,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     this.scope.sync(this.regions);
   }
 
-  private emit(keepVolumes = false): void {
-    // The regions changed: so may every class's volume (not when features were only taken in).
-    if (!keepVolumes) this.volumeCache.clear();
+  private emit(): void {
     // Live-edit listeners (e.g. the intensity-profile inset) react on EVERY
     // change — including per-frame during a batched drag — so they track the
     // region live. The main regionUpdate$ stays coalesced during a batch (fires

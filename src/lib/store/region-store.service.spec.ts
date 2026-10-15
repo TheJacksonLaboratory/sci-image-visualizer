@@ -1380,7 +1380,7 @@ describe('RegionStore', () => {
   });
 
   describe('classVolumes', () => {
-    it("sums a class's area over the slices, cached until the regions change", async () => {
+    it("sums a class's area over the slices, following the regions", async () => {
       const a = Object.assign(rectRegion(0, 0, 10, 10), { label: 'A' });
       const b = Object.assign(rectRegion(20, 0, 5, 4), { label: 'A' });
       const c = Object.assign(rectRegion(0, 0, 3, 3), { label: 'B' });

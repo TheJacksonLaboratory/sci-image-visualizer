@@ -385,4 +385,33 @@ describe('RegionStore region sources', () => {
     expect(zs).toEqual(new Set([0, 1, 2])); // the drawn line on slice 2 is part of it
     expect((await store.classVolumes(['ILM'])).get('ILM')).toBe(0);
   });
+
+  it('reads the sources once for volumes and surfaces while regions are drawn, again once a feature is taken', async () => {
+    const source = tableSource([feature('a', 0), feature('b', 20), feature('c', 40, 'B')]);
+    const reads = jest.spyOn(RegionFeatureTable.prototype, 'classOutlines');
+    store.attachRegionSource(source);
+    await flush();
+    expect(Object.fromEntries(await store.classVolumes(['A', 'B']))).toEqual({ A: 200, B: 100 });
+    await store.reconstructClasses([{ key: 'A', classes: ['A'] }], 1);
+    // The surface at full detail reuses the outlines the volume read.
+    expect(reads.mock.calls.map(([classes]) => classes)).toEqual([['A'], ['B']]);
+
+    // Drawing: the volumes and the surface take it in, the sources are not read again.
+    store.addRegion(
+      Object.assign(new Region(), {
+        label: 'A',
+        bounds: Object.assign(new Rectangle(), { x: 100, y: 0, width: 5, height: 4 }),
+      }),
+    );
+    expect((await store.classVolumes(['A', 'B'])).get('A')).toBe(220);
+    const [a] = await store.reconstructClasses([{ key: 'A', classes: ['A'] }], 1);
+    expect(Math.max(...Array.from(a.mesh.vertices.filter((_, i) => i % 3 === 0)))).toBeGreaterThan(100);
+    expect(reads).toHaveBeenCalledTimes(2);
+
+    // Taking a feature changes what the source holds: read again, the total unchanged.
+    await store.takeSourceFeatures(['b']);
+    expect((await store.classVolumes(['A'])).get('A')).toBe(220);
+    expect(reads).toHaveBeenCalledTimes(3);
+    reads.mockRestore();
+  });
 });
