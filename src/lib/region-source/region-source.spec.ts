@@ -1,3 +1,6 @@
+import { HTTP_INTERCEPTORS, HttpClient, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
 import { openHttpRegionSource } from './http-region-source';
 import { RegionTileCache, isAbortError } from './region-source';
 import { RegionSourceMessage, RegionSourceReply, RegionSourceTables } from './region-source-ops';
@@ -246,5 +249,65 @@ describe('openHttpRegionSource', () => {
     await expect(
       openHttpRegionSource('http://x/regions/', { fetch: fetchFn as unknown as typeof fetch }),
     ).rejects.toThrow('500');
+  });
+  describe("through the host's HttpClient", () => {
+    /** A host's auth interceptor, as jit-ui's adds its bearer token. */
+    class Auth implements HttpInterceptor {
+      intercept(req: HttpRequest<unknown>, next: HttpHandler) {
+        return next.handle(req.clone({ setHeaders: { Authorization: 'Bearer t' } }));
+      }
+    }
+    let http: HttpClient;
+    let server: HttpTestingController;
+    const settle = () => new Promise((r) => setTimeout(r));
+
+    beforeEach(() => {
+      TestBed.configureTestingModule({
+        imports: [HttpClientTestingModule],
+        providers: [{ provide: HTTP_INTERCEPTORS, useClass: Auth, multi: true }],
+      });
+      http = TestBed.inject(HttpClient);
+      server = TestBed.inject(HttpTestingController);
+    });
+
+    afterEach(() => server.verify());
+
+    it('sends every request through it, so the host’s interceptors apply', async () => {
+      const opening = openHttpRegionSource('http://x/regions', { http });
+      const info = server.expectOne('http://x/regions/info');
+      expect(info.request.method).toBe('GET');
+      expect(info.request.headers.get('Authorization')).toBe('Bearer t');
+      info.flush(JSON.stringify(table.info()));
+      const source = await opening;
+      expect(source.info.featureCount).toBe(2);
+
+      const tile = source.getTile(0, { level: 0, gx: 0, gy: 0 });
+      await settle();
+      const t = server.expectOne('http://x/regions/tile/0/0/0/0');
+      expect(t.request.headers.get('Authorization')).toBe('Bearer t');
+      t.flush(
+        JSON.stringify({
+          features: table
+            .tile(0, 0, 0, 0)
+            .features.map((f) => ({ ...f, rings: f.rings.map((r) => Array.from(r)) })),
+        }),
+      );
+      expect((await tile).features[0].rings[0]).toBeInstanceOf(Float32Array);
+
+      const features = source.getFeatures(['b']);
+      await settle();
+      const post = server.expectOne('http://x/regions/features');
+      expect(post.request.method).toBe('POST');
+      expect(post.request.body).toEqual({ ids: ['b'] });
+      expect(post.request.headers.get('Authorization')).toBe('Bearer t');
+      post.flush(JSON.stringify({ features: table.features(['b']) }));
+      expect((await features)[0].id).toBe('b');
+    });
+
+    it('fails on an HTTP error with its status', async () => {
+      const opening = openHttpRegionSource('http://x/regions', { http });
+      server.expectOne('http://x/regions/info').flush('no', { status: 401, statusText: 'Unauthorized' });
+      await expect(opening).rejects.toThrow('HTTP 401');
+    });
   });
 });

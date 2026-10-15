@@ -1,3 +1,4 @@
+import type { HttpClient } from '@angular/common/http';
 import { IImageInfo } from '../contracts/image.contract';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
@@ -46,13 +47,16 @@ const loads = new WeakMap<RegionLoadTarget, number>();
  * plane only stays global, as its regions would. A folder stack's sources open lazily, the first
  * time their slice is shown.
  *
- * `z` is the slice shown now; entering stack mode makes it live and resets undo.
+ * `z` is the slice shown now; entering stack mode makes it live and resets undo. `http`, the
+ * host's `HttpClient`, carries a server-side source's requests, so the host's interceptors (its
+ * auth) apply to them as to the image tiles.
  */
 export function applyImageRois(
   info: IImageInfo,
   target: RegionLoadTarget,
   z: number,
   minSourceChars = REGION_SOURCE_MIN_CHARS,
+  http?: HttpClient,
 ): void {
   const attach = target.attachRegionSource?.bind(target);
   const load = (loads.get(target) ?? 0) + 1;
@@ -79,7 +83,7 @@ export function applyImageRois(
   if (attach && (info.regionSourceUrl || asSource(roiJson))) {
     const url = info.regionSourceUrl;
     const open: RegionSourceOpener = url
-      ? () => openHttpRegionSource(url)
+      ? () => openHttpRegionSource(url, { http })
       : () => openGeoJsonRegionSource(roiJson as string);
     // As loading a file of regions replaces the regions, a source starts the image afresh.
     target.setRegions([]);

@@ -73,7 +73,12 @@ provideVisualization(),
 a folder stack opens the first time its slice is shown (at most six stay open).
 
 A host can also open one itself: `openGeoJsonRegionSource(text)` and
-`openHttpRegionSource(url)` return a `RegionSource`.
+`openHttpRegionSource(url, { http })` return a `RegionSource`.
+
+A server source's requests go through the host's Angular `HttpClient`, as the image tiles and the
+spatial data do, so the host's interceptors apply to them: a host that authenticates its API (a
+bearer token added by an interceptor, say) needs nothing more for `regionSourceUrl`. The library
+itself handles no credentials. Opened without `http`, a source uses `fetch` (with `init`).
 
 ## The server wire
 

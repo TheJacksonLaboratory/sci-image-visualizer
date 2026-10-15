@@ -11,7 +11,13 @@
  *  - `POST export` `{ exclude, extra }`→ a GeoJSON FeatureCollection
  *
  * Tile rings travel as flat `[x, y, x, y, …]` arrays, label points as flat `[x, y, room, …]`.
+ *
+ * Given the host's Angular `HttpClient` (as the visualizer passes it), every request goes through
+ * it, so the host's interceptors apply — its auth header above all — as for the image tiles and
+ * the spatial data. The library itself knows nothing of authentication.
  */
+import type { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { RegionSource, RegionTileCache, SourceFeature, abortable } from './region-source';
 import type {
   Bbox,
@@ -37,7 +43,12 @@ export interface WireTileFeature {
 
 /** Options of {@link openHttpRegionSource}. */
 export interface HttpRegionSourceOptions {
-  /** Extra request options (credentials, headers) for every request. */
+  /**
+   * The host's `HttpClient`: requests then go through it and its interceptors (the host's auth),
+   * not `fetch`, and `init` and `fetch` are not used.
+   */
+  http?: HttpClient;
+  /** Extra request options (credentials, headers) for every `fetch` request. */
   init?: RequestInit;
   /** The fetch to use (default the global one). */
   fetch?: typeof fetch;
@@ -69,6 +80,20 @@ class Http {
   }
 
   async text(path: string, body?: unknown): Promise<string> {
+    const http = this.options.http;
+    if (http) {
+      const url = this.base + path;
+      try {
+        return await firstValueFrom(
+          body === undefined
+            ? http.get(url, { responseType: 'text' })
+            : http.post(url, body, { responseType: 'text' }),
+        );
+      } catch (err) {
+        const status = (err as { status?: number } | null)?.status;
+        throw new Error(`Region source ${path}: HTTP ${status ?? 'error'}`);
+      }
+    }
     const init: RequestInit = { ...this.options.init };
     if (body !== undefined) {
       init.method = 'POST';

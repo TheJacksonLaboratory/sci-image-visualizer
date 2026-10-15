@@ -1,3 +1,5 @@
+import type { HttpClient } from '@angular/common/http';
+import { of } from 'rxjs';
 import { applyImageRois, RegionLoadTarget } from './region-load';
 import { IImageInfo } from '../contracts/image.contract';
 import { Region } from '../models/region';
@@ -147,6 +149,17 @@ describe('applyImageRois', () => {
       applyImageRois(info({ isStack: false, roiJsonStr: 'A', regionSourceUrl: 'http://x/regions' }), target, 0);
       expect(target.importRegions).not.toHaveBeenCalled();
       expect(attach).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens the server-side source through the host's HttpClient", async () => {
+      const get = jest.fn(() =>
+        of('{"featureCount":0,"bounds":null,"tileSize":512,"levels":1,"planes":[0],"classColors":{}}'),
+      );
+      const http = { get, post: jest.fn() } as unknown as HttpClient;
+      applyImageRois(info({ isStack: false, regionSourceUrl: 'http://x/regions' }), target, 0, undefined, http);
+      const open = attach.mock.calls[0][0] as () => Promise<{ info: { featureCount: number } }>;
+      expect((await open()).info.featureCount).toBe(0);
+      expect(get).toHaveBeenCalledWith('http://x/regions/info', { responseType: 'text' });
     });
   });
 });

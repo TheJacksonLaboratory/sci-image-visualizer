@@ -22,6 +22,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 
 import { Observable } from 'rxjs';
@@ -366,7 +367,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.state.setImageLoading(false);
     },
     landed: (info) => {
-      applyImageRois(info, this.plotService, this.zIndex, this.vizConfig?.regionSourceMinChars);
+      // The host's HttpClient carries a server-side region source's requests: its interceptors (auth) apply.
+      const http = this.injector?.get(HttpClient, null) ?? undefined;
+      applyImageRois(info, this.plotService, this.zIndex, this.vizConfig?.regionSourceMinChars, http);
       this.contributions.activate();
     },
     setImageLoading: (loading) => this.state.setImageLoading(loading),
