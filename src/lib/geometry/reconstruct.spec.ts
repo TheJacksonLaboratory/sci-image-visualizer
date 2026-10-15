@@ -1,4 +1,4 @@
-import { outlinedVolume, reconstruct, ringsArea } from './reconstruct';
+import { outlinedVolume, outlinesArea, reconstruct, ringsArea } from './reconstruct';
 import { smoothMesh, surfaceNets } from './surface-nets';
 
 /** Signed volume of a closed triangle mesh (positive when its faces point outward). */
@@ -17,6 +17,38 @@ function volume(vertices: Float32Array, faces: Uint32Array): number {
       6;
   }
   return v;
+}
+
+/** How many faces of the mesh the ray from `o` along `d` crosses (Möller–Trumbore). */
+function hits(vertices: Float32Array, faces: Uint32Array, o: number[], d: number[]): number {
+  const sub = (a: number[], b: number[]) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a: number[], b: number[]) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let n = 0;
+  for (let i = 0; i < faces.length; i += 3) {
+    const [a, b, c] = [faces[i], faces[i + 1], faces[i + 2]].map((k) => [
+      vertices[3 * k],
+      vertices[3 * k + 1],
+      vertices[3 * k + 2],
+    ]);
+    const e1 = sub(b, a),
+      e2 = sub(c, a);
+    const p = cross(d, e2);
+    const det = dot(e1, p);
+    if (Math.abs(det) < 1e-12) continue;
+    const t0 = sub(o, a);
+    const u = dot(t0, p) / det;
+    if (u < 0 || u > 1) continue;
+    const q = cross(t0, e1);
+    const v = dot(d, q) / det;
+    if (v < 0 || u + v > 1) continue;
+    if (dot(e2, q) / det > 0) n++;
+  }
+  return n;
 }
 
 /** Whether every edge of the mesh is shared by exactly two faces (closed, manifold). */
@@ -101,6 +133,28 @@ describe('reconstruct', () => {
     expect(ratio).toBeLessThan(0.85);
   });
 
+  it('fills features as their union: a child inside its parent (a hierarchy group) cuts no hole', () => {
+    const rings = [square(0, 0, 20), square(5, 5, 10)];
+    const slices = [0, 1, 2].map((z) => ({ z, rings, ringGroups: [0, 1] }));
+    const mesh = reconstruct(slices, { smooth: 0 });
+    expect(closed(mesh.faces)).toBe(true);
+    // Up through the common centre: in at the bottom, out at the top.
+    expect(hits(mesh.vertices, mesh.faces, [10.3, 10.6, -5], [0, 0, 1])).toBe(2);
+    // The same rings as one feature (no groups, as an older source sends them): the inner ring is its hole.
+    const holed = reconstruct(
+      slices.map(({ z }) => ({ z, rings })),
+      { smooth: 0 },
+    );
+    expect(hits(holed.vertices, holed.faces, [10.3, 10.6, -5], [0, 0, 1])).toBe(0);
+    // A feature's own hole stays one: the rings of a feature are even-odd.
+    const own = reconstruct(
+      slices.map(({ z }) => ({ z, rings: [...rings, square(40, 0, 5)], ringGroups: [0, 0, 1] })),
+      { smooth: 0 },
+    );
+    expect(hits(own.vertices, own.faces, [10.3, 10.6, -5], [0, 0, 1])).toBe(0);
+    expect(hits(own.vertices, own.faces, [42.3, 2.6, -5], [0, 0, 1])).toBe(2);
+  });
+
   it('coarsens to stay within the voxel budget, and is empty without area', () => {
     const big = reconstruct([{ z: 0, rings: [square(0, 0, 1000)] }], {
       pixelStep: 1,
@@ -131,6 +185,27 @@ describe('ringsArea / outlinedVolume', () => {
     expect(ringsArea([square(0, 0, 10), square(2, 2, 6), square(4, 4, 2)])).toBe(68);
     // Either winding; side-by-side parts add.
     expect(ringsArea([square(0, 0, 10).reverse(), square(20, 0, 5)])).toBe(125);
+  });
+
+  it('measures features as their union, each one even-odd', () => {
+    // A child inside its parent adds nothing; without groups (one feature) it is a hole.
+    expect(outlinesArea([square(0, 0, 20), square(5, 5, 10)], [0, 1])).toBe(400);
+    expect(outlinesArea([square(0, 0, 20), square(5, 5, 10)])).toBe(300);
+    // Overlapping, side by side, and one filling another's hole.
+    expect(outlinesArea([square(0, 0, 10), square(5, 5, 10)], [0, 1])).toBeCloseTo(175, 9);
+    expect(outlinesArea([square(0, 0, 10), square(20, 0, 10)], [3, 7])).toBe(200);
+    expect(outlinesArea([square(0, 0, 20), square(5, 5, 10), square(5, 5, 10)], [0, 0, 1])).toBeCloseTo(400, 9);
+    // A feature's own hole stays one beside another feature.
+    expect(outlinesArea([square(0, 0, 10), square(2, 2, 6), square(20, 0, 5)], [0, 0, 1])).toBe(89);
+  });
+
+  it('measures the union exactly where the outlines cross between vertices', () => {
+    // A 10² square and the same square turned 45° about its centre: they cross between their
+    // vertices' rows. The union is the square and the 4 corners of the turned one beyond it.
+    const r = 5 * Math.SQRT2;
+    const diamond = Float64Array.of(5, 5 - r, 5 + r, 5, 5, 5 + r, 5 - r, 5);
+    const corner = 10 - 5 * Math.SQRT2;
+    expect(outlinesArea([square(0, 0, 10), diamond], [0, 1])).toBeCloseTo(100 + 2 * corner * corner, 4);
   });
 
   it('sums each slice’s area, one slice thick (Cavalieri)', () => {

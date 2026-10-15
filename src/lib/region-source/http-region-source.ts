@@ -123,6 +123,7 @@ class HttpRegionSource implements RegionSource {
         z: number;
         rings: number[][];
         lines?: number[][];
+        ringGroups?: number[];
         ringLabels?: string[];
         lineLabels?: string[];
       }>;
@@ -131,6 +132,7 @@ class HttpRegionSource implements RegionSource {
       z: s.z,
       rings: s.rings.map((r) => Float32Array.from(r)),
       ...(s.lines?.length ? { lines: s.lines.map((l) => Float32Array.from(l)) } : {}),
+      ...(s.ringGroups ? { ringGroups: s.ringGroups } : {}),
       ...(s.ringLabels ? { ringLabels: s.ringLabels } : {}),
       ...(s.lineLabels ? { lineLabels: s.lineLabels } : {}),
     }));

@@ -276,7 +276,10 @@ class FolderRegionSet {
     for (let z = 0; z < this.files.length; z++) {
       const entry = await this.table(z);
       if (!entry) continue;
-      const own = exclude.map(splitId).filter(([qz]) => qz === z).map(([, id]) => id);
+      const own = exclude
+        .map(splitId)
+        .filter(([qz]) => qz === z)
+        .map(([, id]) => id);
       for (const s of entry.table.classOutlines(classes, level, own)) {
         if (s.z === entry.plane) slices.push({ ...s, z });
       }
@@ -332,6 +335,7 @@ function wireOutlines(slices) {
       z: s.z,
       rings: s.rings.map(round),
       ...(s.lines?.length ? { lines: s.lines.map(round) } : {}),
+      ...(s.ringGroups ? { ringGroups: s.ringGroups } : {}),
       ...(s.ringLabels ? { ringLabels: s.ringLabels } : {}),
       ...(s.lineLabels ? { lineLabels: s.lineLabels } : {}),
     })),

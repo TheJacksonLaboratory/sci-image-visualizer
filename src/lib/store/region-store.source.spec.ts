@@ -415,6 +415,28 @@ describe('RegionStore region sources', () => {
     reads.mockRestore();
   });
 
+  it('measures and cuts nested features of a class as their union, taken or not', async () => {
+    const at = (id: string, x: number, size: number) => ({
+      type: 'Feature',
+      id,
+      properties: { classification: { name: 'A' } },
+      geometry: { type: 'Polygon', coordinates: [square(x, x, size)] },
+    });
+    store.attachRegionSource(tableSource([at('parent', 0, 20), at('child', 5, 10)]));
+    await flush();
+    expect((await store.classVolumes(['A'])).get('A')).toBe(400);
+    const [slice] = (await store.outlinesByClass(0)).get('A')!;
+    expect(new Set(Array.from(slice.ringGroups!)).size).toBe(2);
+
+    // Taking the child makes it a region: the class is the same, so is its volume.
+    await store.takeSourceFeatures(['child']);
+    expect(store.getRegions().length).toBe(1);
+    expect((await store.classVolumes(['A'])).get('A')).toBe(400);
+    const [taken] = (await store.outlinesByClass(0)).get('A')!;
+    expect(taken.rings.length).toBe(2);
+    expect(new Set(Array.from(taken.ringGroups!)).size).toBe(2);
+  });
+
   it('reads every class at once for a section, by class and slice, the drawn regions included', async () => {
     const at = (id: string, z: number, label: string, geometry: object) => ({
       type: 'Feature',

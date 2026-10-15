@@ -108,6 +108,11 @@ export interface TileFeature {
 export interface ClassOutlines {
   z: number;
   rings: Float32Array[];
+  /**
+   * The feature each ring is part of (see SliceOutlines.ringGroups): a feature's rings fill
+   * even-odd, the features as their union. Absent from a server that predates them.
+   */
+  ringGroups?: number[];
   lines?: Float32Array[];
   ringLabels?: string[];
   lineLabels?: string[];
@@ -481,8 +486,9 @@ export class RegionFeatureTable {
   /**
    * The outlines of every feature of these classes, plane by plane, simplified for `level` (what a
    * 3D reconstruction of the classes stacks), without the `exclude`d ids: closed features' rings,
-   * open features' polylines as `lines`. Planes without one are left out. `classes` null reads
-   * every labelled feature, each outline with its class (`ringLabels`, `lineLabels`).
+   * open features' polylines as `lines`, each ring with its feature (`ringGroups`). Planes without
+   * one are left out. `classes` null reads every labelled feature, each outline with its class
+   * (`ringLabels`, `lineLabels`).
    */
   classOutlines(
     classes: readonly string[] | null,
@@ -505,6 +511,7 @@ export class RegionFeatureTable {
         if (!wanted) (plane.lineLabels ??= []).push(...rings.map(() => label));
       } else {
         plane.rings.push(...rings);
+        (plane.ringGroups ??= []).push(...rings.map(() => i));
         if (!wanted) (plane.ringLabels ??= []).push(...rings.map(() => label));
       }
     }

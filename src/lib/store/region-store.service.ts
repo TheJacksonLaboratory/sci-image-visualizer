@@ -24,7 +24,7 @@ import {
   replaceBounds,
 } from '../models/polygon-factory';
 import type { Mesh } from '../geometry/surface-nets';
-import { SliceOutlines, outlinedVolume } from '../geometry/reconstruct';
+import { SliceOutlines, outlinesArea } from '../geometry/reconstruct';
 import { reconstructInWorker } from '../region-source/worker-region-source';
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
@@ -43,20 +43,67 @@ type LabelledOutlines = SliceOutlines & { ringLabels?: string[]; lineLabels?: st
 
 /** Class sets whose region-source outlines are kept for rebuilding their surfaces. */
 const SOURCE_OUTLINE_CACHE_SIZE = 8;
+/** Classes whose region-source part of the volume is kept (see RegionStore.classVolumes). */
+const SOURCE_VOLUME_CACHE_SIZE = 64;
 
-/** Outlines by slice merged into one entry per slice (rings, then lines), in slice order. */
+/** A slice's rings, each with its feature (see SliceOutlines.ringGroups), and its lines. */
+interface SliceParts {
+  rings: ArrayLike<number>[];
+  ringGroups: number[];
+  lines: ArrayLike<number>[];
+}
+
+/**
+ * Feature ids unique across outlines read from several places: each call gives one part's
+ * renumbering of its own ids (a part without them is one feature).
+ */
+function featureIds(): () => (own: number | undefined) => number {
+  let next = 0;
+  return () => {
+    const ids = new Map<number | undefined, number>();
+    return (own) => {
+      let id = ids.get(own);
+      if (id === undefined) ids.set(own, (id = next++));
+      return id;
+    };
+  };
+}
+
+/** A slice's parts as outlines. */
+function sliceOutlines(z: number, s: SliceParts): SliceOutlines {
+  return {
+    z,
+    rings: s.rings,
+    ...(s.rings.length ? { ringGroups: s.ringGroups } : {}),
+    ...(s.lines.length ? { lines: s.lines } : {}),
+  };
+}
+
+/**
+ * Outlines by slice merged into one entry per slice (rings, then lines), in slice order, each
+ * part's features apart from the others' (they fill as their union).
+ */
 function mergeOutlines(parts: readonly SliceOutlines[]): SliceOutlines[] {
-  const byZ = new Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>();
+  const byZ = new Map<number, SliceParts>();
+  const nextPart = featureIds();
   for (const part of parts) {
     if (!part.rings.length && !part.lines?.length) continue;
     let slice = byZ.get(part.z);
-    if (!slice) byZ.set(part.z, (slice = { rings: [], lines: [] }));
-    slice.rings.push(...part.rings);
+    if (!slice) byZ.set(part.z, (slice = { rings: [], ringGroups: [], lines: [] }));
+    const id = nextPart();
+    part.rings.forEach((r, i) => {
+      slice.rings.push(r);
+      slice.ringGroups.push(id(part.ringGroups?.[i]));
+    });
     slice.lines.push(...(part.lines ?? []));
   }
-  return Array.from(byZ, ([z, s]) => ({ z, rings: s.rings, ...(s.lines.length ? { lines: s.lines } : {}) })).sort(
-    (a, b) => a.z - b.z,
-  );
+  return Array.from(byZ, ([z, s]) => sliceOutlines(z, s)).sort((a, b) => a.z - b.z);
+}
+
+/** The region sources' part of a class's volume: its area on each slice, with the outlines. */
+interface SourceVolume {
+  total: number;
+  slices: ReadonlyMap<number, { area: number; outlines: SliceOutlines }>;
 }
 
 /** One undo step: the region set and, for a slice with a region source, what was taken from it. */
@@ -169,7 +216,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * {@link sourceStateKey}): an edit of the regions leaves it, so the volumes of a slice being drawn
    * on cost no source reads.
    */
-  private readonly sourceVolumeCache = new Map<string, Promise<number>>();
+  private readonly sourceVolumeCache = new Map<string, Promise<SourceVolume>>();
   /** The region sources' outlines of the class sets reconstructed last (see {@link sourceOutlines}). */
   private readonly sourceOutlineCache = new Map<string, Promise<LabelledOutlines[]>>();
 
@@ -902,27 +949,57 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   }
 
   /**
-   * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice,
-   * one slice thick (Cavalieri's estimator), from the exact outlines. The region sources' part is
-   * cached until what they hold changes (a feature taken or deleted, another source); the drawn
-   * and taken regions' part is measured each time.
+   * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice
+   * (its features' union, see `outlinesArea`), one slice thick (Cavalieri's estimator), from the
+   * exact outlines. Where a feature is, a region source's or a drawn or taken region, does not
+   * change it: taking one leaves the volume as it was. The region sources' part is cached until
+   * what they hold changes (a feature taken or deleted, another source); only the slices with
+   * drawn or taken regions of the class are measured again.
    */
   async classVolumes(classes: readonly string[]): Promise<Map<string, number>> {
     const state = this.sourceStateKey();
     const out = new Map<string, number>();
     await Promise.all(
       [...new Set(classes)].map(async (name) => {
-        const key = `${state}\n${name}`;
-        let source = this.sourceVolumeCache.get(key);
-        if (!source) {
-          source = this.sourceOutlines([name], 0).then(outlinedVolume);
-          this.sourceVolumeCache.set(key, source);
-          source.catch(() => this.sourceVolumeCache.delete(key));
+        const source = await this.sourceVolume(state, name);
+        let volume = source.total;
+        for (const regions of mergeOutlines(this.regionOutlines([name]))) {
+          const under = source.slices.get(regions.z);
+          const [both] = under ? mergeOutlines([under.outlines, regions]) : [regions];
+          volume += outlinesArea(both.rings, both.ringGroups) - (under?.area ?? 0);
         }
-        out.set(name, (await source) + outlinedVolume(this.regionOutlines([name])));
+        out.set(name, volume);
       }),
     );
     return out;
+  }
+
+  /** The region sources' part of a class's volume, cached by what they hold (see classVolumes). */
+  private sourceVolume(state: string, name: string): Promise<SourceVolume> {
+    const key = `${state}\n${name}`;
+    let source = this.sourceVolumeCache.get(key);
+    if (source) {
+      // Most recently used last.
+      this.sourceVolumeCache.delete(key);
+      this.sourceVolumeCache.set(key, source);
+      return source;
+    }
+    source = this.sourceOutlines([name], 0).then((parts) => {
+      const slices = new Map<number, { area: number; outlines: SliceOutlines }>();
+      let total = 0;
+      for (const outlines of mergeOutlines(parts)) {
+        const area = outlinesArea(outlines.rings, outlines.ringGroups);
+        slices.set(outlines.z, { area, outlines });
+        total += area;
+      }
+      return { total, slices };
+    });
+    this.sourceVolumeCache.set(key, source);
+    source.catch(() => this.sourceVolumeCache.delete(key));
+    while (this.sourceVolumeCache.size > SOURCE_VOLUME_CACHE_SIZE) {
+      this.sourceVolumeCache.delete(this.sourceVolumeCache.keys().next().value as string);
+    }
+    return source;
   }
 
   /**
@@ -983,18 +1060,23 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * stack cuts (see `geometry/section`).
    */
   async outlinesByClass(level: number): Promise<Map<string, SliceOutlines[]>> {
-    const byClass = new Map<string, Map<number, { rings: ArrayLike<number>[]; lines: ArrayLike<number>[] }>>();
+    const byClass = new Map<string, Map<number, SliceParts>>();
     const slot = (label: string, z: number) => {
       let slices = byClass.get(label);
       if (!slices) byClass.set(label, (slices = new Map()));
       let slice = slices.get(z);
-      if (!slice) slices.set(z, (slice = { rings: [], lines: [] }));
+      if (!slice) slices.set(z, (slice = { rings: [], ringGroups: [], lines: [] }));
       return slice;
     };
+    const nextPart = featureIds();
     for (const s of await this.sourceOutlines(null, level)) {
+      const id = nextPart();
       s.rings.forEach((r, i) => {
         const label = s.ringLabels?.[i];
-        if (label) slot(label, s.z).rings.push(r);
+        if (!label) return;
+        const slice = slot(label, s.z);
+        slice.rings.push(r);
+        slice.ringGroups.push(id(s.ringGroups?.[i]));
       });
       (s.lines ?? []).forEach((l, i) => {
         const label = s.lineLabels?.[i];
@@ -1002,15 +1084,15 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
       });
     }
     for (const { label, outlines } of this.labelledRegionOutlines(null)) {
+      // A region is one feature.
+      const id = nextPart()(undefined);
       const slice = slot(label, outlines.z);
       slice.rings.push(...outlines.rings);
+      slice.ringGroups.push(...outlines.rings.map(() => id));
       slice.lines.push(...(outlines.lines ?? []));
     }
     return new Map(
-      Array.from(byClass, ([label, slices]) => [
-        label,
-        Array.from(slices, ([z, s]) => ({ z, rings: s.rings, ...(s.lines.length ? { lines: s.lines } : {}) })),
-      ]),
+      Array.from(byClass, ([label, slices]) => [label, Array.from(slices, ([z, s]) => sliceOutlines(z, s))]),
     );
   }
 

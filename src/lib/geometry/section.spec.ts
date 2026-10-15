@@ -47,6 +47,31 @@ describe('sectionOutlines', () => {
     expect(box(cut.get('D')!.rings)).toEqual([0, 0, 2, 30]);
   });
 
+  it('cuts overlapping features of a class as their union, each feature even-odd', () => {
+    // Two overlapping squares on slices 0 and 1, y 0..20 and 10..30, as two features.
+    const rings = [square(0, 0, 20), square(0, 10, 20)];
+    const two = new Map([['T', [0, 1].map((z) => ({ z, rings, ringGroups: [0, 1] }))]]);
+    const cut = sectionOutlines(two, 'x', 10, { depth: 2, extent: 30 });
+    expect(cut.get('T')!.rings.length).toBe(1);
+    expect(box(cut.get('T')!.rings)).toEqual([0, 0, 2, 30]);
+    // As one feature (no groups) the overlap is even-odd: y 10..20 drops out.
+    const one = new Map([['T', [0, 1].map((z) => ({ z, rings }))]]);
+    expect(sectionOutlines(one, 'x', 10, { depth: 2, extent: 30 }).get('T')!.rings.length).toBe(2);
+    // A feature's own hole stays one, beside another feature.
+    const holed = new Map([
+      [
+        'D',
+        [0, 1].map((z) => ({
+          z,
+          rings: [square(0, 0, 30), square(10, 10, 10), square(0, 40, 5)],
+          ringGroups: [4, 4, 9],
+        })),
+      ],
+    ]);
+    const index = indexOutlines(holed);
+    expect(sectionOutlines(index, 'x', 15, { depth: 2, extent: 50 }).get('D')!.rings.length).toBe(2);
+  });
+
   it('joins a line crossing on each slice into the line it draws across the stack', () => {
     // A boundary at y = 50 + z on slices 0..3, and a second one at y = 90 on slices 0..1.
     const lines = new Map([
