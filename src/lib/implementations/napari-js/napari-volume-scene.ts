@@ -310,12 +310,16 @@ export class VolumeScene implements NapariScene {
     // Anchoring the in-plane long side to a fixed reference and letting Z span the
     // full slice count makes the box shape identical at every decimate factor.
     const meta = ctx.info()?.imageMeta?.[0];
-    const mppXYZ: [number, number, number] | null =
-      meta?.mppX && meta?.mppY && meta?.mppZ ? [meta.mppX, meta.mppY, meta.mppZ] : null;
+    const imageDesc = ctx.tiles.currentDescriptor(ctx.info());
+    // The server's descriptor first (it reports a tiled stack's spacing, e.g. a NRRD volume's), else
+    // the image metadata.
+    const mx = imageDesc?.mppX || meta?.mppX;
+    const my = imageDesc?.mppY || meta?.mppY;
+    const mz = imageDesc?.mppZ || meta?.mppZ;
+    const mppXYZ: [number, number, number] | null = mx && my && mz ? [mx, my, mz] : null;
     // The image's DECLARED pixel dimensions, which is what mpp is per: the sampled
     // dims are decimated, so sizing a physical box by them would make the world
     // box depend on the resolution the user happens to be viewing at.
-    const imageDesc = ctx.tiles.currentDescriptor(ctx.info());
     const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
     const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
     const fullD = stackDepth(ctx.info()) || dims.depth;
@@ -452,7 +456,7 @@ export class VolumeScene implements NapariScene {
       ],
       // A descriptor that reports only mppX is square-pixel by convention, which is
       // what the 2D scale bar already assumes of it.
-      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
+      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, desc?.mppZ || meta?.mppZ || 0],
     };
   }
 

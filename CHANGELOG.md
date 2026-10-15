@@ -46,6 +46,9 @@ file was added.
 
 ### Changed
 
+- **A volume takes its slice spacing from the tile server's descriptor** (`TileDescriptor.mppZ`)
+  as it already took its pixel size, so a tiled stack whose server reports it (jit-service for a
+  NRRD atlas volume) is drawn to scale without the host copying it into `imageMeta`.
 - **The heatmap's single-image mode slices with the slice bar** of the Image views, in place of
   the slice-number field and its re-plot button: the slice the bar settles on (a drag let go, a
   click on its track, or a pause in ← / → steps) is plotted.

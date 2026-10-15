@@ -9,7 +9,8 @@ import type { Colormap } from 'napari-js';
 import { saveAs } from 'file-saver';
 
 import { NapariVisualizerService } from './napari-visualizer.service';
-import { bitmapToLuminance } from './napari-tile-client';
+import { NapariTileClient, bitmapToLuminance } from './napari-tile-client';
+import type { TileDescriptor } from '../tile-server/tile-protocol';
 import { Image2dScene } from './napari-image-2d-scene';
 import { NapariToolBridge } from './napari-tool-bridge';
 import type { SceneContext } from './napari-scene';
@@ -3252,6 +3253,38 @@ describe('NapariVisualizerService', () => {
       expect(vz * layer.depth).toBeCloseTo(76 * 200, 3);
       // Anisotropic, and in the right direction: z voxels are the long ones.
       expect(vz / vx).toBeGreaterThan(1);
+    });
+
+    it("takes a stack's slice spacing from the server's tile descriptor", async () => {
+      // jit-service reports a NRRD volume's voxel spacing in /tiles/info, not in the image metadata.
+      jest.spyOn(NapariTileClient.prototype, 'currentDescriptor').mockReturnValue({
+        width: 275,
+        height: 275,
+        tileSize: 512,
+        levels: [{ res: 0, width: 275, height: 275 }],
+        mppX: 40,
+        mppY: 40,
+        mppZ: 200,
+      } as TileDescriptor);
+      const layer = await mountVolume(
+        imageInfo({
+          tiled: false,
+          urls: Array.from({ length: 76 }, (_, z) => `u${z}`),
+          imageMeta: [{ channelCount: 1, rgbChannels: 1, x: 275, y: 275, z: 76 }],
+        }),
+      );
+
+      const [vx, , vz] = layer.voxelSize;
+      expect(vx * layer.width).toBeCloseTo(275 * 40, 3);
+      expect(vz * layer.depth).toBeCloseTo(76 * 200, 3);
+      const labels = (
+        service as unknown as {
+          scene: { axesLabels: (v: { width: number; height: number; depth: number }) => { text: string }[] };
+        }
+      ).scene
+        .axesLabels({ width: 1, height: 1, depth: 1 })
+        .map((l) => l.text);
+      expect(labels[2]).toBe('Z · 1.5 cm');
     });
 
     it('labels the axes from the physical extent, once — not the world box', async () => {
