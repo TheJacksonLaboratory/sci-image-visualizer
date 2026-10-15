@@ -1269,6 +1269,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     const image = this.scope.activeImage;
     const slice = this.sourceSlice;
     if (this.sourceView$.value) this.sourceView$.next(null);
+    this.sources.show(image, slice);
     if (!this.sources.has(image, slice)) {
       this.hintStyle = undefined;
       this.restyle();

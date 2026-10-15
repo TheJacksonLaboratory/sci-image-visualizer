@@ -205,6 +205,18 @@ describe('RegionStore region sources', () => {
     expect(view?.source).toBe(sources[0]);
   });
 
+  it("keeps the displayed slice's source open while every slice is read", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    const sources = Array.from({ length: OPEN_REGION_SOURCES + 2 }, (_, z) => tableSource([feature(`s${z}`, 0)]));
+    sources.forEach((s, z) => store.attachRegionSource(async () => s, { slice: z }));
+    await flush();
+    expect(view?.source).toBe(sources[0]);
+    await store.outlinesByClass(0);
+    expect(sources[0].disposed).toBe(false);
+    expect(sources.filter((s) => s.disposed)).toHaveLength(2);
+    expect(await store.takeSourceFeatures(['s0'])).toHaveLength(1);
+  });
+
   it('drops a take that resolves after the slice changed', async () => {
     store.enterStackMode(new Map(), 0, 'per-slice-file');
     store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 });
