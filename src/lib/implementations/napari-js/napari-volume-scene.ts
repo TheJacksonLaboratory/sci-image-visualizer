@@ -88,7 +88,7 @@ export class VolumeScene implements NapariScene {
     private readonly rendering: 'iso' | 'mip',
   ) {
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
-    this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, ctx.viewer.camera3d, {
+    this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, {
       onMove: (axis, value) => ctx.inZone(() => ctx.slicePlaneMoved(axis, value)),
     });
   }

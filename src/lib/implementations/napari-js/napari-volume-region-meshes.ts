@@ -1,7 +1,4 @@
-import { tintColormap } from 'napari-js';
 import type { SurfaceLayer, Viewer } from 'napari-js';
-
-import { MeshBox, meshBox, rayHitMesh, screenRay } from './napari-mesh-pick';
 
 /** A region's 3D reconstruction to show in the volume: a mesh in image px (x, y) and slices (z). */
 export interface RegionMesh3D {
@@ -33,16 +30,14 @@ export const REGION_MESH_DIMMED_OPACITY = 0.12;
 /**
  * The region reconstructions shown in a volume view: one translucent surface per region, in its
  * colour, placed in the volume's world box (pixel x, y and slice z mapped onto it the way the
- * volume maps its voxels) and re-placed when the volume's Z is stretched.
+ * volume maps its voxels) and re-placed when the volume's Z is stretched. A surface is updated in
+ * place (`setData`, `color`) rather than added again, and picked by napari-js (`pickSurface`).
  *
  * Highlighting is focus + context: the highlighted surfaces turn near opaque and the others fade
  * to a ghost, so the selection stands out while staying in place among its neighbours.
  */
 export class VolumeRegionMeshes {
-  private readonly layers = new Map<
-    string,
-    { mesh: RegionMesh3D; layer: SurfaceLayer; world: Float32Array; box: MeshBox }
-  >();
+  private readonly layers = new Map<string, { mesh: RegionMesh3D; layer: SurfaceLayer }>();
   private highlighted: ReadonlySet<string> = new Set();
   private hidden: ReadonlySet<string> = new Set();
   /** The meshes to show (kept while the volume has no frame yet). */
@@ -60,7 +55,7 @@ export class VolumeRegionMeshes {
   /** Follow the volume's frame (it opened, or its Z was stretched): re-place every surface. */
   setFrame(frame: VolumeFrame): void {
     this.frame = frame;
-    for (const [key, e] of [...this.layers]) this.remove(key, e.layer);
+    for (const e of this.layers.values()) e.layer.setData(toWorld(e.mesh.vertices, frame), e.mesh.faces);
     this.sync();
   }
 
@@ -81,21 +76,9 @@ export class VolumeRegionMeshes {
   /** The front-most surface under screen point (`x`, `y`) (canvas CSS px), or null. */
   pickAt(x: number, y: number): RegionMesh3D | null {
     if (!this.layers.size) return null;
-    const [vw, vh] = this.viewer.viewportSize();
-    if (vw <= 0 || vh <= 0) return null;
-    const ray = screenRay(this.viewer.camera3d.viewProjection(vw, vh), x, y, vw, vh);
-    if (!ray) return null;
-    let best: RegionMesh3D | null = null;
-    let bestT = Infinity;
-    for (const [key, e] of this.layers) {
-      if (this.hidden.has(key)) continue;
-      const t = rayHitMesh(ray, e.world, e.mesh.faces, e.box);
-      if (t < bestT) {
-        bestT = t;
-        best = e.mesh;
-      }
-    }
-    return best;
+    const ours = new Map([...this.layers.values()].map((e) => [e.layer, e.mesh]));
+    const hit = this.viewer.pickSurface(x, y, { pickable: (layer) => ours.has(layer) });
+    return hit ? (ours.get(hit.layer) ?? null) : null;
   }
 
   /** The meshes shown. */
@@ -112,7 +95,16 @@ export class VolumeRegionMeshes {
     const keep = new Map(this.wanted.map((m) => [m.key, m]));
     for (const [key, e] of [...this.layers]) {
       const want = keep.get(key);
-      if (!want || want.vertices !== e.mesh.vertices || want.color !== e.mesh.color) this.remove(key, e.layer);
+      if (!want || !want.faces.length) {
+        this.remove(key, e.layer);
+        continue;
+      }
+      // Rebuilt or recoloured: the same surface, updated in place.
+      if (want.vertices !== e.mesh.vertices && this.frame) {
+        e.layer.setData(toWorld(want.vertices, this.frame), want.faces);
+      }
+      if (want.color !== e.mesh.color) e.layer.color = want.color;
+      e.mesh = want;
     }
     if (this.frame) {
       for (const mesh of this.wanted) if (!this.layers.has(mesh.key) && mesh.faces.length) this.add(mesh);
@@ -122,18 +114,15 @@ export class VolumeRegionMeshes {
 
   private add(mesh: RegionMesh3D): void {
     const frame = this.frame as VolumeFrame;
-    const world = toWorld(mesh.vertices, frame);
-    const values = new Float32Array(world.length / 3).fill(1);
-    const layer = this.viewer.addSurface(world, mesh.faces, values, {
+    const layer = this.viewer.addSurface(toWorld(mesh.vertices, frame), mesh.faces, undefined, {
       name: `region ${mesh.key}`,
-      colormap: tintColormap(mesh.color),
-      contrastLimits: [0, 1],
+      color: mesh.color,
       opacity: this.opacityOf(mesh.key),
       blending: 'translucent',
       fit: 'never',
     });
     layer.visible = !this.hidden.has(mesh.key);
-    this.layers.set(mesh.key, { mesh, layer, world, box: meshBox(world) });
+    this.layers.set(mesh.key, { mesh, layer });
   }
 
   private opacityOf(key: string): number {
