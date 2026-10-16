@@ -4,6 +4,7 @@ import {
   Component,
   DestroyRef,
   Inject,
+  Input,
   OnDestroy,
   OnInit,
   ViewChild,
@@ -92,6 +93,22 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
   @ViewChild('op') private overlayPanel!: OverlayPanel;
+
+  /**
+   * Whether the editor is on screen (its dialog open). Closed, it asks the region source nothing:
+   * its page of features, its class counts and, in a volume view, its classes' volumes are each a
+   * request over the whole set (a stack's every slice), and they competed with the volume's own
+   * slice loading for nothing anyone could see. Opened, it reads them again.
+   */
+  @Input() set active(value: boolean) {
+    const was = this.isActive;
+    this.isActive = value;
+    if (value && !was) {
+      void this.refreshSource();
+      this.resetVolumes();
+    }
+  }
+  private isActive = true;
 
   protected regions: Region[] = [];
   protected selectedRegions: Region[] = [];
@@ -469,6 +486,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * `max(first, regions)` − regions.
    */
   private async refreshSource(): Promise<void> {
+    if (!this.isActive) return;
     const request = ++this.sourceRequest;
     const view = this.sourceView;
     let rows: RegionIndexRow[] = [];
@@ -719,6 +737,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Compute the volumes of the classes on the table's page that are not known yet. */
   private requestVolumes(): void {
     const api = this.regionApi.getClassVolumes?.bind(this.regionApi);
+    // Closed: asked for again when it opens (see active).
+    if (!this.isActive) return;
     if (!this.volumeView || !api) {
       if (this.tableVolumes) {
         this.tableVolumes = null;

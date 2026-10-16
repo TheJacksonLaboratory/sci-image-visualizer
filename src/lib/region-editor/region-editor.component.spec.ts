@@ -1856,6 +1856,27 @@ describe('RegionEditorComponent with a region source', () => {
 
   const page = (): Region[] => (component as any).pagedRegions;
 
+  it('asks the region source nothing while closed, and reads it again when opened', async () => {
+    const index = api.getRegionSourceIndex as jest.Mock;
+    const counts = api.getRegionSourceClassCounts as jest.Mock;
+    const volumes = jest.fn(async () => ({}));
+    Object.assign(api, { getClassVolumes: volumes });
+    component.active = false;
+    index.mockClear();
+    counts.mockClear();
+    volume$.next(true);
+    (component as any).onPageChange({ first: 10, rows: 10 });
+    await settle();
+    expect(index).not.toHaveBeenCalled();
+    expect(counts).not.toHaveBeenCalled();
+    expect(volumes).not.toHaveBeenCalled();
+    component.active = true;
+    await settle();
+    expect(index).toHaveBeenCalledTimes(1);
+    expect(counts).toHaveBeenCalledWith(true);
+    expect(volumes).toHaveBeenCalled();
+  });
+
   it("counts the whole stack's classes in a volume view, and the slice's with its slice pane", async () => {
     const tree = () => Object.fromEntries((component as any).treeCounts);
     expect(tree()).toEqual({ MB: 10, CTX: 3 });
