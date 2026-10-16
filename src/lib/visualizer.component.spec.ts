@@ -1,3 +1,4 @@
+import { ElementRef } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { MenuItem } from 'primeng/api';
 
@@ -788,6 +789,49 @@ describe('VisualizerComponent (UI shell)', () => {
           expect.any(Number),
           PlotType.SPATIAL_OMICS,
         );
+      });
+
+      it('waits until a viewer created outside the document is attached (a closed dialog)', async () => {
+        // jit-ui's pipeline preview lives in a closed dialog's projected content: its view is
+        // initialised while detached, and napari found no "#viz-plot-1". It draws once attached.
+        const observers: Array<{ cb: () => void; disconnected: boolean }> = [];
+        const RO = (globalThis as any).ResizeObserver;
+        (globalThis as any).ResizeObserver = class {
+          private readonly entry: { cb: () => void; disconnected: boolean };
+          constructor(cb: () => void) {
+            this.entry = { cb, disconnected: false };
+            observers.push(this.entry);
+          }
+          observe(): void {}
+          disconnect(): void {
+            this.entry.disconnected = true;
+          }
+        };
+        try {
+          plotService.plot = jest.fn(async () => true);
+          const c = makeComponent(plotService, port);
+          (c as any).imageInfo = undefined;
+          const el = document.createElement('div'); // not in the document
+          (c as any).hostRef = new ElementRef(el);
+          dataset$.next({ id: 'cytos', name: 'Cytos', observations: { count: 3 }, columns: [] });
+          (c as any).watchSpatialDataset();
+          (c as any).whenInDocument(() => (c as any).onViewReady());
+          await flush();
+          // A resize while still detached does nothing: no draw, no alert.
+          observers[0].cb();
+          await flush();
+          expect(plotService.plot).not.toHaveBeenCalled();
+          expect((c as any).messageService.add).not.toHaveBeenCalled();
+
+          document.body.appendChild(el);
+          observers[0].cb();
+          await flush();
+          expect(plotService.plot).toHaveBeenCalledTimes(1);
+          expect(observers[0].disconnected).toBe(true);
+          el.remove();
+        } finally {
+          (globalThis as any).ResizeObserver = RO;
+        }
       });
 
       it('waits for the view before drawing an image-less dataset published before it (jit-ui)', async () => {
