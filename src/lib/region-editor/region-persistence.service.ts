@@ -6,7 +6,7 @@ import { catchError, debounceTime, switchMap } from 'rxjs/operators';
 import { Region } from '../models/region';
 import { withRegionZ } from '../models/region-clone';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
-import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
+import { REGION_IO_PORT, RegionIoPort, ServerRegionPick } from '../contracts/ports/region-io.port';
 import { fileStem } from './file-stem';
 
 /** One slice-file's serialized regions (folder stack, jit-ui#93). */
@@ -155,6 +155,16 @@ export class RegionPersistenceService {
       });
     }
     return out;
+  }
+
+  /** Whether the host can pick regions on its server (see RegionIoPort.pickServerRegions). */
+  canPickServerRegions(): boolean {
+    return typeof this.io.pickServerRegions === 'function';
+  }
+
+  /** Let the user pick regions on the host's server; null when cancelled or unsupported. */
+  pickServerRegions(): Observable<ServerRegionPick | null> {
+    return this.io.pickServerRegions?.() ?? of(null);
   }
 
   /** Write per-slice geojsons through the host port. */

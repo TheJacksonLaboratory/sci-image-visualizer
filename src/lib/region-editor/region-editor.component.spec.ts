@@ -12,7 +12,8 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
 import { ShapeSelection } from '../models/shape';
 import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
-import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
+import { REGION_IO_PORT, RegionIoPort, ServerRegionPick } from '../contracts/ports/region-io.port';
+import { importFile } from '../region-import/region-import';
 import { PresetSet } from '../models/class-preset';
 import { pickMpp } from './region-metrics';
 import { IImageMetadata } from '../contracts/image.contract';
@@ -2019,5 +2020,175 @@ describe('RegionEditorComponent with a region source', () => {
     (component as any).volumeView = false;
     (component as any).resetVolumes();
     expect((component as any).tableVolumes).toBeNull();
+  });
+});
+
+describe('RegionEditorComponent importing region sets', () => {
+  let component: RegionEditorComponent;
+  let api: RoutingVisualizerService;
+  let picked: Subject<ServerRegionPick | null>;
+  let toasts: jest.Mock;
+  const settle = () => new Promise((r) => setTimeout(r));
+
+  /** A 3 × 2 × 2 uint8 NRRD (3 sections of 2 × 2): each section's top row label 1, its bottom row 2. */
+  const nrrd = () => {
+    const head = new TextEncoder().encode('NRRD0004\ntype: uchar\ndimension: 3\nsizes: 3 2 2\nencoding: raw\n\n');
+    const data = new Uint8Array(12);
+    for (let i = 0; i < 12; i++) data[i] = (Math.floor(i / 3) % 2) + 1;
+    const out = new Uint8Array(head.length + data.length);
+    out.set(head);
+    out.set(data, head.length);
+    return out;
+  };
+  const allen = {
+    msg: [
+      {
+        id: 1,
+        acronym: 'A',
+        name: 'Area A',
+        color_hex_triplet: 'FF0000',
+        graph_order: 0,
+        children: [{ id: 2, acronym: 'B', color_hex_triplet: '00FF00', graph_order: 1 }],
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    picked = new Subject();
+    toasts = jest.fn();
+    api = MockService(RoutingVisualizerService, {
+      getPresetSet$: () =>
+        new BehaviorSubject<PresetSet>({
+          classes: [],
+          fallbackPalette: ['#123456'],
+          autoPromote: false,
+          matchMode: 'exact',
+        }),
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => EMPTY,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      getAnnotationRegions: () => [],
+      setAnnotationRegions: jest.fn(),
+      setSelectedRegions: jest.fn(),
+      getMaskImageSize: () => ({ width: 2, height: 2 }),
+      importSliceRegionSources: jest.fn((openers: ReadonlyMap<number, unknown>) => openers.size),
+      importRegionSourceOpener: jest.fn(async () => undefined),
+    });
+    shallowEditor();
+    await TestBed.configureTestingModule({
+      imports: [RegionEditorComponent, FormsModule],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: { add: toasts } },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        {
+          provide: REGION_IO_PORT,
+          useValue: {
+            getSelectedFileName: () => 'atlas.nrrd',
+            roiFileExists: () => of(false),
+            saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
+            pickServerRegions: () => picked,
+          } as RegionIoPort,
+        },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+    component = TestBed.createComponent(RegionEditorComponent).componentInstance;
+    component.ngOnInit();
+  });
+
+  const importFiles = (files: Array<{ name: string; data: string | Uint8Array }>) =>
+    (component as any).importRegionFiles(files.map((f) => importFile(f.data, f.name)));
+
+  it('imports a label volume as one source per slice, its classes and tree from the ontology chosen with it', async () => {
+    await importFiles([
+      { name: 'annotation.nrrd', data: nrrd() },
+      { name: 'ontology/structure_graph_1.json', data: JSON.stringify(allen) },
+    ]);
+    const openers = (api.importSliceRegionSources as jest.Mock).mock.calls[0][0] as Map<
+      number,
+      () => Promise<{ info: { hierarchy?: unknown[]; classColors: Record<string, string> } }>
+    >;
+    expect([...openers.keys()]).toEqual([0, 1, 2]);
+    // A slice's source, traced when opened: classes A and B, the ontology's tree.
+    const source = await openers.get(1)!();
+    expect(source.info.hierarchy).toEqual([
+      { name: 'A', title: 'Area A', color: '#FF0000', order: 0 },
+      { name: 'B', parent: 'A', color: '#00FF00', order: 1 },
+    ]);
+    expect(Object.keys(source.info.classColors).sort()).toEqual(['A', 'B']);
+    expect(toasts).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success', detail: '3 slices of 2 × 2; 3 slices annotated.' }),
+    );
+  });
+
+  it("imports a folder of per-slice files in name order, each with the set's class tree", async () => {
+    const fc = (cls: string) =>
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            id: cls,
+            properties: { classification: { name: cls, color: [1, 2, 3] } },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [0, 0],
+                  [1, 0],
+                  [1, 1],
+                  [0, 0],
+                ],
+              ],
+            },
+          },
+        ],
+      });
+    await importFiles([
+      { name: 'regions/s10.geojson', data: fc('C') },
+      { name: 'regions/s2.geojson', data: fc('B') },
+      {
+        name: 'regions/regionset.json',
+        data: JSON.stringify({ classHierarchy: [{ name: 'B' }, { name: 'C', parent: 'B' }] }),
+      },
+    ]);
+    const openers = (api.importSliceRegionSources as jest.Mock).mock.calls[0][0] as Map<
+      number,
+      () => Promise<{ info: { hierarchy?: unknown[]; classColors: Record<string, string> } }>
+    >;
+    expect(openers.size).toBe(2);
+    const second = await openers.get(1)!();
+    expect(Object.keys(second.info.classColors)).toEqual(['C']);
+    expect(second.info.hierarchy).toEqual([{ name: 'B' }, { name: 'C', parent: 'B' }]);
+  });
+
+  it('imports regions picked on the server: files as chosen files, a served set as a source', async () => {
+    expect((component as any).canImportFromServer).toBe(true);
+    (component as any).importFromServer();
+    expect((component as any).importing).toBe(true);
+    picked.next({ kind: 'files', files: [{ name: 'annotation.nrrd', data: nrrd() }] });
+    await settle();
+    expect(api.importSliceRegionSources).toHaveBeenCalledTimes(1);
+
+    (component as any).importFromServer();
+    picked.next({ kind: 'source', url: 'https://server/api/regions/ID/', name: 'annotation_25_coronal' });
+    picked.complete();
+    await settle();
+    expect(api.importRegionSourceOpener).toHaveBeenCalledWith(expect.any(Function));
+    expect((component as any).importing).toBe(false);
+  });
+
+  it('says why when the chosen files are not regions', async () => {
+    await importFiles([{ name: 'image.tif', data: 'x' }]);
+    expect(api.importSliceRegionSources).not.toHaveBeenCalled();
+    expect(toasts).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', summary: 'Error importing regions' }),
+    );
   });
 });

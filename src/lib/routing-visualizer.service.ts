@@ -745,6 +745,63 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   dropRegionSource(): Promise<void> {
     return this.regionStore.dropSliceRegionSource();
   }
+
+  /**
+   * Replace the image's regions and region sources with one source per slice, as an imported label
+   * volume or folder of per-slice region files gives them: `openers` by slice index, each opened
+   * the first time its slice is shown. A single image takes slice 0's. Resolves how many slices
+   * have a source.
+   */
+  importSliceRegionSources(openers: ReadonlyMap<number, RegionSourceOpener>): number {
+    const info = this.plottedInfo;
+    this.regionStore.detachRegionSources();
+    if (!info?.isStack) {
+      const first = openers.get(0) ?? openers.values().next().value;
+      this.regionStore.setRegions([]);
+      this.regionStore.resetUndoHistory();
+      if (!first) return 0;
+      this.regionStore.attachRegionSource(first, { slice: 0 });
+      return 1;
+    }
+    this.enterImportedStack(info);
+    for (const [z, open] of openers) this.regionStore.attachRegionSource(open, { slice: z });
+    return openers.size;
+  }
+
+  /**
+   * Replace the image's regions and region sources with one imported source (a region set the
+   * host's server serves): over every slice of a stack when it is z-indexed, else on the slice
+   * shown, as {@link applyImageRois} lays out an image's own.
+   */
+  async importRegionSourceOpener(open: RegionSourceOpener): Promise<void> {
+    let first: RegionSource | null = await open();
+    const reuse: RegionSourceOpener = () => {
+      const source = first;
+      first = null;
+      return source ? Promise.resolve(source) : open();
+    };
+    const info = this.plottedInfo;
+    const zIndexed = !!info?.isStack && first.info.planes.some((p) => p !== 0);
+    this.regionStore.detachRegionSources();
+    if (zIndexed) {
+      this.enterImportedStack(info as IImageInfo);
+      this.regionStore.attachRegionSource(reuse, 'planes');
+      return;
+    }
+    this.regionStore.setRegions([]);
+    this.regionStore.resetUndoHistory();
+    this.regionStore.attachRegionSource(reuse, { slice: this.regionStore.getDisplaySlice() });
+  }
+
+  /** Empty every slice of a stack (its regions and undo history) for regions imported over it. */
+  private enterImportedStack(info: IImageInfo): void {
+    const layout = this.regionStore.isStackMode()
+      ? this.regionStore.getStackSaveLayout()
+      : info.tiled === false
+        ? 'per-slice-file'
+        : 'combined';
+    this.regionStore.enterStackMode(new Map(), this.regionStore.getDisplaySlice(), layout);
+  }
   getRegionSourceView$(): Observable<RegionSourceView | null> {
     return this.regionStore.getRegionSourceView$();
   }
