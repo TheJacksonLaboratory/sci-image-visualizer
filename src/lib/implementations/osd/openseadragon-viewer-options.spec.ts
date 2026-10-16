@@ -149,6 +149,17 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
     expect(options({ sliceCount: 5, maxSlices: 8 }).maxImageCacheCount).toBe(600);
     expect(options({ sliceCount: 50, maxSlices: 30 }).maxImageCacheCount).toBe(1200);
     expect(options({ sliceCount: 500, maxSlices: 100 }).maxImageCacheCount).toBe(2400);
+    // A single image drawn per channel: room for its channels' tiles, up to a cap.
+    expect(options({ channelImages: 4 }).maxImageCacheCount).toBe(300);
+    expect(options({ channelImages: 22 }).maxImageCacheCount).toBe(1200);
+    expect(options({ channelImages: 1 }).maxImageCacheCount).toBe(150);
+  });
+
+  it('limits the tile requests in flight for an image drawn per channel only', () => {
+    // Unlimited, a 22-channel view's requests queued in the browser while OSD's 30 s timeout ran.
+    expect(options({ channelImages: 22 }).imageLoaderLimit).toBe(12);
+    expect(options({ channelImages: 1 })).not.toHaveProperty('imageLoaderLimit');
+    expect(options({})).not.toHaveProperty('imageLoaderLimit');
   });
 
   it('passes minPixelRatio=0.5 — raising it selects COARSER levels, not finer', () => {

@@ -234,6 +234,44 @@ describe('SliceCache', () => {
     expect(c1.setOpacity).toHaveBeenLastCalledWith(0); // hidden channel
   });
 
+  it("loads only the visible channels' tiles, a channel shown or hidden later following", () => {
+    host.state.isMultiChannel = true;
+    host.state.currentZ = 0;
+    host.state.visible = [true, false];
+    cache.showSlice(0);
+    // A hidden channel is added without preload: at opacity 0 OSD then loads nothing for it.
+    const preload = viewer.addTiledImage.mock.calls.map((c: [OsdAddTiledImageOptions]) => c[0].preload);
+    expect(preload).toEqual([true, false]);
+    const c0 = Object.assign(viewer.succeedNext(0), { setPreload: jest.fn() });
+    const c1 = Object.assign(viewer.succeedNext(0), { setPreload: jest.fn() });
+
+    host.state.visible = [false, true];
+    cache.revealChannelSlice(0);
+    expect(c0.setPreload).toHaveBeenLastCalledWith(false);
+    expect(c0.setOpacity).toHaveBeenLastCalledWith(0);
+    expect(c1.setPreload).toHaveBeenLastCalledWith(true);
+    expect(c1.setOpacity).toHaveBeenLastCalledWith(1);
+  });
+
+  it("drops a hidden channel's queued tile requests, keeping the visible ones'", () => {
+    host.state.isMultiChannel = true;
+    host.state.currentZ = 0;
+    cache.showSlice(0);
+    const c0 = viewer.succeedNext(0);
+    const c1 = viewer.succeedNext(0);
+    const job = (item: unknown) => ({ tile: { tiledImage: item }, abort: jest.fn() });
+    const queued = [job(c0), job(c1), job(c0)];
+    (viewer as { imageLoader?: { jobQueue?: unknown[] } }).imageLoader = { jobQueue: [...queued] };
+
+    host.state.visible = [false, true];
+    cache.revealChannelSlice(0);
+    expect(viewer.imageLoader?.jobQueue).toEqual([queued[1]]);
+    // Aborting a queued job only marks its tile as not loading, so it is asked for again when shown.
+    expect(queued[0].abort).toHaveBeenCalled();
+    expect(queued[2].abort).toHaveBeenCalled();
+    expect(queued[1].abort).not.toHaveBeenCalled();
+  });
+
   it('re-tints a stale multichannel slice when revealed after a display change', () => {
     host.state.isMultiChannel = true;
     host.state.currentZ = 0;

@@ -51,7 +51,16 @@ export interface ViewerOptionsInput {
   sliceCount: number;
   /** How many slices the slice cache keeps resident (see SliceCache.maxSlices). */
   maxSlices: number;
+  /** Tiled images per slice: the channel count when channels are drawn per channel, else 1. */
+  channelImages?: number;
 }
+
+/** Tile cache entries a single image keeps per tiled image (one per channel when drawn per channel). */
+const TILES_PER_IMAGE = 150;
+/** The most tiles a single per-channel image keeps (each a decoded 512² tile, ~1 MB). */
+const MAX_CHANNEL_TILES = 1200;
+/** Tile requests in flight at once for an image drawn per channel. */
+const CHANNEL_REQUEST_LIMIT = 12;
 
 /**
  * The options object handed to the OpenSeadragon factory. Pure: every value
@@ -138,6 +147,17 @@ export function buildViewerOptions(input: ViewerOptionsInput): Record<string, un
     // so they get a much larger tile budget — otherwise switching slices evicts
     // each other's tiles and scrubbing back re-fetches. Scaled to the resident
     // slice count; single images keep the lean default.
-    maxImageCacheCount: input.sliceCount > 1 ? Math.min(2400, Math.max(600, input.maxSlices * 40)) : 150,
+    // A single image drawn per channel needs room for every visible channel's tiles in view: at
+    // 150 a 22-channel plate evicted tiles while they were still being converted.
+    maxImageCacheCount:
+      input.sliceCount > 1
+        ? Math.min(2400, Math.max(600, input.maxSlices * 40))
+        : Math.min(MAX_CHANNEL_TILES, TILES_PER_IMAGE * Math.max(1, Math.ceil((input.channelImages ?? 1) / 2))),
+    // OSD sends every tile request at once by default (imageLoaderLimit 0) and times each out
+    // after 30 s from when it is sent. A view of a 22-channel image asks for hundreds of tiles;
+    // the browser holds all but a few connections' worth back, so those timed out while still
+    // waiting their turn. Limited, they wait in OSD's queue (not timed), where a channel being
+    // hidden drops its own (SliceCache.revealChannelSlice). Single images keep OSD's default.
+    ...((input.channelImages ?? 1) > 1 ? { imageLoaderLimit: CHANNEL_REQUEST_LIMIT } : {}),
   };
 }

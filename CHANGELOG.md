@@ -9,6 +9,16 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenSeadragon: images with many channels load without errors.** An image drawn one tiled
+  image per channel (a 22-channel plate) fetched every channel's tiles, hidden ones included,
+  and sent all the requests at once: the browser held most of them back while OpenSeadragon's
+  30 s timeout ran ("Image load exceeded timeout"), and its 150-tile cache evicted tiles still
+  being converted ("The image could not be decoded"). A hidden channel now loads nothing (its
+  queued requests are dropped when it is hidden), at most 12 tile requests are in flight, and
+  the tile cache grows with the channel count (up to 1200 tiles).
+
 ## [0.10.0] — 2026-10-16
 
 ### Added
