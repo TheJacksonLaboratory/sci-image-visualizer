@@ -583,6 +583,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** Keyboard, wheel and context-menu handling; created once the view exists. */
   private shortcuts?: ViewerShortcuts;
+  /** Waits for a viewer created outside the document to be attached (see {@link whenInDocument}). */
+  private attachObserver: ResizeObserver | null = null;
 
   /** Debounced z-slice scrubbing (see SliceScrubber — refactoring plan Step 7). */
   private readonly scrubber = new SliceScrubber((z) => {
@@ -891,12 +893,35 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // re-enters the zone (ngZone.run) only when it actually changes view state.
     this.shortcuts = new ViewerShortcuts(this.shortcutHost(), this.ngZone);
     this.shortcuts.attach();
-    this.onViewReady();
+    this.whenInDocument(() => this.onViewReady());
   }
 
   /** The plot div exists now: run an image-less draw that arrived before it did. */
   private onViewReady(): void {
     this.render.viewIsReady(this.spatial.dataset, !!this.imageInfo);
+  }
+
+  /**
+   * Run `ready` once this viewer is in the document. A host may create it detached — a closed
+   * dialog's projected content, such as jit-ui's pipeline preview — and the backends find the
+   * plot div by id, so a draw then found no target and alerted "the renderer could not start"
+   * over another viewer. Until then its view is not ready, and an image-less draw waits.
+   */
+  private whenInDocument(ready: () => void): void {
+    const el = this.hostRef?.nativeElement;
+    if (!el || el.isConnected || typeof ResizeObserver === 'undefined') {
+      ready();
+      return;
+    }
+    // Attached and laid out, its size changes from nothing: that is when it can be drawn into.
+    const observer = new ResizeObserver(() => {
+      if (!el.isConnected) return;
+      observer.disconnect();
+      this.attachObserver = null;
+      this.ngZone.run(ready);
+    });
+    this.attachObserver = observer;
+    observer.observe(el);
   }
 
   /** What the keyboard, wheel and context-menu shortcuts act on. Their listeners live
@@ -949,6 +974,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   }
 
   ngOnDestroy() {
+    this.attachObserver?.disconnect();
     // A contributed mode's session ends first, while the viewer it drew over
     // still exists. The panel goes with this view, so no change detection.
     this.contributions.destroy();
