@@ -136,6 +136,13 @@ export interface IRegionEditorApi {
    * view without it lists every slice's classes; with it, the slice's.
    */
   getSliceEditor$?(): Observable<boolean>;
+  /** Whether the volume view draws the region reconstructions through the volume, and changes. */
+  getRegionsThroughVolume$?(): Observable<boolean>;
+  /**
+   * Draw the region reconstructions through the volume (it hides none: surfaces traced inside its
+   * bright structures) or hidden behind what it shows in front of them (the default).
+   */
+  setRegionsThroughVolume?(through: boolean): void;
   /**
    * Show these groups of classes in the volume view as 3D reconstructions (one surface per group,
    * in its colour), and only these; [] hides them.

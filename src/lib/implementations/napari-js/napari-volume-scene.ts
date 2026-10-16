@@ -106,6 +106,29 @@ export class VolumeScene implements NapariScene {
     this.regionMeshes.setHidden(keys);
   }
 
+  /** Whether the volume lets every region through (see {@link setRegionsThroughVolume}). */
+  private regionsThrough = false;
+
+  /**
+   * The volume hides the region reconstructions behind what it shows (its brightest sample along
+   * each ray, napari-js's `'translucent'` depth) — the perspective of a region behind the
+   * cerebellum — or, `through`, hides none (`'translucent_no_depth'`): surfaces traced inside its
+   * bright structures, an OCT's layer boundaries in its bright bands, which that depth speckles
+   * or hides. A multichannel volume's channels add up and hide nothing either way.
+   */
+  setRegionsThroughVolume(through: boolean): void {
+    this.regionsThrough = through;
+    this.applyVolumeDepth();
+    this.ctx.viewer.requestRender();
+  }
+
+  private applyVolumeDepth(): void {
+    if (this.multichannel) return;
+    for (const layer of this.view?.layers ?? []) {
+      layer.blending = this.regionsThrough ? 'translucent_no_depth' : 'translucent';
+    }
+  }
+
   /** Show the planes of the sections beside the volume where they are (null: hide one). */
   setSlicePlanes(planes: SlicePlanes): void {
     this.slicePlanes.set(planes);
@@ -198,6 +221,7 @@ export class VolumeScene implements NapariScene {
     for (const ch of channels) ch.voxelSize = voxelSize;
 
     view.render(this.multichannel ? 'multichannel' : 'grayscale', channels, { rendering: this.rendering });
+    this.applyVolumeDepth();
     ctx.setImageSize(dims.width, dims.height);
     this.dims = dims;
 

@@ -45,6 +45,11 @@ export interface NapariScene {
   setRegionHighlight?(keys: readonly string[]): void;
   /** Hide the reconstructions of these keys. */
   setRegionHidden?(keys: readonly string[]): void;
+  /**
+   * Draw the region reconstructions through the volume (it hides none of them) rather than hidden
+   * where it is in front of them (see VolumeScene.setRegionsThroughVolume).
+   */
+  setRegionsThroughVolume?(through: boolean): void;
   /** Show the planes of the sections beside the 3D view (volume scenes only). */
   setSlicePlanes?(planes: SlicePlanes): void;
   /** The assembled volume the sections are cut from (volume scenes only). */

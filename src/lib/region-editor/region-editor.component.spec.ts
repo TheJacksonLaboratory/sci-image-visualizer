@@ -1856,6 +1856,13 @@ describe('RegionEditorComponent with a region source', () => {
 
   const page = (): Region[] => (component as any).pagedRegions;
 
+  it('toggles the regions through the volume in a volume view', async () => {
+    const set = jest.fn();
+    Object.assign(api, { setRegionsThroughVolume: set });
+    (component as any).toggleThroughVolume();
+    expect(set).toHaveBeenCalledWith(true);
+  });
+
   it('asks the region source nothing while closed, and reads it again when opened', async () => {
     const index = api.getRegionSourceIndex as jest.Mock;
     const counts = api.getRegionSourceClassCounts as jest.Mock;

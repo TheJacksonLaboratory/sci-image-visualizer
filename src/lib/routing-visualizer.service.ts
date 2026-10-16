@@ -111,6 +111,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private readonly volumeView$ = new BehaviorSubject<boolean>(false);
   /** Whether the volume view's slice pane is wanted (see {@link setSliceEditor}). */
   private readonly sliceEditor$ = new BehaviorSubject<boolean>(false);
+  /** Whether the volume view draws the region reconstructions through the volume. */
+  private readonly regionsThroughVolume$ = new BehaviorSubject<boolean>(false);
   /** Region reconstructions built so far, by image, resolution and classes (with those classes). */
   private readonly meshCache = new Map<string, { mesh: Mesh; classes: readonly string[] }>();
   /** Bumped per {@link showRegionClasses3d} (and per new image), so only the latest one shows. */
@@ -771,6 +773,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Whether the volume view's slice pane is wanted (it shows while a volume view is on screen). */
   getSliceEditor$(): Observable<boolean> {
     return this.sliceEditor$.asObservable();
+  }
+
+  /** Whether the volume view draws the region reconstructions through the volume. */
+  getRegionsThroughVolume$(): Observable<boolean> {
+    return this.regionsThroughVolume$.asObservable();
+  }
+
+  /**
+   * Draw the region reconstructions through the volume (it hides none of them: surfaces inside its
+   * bright structures, an OCT's layer boundaries) or hidden behind what it shows (the default).
+   */
+  setRegionsThroughVolume(through: boolean): void {
+    if (this.regionsThroughVolume$.value === through) return;
+    this.regionsThroughVolume$.next(through);
+    this.napari.setRegionsThroughVolume(through);
   }
 
   /** The class groups shown in 3D on this image ([] after a switch to another image). */

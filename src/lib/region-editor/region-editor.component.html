@@ -19,6 +19,18 @@
       (onClick)="toggleFill()"
     >
     </p-button>
+    <p-button
+      *ngIf="volumeView"
+      icon="pi pi-eye"
+      size="small"
+      [text]="!regionsThroughVolume"
+      [attr.aria-pressed]="regionsThroughVolume"
+      pTooltip="See the regions through the volume. Off, the volume hides the parts of them behind what it shows; on, none (layers traced inside bright structures, such as an OCT's)."
+      tooltipPosition="bottom"
+      ariaLabel="Regions through volume"
+      (onClick)="toggleThroughVolume()"
+    >
+    </p-button>
     <span class="toolbar-separator"></span>
     <!-- New regions are now created from the diagram toolbar
          (rectangle, polyline, freeform, wand). -->

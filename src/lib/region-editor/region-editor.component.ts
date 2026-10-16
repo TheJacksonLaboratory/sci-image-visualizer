@@ -176,6 +176,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected volumeView = false;
   /** Whether the volume view's slice pane is wanted (one slice edited beside the 3D view). */
   private slicePane = false;
+  /** Whether the volume view draws the regions through the volume (see toggleThroughVolume). */
+  protected regionsThroughVolume = false;
   /** Classes shown in 3D in the volume view, each with the classes its surface covers. */
   protected shown3d = new Map<string, string[]>();
   /** The classes of the class tree's pick (it and its subtree), as long as the pick holds. */
@@ -332,6 +334,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.resetVolumes();
         this.changed();
         if (this.stackCounts !== counting) void this.refreshSource();
+      });
+
+    this.regionApi
+      .getRegionsThroughVolume$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((through) => {
+        this.regionsThroughVolume = through;
+        this.changed();
       });
 
     this.regionApi
@@ -524,6 +534,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** Toggle the filled (atlas) look: each region filled in its colour, labels inside. */
+  /** In a volume view: the regions drawn through the volume, or hidden behind what it shows. */
+  protected toggleThroughVolume(): void {
+    this.regionApi.setRegionsThroughVolume?.(!this.regionsThroughVolume);
+  }
+
   protected toggleFill(): void {
     this.regionApi.setRegionStyle?.({ fillOpacity: this.regionsFilled ? 0 : REGION_FILL_OPACITY });
   }

@@ -362,6 +362,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
+      this.scene.setRegionsThroughVolume?.(this.regionsThroughVolume);
       this.scene.setSlicePlanes?.(this.slicePlanes);
       await this.scene.mount();
       this.tools.scheduleReadback();
@@ -443,6 +444,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.regionHidden = keys;
     this.scene?.setRegionHidden?.(keys);
   }
+
+  /** Draw the reconstructions through the volume rather than hidden behind it (kept across plots). */
+  setRegionsThroughVolume(through: boolean): void {
+    this.regionsThroughVolume = through;
+    this.scene?.setRegionsThroughVolume?.(through);
+  }
+  private regionsThroughVolume = false;
 
   /** Show the planes of the sections beside a volume view (null: hide one); kept across plots. */
   setSlicePlanes(planes: SlicePlanes): void {
