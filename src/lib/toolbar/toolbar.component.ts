@@ -102,6 +102,10 @@ export class ToolbarComponent {
    * controls — flipping that would show 2D pan/zoom and hide the orbit controls.
    */
   @Input() is3dRegions = false;
+  /** A napari volume / isosurface view: the Region Editor (regions in 3D) without drawing tools. */
+  @Input() isVolumeView = false;
+  /** Whether the volume view is split with the slice editor (the slice, with every region tool). */
+  @Input() sliceEditor = false;
   /** The armed tool's mode (zoom, pan, a drawing tool, `samPoint`, …), or null. */
   @Input() activeDragMode: string | null = null;
   /** The 3D camera mode (`turntable` / `orbit` / …). */
@@ -168,6 +172,8 @@ export class ToolbarComponent {
   @Output() openSpatialControls = new EventEmitter<void>();
   /** Open the Region Editor dialog. */
   @Output() openRegionEditor = new EventEmitter<void>();
+  /** Split the volume view with the slice editor, or close it. */
+  @Output() toggleSliceEditor = new EventEmitter<void>();
   /** A single-image / stack choice was picked. */
   @Output() selectStackOption = new EventEmitter<{ name: string; val: string }>();
   /** The live slice scrubber moved (fires while dragging). */
@@ -262,9 +268,11 @@ export class ToolbarComponent {
    *  view, the napari-js WebGPU image, the napari-js surface — which rebuilds the height field
    *  from the picked slice (jit-ui#102) — and the 2D spatial-omics view, where a 3D dataset's
    *  registered volume is the image and the slider picks the section whose observations are
-   *  drawn. Drives the per-slice slider. */
+   *  drawn. Also a split volume view, whose slice editor shows the slice picked. Drives the
+   *  per-slice slider. */
   protected get showsLiveSliceScrubber(): boolean {
     return (
+      (this.isVolumeView && this.sliceEditor) ||
       this.effectivePlotType === PlotType.IMAGE ||
       this.effectivePlotType === PlotType.NAPARI_IMAGE ||
       isNapariSurface(this.effectivePlotType) ||

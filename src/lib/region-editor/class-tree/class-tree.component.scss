@@ -1,0 +1,166 @@
+:host {
+  display: block;
+  flex: 0 0 auto;
+}
+
+/* Shown inside the classes panel, under its header. */
+.class-tree {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0.25rem;
+}
+
+.tree-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0 0.5rem 0.25rem;
+}
+
+.tree-picked {
+  font-size: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-search {
+  margin: 0 0.5rem 0.25rem;
+}
+
+/* Taller than the flat class list (an ontology is deep); drag the bottom edge to resize. */
+.tree-body {
+  height: 14rem;
+  min-height: 3rem;
+  max-height: 70vh;
+  overflow: auto;
+  resize: vertical;
+  padding-bottom: 0.25rem;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-top: 0.05rem;
+  padding-bottom: 0.05rem;
+  padding-right: 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  }
+
+  &.picked {
+    background: var(--highlight-bg, rgba(51, 153, 255, 0.15));
+  }
+
+  /* A class with a selected region. */
+  &.marked {
+    box-shadow: inset 3px 0 0 var(--primary-color);
+  }
+
+  /* A class with no region on this slice, as the atlas viewer greys it. */
+  &.absent {
+    color: var(--text-color-secondary, #8a8a8a);
+    font-style: italic;
+    opacity: 0.7;
+  }
+}
+
+.tree-toggle {
+  flex: 0 0 0.9rem;
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+}
+
+.tree-swatch {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+/* The colour picker's swatch, as small as the tree's rows. */
+::ng-deep region-class-tree .tree-swatch .hex-picker-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 1px;
+  border-radius: 0;
+}
+
+.tree-name {
+  font-weight: 700;
+}
+
+.absent .tree-name {
+  font-weight: 400;
+}
+
+.tree-long {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+
+.tree-count {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: var(--text-color-secondary);
+}
+
+.tree-empty {
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-color-secondary);
+}
+
+/* The 3D toggle (volume view): dim until the class is shown. */
+.tree-3d {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.35;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  &.on {
+    opacity: 1;
+    color: var(--primary-color);
+  }
+}
+
+/* The eye: faint on a shown class (most are), plain on a hidden one. */
+.tree-eye {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.4;
+  cursor: pointer;
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &.partial {
+    opacity: 0.7;
+    color: var(--primary-color);
+  }
+}
+
+.tree-row.hidden-class {
+  .tree-eye {
+    opacity: 1;
+  }
+
+  .tree-swatch,
+  .tree-name,
+  .tree-long,
+  .tree-count {
+    opacity: 0.45;
+  }
+}

@@ -1,11 +1,12 @@
 import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
-import { EMPTY, NEVER, Subject, of, throwError } from 'rxjs';
+import { EMPTY, NEVER, Subject, of, throwError, BehaviorSubject } from 'rxjs';
 
 import { RegionEditorComponent } from './region-editor.component';
 import { RoutingVisualizerService } from '../routing-visualizer.service';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
+import type { RegionSourceView } from '../region-source/region-source';
 import { MockService } from 'ng-mocks';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { Polygon, Rectangle, Region, MultiPolygon } from '../models/region';
@@ -282,14 +283,36 @@ describe('RegionEditorComponent', () => {
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
   });
 
-  it('a failed region import shows its error toast in the library outlet (RT-32)', () => {
+  it('a failed region import shows its error toast in the library outlet (RT-32)', async () => {
     (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
       throw new Error('bad geojson');
     });
     const add = jest.spyOn(component['messageService'], 'add');
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    (component as any).applyImportedRois('garbage');
+    await (component as any).applyImportedRois('garbage');
     expect(add).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error', key: expect.any(String) }));
+  });
+
+  it("replaces the slice's region source with a small imported file's regions", async () => {
+    const api = mockVisualizer as unknown as { importRegionSource: jest.Mock; dropRegionSource: jest.Mock };
+    const order: string[] = [];
+    api.importRegionSource = jest.fn().mockResolvedValue(false);
+    api.dropRegionSource = jest.fn(async () => {
+      order.push('drop');
+    });
+    (mockVisualizer.importRegions as jest.Mock).mockReturnValue([]);
+    (mockVisualizer.setAnnotationRegions as jest.Mock).mockImplementation(() => order.push('commit'));
+    await (component as any).applyImportedRois('{"type":"FeatureCollection","features":[]}');
+    expect(order).toEqual(['drop', 'commit']);
+
+    // A file that does not parse leaves the source alone.
+    api.dropRegionSource.mockClear();
+    (mockVisualizer.importRegions as jest.Mock).mockImplementation(() => {
+      throw new Error('bad geojson');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    await (component as any).applyImportedRois('garbage');
+    expect(api.dropRegionSource).not.toHaveBeenCalled();
   });
 
   it('stops the save-as exists check on destroy (RT-32)', fakeAsync(() => {
@@ -901,7 +924,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).toHaveBeenCalledWith(JSON.stringify({ count: 3 }), 'stack.geojson');
   }));
 
-  it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', () => {
+  it('saves one geojson per slice-file for a folder stack (per-slice-file layout) — jit-ui#93', async () => {
     // Folder stack: persistRegions should skip the single-file save-as dialog
     // and write each slice's regions back to its own slice-file's geojson.
     const s0 = new Region();
@@ -921,6 +944,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     );
 
     component['persistRegions']();
+    await new Promise((r) => setTimeout(r)); // the slices serialize first
 
     // No single-file dialog for a folder stack.
     expect(component['showSaveAsDialog']).toBe(false);
@@ -933,7 +957,7 @@ describe('RegionEditorComponent persist / save-as', () => {
     expect(mockRegionIo.saveGeoJson).not.toHaveBeenCalled();
   });
 
-  it("ignores a folder stack's Save while its save is still uploading, and destroy cancels that one", () => {
+  it("ignores a folder stack's Save while its save is still uploading, and destroy cancels that one", async () => {
     // The toolbar Save stays enabled during a stack save (there is no dialog);
     // a second click must not start a duplicate write and orphan the first.
     const s0 = new Region();
@@ -946,6 +970,7 @@ describe('RegionEditorComponent persist / save-as', () => {
 
     component['persistRegions']();
     component['persistRegions']();
+    await new Promise((r) => setTimeout(r)); // the slices serialize first
 
     expect(mockRegionIo.saveSliceGeoJsons).toHaveBeenCalledTimes(1);
     expect(upload.observed).toBe(true);
@@ -1133,11 +1158,12 @@ describe('RegionEditorComponent export', () => {
 
   // --- confirmExport (download action) ---
 
-  it('should download geojson with the chosen filename', () => {
+  it('should download geojson with the chosen filename', async () => {
     component['exportFilename'] = 'my_export.geojson';
     component['showExportDialog'] = true;
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(component['showExportDialog']).toBe(false);
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'my_export.geojson');
@@ -1145,10 +1171,11 @@ describe('RegionEditorComponent export', () => {
     expect(blob.type).toBe('application/json');
   });
 
-  it('should use custom filename entered by user', () => {
+  it('should use custom filename entered by user', async () => {
     component['exportFilename'] = 'custom_regions.geojson';
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'custom_regions.geojson');
   });
@@ -1170,10 +1197,11 @@ describe('RegionEditorComponent export', () => {
     expect(saveAs).not.toHaveBeenCalled();
   });
 
-  it('should trim whitespace from filename before downloading', () => {
+  it('should trim whitespace from filename before downloading', async () => {
     component['exportFilename'] = '  padded_name.geojson  ';
 
     component['confirmExport']();
+    await new Promise((r) => setTimeout(r)); // the download serializes first
 
     expect(saveAs).toHaveBeenCalledWith(expect.any(Blob), 'padded_name.geojson');
   });
@@ -1735,5 +1763,261 @@ describe('RegionEditorComponent — OnPush', () => {
     host.detectChanges();
     expect(total()).toBe(2);
     host.destroy();
+  });
+});
+
+describe('RegionEditorComponent with a region source', () => {
+  let component: RegionEditorComponent;
+  let api: RoutingVisualizerService;
+  const rows = Array.from({ length: 12 }, (_, i) => ({
+    id: `f${i}`,
+    label: i < 3 ? 'CTX' : 'MB',
+    color: '#00ff00',
+    bbox: [0, 0, 1, 1] as [number, number, number, number],
+  }));
+  const view = {
+    source: {
+      info: { hierarchy: [{ name: 'grey' }, { name: 'CTX', parent: 'grey' }, { name: 'MB', parent: 'grey' }] },
+    },
+    plane: 0,
+    taken: new Set<string>(),
+    colorOf: () => '#00ff00',
+    style: { fillOpacity: 0, stroke: null, strokeWidth: null, highlight: null },
+    labels: false,
+  } as unknown as RegionSourceView;
+  const settle = () => new Promise((r) => setTimeout(r));
+  let presets$: BehaviorSubject<PresetSet>;
+  let volume$: BehaviorSubject<boolean>;
+  let slicePane$: BehaviorSubject<boolean>;
+
+  beforeEach(async () => {
+    const drawn = Object.assign(new Region(), { id: 1, name: 'shape1', label: 'MB', color: '#f00' });
+    // Another slice's region: counted only with the whole stack.
+    const elsewhere = Object.assign(new Region(), { id: 2, name: 'shape2', label: 'CTX', color: '#0f0', z: 4 });
+    volume$ = new BehaviorSubject(false);
+    slicePane$ = new BehaviorSubject(false);
+    presets$ = new BehaviorSubject<PresetSet>({
+      classes: [],
+      fallbackPalette: ['#123456'],
+      autoPromote: false,
+      matchMode: 'exact',
+    });
+    api = MockService(RoutingVisualizerService, {
+      getPresetSet$: () => presets$,
+      getShowShapeLabel: () => false,
+      getShapeColor: () => '#00FFFF',
+      getFillColor: () => 'rgba(0,0,0,0)',
+      getClassificationColors: () => new Map<string, string>(),
+      getRegionUpdateEvent: () => EMPTY,
+      getSelectedRegions$: () => EMPTY,
+      getImageMeta: () => EMPTY,
+      setSelectedRegions: jest.fn(),
+      getAnnotationRegions: () => [drawn],
+      setAnnotationRegions: jest.fn(),
+      getRegionSourceView$: () => new BehaviorSubject<RegionSourceView | null>(view),
+      getRegionSourceIndex: jest.fn(async (q: { offset: number; limit: number }) => ({
+        total: rows.length,
+        rows: rows.slice(q.offset, q.offset + q.limit),
+      })),
+      getRegionSourceClassCounts: jest.fn(async (stack?: boolean) =>
+        stack ? { CTX: 30, MB: 90 } : { CTX: 3, MB: 9 },
+      ),
+      getSliceAnnotationRegions: () => [drawn, elsewhere],
+      getVolumeView$: () => volume$,
+      getSliceEditor$: () => slicePane$,
+      getClassVolumes: async () => ({}),
+      selectSourceFeatures: jest.fn(async () => []),
+      deleteSourceFeatures: jest.fn(),
+      selectRegionClasses: jest.fn(async () => undefined),
+    });
+    shallowEditor();
+    await TestBed.configureTestingModule({
+      imports: [RegionEditorComponent, FormsModule],
+      providers: [
+        { provide: REGION_EDITOR_API, useValue: api },
+        { provide: MessageService, useValue: MockService(MessageService) },
+        { provide: ConfirmationService, useValue: MockService(ConfirmationService) },
+        {
+          provide: REGION_IO_PORT,
+          useValue: {
+            getSelectedFileName: () => undefined,
+            roiFileExists: () => of(false),
+            saveGeoJson: () => of(void 0),
+            saveSliceGeoJsons: () => of(void 0),
+          } as RegionIoPort,
+        },
+      ],
+      schemas: [NO_ERRORS_SCHEMA],
+    }).compileComponents();
+    component = TestBed.createComponent(RegionEditorComponent).componentInstance;
+    component.ngOnInit();
+    await settle();
+  });
+
+  const page = (): Region[] => (component as any).pagedRegions;
+
+  it('toggles the regions through the volume in a volume view', async () => {
+    const set = jest.fn();
+    Object.assign(api, { setRegionsThroughVolume: set });
+    (component as any).toggleThroughVolume();
+    expect(set).toHaveBeenCalledWith(true);
+  });
+
+  it('asks the region source nothing while closed, and reads it again when opened', async () => {
+    const index = api.getRegionSourceIndex as jest.Mock;
+    const counts = api.getRegionSourceClassCounts as jest.Mock;
+    const volumes = jest.fn(async () => ({}));
+    Object.assign(api, { getClassVolumes: volumes });
+    component.active = false;
+    index.mockClear();
+    counts.mockClear();
+    volume$.next(true);
+    (component as any).onPageChange({ first: 10, rows: 10 });
+    await settle();
+    expect(index).not.toHaveBeenCalled();
+    expect(counts).not.toHaveBeenCalled();
+    expect(volumes).not.toHaveBeenCalled();
+    component.active = true;
+    await settle();
+    expect(index).toHaveBeenCalledTimes(1);
+    expect(counts).toHaveBeenCalledWith(true);
+    expect(volumes).toHaveBeenCalled();
+  });
+
+  it("counts the whole stack's classes in a volume view, and the slice's with its slice pane", async () => {
+    const tree = () => Object.fromEntries((component as any).treeCounts);
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    volume$.next(true);
+    await settle();
+    // Every slice's regions and source features (the 2D slice's would be the last one shown).
+    expect(tree()).toEqual({ MB: 91, CTX: 31 });
+    expect((api.getRegionSourceClassCounts as jest.Mock).mock.calls.at(-1)[0]).toBe(true);
+    slicePane$.next(true);
+    await settle();
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    slicePane$.next(false);
+    volume$.next(false);
+    await settle();
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    // The table lists the slice's regions throughout.
+    expect((component as any).tableTotal).toBe(13);
+  });
+
+  it('lists the regions, then the source features, in one table', () => {
+    expect((component as any).tableTotal).toBe(13);
+    expect(page().map((r) => r.sourceId ?? r.name)).toEqual(['shape1', ...rows.slice(0, 9).map((r) => r.id)]);
+    expect((api.getRegionSourceIndex as jest.Mock).mock.calls.at(-1)[0]).toEqual({ offset: 0, limit: 9 });
+  });
+
+  it('pages into the source past the regions', async () => {
+    (component as any).onPageChange({ first: 10, rows: 10 });
+    await settle();
+    expect((api.getRegionSourceIndex as jest.Mock).mock.calls.at(-1)[0]).toEqual({ offset: 9, limit: 10 });
+    expect(page().map((r) => r.sourceId)).toEqual(['f9', 'f10', 'f11']);
+  });
+
+  it('takes selected source rows into the regions, and deletes source rows from the source', () => {
+    component['selectedRegions'] = [page()[0], page()[2]];
+    (component as any).onSelectionChanged();
+    expect(api.setSelectedRegions).toHaveBeenCalledWith([page()[0]]);
+    expect(api.selectSourceFeatures).toHaveBeenCalledWith(['f1'], true);
+    (component as any).deleteRegion(3);
+    expect(api.deleteSourceFeatures).toHaveBeenCalledWith(['f2']);
+  });
+
+  it('counts the source in the classes, as a tree, and a tree pick selects the subtree', async () => {
+    expect((component as any).classHierarchy).toHaveLength(3);
+    expect((component as any).treeCounts.get('MB')).toBe(10);
+    expect((component as any).classCount('CTX')).toBe(3);
+    await (component as any).pickClasses({ name: 'grey', classes: ['grey', 'CTX', 'MB'], additive: false });
+    expect(api.selectRegionClasses).toHaveBeenCalledWith(['grey', 'CTX', 'MB'], false);
+    expect((component as any).pickedClass).toBe('grey');
+  });
+
+  it('shows classes in 3D in a volume view, each with its subtree, and hides them again', async () => {
+    const show = jest.fn(async () => undefined);
+    (api as unknown as { showRegionClasses3d: typeof show }).showRegionClasses3d = show;
+    (component as any).toggleClass3d('grey', ['grey', 'CTX', 'MB']);
+    (component as any).toggleClass3d('MB');
+    expect(show).toHaveBeenLastCalledWith([
+      { key: 'grey', classes: ['grey', 'CTX', 'MB'], color: expect.any(String), label: 'grey' },
+      { key: 'MB', classes: ['MB'], color: expect.any(String), label: 'MB' },
+    ]);
+    (component as any).toggleClass3d('grey');
+    expect(show).toHaveBeenLastCalledWith([
+      { key: 'MB', classes: ['MB'], color: expect.any(String), label: 'MB' },
+    ]);
+    expect([...(component as any).shown3dNames]).toEqual(['MB']);
+  });
+
+  it('repaints the surfaces shown in 3D when a class colour changes', async () => {
+    const show = jest.fn(async () => undefined);
+    (api as unknown as { showRegionClasses3d: typeof show }).showRegionClasses3d = show;
+    (component as any).toggleClass3d('MB');
+    expect(show).toHaveBeenCalledTimes(1);
+
+    presets$.next({ ...presets$.value, classes: [{ name: 'MB', color: '#ff00aa' }] });
+    expect(show).toHaveBeenLastCalledWith([{ key: 'MB', classes: ['MB'], color: '#ff00aa', label: 'MB' }]);
+    expect((component as any).treeColor('MB')).toBe('#ff00aa');
+
+    // Another class's colour: the surface is left alone.
+    presets$.next({ ...presets$.value, classes: [...presets$.value.classes, { name: 'CTX', color: '#00aaff' }] });
+    expect(show).toHaveBeenCalledTimes(2);
+  });
+
+  it('highlights the surfaces holding the selected classes, and a surface click picks its class', async () => {
+    const highlight = jest.fn();
+    const picked$ = new Subject<{ key: string | null; additive: boolean }>();
+    Object.assign(api, {
+      showRegionClasses3d: jest.fn(async () => undefined),
+      highlightRegionClasses3d: highlight,
+    });
+    (component as any).toggleClass3d('grey', ['grey', 'CTX', 'MB']);
+    (component as any).toggleClass3d('CTX');
+    expect(highlight).not.toHaveBeenCalled();
+
+    // A pick in the tree: every surface holding one of its classes.
+    await (component as any).pickClasses({ name: 'MB', classes: ['MB'], additive: false });
+    expect(highlight).toHaveBeenLastCalledWith(['grey']);
+
+    // Rows picked in the table replace the pick: their classes count.
+    (component as any).selectedRegions = [Object.assign(new Region(), { id: 7, label: 'CTX' })];
+    (component as any).onSelectionChanged();
+    expect(highlight).toHaveBeenLastCalledWith(['grey', 'CTX']);
+    expect([...(component as any).markedClasses]).toEqual(['CTX']);
+
+    // A click on a surface in 3D picks its class with its subtree, as the tree does.
+    (component as any).onPicked3d('grey', false);
+    expect((component as any).pickedClass).toBe('grey');
+    expect(api.selectRegionClasses).toHaveBeenLastCalledWith(['grey', 'CTX', 'MB'], false);
+
+    // A click beside the surfaces clears the selection and the highlight.
+    (component as any).onPicked3d(null, false);
+    expect((component as any).pickedClass).toBeNull();
+    expect((component as any).selectedRegions).toEqual([]);
+    expect(highlight).toHaveBeenLastCalledWith([]);
+    picked$.complete();
+  });
+
+  it("in a volume view, asks for the volumes of the page's classes, once each", async () => {
+    const volumes = jest.fn(async (classes: readonly string[]) =>
+      Object.fromEntries(classes.map((c) => [c, c === 'MB' ? 900 : 40])),
+    );
+    Object.assign(api, { getClassVolumes: volumes });
+    await settle();
+    (component as any).volumeView = true;
+    (component as any).resetVolumes();
+    expect([...(component as any).tableVolumes.values()].every((v: unknown) => v === null)).toBe(true);
+    await settle();
+    expect(volumes).toHaveBeenCalledTimes(1);
+    expect(new Set(volumes.mock.calls[0][0])).toEqual(new Set(['MB', 'CTX']));
+    expect(Object.fromEntries((component as any).tableVolumes)).toEqual({ MB: 900, CTX: 40 });
+    (component as any).requestVolumes();
+    expect(volumes).toHaveBeenCalledTimes(1);
+
+    // Back to a 2D view: areas again.
+    (component as any).volumeView = false;
+    (component as any).resetVolumes();
+    expect((component as any).tableVolumes).toBeNull();
   });
 });

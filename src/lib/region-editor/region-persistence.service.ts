@@ -81,9 +81,24 @@ export class RegionPersistenceService {
     );
   }
 
-  /** Download `regions` as a GeoJSON file named `filename`. */
-  download(regions: Region[], filename: string): void {
-    const blob = new Blob([this.api.getGeoJsonString(regions)], { type: 'application/json' });
+  /**
+   * `regions` as GeoJSON, merged with the image's region source when it has one (the source's
+   * features that were not taken or deleted, then `regions`); `slice` names a folder stack's
+   * slice.
+   */
+  serialize(regions: Region[], slice?: number): Promise<string> {
+    const merged = this.api.getGeoJsonStringWithSource?.(regions, slice);
+    if (merged) return merged;
+    try {
+      return Promise.resolve(this.api.getGeoJsonString(regions));
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  /** Download `regions` (with the region source behind them) as a GeoJSON file named `filename`. */
+  async download(regions: Region[], filename: string): Promise<void> {
+    const blob = new Blob([await this.serialize(regions)], { type: 'application/json' });
     saveAs(blob, filename);
   }
 
@@ -96,17 +111,24 @@ export class RegionPersistenceService {
   save(regions: () => Region[], filename: string): Observable<void> {
     return new Observable<void>((subscriber) => {
       let upload: Subscription | undefined;
+      let cancelled = false;
       const timer = setTimeout(() => {
-        let geoJsonStr: string;
+        let serialized: Promise<string>;
         try {
-          geoJsonStr = this.api.getGeoJsonString(regions());
+          serialized = this.serialize(regions());
         } catch (err) {
           subscriber.error(err);
           return;
         }
-        upload = this.io.saveGeoJson(geoJsonStr, filename).subscribe(subscriber);
+        serialized.then(
+          (geoJsonStr) => {
+            if (!cancelled) upload = this.io.saveGeoJson(geoJsonStr, filename).subscribe(subscriber);
+          },
+          (err) => subscriber.error(err),
+        );
       });
       return () => {
+        cancelled = true;
         clearTimeout(timer);
         upload?.unsubscribe();
       };
@@ -117,12 +139,20 @@ export class RegionPersistenceService {
    * A folder stack's regions as one geojson per slice-file (jit-ui#93), each
    * serialized on the default plane (z=0): every slice-file is one plane, and
    * the loader re-derives the slice index from the file's position. Slices
-   * cleared since load are included (empty) so their file is overwritten.
+   * cleared since load are included (empty) so their file is overwritten, and so are slices
+   * whose region source lost features; a slice with a region source keeps the features still
+   * in it.
    */
-  sliceGeoJsons(): SliceGeoJson[] {
+  async sliceGeoJsons(): Promise<SliceGeoJson[]> {
     const out: SliceGeoJson[] = [];
     for (const [z, regs] of this.api.getStackSaveAnnotationSlices()) {
-      out.push({ z, geoJsonStr: this.api.getGeoJsonString(regs.map((r) => withRegionZ(r, 0))) });
+      out.push({
+        z,
+        geoJsonStr: await this.serialize(
+          regs.map((r) => withRegionZ(r, 0)),
+          z,
+        ),
+      });
     }
     return out;
   }

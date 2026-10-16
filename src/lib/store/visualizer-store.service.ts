@@ -3,6 +3,7 @@ import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset';
+import { findPreset, presetKey } from './class-color.util';
 import { PREFERENCES_PORT, PreferencesPort } from '../contracts/ports/preferences.port';
 
 import { IImageMetadata } from '../contracts/image.contract';
@@ -63,6 +64,8 @@ export class VisualizerStore {
   // PreferencesPort (app-side adapter → jit-service). getClassificationColors()
   // below stays as a name→colour view for the backends' region renderers.
   private presetSet: PresetSet = defaultPresetSet();
+  /** Session-only class colours from imported files (see PresetSet.importedColors). */
+  private importedColors: Record<string, string> = {};
   private readonly presetSet$ = new BehaviorSubject<PresetSet>(this.presetSet);
   private readonly savePresets$ = new Subject<void>();
   private presetsLoaded = false;
@@ -100,7 +103,7 @@ export class VisualizerStore {
       next: (set) => {
         if (set && Array.isArray(set.classes) && set.classes.length > 0) {
           this.presetSet = this.normalizePresetSet(set);
-          this.presetSet$.next(this.presetSet);
+          this.emitPresetSet();
         }
         this.presetsLoaded = true;
       },
@@ -108,6 +111,11 @@ export class VisualizerStore {
         this.presetsLoaded = true;
       },
     });
+  }
+
+  /** Publish the preset set with this session's imported class colours. */
+  private emitPresetSet(): void {
+    this.presetSet$.next({ ...this.presetSet, importedColors: this.importedColors });
   }
 
   private normalizePresetSet(set: PresetSet): PresetSet {
@@ -325,14 +333,31 @@ export class VisualizerStore {
       fallbackPalette: [...this.presetSet.fallbackPalette],
       autoPromote: this.presetSet.autoPromote,
       matchMode: this.presetSet.matchMode,
+      importedColors: { ...this.importedColors },
     };
+  }
+  /**
+   * Remember the class colours an imported file carried (label → colour), so its regions keep
+   * them: a class with a preset keeps the preset's colour, and the latest import wins for the
+   * rest. Not persisted.
+   */
+  rememberImportedClassColors(colors: ReadonlyMap<string, string>): void {
+    let changed = false;
+    for (const [label, color] of colors) {
+      if (!label || findPreset(label, this.presetSet)) continue;
+      const key = presetKey(this.presetSet, label);
+      if (this.importedColors[key] === color) continue;
+      this.importedColors = { ...this.importedColors, [key]: color };
+      changed = true;
+    }
+    if (changed) this.emitPresetSet();
   }
   getPresetSet$(): Observable<PresetSet> {
     return this.presetSet$.asObservable();
   }
   setPresetSet(set: PresetSet): void {
     this.presetSet = this.normalizePresetSet(set);
-    this.presetSet$.next(this.presetSet);
+    this.emitPresetSet();
     this.savePresetsNow(); // explicit bulk apply/import → persist immediately
   }
   /** Add or update a class (keyed by exact stored `name`). */
@@ -342,17 +367,17 @@ export class VisualizerStore {
     if (i >= 0) classes[i] = { ...classes[i], ...preset };
     else classes.push({ ...preset });
     this.presetSet = { ...this.presetSet, classes };
-    this.presetSet$.next(this.presetSet);
+    this.emitPresetSet();
     this.queuePresetSave();
   }
   removeClass(name: string): void {
     this.presetSet = { ...this.presetSet, classes: this.presetSet.classes.filter((c) => c.name !== name) };
-    this.presetSet$.next(this.presetSet);
+    this.emitPresetSet();
     this.queuePresetSave();
   }
   resetPresets(): void {
     this.presetSet = defaultPresetSet();
-    this.presetSet$.next(this.presetSet);
+    this.emitPresetSet();
     this.savePresetsNow(); // explicit reset → persist immediately
   }
 

@@ -64,6 +64,10 @@ export interface IImageInfo {
    *  opposed to the scalar `roiJsonStr`, which is one ROI set for the whole
    *  image (a single file or a server z-stack). (jit-ui#93) */
   roiJsonStrs?: (string | null)[];
+  /** Base URL of a server-side region source for this image (see `openHttpRegionSource`):
+   *  its regions are drawn from the server's level-of-detail tiles instead of being loaded
+   *  from `roiJsonStr`. On a stack, slice z shows the source's plane z. */
+  regionSourceUrl?: string;
   /** Per-slice, per-channel plane URLs for a SERVERLESS multichannel image
    *  (`tiled: false` + `imageMeta[0].channelCount > 1`). `channelUrls[z][c]`
    *  is a complete single-band image of channel c at slice z. The OSD simple

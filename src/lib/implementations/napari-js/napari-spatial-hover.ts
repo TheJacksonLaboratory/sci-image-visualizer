@@ -74,13 +74,20 @@ export class SpatialHover {
    * Listen on `el` (the plot host) rather than the canvas, so it keeps working over the region
    * overlay (an SVG covering the canvas, which would otherwise swallow every move), and throttle
    * to one hit-test per animation frame: a pointermove can fire far more often than that, and
-   * the first test after an orbit re-projects the cloud.
+   * the first test after an orbit re-projects the cloud. None while a button is held: that is an
+   * orbit or a pan moving the camera every frame, and a test per frame re-projected all of a 3.7M
+   * cloud each time (≈150 ms a frame); the first move after the drag pays for one.
    */
   install(el: HTMLElement): void {
     this.dispose();
     this.tooltip = new NapariSpatialTooltip(el);
 
     const onMove = (e: PointerEvent) => {
+      if (e.buttons) {
+        this.pointer = null;
+        this.tooltip?.hide();
+        return;
+      }
       this.pointer = { clientX: e.clientX, clientY: e.clientY };
       if (this.frame) return;
       this.frame = requestAnimationFrame(() => {

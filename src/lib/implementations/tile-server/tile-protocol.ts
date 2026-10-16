@@ -40,6 +40,9 @@ export interface TileDescriptor {
   /** Physical pixel size in µm (0 when the format doesn't report it). */
   mppX?: number;
   mppY?: number;
+  /** Spacing between z slices in µm (0 or absent when the format doesn't report it): what
+   *  lets a z-stack be drawn as a volume to scale. */
+  mppZ?: number;
 }
 
 /** Tile coordinates for one `/tile` request. `channel == null` (or omitted)

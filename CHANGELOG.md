@@ -9,6 +9,54 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Large region sets drawn by level of detail.** An image's ROI GeoJSON of at least
+  `VizConfig.regionSourceMinChars` characters (default 1 000 000) no longer loads as regions: it
+  opens as a _region source_, parsed and tiled in a Web Worker, and OpenSeadragon and napari draw
+  only the tiles in view — outlines simplified to under a screen pixel when zoomed out, exact at
+  1:1 and closer (as the spatial views draw cell outlines). A feature joins the regions, as an
+  ordinary editable region, when it is clicked, caught in a rubber band or picked in the Region
+  Editor; until then it costs no region. A z-indexed stack file serves each slice its plane, and
+  each large slice file of a folder stack opens the first time its slice is shown. Plotly shows
+  the regions only, not the source.
+- **Server-side region sources**: `IImageInfo.regionSourceUrl` names a server that serves the
+  tiles itself (`openHttpRegionSource`), so the browser never downloads the set; the example tile
+  server serves any GeoJSON file or folder of per-slice files under `REGION_DIR` this way. Its
+  requests go through the host's `HttpClient`, so the host's interceptors (its auth) apply.
+- **The Region Editor's table lists a region source's features** after the regions, paged by
+  its paginator; selecting, reclassifying or recolouring a source row takes it into the regions,
+  the bin deletes it. The classes panel counts the source's classes. A large import becomes the
+  slice's source; save and export write its remaining features with the regions, and Delete all
+  clears it.
+- **Class hierarchies**: a region set may carry one (`classHierarchy`, e.g. an atlas ontology,
+  as a FeatureCollection member or a served folder's `regionset.json`). The Region Editor then
+  shows its classes as a tree, as the Allen atlas viewer does: search, colour swatches, counts,
+  classes absent from the slice greyed; picking a class selects its regions and its subclasses'.
+- **An atlas look**: regions filled in their colour with thin outlines, the selection in a
+  highlight, class labels centred inside each part where they fit (only the deepest classes
+  drawn). A region set can ask for it (`style`), and the Region Editor's fill button toggles it.
+- **Regions in 3D**: in a napari volume or isosurface view, each class in the Region Editor (a
+  tree node with its subclasses) can be shown as its 3D reconstruction from every slice's
+  outlines — a translucent surface in its colour inside the volume, following its Z stretch.
+  The Region Editor button is on the toolbar in those views.
+- **Regions keep their GeoJSON feature id and other properties** (`Region.sourceId`,
+  `Region.properties`) through an import and a save, e.g. QuPath's `id` and `objectType`, or an
+  atlas structure's acronym and id.
+
+### Changed
+
+- **A volume takes its slice spacing from the tile server's descriptor** (`TileDescriptor.mppZ`)
+  as it already took its pixel size, so a tiled stack whose server reports it (jit-service for a
+  NRRD atlas volume) is drawn to scale without the host copying it into `imageMeta`.
+- **The heatmap's single-image mode slices with the slice bar** of the Image views, in place of
+  the slice-number field and its re-plot button: the slice the bar settles on (a drag let go, a
+  click on its track, or a pause in ← / → steps) is plotted.
+- **Imported GeoJSON keeps its class colours**: a class with no preset is drawn in the colour the
+  file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
+  preset colour, and a class colour set later recolours the class as before. The imported colours
+  last for the session and are never saved with the presets.
+
 ## [0.9.0] — 2026-10-13
 
 Implements the 0.8.3 code review ([#45](https://github.com/TheJacksonLaboratory/sci-image-visualizer/issues/45)):

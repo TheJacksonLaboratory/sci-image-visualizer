@@ -38,6 +38,11 @@ export class RegionScopeCache {
     return imageInfo.fileName || undefined;
   }
 
+  /** The active image's cache key (see {@link imageKey}). */
+  get activeImage(): string | undefined {
+    return this.imageKey;
+  }
+
   /** True while a z-stack is loaded and regions are held per slice. */
   get stackMode(): boolean {
     return this.stack;

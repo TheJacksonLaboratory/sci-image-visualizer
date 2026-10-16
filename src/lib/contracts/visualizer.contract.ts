@@ -1,4 +1,5 @@
 import { InjectionToken } from '@angular/core';
+import type { SectionAxis, SectionViews } from './section-view.contract';
 import { Observable } from 'rxjs';
 import { Image } from 'image-js';
 
@@ -536,6 +537,15 @@ export interface IVisualizer
   /** This backend's region renderer. May be null until a plot is mounted
    *  (OpenSeadragon). Drives region draw/select modes uniformly. */
   getRegionOverlay(): IRegionOverlay | null;
+  /** Split a volume view: the displayed slice, with every region tool, in the div `div` beside
+   *  the 3D view; null closes it. Resolves whether the slice shows. Optional: the router's. */
+  setSliceEditor?(div: string | null): Promise<boolean>;
+  /** The slice editor's sections through x and y (nulls while it is closed). Optional: the router's. */
+  getSectionViews$?(): Observable<SectionViews>;
+  /** Move the slice editor's section plane through `axis` to `at` (image px). */
+  setSectionPlane?(axis: SectionAxis, at: number): void;
+  /** The slice picked by dragging the z plane in the volume (the host shows it). */
+  getSliceDrag$?(): Observable<number>;
   /** Isosurface controls when this backend advertises `ViewerFeature.Isosurface`,
    *  else null — so consumers gate on the returned object, not a no-op method. */
   getIsosurfaceControls(): IIsosurfaceControls | null;

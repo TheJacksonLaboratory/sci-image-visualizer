@@ -22,6 +22,7 @@ import { saveAs } from 'file-saver';
 import { MultiPolygon, Polygon, Rectangle, Region } from './region';
 import { bezierCurveFromHandles, resolveHandles } from './bezier';
 import { hexToRgb, rgbToHex } from '../contracts/color';
+import { featureIdOf } from '../region-source/region-tiles';
 
 /**
  * Parse a GeoJSON FeatureCollection string (QuPath-compatible) into regions.
@@ -41,20 +42,35 @@ export function regionsFromGeoJson(geoJsonStr: string): Region[] {
   }
   let idx = 0;
   for (const feature of geoJson.features) {
-    regions.push(regionFromFeature(feature, idx));
+    regions.push(regionFromGeoJsonFeature(feature, idx));
     idx++;
   }
   return regions;
 }
+
+/** Properties SIV reads into the region itself; the rest travel in {@link Region.properties}. */
+const OWN_PROPERTIES = new Set([
+  'classification',
+  'id',
+  'isBezier',
+  'bezierAnchors',
+  'bezierHandlesIn',
+  'bezierHandlesOut',
+  'holes',
+  'holeHandlesIn',
+  'holeHandlesOut',
+]);
 
 /** A feature's `classification`: QuPath's `{name, color}`, or a bare name. */
 type Classification = string | { name?: string; color?: number[] };
 
 /** The parts of a GeoJSON feature the reader looks at, JIT's bezier extras
  *  included. Parsed from a file, so nothing here is guaranteed. */
-interface GeoJsonFeature {
+export interface GeoJsonFeature {
+  id?: string | number;
   geometry: { type?: string; coordinates?: unknown; plane?: { z?: number } };
   properties?: {
+    id?: string | number;
     classification?: Classification;
     isBezier?: boolean;
     bezierAnchors?: number[][];
@@ -66,10 +82,18 @@ interface GeoJsonFeature {
   };
 }
 
-/** One GeoJSON feature as the region `shape<idx>`. */
-function regionFromFeature(feature: GeoJsonFeature, idx: number): Region {
+/**
+ * One GeoJSON feature as the region `shape<idx>`. Throws on a feature without coordinates.
+ * The feature's id becomes {@link Region.sourceId} (or `sourceId`, when given: a region source's
+ * id for the feature) and its other properties {@link Region.properties}.
+ */
+export function regionFromGeoJsonFeature(feature: GeoJsonFeature, idx: number, sourceId?: string): Region {
   const region = new Region();
   region.name = `shape${idx}`;
+  const id = sourceId ?? featureIdOf(feature);
+  if (id !== undefined) region.sourceId = id;
+  const extra = Object.entries(feature.properties ?? {}).filter(([key]) => !OWN_PROPERTIES.has(key));
+  if (extra.length) region.properties = Object.fromEntries(extra);
   // QuPath stores the image plane INSIDE the geometry (a sibling of
   // type/coordinates), not in properties: `geometry.plane = {c,z,t}`, all
   // zero-based, and the key is omitted for the default plane (z=0,t=0). A
@@ -229,8 +253,11 @@ export function regionsToGeoJson(rois: readonly Region[]): string {
   return JSON.stringify(geoJsonData);
 }
 
-/** A region as a GeoJSON feature; null for a region without bounds. */
-function featureFromRegion(roi: Region): object | null {
+/**
+ * A region as a GeoJSON feature; null for a region without bounds. Its {@link Region.sourceId}
+ * is the feature's `id` and its {@link Region.properties} come along beside the classification.
+ */
+export function featureFromRegion(roi: Region): object | null {
   const classification = {
     name: roi.label ? roi.label : roi.name,
     color: hexToRgb(roi?.color) ?? [0, 0, 0],
@@ -240,6 +267,24 @@ function featureFromRegion(roi: Region): object | null {
   // (z=0,t=0). Emit `plane: {c,z,t}` only for a non-default slice so a
   // single-plane image round-trips byte-identically to QuPath (jit-ui#93).
   const planeProp = (roi.z ?? 0) !== 0 ? { plane: { c: -1, z: roi.z, t: 0 } } : {};
+  const feature = geometryFeature(roi, classification, planeProp);
+  if (!feature) return null;
+  if (roi.properties) feature.properties = { ...roi.properties, ...feature.properties };
+  if (roi.sourceId === undefined) return feature;
+  const { type, ...rest } = feature;
+  return { type, id: roi.sourceId, ...rest };
+}
+
+/** A GeoJSON feature as {@link featureFromRegion} builds it. */
+interface ExportedFeature {
+  type: 'Feature';
+  id?: string;
+  properties: Record<string, unknown>;
+  geometry: object;
+}
+
+/** The region's geometry as a feature with its classification (and bézier extras). */
+function geometryFeature(roi: Region, classification: object, planeProp: object): ExportedFeature | null {
   if (roi.bounds instanceof Rectangle) {
     const { x, y, width, height } = roi.bounds;
     const ring = [
@@ -281,7 +326,7 @@ function featureFromRegion(roi: Region): object | null {
 }
 
 /** A closed polygon (with its holes) as a Polygon feature, an open one as a LineString. */
-function polygonFeature(polygon: Polygon, classification: object, planeProp: object): object {
+function polygonFeature(polygon: Polygon, classification: object, planeProp: object): ExportedFeature {
   const closed = polygon.closed !== false;
   const isBezier = polygon.bezier === true;
   // For a bezier region the geometry is the flattened smooth curve,

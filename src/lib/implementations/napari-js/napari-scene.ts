@@ -1,4 +1,7 @@
+import type { RegionMesh3D } from './napari-volume-region-meshes';
 import type { Viewer } from 'napari-js';
+import type { VolumeFrame } from './napari-volume-region-meshes';
+import type { PlaneAxis, SlicePlanes } from './napari-volume-slice-planes';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
@@ -36,6 +39,23 @@ export interface NapariScene {
   setNavigatorVisible?(visible: boolean): void;
   /** Observations projected to canvas pixels (the spatial 3D cloud), or null. */
   screenProjection?(obs: SpatialObservations): Float32Array | null;
+  /** Show these region reconstructions in the 3D view (volume scenes only). */
+  setRegionMeshes?(meshes: readonly RegionMesh3D[]): void;
+  /** Highlight the reconstructions of these keys (none: all as usual). */
+  setRegionHighlight?(keys: readonly string[]): void;
+  /** Hide the reconstructions of these keys. */
+  setRegionHidden?(keys: readonly string[]): void;
+  /**
+   * Draw the region reconstructions through the volume (it hides none of them) rather than hidden
+   * where it is in front of them (see VolumeScene.setRegionsThroughVolume).
+   */
+  setRegionsThroughVolume?(through: boolean): void;
+  /** Show the planes of the sections beside the 3D view (volume scenes only). */
+  setSlicePlanes?(planes: SlicePlanes): void;
+  /** The assembled volume the sections are cut from (volume scenes only). */
+  volumeVoxels?(): VolumeVoxelsOnScreen | null;
+  /** Image px per voxel of the assembled volume, in-plane (volume scenes only). */
+  voxelStep?(): number | null;
   /** Remove everything the scene added; called before the viewer is disposed. */
   dispose(): void;
 }
@@ -64,6 +84,16 @@ export interface StackProgress {
 
 /** Everything a scene is built from: the viewer and its DOM, the service's collaborators, and the
  *  service state a scene reads live. */
+/** A volume as assembled for display (voxels per channel, key 0 the grayscale one) and its frame. */
+export interface VolumeVoxelsOnScreen {
+  width: number;
+  height: number;
+  depth: number;
+  channels: ReadonlyMap<number, Uint8Array>;
+  multichannel: boolean;
+  frame: VolumeFrame;
+}
+
 export interface SceneContext {
   readonly viewer: Viewer;
   readonly host: HTMLElement;
@@ -92,4 +122,8 @@ export interface SceneContext {
   fitCameraSoon(): void;
   outsideZone<T>(fn: () => T): T;
   inZone<T>(fn: () => T): T;
+  /** A region reconstruction was clicked (its key), or the volume beside them (null). */
+  regionMeshPicked(key: string | null, additive: boolean): void;
+  /** A section's plane dragged in the volume to `value` along its axis. */
+  slicePlaneMoved(axis: PlaneAxis, value: number): void;
 }

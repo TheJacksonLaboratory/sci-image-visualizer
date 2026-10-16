@@ -1,12 +1,28 @@
+import type { HttpClient } from '@angular/common/http';
 import { IImageInfo } from '../contracts/image.contract';
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { Region } from '../models/region';
+import { openHttpRegionSource } from '../region-source/http-region-source';
+import { REGION_SOURCE_MIN_CHARS, RegionSource } from '../region-source/region-source';
+import { openGeoJsonRegionSource } from '../region-source/worker-region-source';
+import type { RegionSourceOpener, RegionSourceSlices } from '../store/region-source-scope';
 
-/** The region-store members {@link applyImageRois} writes through. */
+/** The region-store members {@link applyImageRois} writes through. A target without
+ *  `attachRegionSource` loads every ROI file as regions. */
 export type RegionLoadTarget = Pick<
   IRegionStore,
   'importRegions' | 'enterStackMode' | 'setRegions' | 'resetUndoHistory'
->;
+> & {
+  attachRegionSource?(source: RegionSource | RegionSourceOpener, slices?: RegionSourceSlices): void;
+  /** The slice shown now (what a stack's source, laid out once it opens, makes live). */
+  getDisplaySlice?(): number;
+  /** Record the slice shown (outside stack mode it only records it): see {@link applyImageRois}. */
+  setDisplaySlice?(z: number): void;
+  isStackMode?(): boolean;
+};
+
+/** Per target, the latest {@link applyImageRois}: a stack source that opens after a later load is dropped. */
+const loads = new WeakMap<RegionLoadTarget, number>();
 
 /**
  * Apply an image's saved ROIs once its render has landed, choosing the region
@@ -28,21 +44,90 @@ export type RegionLoadTarget = Pick<
  *    Loading saved ROIs is not a user edit, so the undo history starts fresh and the
  *    first undo cannot wipe them (jit-ui#85).
  *
- * `z` is the slice shown now; entering stack mode makes it live and resets undo.
+ * Large ROI files (`minSourceChars` and up) and a server-side source (`regionSourceUrl`)
+ * become tiled region sources instead of regions; a z-indexed one serves each slice its own
+ * plane. On a single-file stack the source is opened first, to tell which: one on the default
+ * plane only stays global, as its regions would. A folder stack's sources open lazily, the first
+ * time their slice is shown.
+ *
+ * `z` is the slice shown now; entering stack mode makes it live and resets undo. `http`, the
+ * host's `HttpClient`, carries a server-side source's requests, so the host's interceptors (its
+ * auth) apply to them as to the image tiles.
  */
-export function applyImageRois(info: IImageInfo, target: RegionLoadTarget, z: number): void {
+export function applyImageRois(
+  info: IImageInfo,
+  target: RegionLoadTarget,
+  z: number,
+  minSourceChars = REGION_SOURCE_MIN_CHARS,
+  http?: HttpClient,
+): void {
+  const attach = target.attachRegionSource?.bind(target);
+  const load = (loads.get(target) ?? 0) + 1;
+  loads.set(target, load);
+  const asSource = (json: string | null | undefined): json is string =>
+    !!attach && !!json && json.length >= minSourceChars;
+
   if (info.isStack && info.tiled === false) {
     const perSlice = info.roiJsonStrs;
     const sliceCount = info.urls?.length ?? perSlice?.length ?? 0;
     const slices = new Map<number, Region[]>();
+    const sourced: number[] = [];
     for (let s = 0; s < sliceCount; s++) {
       const json = perSlice?.[s] ?? null;
-      slices.set(s, json ? target.importRegions(json) : []);
+      if (asSource(json)) sourced.push(s);
+      slices.set(s, json && !asSource(json) ? target.importRegions(json) : []);
     }
     target.enterStackMode(slices, z, 'per-slice-file');
+    for (const s of sourced) attach?.(() => openGeoJsonRegionSource(perSlice?.[s] as string), { slice: s });
     return;
   }
+
   const roiJson = info.roiJsonStr;
+  if (attach && (info.regionSourceUrl || asSource(roiJson))) {
+    const url = info.regionSourceUrl;
+    const open: RegionSourceOpener = url
+      ? () => openHttpRegionSource(url, { http })
+      : () => openGeoJsonRegionSource(roiJson as string);
+    // As loading a file of regions replaces the regions, a source starts the image afresh.
+    target.setRegions([]);
+    target.resetUndoHistory();
+    if (!info.isStack) {
+      attach(open, { slice: 0 });
+      return;
+    }
+    // A stack: per slice when the source is z-indexed, else global (as its regions would be).
+    // The store learns the slice the image opened on (a host may open a stack on any slice), so
+    // the source, laid out on the store's slice once it opens, shows that one; a scrub meanwhile
+    // records its own, which then wins.
+    if (!target.isStackMode?.()) target.setDisplaySlice?.(z);
+    let first: Promise<RegionSource> | null = open();
+    const reuse: RegionSourceOpener = () => {
+      const opening = first;
+      first = null;
+      return opening ?? open();
+    };
+    const lay = (zIndexed: boolean) => {
+      if (loads.get(target) !== load) {
+        void first?.then(
+          (source) => source.dispose(),
+          () => undefined,
+        );
+        return;
+      }
+      if (zIndexed) {
+        target.enterStackMode(new Map(), target.getDisplaySlice?.() ?? z, 'combined');
+        attach(reuse, 'planes');
+      } else {
+        attach(reuse, { slice: 0 });
+      }
+    };
+    // One that cannot be opened is attached as a single plane (its slice reports the failure).
+    first.then(
+      (source) => lay(source.info.planes.some((p) => p !== 0)),
+      () => lay(false),
+    );
+    return;
+  }
   if (info.isStack) {
     const regions = roiJson ? target.importRegions(roiJson) : [];
     if (!roiJson || regions.some((r) => (r.z ?? 0) !== 0)) {

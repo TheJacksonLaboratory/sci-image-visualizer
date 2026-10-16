@@ -138,3 +138,25 @@ export function regionPolygons(region: Region): Polygon[] {
   if (b instanceof MultiPolygon) return b.polygons.filter((p) => p.closed !== false).map(flattenPolygon);
   return [];
 }
+
+/**
+ * The open polylines a region traces (a polyline, or a multi-polygon's open parts), as interleaved
+ * `x, y` image px; a bézier polyline as its flattened curve. Closed shapes yield nothing.
+ */
+export function regionPolylines(region: Region): Float64Array[] {
+  const b = region.bounds;
+  const parts = b instanceof Polygon ? [b] : b instanceof MultiPolygon ? b.polygons : [];
+  return parts
+    .filter((p) => p.closed === false && p.xpoints.length >= 2)
+    .map((p) => {
+      const { xs, ys } = p.bezier
+        ? bezierCurveFromHandles(
+            p.xpoints,
+            p.ypoints,
+            resolveHandles(p.xpoints, p.ypoints, false, p.handlesIn, p.handlesOut),
+            false,
+          )
+        : { xs: p.xpoints, ys: p.ypoints };
+      return Float64Array.from(xs.flatMap((x, i) => [x, ys[i]]));
+    });
+}

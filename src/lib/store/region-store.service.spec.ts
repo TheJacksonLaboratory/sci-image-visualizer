@@ -1049,6 +1049,51 @@ describe('RegionStore', () => {
       expect(typeof json).toBe('string');
       expect(store.importRegions(json).length).toBeGreaterThan(0);
     });
+
+    describe("an imported file's class colours", () => {
+      const feature = (name: string, color: number[]) => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [0, 0],
+              [10, 0],
+              [5, 10],
+              [0, 0],
+            ],
+          ],
+        },
+        properties: { classification: { name, color } },
+      });
+      const file = (...features: object[]) => JSON.stringify({ type: 'FeatureCollection', features });
+
+      it('are kept for classes with no preset, and preset colours still win', () => {
+        store.setClassificationColor('Tumor', '#123456');
+        store.setRegions(store.importRegions(file(feature('root', [255, 255, 255]), feature('Tumor', [0, 0, 0]))));
+        const byLabel = new Map(store.getRegions().map((r) => [r.label, r.color]));
+        expect(byLabel.get('root')).toBe('#ffffff');
+        expect(byLabel.get('Tumor')).toBe('#123456');
+      });
+
+      it('apply to regions of that class added later, and give way to a class colour set afterwards', () => {
+        store.setRegions(store.importRegions(file(feature('CA1', [120, 0, 0]))));
+        const r = polyRegion([0, 10, 5], [0, 0, 10]);
+        r.label = 'CA1';
+        store.addRegion(r);
+        expect(store.getRegions().map((x) => x.color)).toEqual(['#780000', '#780000']);
+        store.setClassificationColor('CA1', '#00FF00');
+        store.setRegions(store.getRegions());
+        expect(store.getRegions().every((x) => x.color === '#00FF00')).toBe(true);
+      });
+
+      it('are not persisted or exported with the preset set', () => {
+        const vis = TestBed.inject(VisualizerStore);
+        store.importRegions(file(feature('root', [255, 255, 255])));
+        expect(vis.getPresetSet().importedColors).toEqual({ root: '#ffffff' });
+        expect(vis.getPresetSet().classes.map((c) => c.name)).not.toContain('root');
+      });
+    });
   });
 
   describe('updateBounds clones the incoming bounds (no aliasing)', () => {
@@ -1331,6 +1376,49 @@ describe('RegionStore', () => {
       const before = live.z;
       store.getSliceRegions();
       expect(live.z).toBe(before);
+    });
+  });
+
+  describe('classVolumes', () => {
+    it("sums a class's area over the slices, following the regions", async () => {
+      const a = Object.assign(rectRegion(0, 0, 10, 10), { label: 'A' });
+      const b = Object.assign(rectRegion(20, 0, 5, 4), { label: 'A' });
+      const c = Object.assign(rectRegion(0, 0, 3, 3), { label: 'B' });
+      store.setRegions([a, b, c], false, true);
+      const first = await store.classVolumes(['A', 'B', 'C']);
+      expect(Object.fromEntries(first)).toEqual({ A: 120, B: 9, C: 0 });
+
+      store.setRegions([Object.assign(rectRegion(0, 0, 2, 2), { label: 'A' })], false, true);
+      expect((await store.classVolumes(['A'])).get('A')).toBe(4);
+    });
+  });
+
+  describe('hidden classes', () => {
+    it('hides a class: its regions redraw hidden and drop out of the selection; showing restores', () => {
+      const a = Object.assign(rectRegion(0, 0, 10, 10), { label: 'A' });
+      const b = Object.assign(rectRegion(20, 0, 5, 4), { label: 'B' });
+      store.setRegions([a, b], false, true);
+      store.setSelectedShapeIndices([0, 1]);
+      const updates: unknown[] = [];
+      store.getRegionUpdateEvent().subscribe((r) => updates.push(r));
+
+      store.setClassesHidden(['A'], true);
+      expect(store.isClassHidden('A')).toBe(true);
+      expect(store.isClassHidden('B')).toBe(false);
+      expect(store.isClassHidden(undefined)).toBe(false);
+      expect([...store.getHiddenClasses()]).toEqual(['A']);
+      expect(store.getSelectedShapeIndices()).toEqual([1]);
+      expect(updates).toHaveLength(1);
+      // The regions stay in the set.
+      expect(store.getRegions()).toHaveLength(2);
+
+      // No change, no redraw.
+      store.setClassesHidden(['A'], true);
+      expect(updates).toHaveLength(1);
+
+      store.setClassesHidden(['A'], false);
+      expect(store.isClassHidden('A')).toBe(false);
+      expect(updates).toHaveLength(2);
     });
   });
 });

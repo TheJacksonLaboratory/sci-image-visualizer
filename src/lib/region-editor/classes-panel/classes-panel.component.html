@@ -2,10 +2,23 @@
      classes above the regions table. Click a row to make it the active class
      (new regions inherit it; with rows selected it re-classifies them); recolour
      via the swatch; the badge shows how many regions use the class. "Manage"
-     opens the full editor (fallback palette, auto-add, matching, import/export). -->
+     opens the full editor (fallback palette, auto-add, matching, import/export).
+     A region set with a class hierarchy (an atlas ontology) can show its classes
+     as a tree instead (projected in by the editor); the header switches views. -->
 <div class="classes-panel">
   <div class="classes-panel-header">
     <span class="classes-panel-title">Classes</span>
+    <button
+      *ngIf="treeView !== null"
+      pButton
+      type="button"
+      [icon]="treeView ? 'pi pi-list' : 'pi pi-sitemap'"
+      class="p-button-sm p-button-text"
+      [pTooltip]="treeView ? 'Show the classes as a list' : 'Show the classes as a tree'"
+      tooltipPosition="bottom"
+      [attr.aria-label]="treeView ? 'Show the classes as a list' : 'Show the classes as a tree'"
+      (click)="treeViewChange.emit(!treeView)"
+    ></button>
     <button
       pButton
       type="button"
@@ -17,33 +30,72 @@
       (click)="manage.emit()"
     ></button>
   </div>
-  <div class="classes-panel-body">
-    <div
-      *ngFor="let c of rows; trackBy: trackByName"
-      class="class-row"
-      [class.active]="activeClass === c.name"
-      (click)="pick.emit(c.name)"
-      [pTooltip]="c.rowTooltip"
-      tooltipPosition="bottom"
-    >
-      <span class="row-swatch" (click)="$event.stopPropagation()">
-        <hex-color-picker [color]="c.color" (colorChange)="recolor.emit({ name: c.name, color: $event })">
-        </hex-color-picker>
-      </span>
-      <span class="row-name">{{ c.name }}</span>
-      <span class="row-count" [class.zero]="c.count === 0">{{ c.count }}</span>
-      <button
-        pButton
-        type="button"
-        icon="pi pi-trash"
-        class="p-button-sm p-button-text p-button-warning row-del"
-        [disabled]="!c.canRemove"
-        [pTooltip]="c.removeTooltip"
+  <ng-container *ngIf="treeView; else list"><ng-content></ng-content></ng-container>
+  <ng-template #list>
+    <input
+      *ngIf="classes.length"
+      type="text"
+      pInputText
+      class="p-inputtext-sm classes-search"
+      placeholder="Search by name"
+      aria-label="Search the classes"
+      [ngModel]="query"
+      (ngModelChange)="onQuery($event)"
+      (keydown.enter)="pickFirstMatch()"
+    />
+    <div class="classes-panel-body">
+      <div
+        *ngFor="let c of shownRows; trackBy: trackByName"
+        class="class-row"
+        [class.active]="activeClass === c.name"
+        [class.picked]="picked === c.name"
+        [class.marked]="marked.has(c.name)"
+        [class.hidden-class]="hidden.has(c.name)"
+        (click)="pick.emit(c.name)"
+        [pTooltip]="c.rowTooltip"
         tooltipPosition="bottom"
-        [attr.aria-label]="'Remove class ' + c.name"
-        (click)="$event.stopPropagation(); remove.emit(c.name)"
-      ></button>
+      >
+        <i
+          class="pi row-eye"
+          [ngClass]="hidden.has(c.name) ? 'pi-eye-slash' : 'pi-eye'"
+          role="button"
+          [attr.aria-pressed]="!hidden.has(c.name)"
+          [attr.aria-label]="(hidden.has(c.name) ? 'Show ' : 'Hide ') + c.name"
+          [pTooltip]="hidden.has(c.name) ? 'Show this class' : 'Hide this class'"
+          tooltipPosition="bottom"
+          (click)="$event.stopPropagation(); toggleHidden.emit(c.name)"
+        ></i>
+        <span class="row-swatch" (click)="$event.stopPropagation()">
+          <hex-color-picker [color]="c.color" (colorChange)="recolor.emit({ name: c.name, color: $event })">
+          </hex-color-picker>
+        </span>
+        <span class="row-name">{{ c.name }}</span>
+        <span class="row-count" [class.zero]="c.count === 0">{{ c.count }}</span>
+        <i
+          *ngIf="volume"
+          class="pi pi-box row-3d"
+          [class.on]="shown3d.has(c.name)"
+          role="button"
+          [attr.aria-pressed]="shown3d.has(c.name)"
+          [attr.aria-label]="'Show ' + c.name + ' in 3D'"
+          pTooltip="Show in the volume, in 3D"
+          tooltipPosition="bottom"
+          (click)="$event.stopPropagation(); toggle3d.emit(c.name)"
+        ></i>
+        <button
+          pButton
+          type="button"
+          icon="pi pi-trash"
+          class="p-button-sm p-button-text p-button-warning row-del"
+          [disabled]="!c.canRemove"
+          [pTooltip]="c.removeTooltip"
+          tooltipPosition="bottom"
+          [attr.aria-label]="'Remove class ' + c.name"
+          (click)="$event.stopPropagation(); remove.emit(c.name)"
+        ></button>
+      </div>
+      <div *ngIf="!classes.length" class="classes-empty">No classes yet — add one from Manage.</div>
+      <div *ngIf="classes.length && !shownRows.length" class="classes-empty">No class matches.</div>
     </div>
-    <div *ngIf="!classes.length" class="classes-empty">No classes yet — add one from Manage.</div>
-  </div>
+  </ng-template>
 </div>

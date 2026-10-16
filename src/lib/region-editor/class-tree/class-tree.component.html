@@ -1,0 +1,83 @@
+<div class="class-tree">
+  <div class="tree-header" *ngIf="picked as p">
+    <span class="tree-picked">
+      <b>{{ p }}</b
+      ><span *ngIf="node(p)?.title as t"> · {{ t }}</span>
+    </span>
+  </div>
+  <input
+    type="text"
+    pInputText
+    class="p-inputtext-sm tree-search"
+    placeholder="Search by name"
+    aria-label="Search the classes"
+    [ngModel]="query"
+    (ngModelChange)="onQuery($event)"
+    (keydown.enter)="pickFirstMatch($event)"
+  />
+  <div class="tree-body" role="tree">
+    <div
+      *ngFor="let row of rows; trackBy: trackRow"
+      class="tree-row"
+      role="treeitem"
+      tabindex="0"
+      [attr.aria-expanded]="row.hasChildren ? row.expanded : null"
+      [class.absent]="total(row.name) === 0"
+      [class.picked]="row.name === picked"
+      [class.marked]="marked.has(row.name)"
+      [class.hidden-class]="visibility.get(row.name) === 'hidden'"
+      [style.padding-left.rem]="0.35 + row.depth * 0.9"
+      [pTooltip]="node(row.name)?.title || row.name"
+      tooltipPosition="left"
+      [showDelay]="600"
+      (click)="choose(row.name, $event)"
+      (keydown.enter)="choose(row.name, $event)"
+    >
+      <i
+        class="pi tree-toggle"
+        [class.pi-minus-circle]="row.hasChildren && row.expanded"
+        [class.pi-plus-circle]="row.hasChildren && !row.expanded"
+        [attr.aria-label]="row.expanded ? 'Collapse' : 'Expand'"
+        (click)="row.hasChildren && toggle(row, $event)"
+      ></i>
+      <i
+        class="pi tree-eye"
+        [ngClass]="visibility.get(row.name) === 'hidden' ? 'pi-eye-slash' : 'pi-eye'"
+        [class.partial]="visibility.get(row.name) === 'partial'"
+        role="button"
+        [attr.aria-pressed]="visibility.get(row.name) !== 'hidden'"
+        [attr.aria-label]="(visibility.get(row.name) === 'hidden' ? 'Show ' : 'Hide ') + row.name"
+        [pTooltip]="
+          (visibility.get(row.name) === 'hidden' ? 'Show' : 'Hide') +
+          (row.hasChildren ? ' it and its subclasses' : '') +
+          (visibility.get(row.name) === 'partial' ? ' (some are hidden)' : '')
+        "
+        tooltipPosition="left"
+        (click)="flipHidden(row.name, $event)"
+        (keydown.enter)="flipHidden(row.name, $event)"
+      ></i>
+      <span class="tree-swatch" (click)="$event.stopPropagation()" (keydown.enter)="$event.stopPropagation()">
+        <hex-color-picker
+          [color]="colorOf(row.name)"
+          (colorChange)="recolor.emit({ name: row.name, color: $event })"
+        >
+        </hex-color-picker>
+      </span>
+      <span class="tree-name">{{ row.name }}</span>
+      <span class="tree-long">{{ node(row.name)?.title }}</span>
+      <span class="tree-count" *ngIf="total(row.name) > 0">{{ total(row.name) }}</span>
+      <i
+        *ngIf="volume"
+        class="pi pi-box tree-3d"
+        [class.on]="shown3d.has(row.name)"
+        role="button"
+        [attr.aria-pressed]="shown3d.has(row.name)"
+        [attr.aria-label]="'Show ' + row.name + ' in 3D'"
+        pTooltip="Show in the volume, in 3D"
+        tooltipPosition="left"
+        (click)="flip3d(row.name, $event)"
+      ></i>
+    </div>
+    <div *ngIf="!rows.length" class="tree-empty">No class matches.</div>
+  </div>
+</div>

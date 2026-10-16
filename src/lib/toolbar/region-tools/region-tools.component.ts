@@ -25,6 +25,8 @@ export class RegionToolsComponent {
   @Input() activeDragMode: string | null = null;
   /** The 3D cloud's screen-space lasso: no brush or polyline. */
   @Input() is3dRegions = false;
+  /** Only the selection tool (a volume view: it picks the regions' surfaces in 3D). */
+  @Input() selectOnly = false;
   /** The backend has a vertex-editing overlay (OSD + napari-js image). */
   @Input() vertexTools = false;
   /** Magic-wand sensitivity (the wand's slider value). */
@@ -71,6 +73,7 @@ export class RegionToolsComponent {
   protected readonly trackByMode = (_: number, b: RegionToolButton): string => b.mode;
 
   protected shown(b: RegionToolButton): boolean {
+    if (this.selectOnly) return b.mode === 'select';
     if (b.gate === 'not3d') return !this.is3dRegions;
     if (b.gate === 'vertex') return this.vertexTools;
     return true;

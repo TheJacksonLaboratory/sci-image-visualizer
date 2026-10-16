@@ -22,6 +22,14 @@ export interface VizConfig {
    * are unaffected.
    */
   useNapariRenderer?: boolean;
+  /**
+   * An image's ROI GeoJSON (`roiJsonStr`, or a slice's `roiJsonStrs[z]`) at least this many
+   * characters long loads as a tiled region source rather than as regions: drawn from the tiles
+   * in view at the zoom's level of detail (OpenSeadragon and napari; Plotly does not draw it),
+   * each feature joining the regions when it is selected or edited. Default 1 000 000; 0 makes
+   * every ROI file a source, `Infinity` none.
+   */
+  regionSourceMinChars?: number;
 }
 
 /** DI token for the host's {@link VizConfig}. Required by the router. */

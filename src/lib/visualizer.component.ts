@@ -22,6 +22,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 
 import { Observable } from 'rxjs';
@@ -56,6 +57,8 @@ import {
   isSpatialOmics3d,
   rendererOwnsWheel,
   NAPARI_DEFAULT_DECIMATE,
+  isNapariVolume,
+  isNapariIsosurface,
 } from './contracts/plot-type';
 import {
   PLOT_TYPE_CONTRIBUTIONS,
@@ -89,6 +92,8 @@ import { ToolModes } from './visualizer/tool-modes';
 import { ShortcutHost, ViewerShortcuts } from './visualizer/viewer-shortcuts';
 import { FloatingDragDirective, FloatingPos } from './visualizer/floating-drag.directive';
 import { IntensityInsetComponent } from './intensity-inset/intensity-inset.component';
+import { SectionPaneComponent } from './section-pane/section-pane.component';
+import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
 import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
@@ -132,6 +137,7 @@ let plotInstanceSeq = 0;
     FloatingDragDirective,
     ToolbarComponent,
     IntensityInsetComponent,
+    SectionPaneComponent,
     ChannelHistogramComponent,
     SpatialControlsComponent,
     RegionEditorComponent,
@@ -361,7 +367,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       this.state.setImageLoading(false);
     },
     landed: (info) => {
-      applyImageRois(info, this.plotService, this.zIndex);
+      // The host's HttpClient carries a server-side region source's requests: its interceptors (auth) apply.
+      const http = this.injector?.get(HttpClient, null) ?? undefined;
+      applyImageRois(info, this.plotService, this.zIndex, this.vizConfig?.regionSourceMinChars, http);
       this.contributions.activate();
     },
     setImageLoading: (loading) => this.state.setImageLoading(loading),
@@ -455,6 +463,104 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   protected get isSpatial3dMode(): boolean {
     return isSpatialOmics3d(this.basePlotType);
   }
+
+  /** True in a napari volume or isosurface view, where the Region Editor shows regions in 3D. */
+  protected get isVolumeView(): boolean {
+    return isNapariVolume(this.basePlotType) || isNapariIsosurface(this.basePlotType);
+  }
+
+  /** Whether the user split the volume view with the slice editor (off by default; kept while
+   *  the view shows other plot types, so a volume view opens split again). */
+  protected sliceEditor = false;
+  /** The slice editor's pane: the displayed slice, with every region tool, top right. */
+  protected readonly sliceDivName = `${this.plotDivName}-slice`;
+  /** The left column's and the top row's shares of the slice editor (%). */
+  protected splitX = 50;
+  protected splitY = 50;
+  /** The sections through x and y shown below (nulls until the volume is cut). */
+  protected sections: SectionViews = { x: null, y: null };
+  protected get sliceEditorShown(): boolean {
+    return this.sliceEditor && this.isVolumeView;
+  }
+
+  /**
+   * Split the volume view with the slice editor, or close it. The editor opens on the displayed
+   * slice and takes the drawing tools; closing it leaves the selection tool armed (it picks the
+   * surfaces in 3D) and disarms any other.
+   */
+  protected async toggleSliceEditor(): Promise<void> {
+    this.sliceEditor = !this.sliceEditor;
+    this.cdr.detectChanges(); // the pane's div, before the backend looks it up
+    this.plotService.relayout(); // the 3D view is a quarter of the area now, or all of it again
+    if (!this.sliceEditor) {
+      await this.plotService.setSliceEditor?.(null);
+      if (this.tools.active !== null && this.tools.active !== 'select') this.tools.apply(null);
+      this.changed();
+      return;
+    }
+    // The regions edited are the displayed slice's.
+    this.plotService.setDisplaySlice(this.zIndex);
+    const shown = await this.plotService.setSliceEditor?.(this.sliceDivName);
+    // The armed tool now acts in the pane.
+    if (shown && this.tools.active !== null) this.tools.apply(this.tools.active);
+    this.changed();
+  }
+
+  /** A point picked in a section: the slice and the other section's plane move there. */
+  protected onSectionPick(axis: SectionAxis, at: { u: number; v: number }): void {
+    // Through x, across is the slice and down is y; through y, across is x and down the slice.
+    const slice = Math.floor(axis === 'x' ? at.u : at.v);
+    if (axis === 'x') this.plotService.setSectionPlane?.('y', at.v);
+    else this.plotService.setSectionPlane?.('x', at.u);
+    this.onZSlide(Math.min(this.maxIndex, Math.max(0, slice)));
+  }
+
+  /** Drag a divider of the slice editor: the vertical one sets the columns, the horizontal one the rows. */
+  protected startPaneResize(event: PointerEvent, axis: 'x' | 'y'): void {
+    const divider = event.currentTarget as HTMLElement;
+    const panes = divider.parentElement;
+    if (!panes) return;
+    event.preventDefault();
+    divider.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent) => {
+      const box = panes.getBoundingClientRect();
+      if (axis === 'x' && box.width > 0) this.setSplit('x', ((e.clientX - box.left) / box.width) * 100);
+      if (axis === 'y' && box.height > 0) this.setSplit('y', ((e.clientY - box.top) / box.height) * 100);
+    };
+    const end = () => {
+      divider.removeEventListener('pointermove', move);
+      divider.removeEventListener('pointerup', end);
+      divider.removeEventListener('pointercancel', end);
+    };
+    divider.addEventListener('pointermove', move);
+    divider.addEventListener('pointerup', end);
+    divider.addEventListener('pointercancel', end);
+  }
+
+  /** A divider's keyboard: ← → move the vertical one, ↑ ↓ the horizontal one, by 5%. */
+  protected nudgePaneSize(event: KeyboardEvent, axis: 'x' | 'y'): void {
+    const keys = axis === 'x' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    const step = event.key === keys[0] ? -5 : event.key === keys[1] ? 5 : 0;
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation(); // not a slice step
+    this.setSplit(axis, (axis === 'x' ? this.splitX : this.splitY) + step);
+  }
+
+  private setSplit(axis: 'x' | 'y', percent: number): void {
+    const value = Math.round(Math.min(80, Math.max(20, percent)));
+    if (axis === 'x') this.splitX = value;
+    else this.splitY = value;
+    this.changed();
+    // The 3D view follows its cell once the grid has its new tracks.
+    if (this.relayoutFrame === null && typeof requestAnimationFrame !== 'undefined') {
+      this.relayoutFrame = requestAnimationFrame(() => {
+        this.relayoutFrame = null;
+        this.plotService.relayout();
+      });
+    }
+  }
+  private relayoutFrame: number | null = null;
 
   /** True for the Image plot type, which renders as a natively pan/zoom-able
    *  raster — so the backend-agnostic zoom/pan toolbar tools are hidden. The
@@ -645,6 +751,22 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.mirror(this.state.isImageLoading$(), (v) => this.imgLoading.set(v));
     this.mirror(this.plotService.getStackLoadingProgress(), (v) => this.loadingPercentage.set(v));
     this.mirror(this.plotService.isStackLoading(), (v) => this.stackLoading.set(v));
+    // The slice editor: its sections, and the slice picked by dragging the z plane in the volume.
+    const sections$ = this.plotService.getSectionViews$?.();
+    if (sections$) {
+      this.mirror(sections$, (v) => {
+        this.sections = v;
+        this.changed();
+      });
+    }
+    const sliceDrag$ = this.plotService.getSliceDrag$?.();
+    if (sliceDrag$) {
+      this.mirror(sliceDrag$, (z) => {
+        this.onZScrub(Math.min(this.maxIndex, Math.max(0, z)));
+        // From a DOM listener, not a template event: the slider and badge must be marked to follow.
+        this.changed();
+      });
+    }
     this.mirror(this.state.getImageLoadingMessage$(), (v) => this.loadingMessage.set(v));
     this.mirror(this.state.getCacheProgress$(), (v) => this.cacheProgress.set(v));
     this.mirror(this.state.isZoom$(), (v) => this.zoom.set(v));
@@ -790,7 +912,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       plotDivName: this.plotDivName,
       hostElement: this.hostRef?.nativeElement ?? null,
       activeDragMode: () => this.activeDragMode,
-      canStepSlice: () => !!this.imageInfo?.isStack && this.isImageView,
+      canStepSlice: () => !!this.imageInfo?.isStack && (this.isImageView || this.sliceEditorShown),
       wheelZooms: () => !rendererOwnsWheel(this.basePlotType) && this.isHeatmap,
       stepSlice: marked((delta: number) => this.stepSlice(delta)),
       resolveSamPrompt: marked((commit: boolean) => {

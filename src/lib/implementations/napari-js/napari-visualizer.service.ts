@@ -56,7 +56,9 @@ import { NapariDisplayState } from './napari-display-state';
 import { LoadingBadgeState } from './napari-loading-state';
 import { NapariToolBridge } from './napari-tool-bridge';
 import { cameraDragMode } from './napari-axes-gizmo';
-import { NapariScene, NapariSettings, SceneContext } from './napari-scene';
+import { NapariScene, NapariSettings, SceneContext, VolumeVoxelsOnScreen } from './napari-scene';
+import type { PlaneAxis, SlicePlanes } from './napari-volume-slice-planes';
+import type { RegionMesh3D } from './napari-volume-region-meshes';
 import { Image2dScene, ScatterRegionsScene } from './napari-image-2d-scene';
 import { Scatter3dScene, VolumeScene } from './napari-volume-scene';
 import { SurfaceScene } from './napari-surface-scene';
@@ -133,6 +135,20 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private lifetime = new AbortController();
   /** What {@link plot} mounted, while it is mounted. */
   private scene: NapariScene | null = null;
+  /** Region reconstructions to show in a volume view, kept across re-plots of their image. */
+  private regionMeshes: readonly RegionMesh3D[] = [];
+  /** The image (file name) {@link regionMeshes} were built from. */
+  private regionMeshesImage: string | undefined;
+  /** The keys of the reconstructions highlighted. */
+  private regionHighlight: readonly string[] = [];
+  /** The keys of the reconstructions hidden. */
+  private regionHidden: readonly string[] = [];
+  /** The planes of the sections beside a volume view, or none. */
+  private slicePlanes: SlicePlanes = { x: null, y: null, z: null };
+  /** A section's plane dragged in the volume (see {@link getSlicePlaneMove$}). */
+  private readonly slicePlaneMove$ = new Subject<{ axis: PlaneAxis; value: number }>();
+  /** Clicks on the reconstructions (see {@link getRegionMeshPick$}). */
+  private readonly regionMeshPick$ = new Subject<{ key: string | null; additive: boolean }>();
   /** Spatial state that outlives a scene (latest data, windows, estimated gene-map fields). */
   private readonly spatial: SpatialSession;
   /** Viewer settings that outlive a scene. */
@@ -249,6 +265,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       fitCameraSoon: () => this.fitCameraSoon(),
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
       inZone: (fn) => this.inZone(fn),
+      regionMeshPicked: (key, additive) => this.regionMeshPick$.next({ key, additive }),
+      slicePlaneMoved: (axis, value) => this.slicePlaneMove$.next({ axis, value }),
     };
   }
 
@@ -339,6 +357,13 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // No loaded image: an image-less spatial dataset opened before any image (the visualizer's
       // plotSpatialWithoutImage) — the observations alone.
       this.scene = this.createScene(plotType, this.sceneContext(viewer, host, canvas), info, imageLoaded == null);
+      // Another image's surfaces would land in this volume's frame at the wrong size: drop them.
+      if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
+      this.scene.setRegionMeshes?.(this.regionMeshes);
+      this.scene.setRegionHighlight?.(this.regionHighlight);
+      this.scene.setRegionHidden?.(this.regionHidden);
+      this.scene.setRegionsThroughVolume?.(this.regionsThroughVolume);
+      this.scene.setSlicePlanes?.(this.slicePlanes);
       await this.scene.mount();
       this.tools.scheduleReadback();
       return true;
@@ -396,6 +421,63 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     /* no-op */
   }
 
+  /** Show `message` on the canvas's loading badge until the returned function is called. */
+  beginTask(message: string): () => void {
+    return this.badge.beginTask(message);
+  }
+
+  /** Show these region reconstructions of `image` in the volume view (kept for its next volume plot). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[], image: string | undefined): void {
+    this.regionMeshes = meshes;
+    this.regionMeshesImage = image;
+    this.scene?.setRegionMeshes?.(meshes);
+  }
+
+  /** Highlight the reconstructions of these keys (none: all as usual). */
+  setRegionHighlight(keys: readonly string[]): void {
+    this.regionHighlight = keys;
+    this.scene?.setRegionHighlight?.(keys);
+  }
+
+  /** Hide the reconstructions of these keys (kept for the next volume plot). */
+  setRegionHidden(keys: readonly string[]): void {
+    this.regionHidden = keys;
+    this.scene?.setRegionHidden?.(keys);
+  }
+
+  /** Draw the reconstructions through the volume rather than hidden behind it (kept across plots). */
+  setRegionsThroughVolume(through: boolean): void {
+    this.regionsThroughVolume = through;
+    this.scene?.setRegionsThroughVolume?.(through);
+  }
+  private regionsThroughVolume = false;
+
+  /** Show the planes of the sections beside a volume view (null: hide one); kept across plots. */
+  setSlicePlanes(planes: SlicePlanes): void {
+    this.slicePlanes = planes;
+    this.scene?.setSlicePlanes?.(planes);
+  }
+
+  /** A section's plane dragged in the volume view, to `value` along its axis (image px, or a slice). */
+  getSlicePlaneMove$(): Observable<{ axis: PlaneAxis; value: number }> {
+    return this.slicePlaneMove$.asObservable();
+  }
+
+  /** The volume on screen, as assembled (see VolumeScene.volumeVoxels); null outside a volume view. */
+  volumeVoxels(): VolumeVoxelsOnScreen | null {
+    return this.scene?.volumeVoxels?.() ?? null;
+  }
+
+  /** A reconstruction clicked with the selection tool (its key), or the volume beside them (null). */
+  getRegionMeshPick$(): Observable<{ key: string | null; additive: boolean }> {
+    return this.regionMeshPick$.asObservable();
+  }
+
+  /** Image px per voxel of the volume on screen, in-plane; null outside a volume view. */
+  regionVoxelStep(): number | null {
+    return this.scene?.voxelStep?.() ?? null;
+  }
+
   /**
    * End the mounted scene: abort its lifetime (its descriptor poll, tile counts, frame loading and
    * awaits) and dispose it — its layers, keys, subscriptions and listeners go with it, so the next
@@ -417,7 +499,18 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.canvas = null;
   }
 
+  /**
+   * The plot area changed size (the slice editor split it, a divider moved): fit the canvas, whose
+   * height was fixed at plot time, to it again.
+   */
   relayout(_trueImageSize?: number[]): void {
+    const { canvas, host } = this;
+    if (canvas && host) {
+      // Let the host take its height from the layout, not from the canvas inside it.
+      canvas.style.height = '0px';
+      const height = host.clientHeight;
+      canvas.style.height = height > 0 ? `${height}px` : '100%';
+    }
     this.viewer?.requestRender();
   }
 

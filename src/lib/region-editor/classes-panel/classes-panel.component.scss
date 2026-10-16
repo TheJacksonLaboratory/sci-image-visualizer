@@ -27,6 +27,10 @@
   color: var(--text-color-secondary);
   margin-right: auto;
 }
+/* The search box over the list, as the class tree has. */
+.classes-search {
+  margin: 0.25rem 0.5rem;
+}
 /* Scrollable class list — kept short by default so the regions table has room,
  * but the user can drag its bottom edge (resize handle) to make it taller. */
 .classes-panel-body {
@@ -53,6 +57,14 @@
 }
 .class-row:hover {
   background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+}
+/* The class picked last (in the class tree, or a surface in 3D). */
+.class-row.picked {
+  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
+}
+/* A class with a selected region. */
+.class-row.marked {
+  box-shadow: inset 3px 0 0 var(--primary-color);
 }
 .class-row.active {
   background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
@@ -101,4 +113,38 @@
   width: 1.75rem;
   height: 1.75rem;
   padding: 0;
+}
+
+/* The 3D toggle (volume view): dim until the class is shown. */
+.class-row .row-3d {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.35;
+  cursor: pointer;
+}
+.class-row .row-3d:hover {
+  opacity: 0.8;
+}
+.class-row .row-3d.on {
+  opacity: 1;
+  color: var(--primary-color);
+}
+
+/* The eye: faint on a shown class (most are), plain on a hidden one. */
+.class-row .row-eye {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  opacity: 0.4;
+  cursor: pointer;
+}
+.class-row .row-eye:hover {
+  opacity: 0.9;
+}
+.class-row.hidden-class .row-eye {
+  opacity: 1;
+}
+.class-row.hidden-class .row-swatch,
+.class-row.hidden-class .row-name,
+.class-row.hidden-class .row-count {
+  opacity: 0.45;
 }

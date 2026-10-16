@@ -22,7 +22,10 @@ import {
   toNapariGamma,
   volumeResolutionFor,
 } from './napari-helpers';
-import type { NapariScene, SceneContext } from './napari-scene';
+import type { NapariScene, SceneContext, VolumeVoxelsOnScreen } from './napari-scene';
+import { RegionMesh3D, VolumeFrame, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { SlicePlanes, VolumeSlicePlanes } from './napari-volume-slice-planes';
+import { RegionMeshPointer } from './napari-region-mesh-pointer';
 
 /** The intensity histogram of an assembled uint8 channel (or the single grayscale volume, key 0). */
 function channelHistogram(data: Map<number, Uint8Array>, channel: number, bins: number): IHistogram | null {
@@ -68,12 +71,119 @@ export class VolumeScene implements NapariScene {
   gizmo: Axes3dGizmo | null = null;
   private zHandle: NapariVolumeZHandle | null = null;
   private displaySub: Subscription | null = null;
+  /** Regions' 3D reconstructions shown in the volume (see {@link setRegionMeshes}). */
+  private readonly regionMeshes: VolumeRegionMeshes;
+  /** The planes of the sections shown beside the volume, marked and draggable in it. */
+  private readonly slicePlanes: VolumeSlicePlanes;
+  /** The image's full size (px, px, slices), which reconstructions are in. */
+  private fullSize: [number, number, number] | null = null;
+  /** Clicks and hover on the reconstructions (with the selection tool). */
+  private meshPointer: RegionMeshPointer | null = null;
+  private toolSub: Subscription | null = null;
+  private selecting = false;
 
   constructor(
     private readonly ctx: SceneContext,
     private readonly info: IImageInfo | undefined,
     private readonly rendering: 'iso' | 'mip',
-  ) {}
+  ) {
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, {
+      onMove: (axis, value) => ctx.inZone(() => ctx.slicePlaneMoved(axis, value)),
+    });
+  }
+
+  /** Show these region reconstructions in the volume (replacing the ones shown). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
+    this.regionMeshes.set(meshes);
+  }
+
+  setRegionHighlight(keys: readonly string[]): void {
+    this.regionMeshes.setHighlight(keys);
+  }
+
+  setRegionHidden(keys: readonly string[]): void {
+    this.regionMeshes.setHidden(keys);
+  }
+
+  /** Whether the volume lets every region through (see {@link setRegionsThroughVolume}). */
+  private regionsThrough = false;
+
+  /**
+   * The volume hides the region reconstructions behind what it shows (its brightest sample along
+   * each ray, napari-js's `'translucent'` depth) — the perspective of a region behind the
+   * cerebellum — or, `through`, hides none (`'translucent_no_depth'`): surfaces traced inside its
+   * bright structures, an OCT's layer boundaries in its bright bands, which that depth speckles
+   * or hides. A multichannel volume's channels add up and hide nothing either way.
+   */
+  setRegionsThroughVolume(through: boolean): void {
+    this.regionsThrough = through;
+    this.applyVolumeDepth();
+    this.ctx.viewer.requestRender();
+  }
+
+  private applyVolumeDepth(): void {
+    if (this.multichannel) return;
+    for (const layer of this.view?.layers ?? []) {
+      layer.blending = this.regionsThrough ? 'translucent_no_depth' : 'translucent';
+    }
+  }
+
+  /** Show the planes of the sections beside the volume where they are (null: hide one). */
+  setSlicePlanes(planes: SlicePlanes): void {
+    this.slicePlanes.set(planes);
+  }
+
+  /**
+   * The assembled volume's voxels per channel (key 0: the grayscale one), its frame, and whether
+   * it is a multichannel composite — what the sections beside it are cut from. Null before it is
+   * assembled.
+   */
+  volumeVoxels(): VolumeVoxelsOnScreen | null {
+    const base = this.worldBase;
+    if (!this.dims || !base || !this.fullSize || !this.channelData.size) return null;
+    const depth = base.depth * this.ctx.settings.volumeZScale;
+    return {
+      ...this.dims,
+      channels: this.channelData,
+      multichannel: this.multichannel,
+      frame: { size: this.fullSize, world: [base.width, base.height, depth] },
+    };
+  }
+
+  /**
+   * Picking the reconstructions: with the selection tool armed, a click on one selects its class
+   * (null beside them); resting over one names it, whatever the tool.
+   */
+  private listenToRegionMeshes(): void {
+    const { ctx } = this;
+    if (this.meshPointer) return;
+    this.toolSub = ctx.store.getActiveTool$().subscribe((tool) => (this.selecting = tool === 'select'));
+    this.meshPointer = ctx.outsideZone(
+      () =>
+        new RegionMeshPointer(ctx.canvas, ctx.host, {
+          pickAt: (x, y) => this.regionMeshes.pickAt(x, y),
+          active: () => this.selecting && this.regionMeshes.shown.length > 0,
+          hoverable: () => this.regionMeshes.shown.length > 0,
+          onPick: (key, additive) => ctx.inZone(() => ctx.regionMeshPicked(key, additive)),
+        }),
+    );
+  }
+
+  /** Image px per voxel of the assembled volume (in-plane), or null before it is assembled. */
+  voxelStep(): number | null {
+    return this.fullSize && this.dims ? this.fullSize[0] / Math.max(1, this.dims.width) : null;
+  }
+
+  /** Place the region reconstructions in the volume's world box as it is now. */
+  private frameRegionMeshes(): void {
+    const base = this.worldBase;
+    if (!base || !this.fullSize) return;
+    const depth = base.depth * this.ctx.settings.volumeZScale;
+    const frame: VolumeFrame = { size: this.fullSize, world: [base.width, base.height, depth] };
+    this.regionMeshes.setFrame(frame);
+    this.slicePlanes.setFrame(frame);
+  }
 
   /**
    * Assemble and render the volume, then add the axes gizmo + labels and the Z handle and follow
@@ -111,6 +221,7 @@ export class VolumeScene implements NapariScene {
     for (const ch of channels) ch.voxelSize = voxelSize;
 
     view.render(this.multichannel ? 'multichannel' : 'grayscale', channels, { rendering: this.rendering });
+    this.applyVolumeDepth();
     ctx.setImageSize(dims.width, dims.height);
     this.dims = dims;
 
@@ -133,6 +244,8 @@ export class VolumeScene implements NapariScene {
       setScale: (s) => this.setZScale(s),
     });
     this.followDisplayState();
+    this.frameRegionMeshes();
+    this.listenToRegionMeshes();
   }
 
   /**
@@ -221,15 +334,20 @@ export class VolumeScene implements NapariScene {
     // Anchoring the in-plane long side to a fixed reference and letting Z span the
     // full slice count makes the box shape identical at every decimate factor.
     const meta = ctx.info()?.imageMeta?.[0];
-    const mppXYZ: [number, number, number] | null =
-      meta?.mppX && meta?.mppY && meta?.mppZ ? [meta.mppX, meta.mppY, meta.mppZ] : null;
+    const imageDesc = ctx.tiles.currentDescriptor(ctx.info());
+    // The server's descriptor first (it reports a tiled stack's spacing, e.g. a NRRD volume's), else
+    // the image metadata.
+    const mx = imageDesc?.mppX || meta?.mppX;
+    const my = imageDesc?.mppY || meta?.mppY;
+    const mz = imageDesc?.mppZ || meta?.mppZ;
+    const mppXYZ: [number, number, number] | null = mx && my && mz ? [mx, my, mz] : null;
     // The image's DECLARED pixel dimensions, which is what mpp is per: the sampled
     // dims are decimated, so sizing a physical box by them would make the world
     // box depend on the resolution the user happens to be viewing at.
-    const imageDesc = ctx.tiles.currentDescriptor(ctx.info());
     const fullW = imageDesc?.width ?? meta?.x ?? dims.width;
     const fullH = imageDesc?.height ?? meta?.y ?? dims.height;
     const fullD = stackDepth(ctx.info()) || dims.depth;
+    this.fullSize = [fullW, fullH, fullD];
     if (mppXYZ) {
       return {
         width: fullW * mppXYZ[0],
@@ -287,6 +405,12 @@ export class VolumeScene implements NapariScene {
     this.gizmo = null;
     this.zHandle?.destroy();
     this.zHandle = null;
+    this.regionMeshes.clear();
+    this.slicePlanes.destroy();
+    this.meshPointer?.destroy();
+    this.meshPointer = null;
+    this.toolSub?.unsubscribe();
+    this.toolSub = null;
     this.worldBase = null;
   }
 
@@ -309,6 +433,7 @@ export class VolumeScene implements NapariScene {
     }
     this.gizmo?.setDepth(worldZ, this.axesLabels({ width: base.width, height: base.height, depth: worldZ }));
     this.zHandle?.reposition();
+    this.frameRegionMeshes();
     this.ctx.viewer.requestRender();
   }
 
@@ -355,7 +480,7 @@ export class VolumeScene implements NapariScene {
       ],
       // A descriptor that reports only mppX is square-pixel by convention, which is
       // what the 2D scale bar already assumes of it.
-      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, meta?.mppZ || 0],
+      mpp: [mppX, desc?.mppY || meta?.mppY || mppX, desc?.mppZ || meta?.mppZ || 0],
     };
   }
 

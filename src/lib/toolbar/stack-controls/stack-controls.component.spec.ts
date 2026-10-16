@@ -36,26 +36,88 @@ describe('StackControlsComponent', () => {
     expect(el().textContent).toContain('2 of 7');
   });
 
-  it('the stack toggle picks a stack option; the slice field shows in single-image mode', () => {
+  it('the stack toggle picks a stack option; the slice bar shows in single-image mode', () => {
     fixture.componentRef.setInput('stackToggle', true);
+    fixture.componentRef.setInput('zIndex', 3);
+    fixture.componentRef.setInput('maxIndex', 9);
     fixture.detectChanges();
-    expect(el().querySelector('p-inputnumber')).not.toBeNull();
+    expect(el().querySelector('p-slider')).not.toBeNull();
+    expect(el().querySelector('p-inputnumber')).toBeNull();
+    expect(el().textContent).toContain('3 of 9');
     const picked: string[] = [];
     stack.selectStackOption.subscribe((o) => picked.push(o.val));
     (el().querySelector('button[aria-label="Stack mode"]') as HTMLButtonElement).click();
     expect(picked).toEqual(['true']);
     fixture.componentRef.setInput('showStack', true);
     fixture.detectChanges();
-    expect(el().querySelector('p-inputnumber')).toBeNull();
+    expect(el().querySelector('p-slider')).toBeNull();
   });
 
-  it('a blank slice field keeps the current slice', () => {
-    const typed: number[] = [];
-    stack.zIndexInput.subscribe((z) => typed.push(z));
-    stack.zIndex = 4;
-    stack['onSliceInput']('');
-    stack['onSliceInput'](null);
-    stack['onSliceInput']('6');
-    expect(typed).toEqual([4, 4, 6]);
+  describe("the heatmap's slice bar", () => {
+    let shown: number[];
+    let replots: number;
+    beforeEach(() => {
+      fixture.componentRef.setInput('stackToggle', true);
+      fixture.detectChanges();
+      shown = [];
+      replots = 0;
+      stack.zIndexInput.subscribe((z) => shown.push(z));
+      stack.reloadAndPlot.subscribe(() => replots++);
+    });
+
+    it('re-plots the slice a drag is let go on, not each step of it', () => {
+      stack['dragging'] = true;
+      stack['onSliceChange'](3);
+      stack['onSliceChange'](4);
+      expect(shown).toEqual([3, 4]);
+      expect(replots).toBe(0);
+      stack['onSliceEnd'](4);
+      expect(replots).toBe(1);
+      expect(stack['dragging']).toBe(false);
+    });
+
+    it('re-plots once key steps pause', () => {
+      jest.useFakeTimers();
+      try {
+        stack['onSliceChange'](1);
+        stack['onSliceChange'](2);
+        jest.advanceTimersByTime(StackControlsComponent.REPLOT_DELAY_MS - 1);
+        expect(replots).toBe(0);
+        jest.advanceTimersByTime(1);
+        expect(replots).toBe(1);
+        expect(shown).toEqual([1, 2]);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('a click on the track re-plots at once, without a second re-plot after', () => {
+      jest.useFakeTimers();
+      try {
+        stack['onSliceChange'](5);
+        stack['onSliceEnd'](5);
+        expect(replots).toBe(1);
+        jest.advanceTimersByTime(StackControlsComponent.REPLOT_DELAY_MS);
+        expect(replots).toBe(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  });
+
+  it('the live scrubber follows the bar and never re-plots', () => {
+    fixture.componentRef.setInput('liveScrubber', true);
+    fixture.detectChanges();
+    const scrubbed: Array<number | undefined> = [];
+    const slid: Array<number | undefined> = [];
+    let replots = 0;
+    stack.zScrub.subscribe((z) => scrubbed.push(z));
+    stack.zSlide.subscribe((z) => slid.push(z));
+    stack.reloadAndPlot.subscribe(() => replots++);
+    stack['onSliceChange'](2);
+    stack['onSliceEnd'](2);
+    expect(scrubbed).toEqual([2]);
+    expect(slid).toEqual([2]);
+    expect(replots).toBe(0);
   });
 });

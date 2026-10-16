@@ -61,6 +61,22 @@ describe('ClassesPanelComponent', () => {
     expect(panel['removeTooltip']('Stroma')).toBe('Remove class');
   });
 
+  it("a class's eye toggles it without picking it, and a hidden class shows dimmed", () => {
+    const toggled: string[] = [];
+    const picked: string[] = [];
+    panel.toggleHidden.subscribe((n) => toggled.push(n));
+    panel.pick.subscribe((n) => picked.push(n));
+    const eye = () => el().querySelectorAll('.class-row .row-eye')[1] as HTMLElement;
+    expect(eye().classList).toContain('pi-eye');
+    eye().click();
+    expect(toggled).toEqual(['Tumor']);
+    expect(picked).toEqual([]);
+    fixture.componentRef.setInput('hidden', new Set(['Tumor']));
+    fixture.detectChanges();
+    expect(eye().classList).toContain('pi-eye-slash');
+    expect(el().querySelectorAll('.class-row')[1].classList).toContain('hidden-class');
+  });
+
   it('a row click picks the class; the trash removes without picking', () => {
     const pick = jest.fn(),
       remove = jest.fn();
@@ -88,5 +104,44 @@ describe('ClassesPanelComponent', () => {
     expect(panel['rowTooltip']('Tumor')).toContain('active');
     fixture.componentRef.setInput('selectedCount', 2);
     expect(panel['rowTooltip']('Tumor')).toContain('selected region');
+  });
+
+  it('switches to a class tree only when there is one, keeping Manage', () => {
+    const switchButton = () =>
+      el().querySelector('[aria-label="Show the classes as a list"]') as HTMLButtonElement | null;
+    const manage = () =>
+      Array.from(el().querySelectorAll('button')).find((b) => b.textContent?.includes('Manage'));
+    expect(switchButton()).toBeNull();
+    expect(el().querySelectorAll('[aria-label^="Show the classes"]').length).toBe(0);
+
+    const views = jest.fn();
+    panel.treeViewChange.subscribe(views);
+    fixture.componentRef.setInput('treeView', true);
+    fixture.detectChanges();
+    expect(el().querySelectorAll('.class-row').length).toBe(0);
+    expect(manage()).toBeTruthy();
+    switchButton()?.click();
+    expect(views.mock.calls).toEqual([[false]]);
+
+    fixture.componentRef.setInput('treeView', false);
+    fixture.detectChanges();
+    expect(el().querySelectorAll('.class-row').length).toBe(3);
+    expect(el().querySelector('[aria-label="Show the classes as a tree"]')).toBeTruthy();
+  });
+
+  it('filters the list by name, and Enter picks the first match', () => {
+    const picks: string[] = [];
+    panel.pick.subscribe((n) => picks.push(n));
+    const input = el().querySelector('.classes-search') as HTMLInputElement;
+    input.value = 'RO';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(Array.from(el().querySelectorAll('.row-name')).map((r) => r.textContent?.trim())).toEqual(['Stroma']);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(picks).toEqual(['Stroma']);
+    input.value = 'xyz';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(el().querySelector('.classes-empty')?.textContent).toContain('No class matches');
   });
 });

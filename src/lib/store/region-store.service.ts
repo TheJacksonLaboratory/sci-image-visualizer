@@ -1,19 +1,116 @@
 import { Injectable } from '@angular/core';
-import { Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../models/region';
-import { downloadGeoJson, regionsFromGeoJson, regionsToGeoJson } from '../models/region-geojson';
+import {
+  GeoJsonFeature,
+  downloadGeoJson,
+  featureFromRegion,
+  regionFromGeoJsonFeature,
+  regionsFromGeoJson,
+  regionsToGeoJson,
+} from '../models/region-geojson';
 import { VisualizerStore } from './visualizer-store.service';
 import { IRegionStore } from '../contracts/visualizer.contract';
-import { IRegionEditApi } from '../contracts/region-store.contract';
-import { applyPresetColors } from './class-color.util';
-import { cloneBounds, makePolygon, rectToRing, regionPolygons, replaceBounds } from '../models/polygon-factory';
+import { IRegionEditApi, IRegionSourceApi } from '../contracts/region-store.contract';
+import { applyPresetColors, colorForLabel, presetKey } from './class-color.util';
+import {
+  cloneBounds,
+  makePolygon,
+  rectToRing,
+  regionPolygons,
+  regionPolylines,
+  replaceBounds,
+} from '../models/polygon-factory';
+import type { Mesh } from 'napari-js/geometry';
+import { SliceOutlines, outlinesArea } from '../geometry/reconstruct';
+import { reconstructInWorker } from '../region-source/worker-region-source';
 import * as edit from '../models/polygon-edit';
 import { regionsEqual, withRegionPatch, withRegionZ } from '../models/region-clone';
 import { RegionHistory } from './region-history';
 import { RegionSelection } from './region-selection';
 import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
+import { RegionSourceOpener, RegionSourceScope, RegionSourceSlices } from './region-source-scope';
+import type { RegionSource, RegionSourceView } from '../region-source/region-source';
+import type { RegionIndexPage, RegionIndexQuery, RegionSourceStyle } from '../region-source/region-tiles';
+import { DEFAULT_REGION_STYLE, RegionStyle } from '../region-overlay/region-style';
+
+/** Selecting classes takes at most this many region-source features into the regions. */
+export const SELECT_CLASSES_LIMIT = 5000;
+/** A region source's outlines on a slice, each ring's and line's class with it when read for all. */
+type LabelledOutlines = SliceOutlines & { ringLabels?: string[]; lineLabels?: string[] };
+
+/** Class sets whose region-source outlines are kept for rebuilding their surfaces. */
+const SOURCE_OUTLINE_CACHE_SIZE = 8;
+/** Classes whose region-source part of the volume is kept (see RegionStore.classVolumes). */
+const SOURCE_VOLUME_CACHE_SIZE = 64;
+
+/** A slice's rings, each with its feature (see SliceOutlines.ringGroups), and its lines. */
+interface SliceParts {
+  rings: ArrayLike<number>[];
+  ringGroups: number[];
+  lines: ArrayLike<number>[];
+}
+
+/**
+ * Feature ids unique across outlines read from several places: each call gives one part's
+ * renumbering of its own ids (a part without them is one feature).
+ */
+function featureIds(): () => (own: number | undefined) => number {
+  let next = 0;
+  return () => {
+    const ids = new Map<number | undefined, number>();
+    return (own) => {
+      let id = ids.get(own);
+      if (id === undefined) ids.set(own, (id = next++));
+      return id;
+    };
+  };
+}
+
+/** A slice's parts as outlines. */
+function sliceOutlines(z: number, s: SliceParts): SliceOutlines {
+  return {
+    z,
+    rings: s.rings,
+    ...(s.rings.length ? { ringGroups: s.ringGroups } : {}),
+    ...(s.lines.length ? { lines: s.lines } : {}),
+  };
+}
+
+/**
+ * Outlines by slice merged into one entry per slice (rings, then lines), in slice order, each
+ * part's features apart from the others' (they fill as their union).
+ */
+function mergeOutlines(parts: readonly SliceOutlines[]): SliceOutlines[] {
+  const byZ = new Map<number, SliceParts>();
+  const nextPart = featureIds();
+  for (const part of parts) {
+    if (!part.rings.length && !part.lines?.length) continue;
+    let slice = byZ.get(part.z);
+    if (!slice) byZ.set(part.z, (slice = { rings: [], ringGroups: [], lines: [] }));
+    const id = nextPart();
+    part.rings.forEach((r, i) => {
+      slice.rings.push(r);
+      slice.ringGroups.push(id(part.ringGroups?.[i]));
+    });
+    slice.lines.push(...(part.lines ?? []));
+  }
+  return Array.from(byZ, ([z, s]) => sliceOutlines(z, s)).sort((a, b) => a.z - b.z);
+}
+
+/** The region sources' part of a class's volume: its area on each slice, with the outlines. */
+interface SourceVolume {
+  total: number;
+  slices: ReadonlyMap<number, { area: number; outlines: SliceOutlines }>;
+}
+
+/** One undo step: the region set and, for a slice with a region source, what was taken from it. */
+interface RegionSnapshot {
+  regions: Region[];
+  taken: ReadonlySet<string>;
+}
 
 /**
  * Backend-neutral region store — the single source of truth for region state.
@@ -44,7 +141,7 @@ import { RegionScopeCache, StackSaveLayout } from './region-scope-cache';
  * are image pixels.
  */
 @Injectable({ providedIn: 'root' })
-export class RegionStore implements IRegionStore, IRegionEditApi {
+export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceApi {
   private static readonly UNDO_LIMIT = 10;
   private static readonly UNDO_COALESCE_MS = 250;
 
@@ -59,7 +156,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * here mutates a region or an array in place (RT-13). History never crosses an
    * image load/switch — {@link resetUndoHistory} clears it.
    */
-  private readonly history = new RegionHistory<Region[]>(RegionStore.UNDO_LIMIT, RegionStore.UNDO_COALESCE_MS);
+  private readonly history = new RegionHistory<RegionSnapshot>(
+    RegionStore.UNDO_LIMIT,
+    RegionStore.UNDO_COALESCE_MS,
+  );
 
   /** Monotonic id source — ids never repeat within the service lifetime, so
    *  selection stays correct across delete/add cycles even when names collide. */
@@ -95,7 +195,45 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
   private batchDepth = 0;
   private pendingEmit = false;
 
-  constructor(private store: VisualizerStore) {}
+  /**
+   * Large region sets held as tiled region sources rather than as regions (see
+   * {@link attachRegionSource}): per image and slice, with the ids taken out of each.
+   */
+  private readonly sources = new RegionSourceScope();
+  private readonly sourceView$ = new BehaviorSubject<RegionSourceView | null>(null);
+  /** The region look the user chose (overrides the source's hint), field by field. */
+  private userStyle: Partial<RegionStyle> = {};
+  /** The current source's style hint. */
+  private hintStyle: RegionSourceStyle | undefined;
+  private readonly regionStyle$ = new BehaviorSubject<RegionStyle>(DEFAULT_REGION_STYLE);
+  /** Bumped on every change of the slice's source, so a late open is dropped. */
+  private sourceGeneration = 0;
+  /** The source last published as the view: a source shown again does not turn the labels back on. */
+  private shownSource: RegionSource | null = null;
+  /** Bumped when a region source is attached or dropped: what is read from the sources is stale. */
+  private sourcesVersion = 0;
+
+  /**
+   * The region sources' part of {@link classVolumes}, by class and what the sources hold (see
+   * {@link sourceStateKey}): an edit of the regions leaves it, so the volumes of a slice being drawn
+   * on cost no source reads.
+   */
+  private readonly sourceVolumeCache = new Map<string, Promise<SourceVolume>>();
+  /** The region sources' outlines of the class sets reconstructed last (see {@link sourceOutlines}). */
+  private readonly sourceOutlineCache = new Map<string, Promise<LabelledOutlines[]>>();
+
+  /** The classes hidden from view (names as given); every class is shown at first. */
+  private readonly hiddenClasses$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
+  /** {@link hiddenClasses$} by {@link presetKey}, as a region's label is matched. */
+  private hiddenKeys: ReadonlySet<string> = new Set();
+
+  constructor(private store: VisualizerStore) {
+    // A class colour change recolours the source's features as it recolours regions.
+    this.store.getPresetSet$().subscribe(() => {
+      const view = this.sourceView$.value;
+      if (view) this.sourceView$.next({ ...view });
+    });
+  }
 
   // ── IRegionStore: CRUD ─────────────────────────────────────────────────
 
@@ -121,7 +259,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.isRegionSavedOn = isRegionSaveOn;
     if (isRegionSaveOn) {
       this.recordUndoSnapshot();
-      this.showShapeLabel = showRegionLabel;
+      if (this.showShapeLabel !== showRegionLabel) {
+        this.showShapeLabel = showRegionLabel;
+        this.republishView();
+      }
       this.fillColor = fillColor;
       if (append) {
         // Reject by id collision (already tracked) or geometry equality (same
@@ -191,11 +332,13 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.resetUndoHistory();
     this.emitSelection();
     this.emit();
+    this.refreshSourceView();
   }
 
   /** Leave stack mode (single-plane image, or the stack was closed). */
   exitStackMode(): void {
     this.scope.exitStack();
+    this.refreshSourceView();
   }
 
   /** The live-set swap of {@link setDisplaySlice}. */
@@ -208,6 +351,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.resetUndoHistory();
     this.emitSelection();
     this.emit();
+    this.refreshSourceView();
   }
 
   /**
@@ -242,7 +386,12 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * the current live slice is captured first. Empty outside stack mode.
    */
   getStackSaveSlices(): Map<number, Region[]> {
-    return this.scope.stackSaveSlices(this.regions);
+    const slices = this.scope.stackSaveSlices(this.regions);
+    // A slice whose region source lost features (taken, deleted) is re-written too.
+    const changed = this.sources.slicesWithTaken(this.scope.activeImage).filter((z) => !slices.has(z));
+    if (!changed.length) return slices;
+    for (const z of changed) slices.set(z, []);
+    return new Map(Array.from(slices).sort((a, b) => a[0] - b[0]));
   }
 
   /** Mint ids/names + apply classification colours + tag the slice index, as
@@ -366,6 +515,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    *  @deprecated Nothing in the library calls it; will be removed next minor. */
   setShowShapeLabel(show: boolean): void {
     this.showShapeLabel = show;
+    this.republishView();
   }
 
   getClassificationColors(): Map<string, string> {
@@ -409,7 +559,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * nothing is left to undo.
    */
   undo(): void {
-    const snapshot = this.history.undo(this.regions);
+    const snapshot = this.history.undo(this.snapshot());
     if (snapshot) this.restoreSnapshot(snapshot);
     this.regionSetReplaced$.next();
   }
@@ -421,7 +571,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * fresh region action).
    */
   redo(): void {
-    const snapshot = this.history.redo(this.regions);
+    const snapshot = this.history.redo(this.snapshot());
     if (snapshot) this.restoreSnapshot(snapshot);
     this.regionSetReplaced$.next();
   }
@@ -434,9 +584,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
 
   /** Make `snapshot` the live region set and notify both backends. Shared by
    *  {@link undo} and {@link redo}; nothing records history while it runs. */
-  private restoreSnapshot(snapshot: Region[]): void {
+  private restoreSnapshot(snapshot: RegionSnapshot): void {
     this.history.restore(() => {
-      this.regions = snapshot.slice();
+      this.regions = snapshot.regions.slice();
+      this.setTaken(snapshot.taken);
       this.syncCache();
       // Drops any selected ids the restored set no longer contains.
       this.emitSelection();
@@ -454,13 +605,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
    * region it edits) rather than changing them, so it never changes after this.
    */
   private recordUndoSnapshot(): void {
-    this.history.record(this.regions);
+    this.history.record(this.snapshot());
+  }
+
+  /** The state an undo step restores. */
+  private snapshot(): RegionSnapshot {
+    return { regions: this.regions, taken: this.currentTaken() };
   }
 
   // ── IRegionStore: GeoJSON I/O (models/region-geojson) ──────────────────
 
+  /** Parse GeoJSON into regions, remembering the class colours the file carries so they are
+   *  kept for classes with no preset (see VisualizerStore.rememberImportedClassColors). */
   importRegions(geoJsonStr: string): Region[] {
-    return regionsFromGeoJson(geoJsonStr);
+    const regions = regionsFromGeoJson(geoJsonStr);
+    const colors = new Map<string, string>();
+    for (const r of regions) {
+      if (r.label && r.color && !colors.has(r.label)) colors.set(r.label, r.color);
+    }
+    if (colors.size) this.store.rememberImportedClassColors(colors);
+    return regions;
   }
   /** Download `regions` as GeoJSON, named after `fileName` (extension
    *  replaced by `.geojson`) or `rois.geojson` without one. */
@@ -641,6 +805,617 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.history.endGesture();
   }
 
+  // ── Region sources: large region sets, tiled by level of detail ─────────
+
+  /**
+   * Hold a large region set as a tiled region source instead of as regions: the backends that
+   * draw sources (OpenSeadragon, napari) draw its features at the detail the zoom shows, from
+   * the tiles in view, and a feature joins the regions — exactly, as an ordinary editable
+   * {@link Region} with its {@link Region.sourceId} — only when it is selected or edited
+   * ({@link takeSourceFeatures}). Until then {@link getRegions} does not include it.
+   *
+   * `source` may be an opener, called the first time its slice is shown (and again if the
+   * source was closed to save memory). `slices` says which slice of the current image it
+   * serves: one (default: the slice shown; plane 0 of the source), or `'planes'`, every slice z
+   * from plane z of a z-indexed source. Replaces the source those slices had.
+   */
+  attachRegionSource(
+    source: RegionSource | RegionSourceOpener,
+    slices: RegionSourceSlices = { slice: this.sourceSlice },
+  ): void {
+    const image = this.scope.activeImage;
+    if (!image) return;
+    const open: RegionSourceOpener = typeof source === 'function' ? source : () => Promise.resolve(source);
+    this.sources.attach(image, open, slices);
+    this.sourcesVersion++;
+    this.refreshSourceView();
+  }
+
+  /** Drop the current image's region sources (closing them) and what was taken from them. */
+  detachRegionSources(): void {
+    const image = this.scope.activeImage;
+    if (!image) return;
+    this.sources.detachImage(image);
+    this.sourcesVersion++;
+    this.refreshSourceView();
+  }
+
+  /**
+   * Drop the slice's region source, for regions imported in place of the slice's (a small file
+   * replacing a large one): a source of the slice's own is detached; a z-indexed source over every
+   * slice has this slice's features taken out (as deleted). The other slices keep theirs.
+   */
+  async dropSliceRegionSource(): Promise<void> {
+    const image = this.scope.activeImage;
+    const slice = this.sourceSlice;
+    if (!image || !this.sources.has(image, slice)) return;
+    if (this.sources.hasOwnSource(image, slice)) {
+      this.sources.detachSlice(image, slice);
+      this.sourcesVersion++;
+      this.refreshSourceView();
+      return;
+    }
+    const generation = this.sourceGeneration;
+    const binding = await this.sources.binding(image, slice);
+    if (!binding || generation !== this.sourceGeneration) return;
+    const all = await binding.source.getIndex(binding.plane, {
+      offset: 0,
+      limit: binding.source.info.featureCount,
+    });
+    if (generation !== this.sourceGeneration) return;
+    this.setTaken(new Set([...this.currentTaken(), ...all.rows.map((r) => r.id)]));
+  }
+
+  /** Whether the slice shown has a region source. */
+  hasRegionSource(): boolean {
+    return this.sources.has(this.scope.activeImage, this.sourceSlice);
+  }
+
+  /** The slice's region source as a source layer draws it; null without one (or until it opens). */
+  getRegionSourceView(): RegionSourceView | null {
+    return this.sourceView$.value;
+  }
+
+  /** {@link getRegionSourceView} and every change of it (slice, taken ids, class colours). */
+  getRegionSourceView$(): Observable<RegionSourceView | null> {
+    return this.sourceView$.asObservable();
+  }
+
+  /**
+   * Take source features into the working set for editing: their exact geometry becomes
+   * ordinary regions (minted, coloured and slice-tagged as any region entering the store) and
+   * the source stops drawing them. Not an undo step of its own — undoing past it puts the
+   * features back in the source. Resolves the region ids, in the order asked (a feature already
+   * taken resolves to its region); [] when the slice changed meanwhile.
+   */
+  async takeSourceFeatures(ids: readonly string[]): Promise<number[]> {
+    const view = this.sourceView$.value;
+    if (!view || !ids.length) return [];
+    const generation = this.sourceGeneration;
+    const wanted = ids.filter((id) => !view.taken.has(id));
+    const features = wanted.length ? await view.source.getFeatures(wanted) : [];
+    if (generation !== this.sourceGeneration) return [];
+    const taken = this.currentTaken();
+    const fresh = features.filter((f) => !taken.has(f.id));
+    if (fresh.length) {
+      const regions = fresh.map((f) => {
+        const region = regionFromGeoJsonFeature(f.feature as GeoJsonFeature, 0, f.id);
+        if (this.scope.stackMode) region.z = this.scope.displaySlice;
+        return region;
+      });
+      const admitted = this.admit(regions);
+      // Fresh instances, completed in place: named after their new id like a drawn region.
+      for (const r of admitted) r.name = `shape${r.id}`;
+      this.regions = this.regions.concat(admitted);
+      this.setTaken(new Set([...taken, ...fresh.map((f) => f.id)]));
+      this.syncCache();
+      this.emitSelection();
+      this.emit();
+    }
+    const bySource = new Map(this.regions.filter((r) => r.sourceId !== undefined).map((r) => [r.sourceId, r.id]));
+    return ids.map((id) => bySource.get(id)).filter((id): id is number => id !== undefined);
+  }
+
+  /** {@link takeSourceFeatures}, then select them (added to the selection with `additive`). */
+  async selectSourceFeatures(ids: readonly string[], additive = false): Promise<number[]> {
+    const taken = await this.takeSourceFeatures(ids);
+    if (!taken.length) return taken;
+    this.selection.replace(additive ? [...new Set([...this.selection.ids, ...taken])] : taken);
+    this.emitSelection();
+    return taken;
+  }
+
+  /**
+   * Features per class still in the slice's region source (not taken); {} without one. With
+   * `stack`, a z-stack's over every slice: its source's planes, or each slice's source added up.
+   */
+  async getRegionSourceClassCounts(stack = false): Promise<Record<string, number>> {
+    const view = this.sourceView$.value;
+    const image = this.scope.activeImage;
+    if (!stack || !this.scope.stackMode) {
+      return view ? view.source.getClassCounts(view.plane, Array.from(view.taken)) : {};
+    }
+    if (this.sources.hasPlanesSource(image)) {
+      const binding = await this.sources.binding(image, this.sourceSlice);
+      if (!binding) return {};
+      try {
+        return await binding.source.getClassCounts(null, this.sources.allTaken(image));
+      } catch (err) {
+        // A tile server that predates counting every plane: the slice's counts.
+        console.warn('[regions] could not count the classes of every slice', err);
+        return view ? view.source.getClassCounts(view.plane, Array.from(view.taken)) : {};
+      }
+    }
+    const counts: Record<string, number> = {};
+    for (const slice of this.sources.slicesWithSource(image)) {
+      const binding = await this.sources.binding(image, slice);
+      if (!binding) continue;
+      const own = await binding.source.getClassCounts(binding.plane, Array.from(this.sources.taken(image, slice)));
+      for (const [label, n] of Object.entries(own)) counts[label] = (counts[label] ?? 0) + n;
+    }
+    return counts;
+  }
+
+  /**
+   * Select every region of these classes on the slice — the regions', and the region source's,
+   * which are taken into the regions (at most {@link SELECT_CLASSES_LIMIT} of them). Added to the
+   * selection with `additive`. Resolves the selected region ids.
+   */
+  async selectClasses(classes: readonly string[], additive = false): Promise<number[]> {
+    const wanted = new Set(classes);
+    const view = this.sourceView$.value;
+    if (view && classes.length) {
+      const page = await view.source.getIndex(view.plane, {
+        offset: 0,
+        limit: SELECT_CLASSES_LIMIT,
+        classes,
+        exclude: Array.from(view.taken),
+      });
+      if (page.rows.length) await this.takeSourceFeatures(page.rows.map((r) => r.id));
+    }
+    const ids = this.regions.filter((r) => !r.isProfile?.() && r.label && wanted.has(r.label)).map((r) => r.id);
+    this.selection.replace(additive ? [...new Set([...this.selection.ids, ...ids])] : ids);
+    this.emitSelection();
+    return ids;
+  }
+
+  /**
+   * The 3D reconstruction of each group of classes over every slice of the stack (an atlas
+   * structure with its substructures, say): the outlines of the regions of those classes on every
+   * slice — the region sources' and those drawn or taken — stacked and meshed in a worker. Meshes
+   * are in image px (x, y) and slice indices (z). `pixelStep` is the in-plane voxel size (image
+   * px); the outlines are read at the matching level of detail. A group with no outline gets an
+   * empty mesh.
+   */
+  async reconstructClasses(
+    groups: ReadonlyArray<{ key: string; classes: readonly string[] }>,
+    pixelStep = 1,
+  ): Promise<Array<{ key: string; mesh: Mesh }>> {
+    const level = Math.max(0, Math.floor(Math.log2(Math.max(1, pixelStep))));
+    const out: Array<{ key: string; mesh: Mesh }> = [];
+    for (const group of groups) {
+      const slices = await this.classOutlines(group.classes, level);
+      out.push({ key: group.key, mesh: await reconstructInWorker(slices, { pixelStep }) });
+    }
+    return out;
+  }
+
+  /**
+   * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice
+   * (its features' union, see `outlinesArea`), one slice thick (Cavalieri's estimator), from the
+   * exact outlines. Where a feature is, a region source's or a drawn or taken region, does not
+   * change it: taking one leaves the volume as it was. The region sources' part is cached until
+   * what they hold changes (a feature taken or deleted, another source); only the slices with
+   * drawn or taken regions of the class are measured again.
+   */
+  async classVolumes(classes: readonly string[]): Promise<Map<string, number>> {
+    const state = this.sourceStateKey();
+    const out = new Map<string, number>();
+    await Promise.all(
+      [...new Set(classes)].map(async (name) => {
+        const source = await this.sourceVolume(state, name);
+        let volume = source.total;
+        for (const regions of mergeOutlines(this.regionOutlines([name]))) {
+          const under = source.slices.get(regions.z);
+          const [both] = under ? mergeOutlines([under.outlines, regions]) : [regions];
+          volume += outlinesArea(both.rings, both.ringGroups) - (under?.area ?? 0);
+        }
+        out.set(name, volume);
+      }),
+    );
+    return out;
+  }
+
+  /** The region sources' part of a class's volume, cached by what they hold (see classVolumes). */
+  private sourceVolume(state: string, name: string): Promise<SourceVolume> {
+    const key = `${state}\n${name}`;
+    let source = this.sourceVolumeCache.get(key);
+    if (source) {
+      // Most recently used last.
+      this.sourceVolumeCache.delete(key);
+      this.sourceVolumeCache.set(key, source);
+      return source;
+    }
+    source = this.sourceOutlines([name], 0).then((parts) => {
+      const slices = new Map<number, { area: number; outlines: SliceOutlines }>();
+      let total = 0;
+      for (const outlines of mergeOutlines(parts)) {
+        const area = outlinesArea(outlines.rings, outlines.ringGroups);
+        slices.set(outlines.z, { area, outlines });
+        total += area;
+      }
+      return { total, slices };
+    });
+    this.sourceVolumeCache.set(key, source);
+    source.catch(() => this.sourceVolumeCache.delete(key));
+    while (this.sourceVolumeCache.size > SOURCE_VOLUME_CACHE_SIZE) {
+      this.sourceVolumeCache.delete(this.sourceVolumeCache.keys().next().value as string);
+    }
+    return source;
+  }
+
+  /**
+   * Every slice's outlines of these classes, the region sources' then the regions': closed shapes'
+   * rings, and open polylines as `lines`.
+   */
+  private async classOutlines(classes: readonly string[], level: number): Promise<SliceOutlines[]> {
+    return mergeOutlines([...(await this.sourceOutlines(classes, level)), ...this.regionOutlines(classes)]);
+  }
+
+  /**
+   * The region sources' outlines of these classes on every slice, without the features taken or
+   * deleted. The last few class sets are kept until what the sources hold changes: rebuilding a
+   * surface after an edit reads nothing again.
+   */
+  private sourceOutlines(classes: readonly string[] | null, level: number): Promise<LabelledOutlines[]> {
+    const key = `${this.sourceStateKey()}\n${level}\n${classes ? classes.join('\n') : '*'}`;
+    const cached = this.sourceOutlineCache.get(key);
+    if (cached) {
+      // Most recently used last.
+      this.sourceOutlineCache.delete(key);
+      this.sourceOutlineCache.set(key, cached);
+      return cached;
+    }
+    const read = this.readSourceOutlines(classes, level);
+    this.sourceOutlineCache.set(key, read);
+    read.catch(() => this.sourceOutlineCache.delete(key));
+    while (this.sourceOutlineCache.size > SOURCE_OUTLINE_CACHE_SIZE) {
+      this.sourceOutlineCache.delete(this.sourceOutlineCache.keys().next().value as string);
+    }
+    return read;
+  }
+
+  private async readSourceOutlines(classes: readonly string[] | null, level: number): Promise<LabelledOutlines[]> {
+    const out: LabelledOutlines[] = [];
+    const image = this.scope.activeImage;
+    if (this.sources.hasPlanesSource(image)) {
+      const binding = await this.sources.binding(image, this.sourceSlice);
+      const outlines = await binding?.source.getClassOutlines(classes, level, this.sources.allTaken(image));
+      out.push(...(outlines ?? []));
+    }
+    for (const z of this.sources.slicesWithSource(image)) {
+      const binding = await this.sources.binding(image, z);
+      if (!binding) continue;
+      const outlines = await binding.source.getClassOutlines(
+        classes,
+        level,
+        Array.from(this.sources.taken(image, z)),
+      );
+      for (const s of outlines) if (s.z === binding.plane) out.push({ ...s, z });
+    }
+    return out;
+  }
+
+  /**
+   * Every class's outlines on every slice, by class: the region sources' (one read for all, kept
+   * like {@link sourceOutlines}) and the drawn and taken regions'. What a section through the
+   * stack cuts (see `geometry/section`).
+   */
+  async outlinesByClass(level: number): Promise<Map<string, SliceOutlines[]>> {
+    const byClass = new Map<string, Map<number, SliceParts>>();
+    const slot = (label: string, z: number) => {
+      let slices = byClass.get(label);
+      if (!slices) byClass.set(label, (slices = new Map()));
+      let slice = slices.get(z);
+      if (!slice) slices.set(z, (slice = { rings: [], ringGroups: [], lines: [] }));
+      return slice;
+    };
+    const nextPart = featureIds();
+    for (const s of await this.sourceOutlines(null, level)) {
+      const id = nextPart();
+      s.rings.forEach((r, i) => {
+        const label = s.ringLabels?.[i];
+        if (!label) return;
+        const slice = slot(label, s.z);
+        slice.rings.push(r);
+        slice.ringGroups.push(id(s.ringGroups?.[i]));
+      });
+      (s.lines ?? []).forEach((l, i) => {
+        const label = s.lineLabels?.[i];
+        if (label) slot(label, s.z).lines.push(l);
+      });
+    }
+    for (const { label, outlines } of this.labelledRegionOutlines(null)) {
+      // A region is one feature.
+      const id = nextPart()(undefined);
+      const slice = slot(label, outlines.z);
+      slice.rings.push(...outlines.rings);
+      slice.ringGroups.push(...outlines.rings.map(() => id));
+      slice.lines.push(...(outlines.lines ?? []));
+    }
+    return new Map(
+      Array.from(byClass, ([label, slices]) => [label, Array.from(slices, ([z, s]) => sliceOutlines(z, s))]),
+    );
+  }
+
+  /** The drawn and taken regions' outlines of these classes, by slice. */
+  private regionOutlines(classes: readonly string[]): SliceOutlines[] {
+    return this.labelledRegionOutlines(new Set(classes)).map((o) => o.outlines);
+  }
+
+  /** Each drawn or taken region's outlines (of the `wanted` classes; null: every class) with its class. */
+  private labelledRegionOutlines(
+    wanted: ReadonlySet<string> | null,
+  ): Array<{ label: string; outlines: SliceOutlines }> {
+    const out: Array<{ label: string; outlines: SliceOutlines }> = [];
+    for (const r of this.scope.stackMode ? this.getSliceRegions() : this.regions) {
+      if (r.isProfile?.() || !r.label || (wanted && !wanted.has(r.label))) continue;
+      const rings: Float64Array[] = [];
+      for (const p of regionPolygons(r)) {
+        rings.push(Float64Array.from(p.xpoints.flatMap((x, i) => [x, p.ypoints[i]])));
+        for (const hole of p.holes ?? []) rings.push(Float64Array.from(hole.flat()));
+      }
+      const lines = regionPolylines(r);
+      out.push({ label: r.label, outlines: { z: r.z ?? 0, rings, ...(lines.length ? { lines } : {}) } });
+    }
+    return out;
+  }
+
+  /** What the region sources of the image hold (see {@link sourceStateKey}): it changes when a
+   *  feature is taken or deleted, or that is undone. */
+  getSourceStateKey(): string {
+    return this.sourceStateKey();
+  }
+
+  /**
+   * What the region sources of the image hold: the image, its sources (one attached or dropped
+   * bumps the version) and the features taken from them. A key for what is read from them.
+   */
+  private sourceStateKey(): string {
+    const image = this.scope.activeImage;
+    let taken = 2166136261;
+    for (const z of this.sources.slicesWithTaken(image)) {
+      for (const id of [...this.sources.taken(image, z)].sort()) {
+        const s = `${z}:${id};`;
+        for (let i = 0; i < s.length; i++) taken = Math.imul(taken ^ s.charCodeAt(i), 16777619) >>> 0;
+      }
+    }
+    return `${image}\n${this.sourcesVersion}\n${taken}`;
+  }
+
+  /** Delete source features without taking them (one undo step). */
+  deleteSourceFeatures(ids: readonly string[]): void {
+    const taken = this.currentTaken();
+    const drop = ids.filter((id) => !taken.has(id));
+    if (!drop.length || !this.sourceView$.value) return;
+    this.recordUndoSnapshot();
+    this.setTaken(new Set([...taken, ...drop]));
+    this.emit();
+  }
+
+  /**
+   * A page of the slice source's features not taken from it (file order), e.g. for the Region
+   * Editor's list; an empty page without a source.
+   */
+  async getRegionSourceIndex(query: Omit<RegionIndexQuery, 'exclude'>): Promise<RegionIndexPage> {
+    const view = this.sourceView$.value;
+    if (!view) return { total: 0, rows: [] };
+    return view.source.getIndex(view.plane, { ...query, exclude: Array.from(view.taken) });
+  }
+
+  /**
+   * `regions` as a GeoJSON FeatureCollection string merged with the region source behind them:
+   * the source's features that were not taken (or deleted), then `regions`. Without a source,
+   * {@link getGeoJsonString}. `slice` names a folder stack's slice (default the one shown);
+   * on a z-indexed stack's source (`'planes'`) the export spans every slice.
+   */
+  async getGeoJsonWithSource(regions: Region[], slice = this.sourceSlice): Promise<string> {
+    const image = this.scope.activeImage;
+    const planes = this.scope.stackMode && this.sources.hasPlanesSource(image);
+    const binding = await this.sources.binding(image, slice);
+    if (!binding) return regionsToGeoJson(regions);
+    const features = regions
+      .filter((r) => !r.isProfile?.())
+      .map((r) => featureFromRegion(r))
+      .filter((f): f is object => !!f);
+    const exclude = planes ? this.sources.allTaken(image) : Array.from(this.sources.taken(image, slice));
+    return binding.source.exportGeoJson(exclude, features);
+  }
+
+  // ── Region look ────────────────────────────────────────────────────────
+
+  /**
+   * Whether a region of class `label` goes unlabelled because a subclass of it (by the region
+   * source's class hierarchy) is among the regions too — an atlas's "Isocortex" under its areas.
+   * False without a hierarchy.
+   */
+  isLabelCovered(label: string | undefined): boolean {
+    if (!label) return false;
+    const hierarchy = this.sourceView$.value?.source.info.hierarchy;
+    if (!hierarchy) return false;
+    if (this.coveredFor?.regions !== this.regions || this.coveredFor.hierarchy !== hierarchy) {
+      const parent = new Map(hierarchy.filter((n) => n.parent).map((n) => [n.name, n.parent as string]));
+      const covered = new Set<string>();
+      for (const r of this.regions) {
+        let p = r.label ? parent.get(r.label) : undefined;
+        while (p && !covered.has(p)) {
+          covered.add(p);
+          p = parent.get(p);
+        }
+      }
+      this.coveredFor = { regions: this.regions, hierarchy, covered };
+    }
+    return this.coveredFor.covered.has(label);
+  }
+  private coveredFor: { regions: Region[]; hierarchy: readonly object[]; covered: Set<string> } | null = null;
+
+  /** The classes hidden from view (see {@link setClassesHidden}). */
+  getHiddenClasses(): ReadonlySet<string> {
+    return this.hiddenClasses$.value;
+  }
+
+  /** {@link getHiddenClasses} and every change of it. */
+  getHiddenClasses$(): Observable<ReadonlySet<string>> {
+    return this.hiddenClasses$.asObservable();
+  }
+
+  /**
+   * Hide (or show again) these classes' regions: the overlays and the region source's layer stop
+   * drawing them, and a hidden region can be neither picked nor kept selected. The regions stay in
+   * the set (the table lists them; a save keeps them).
+   */
+  setClassesHidden(classes: readonly string[], hidden: boolean): void {
+    const cur = this.hiddenClasses$.value;
+    const next = new Set(cur);
+    for (const c of classes) {
+      if (hidden) next.add(c);
+      else next.delete(c);
+    }
+    if (next.size === cur.size && [...next].every((c) => cur.has(c))) return;
+    const set = this.store.getPresetSet();
+    this.hiddenKeys = new Set([...next].map((c) => presetKey(set, c)));
+    this.hiddenClasses$.next(next);
+    if (hidden) {
+      const shown = this.selection.indices.filter((i) => !this.isClassHidden(this.regions[i]?.label));
+      if (shown.length !== this.selection.indices.length) this.setSelectedShapeIndices(shown);
+    }
+    this.republishView();
+    this.regionUpdate$.next(this.getRegions());
+  }
+
+  /** Whether regions labelled `label` are hidden (an unlabelled region never is). */
+  isClassHidden(label: string | null | undefined): boolean {
+    return !!label && this.hiddenKeys.size > 0 && this.hiddenKeys.has(presetKey(this.store.getPresetSet(), label));
+  }
+
+  /** The region look: outlines, or filled (an atlas's look); see `region-style`. */
+  getRegionStyle(): RegionStyle {
+    return this.regionStyle$.value;
+  }
+
+  /** {@link getRegionStyle} and every change of it. */
+  getRegionStyle$(): Observable<RegionStyle> {
+    return this.regionStyle$.asObservable();
+  }
+
+  /**
+   * Choose the region look, field by field; it overrides a region source's hint for the session.
+   * The overlays redraw.
+   */
+  setRegionStyle(patch: Partial<RegionStyle>): void {
+    this.userStyle = { ...this.userStyle, ...patch };
+    this.restyle();
+  }
+
+  /** The look now: the user's choice, else the source's hint, else outlines. */
+  private effectiveStyle(): RegionStyle {
+    const hint = this.hintStyle ?? {};
+    return {
+      fillOpacity: this.userStyle.fillOpacity ?? hint.fillOpacity ?? DEFAULT_REGION_STYLE.fillOpacity,
+      stroke: this.userStyle.stroke !== undefined ? this.userStyle.stroke : (hint.stroke ?? null),
+      strokeWidth:
+        this.userStyle.strokeWidth !== undefined ? this.userStyle.strokeWidth : (hint.strokeWidth ?? null),
+      highlight: this.userStyle.highlight !== undefined ? this.userStyle.highlight : (hint.highlight ?? null),
+    };
+  }
+
+  /** Publish the look when it changed: the overlays redraw the regions, the source layer its features. */
+  private restyle(redraw = false): void {
+    const next = this.effectiveStyle();
+    const cur = this.regionStyle$.value;
+    const same = (Object.keys(next) as Array<keyof RegionStyle>).every((k) => next[k] === cur[k]);
+    if (!same) this.regionStyle$.next(next);
+    const view = this.sourceView$.value;
+    if (redraw || !same || (view && view.labels !== this.showShapeLabel)) {
+      this.republishView();
+      this.regionUpdate$.next(this.getRegions());
+    }
+  }
+
+  /** Re-emit the source view with the current look and label setting. */
+  private republishView(): void {
+    const view = this.sourceView$.value;
+    if (view) this.sourceView$.next({ ...view, style: this.regionStyle$.value, labels: this.showShapeLabel });
+  }
+
+  /** The slice a region source is keyed by: the display slice in stack mode, else 0. */
+  private get sourceSlice(): number {
+    return this.scope.stackMode ? this.scope.displaySlice : 0;
+  }
+
+  private currentTaken(): ReadonlySet<string> {
+    return this.sources.taken(this.scope.activeImage, this.sourceSlice);
+  }
+
+  /** Replace the slice's taken ids and tell the source layers. */
+  private setTaken(taken: ReadonlySet<string>): void {
+    if (taken === this.currentTaken()) return;
+    this.sources.setTaken(this.scope.activeImage, this.sourceSlice, taken);
+    const view = this.sourceView$.value;
+    if (view) this.sourceView$.next({ ...view, taken });
+  }
+
+  /**
+   * Look up (opening it if needed) the slice's source and publish it as the source view. The view
+   * is withdrawn at once: until the incoming source opens, nothing reads, takes or deletes from the
+   * outgoing one into the slice now shown.
+   */
+  private refreshSourceView(): void {
+    const generation = ++this.sourceGeneration;
+    const image = this.scope.activeImage;
+    const slice = this.sourceSlice;
+    if (this.sourceView$.value) this.sourceView$.next(null);
+    this.sources.show(image, slice);
+    if (!this.sources.has(image, slice)) {
+      this.hintStyle = undefined;
+      this.restyle();
+      return;
+    }
+    this.sources.binding(image, slice).then(
+      (binding) => {
+        if (generation !== this.sourceGeneration) return;
+        if (!binding) {
+          this.sourceView$.next(null);
+          return;
+        }
+        const info = binding.source.info;
+        const classColors = Object.entries(info.classColors);
+        if (classColors.length) this.store.rememberImportedClassColors(new Map(classColors));
+        // A source that asks for labels gets them when it opens (the toggle still turns them off).
+        const labelsOn = !!info.style?.labels && !this.showShapeLabel && this.shownSource !== binding.source;
+        if (labelsOn) this.showShapeLabel = true;
+        this.shownSource = binding.source;
+        this.hintStyle = info.style;
+        this.sourceView$.next({
+          source: binding.source,
+          plane: binding.plane,
+          taken: this.sources.taken(image, slice),
+          colorOf: (f) =>
+            f.label ? colorForLabel(f.label, this.store.getPresetSet()) : f.color || this.shapeColor,
+          style: this.regionStyle$.value,
+          labels: this.showShapeLabel,
+          isHidden: (label) => this.isClassHidden(label),
+        });
+        this.restyle(labelsOn);
+      },
+      (err) => {
+        if (generation !== this.sourceGeneration) return;
+        console.warn('[regions] could not open the region source', err);
+        this.sourceView$.next(null);
+      },
+    );
+  }
+
   // ── per-image lifecycle ────────────────────────────────────────────────
 
   /**
@@ -658,6 +1433,7 @@ export class RegionStore implements IRegionStore, IRegionEditApi {
     this.resetUndoHistory();
     this.emitSelection();
     this.regionUpdate$.next(this.getRegions());
+    this.refreshSourceView();
   }
 
   // ── internals ──────────────────────────────────────────────────────────
