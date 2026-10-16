@@ -524,13 +524,13 @@ export class RegionFeatureTable {
     return Array.from(byPlane.values()).sort((a, b) => a.z - b.z);
   }
 
-  /** Features per class on plane `z`, without the `exclude`d ids. */
-  classCounts(z: number, exclude: readonly string[] = []): Record<string, number> {
+  /** Features per class on plane `z` (null: on every plane), without the `exclude`d ids. */
+  classCounts(z: number | null, exclude: readonly string[] = []): Record<string, number> {
     const skip = new Set(exclude);
     const counts: Record<string, number> = {};
     for (let i = 0; i < this.ids.length; i++) {
       const label = this.labels[i];
-      if (this.planes[i] !== z || !label || skip.has(this.ids[i])) continue;
+      if ((z !== null && this.planes[i] !== z) || !label || skip.has(this.ids[i])) continue;
       counts[label] = (counts[label] ?? 0) + 1;
     }
     return counts;

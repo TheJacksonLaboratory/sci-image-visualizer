@@ -157,6 +157,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected regionsFilled = false;
   /** Whether a volume view is on screen (classes can then be shown in 3D). */
   protected volumeView = false;
+  /** Whether the volume view's slice pane is wanted (one slice edited beside the 3D view). */
+  private slicePane = false;
   /** Classes shown in 3D in the volume view, each with the classes its surface covers. */
   protected shown3d = new Map<string, string[]>();
   /** The classes of the class tree's pick (it and its subtree), as long as the pick holds. */
@@ -308,9 +310,20 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       .getVolumeView$?.()
       ?.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((volume) => {
+        const counting = this.stackCounts;
         this.volumeView = volume;
         this.resetVolumes();
         this.changed();
+        if (this.stackCounts !== counting) void this.refreshSource();
+      });
+
+    this.regionApi
+      .getSliceEditor$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((pane) => {
+        const counting = this.stackCounts;
+        this.slicePane = pane;
+        if (this.stackCounts !== counting) void this.refreshSource();
       });
 
     // What is shown in 3D: the router clears it when another image is plotted.
@@ -468,7 +481,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       try {
         const [page, perClass] = await Promise.all([
           this.regionApi.getRegionSourceIndex({ offset: start - own, limit }),
-          this.regionApi.getRegionSourceClassCounts?.(),
+          this.regionApi.getRegionSourceClassCounts?.(this.stackCounts),
         ]);
         rows = page?.rows ?? [];
         total = page?.total ?? 0;
@@ -960,7 +973,15 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   // ── Docked Classes panel (jit-ui#70) ─────────────────────────────────
 
-  /** Rebuild the per-class region counts shown in the panel. */
+  /**
+   * Whether the classes count every slice of the stack: in a volume view (the whole stack on
+   * screen), unless its slice pane shows one slice. The table lists the slice's regions anyway.
+   */
+  private get stackCounts(): boolean {
+    return this.volumeView && !this.slicePane;
+  }
+
+  /** Rebuild the per-class region counts shown in the panel (the stack's, see stackCounts). */
   private recomputeClassCounts(): void {
     const counts = new Map<string, number>();
     const tree = new Map<string, number>();
@@ -969,7 +990,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       counts.set(k, (counts.get(k) ?? 0) + n);
       tree.set(label, (tree.get(label) ?? 0) + n);
     };
-    for (const r of this.regions) if (r.label) add(r.label, 1);
+    const regions = this.stackCounts ? this.regionApi.getSliceAnnotationRegions() : this.regions;
+    for (const r of regions) if (r.label) add(r.label, 1);
     // The region source's classes count too (its features are rows of the table).
     for (const [label, n] of Object.entries(this.sourceClassCounts)) add(label, n);
     this.classCounts = counts;

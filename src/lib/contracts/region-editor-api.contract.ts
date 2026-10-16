@@ -120,14 +120,22 @@ export interface IRegionEditorApi {
   selectSourceFeatures?(ids: readonly string[], additive?: boolean): Promise<number[]>;
   /** Delete source features without taking them (one undo step). */
   deleteSourceFeatures?(ids: readonly string[]): void;
-  /** Features per class still in the slice's region source (not taken). */
-  getRegionSourceClassCounts?(): Promise<Record<string, number>>;
+  /**
+   * Features per class still in the slice's region source (not taken); with `stack`, a z-stack's
+   * over every slice.
+   */
+  getRegionSourceClassCounts?(stack?: boolean): Promise<Record<string, number>>;
   /** The region look (outlines, or filled with labels inside) and every change of it. */
   getRegionStyle$?(): Observable<RegionStyle>;
   /** Choose the region look, field by field (overrides a region source's hint). */
   setRegionStyle?(patch: Partial<RegionStyle>): void;
   /** Whether a volume view is on screen (regions can then be shown in 3D). */
   getVolumeView$?(): Observable<boolean>;
+  /**
+   * Whether the volume view's slice pane is wanted (one slice edited beside the 3D view). A volume
+   * view without it lists every slice's classes; with it, the slice's.
+   */
+  getSliceEditor$?(): Observable<boolean>;
   /**
    * Show these groups of classes in the volume view as 3D reconstructions (one surface per group,
    * in its colour), and only these; [] hides them.

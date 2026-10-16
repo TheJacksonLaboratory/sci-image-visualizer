@@ -287,7 +287,16 @@ class FolderRegionSet {
     return wireOutlines(slices);
   }
 
+  /** Plane z's features per class; z null: every slice's, added up. */
   async classes(z, exclude) {
+    if (z === null) {
+      const counts = {};
+      for (let s = 0; s < this.files.length; s++) {
+        for (const [label, n] of Object.entries(await this.classes(s, exclude)))
+          counts[label] = (counts[label] ?? 0) + n;
+      }
+      return counts;
+    }
     const entry = await this.table(z);
     if (!entry) return {};
     const own = exclude

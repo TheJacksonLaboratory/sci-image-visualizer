@@ -39,7 +39,7 @@ function tableSource(features: object[]): RegionSource & { disposed: boolean; as
       return table.features(ids);
     },
     getIndex: async (z: number, q: never) => table.index(z, q),
-    getClassCounts: async (z: number, exclude?: readonly string[]) => table.classCounts(z, exclude),
+    getClassCounts: async (z: number | null, exclude?: readonly string[]) => table.classCounts(z, exclude),
     getClassOutlines: async (c: readonly string[], level: number, ex?: readonly string[]) =>
       table.classOutlines(c, level, ex),
     exportGeoJson: async (exclude: readonly string[], extra: readonly object[]) =>
@@ -364,6 +364,42 @@ describe('RegionStore region sources', () => {
     expect(store.hasRegionSource()).toBe(true); // slice 0 still draws 'a'
     const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
     expect(out.features.map((f: { id: string }) => f.id)).toEqual(['a']);
+  });
+
+  it("counts a z-stack source's classes over every plane, without what was taken", async () => {
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(
+      tableSource([feature('a', 0, 'X', 0), feature('b', 0, 'X', 1), feature('c', 20, 'Y', 1)]),
+      'planes',
+    );
+    await flush();
+    expect(await store.getRegionSourceClassCounts()).toEqual({ X: 1 });
+    expect(await store.getRegionSourceClassCounts(true)).toEqual({ X: 2, Y: 1 });
+    store.setDisplaySlice(1);
+    await flush();
+    await store.selectClasses(['Y']);
+    expect(await store.getRegionSourceClassCounts(true)).toEqual({ X: 2 });
+  });
+
+  it("adds up the classes of each slice's own source for the whole stack", async () => {
+    store.enterStackMode(new Map(), 0, 'per-slice-file');
+    store.attachRegionSource(tableSource([feature('a', 0, 'X')]), { slice: 0 });
+    store.attachRegionSource(tableSource([feature('a', 0, 'X'), feature('b', 20, 'Y')]), { slice: 2 });
+    await flush();
+    expect(await store.getRegionSourceClassCounts()).toEqual({ X: 1 });
+    expect(await store.getRegionSourceClassCounts(true)).toEqual({ X: 2, Y: 1 });
+  });
+
+  it("falls back to the slice's counts when the source cannot count every plane", async () => {
+    const source = tableSource([feature('a', 0, 'X', 0), feature('b', 0, 'X', 1)]);
+    const perPlane = source.getClassCounts;
+    source.getClassCounts = (z, exclude) => (z === null ? Promise.reject(new Error('400')) : perPlane(z, exclude));
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(source, 'planes');
+    await flush();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await store.getRegionSourceClassCounts(true)).toEqual({ X: 1 });
+    warn.mockRestore();
   });
 
   it('counts the classes still in the source and selects whole classes', async () => {

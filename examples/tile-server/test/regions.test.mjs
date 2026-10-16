@@ -96,6 +96,10 @@ test('a file set: info, tiles per plane, exact features, the index and the expor
   const feats = (await post('/regions/cells/features', { ids: ['b'] })).body.features;
   assert.equal(feats[0].feature.properties.acronym, 'b');
 
+  // The whole stack's classes (every plane).
+  assert.deepEqual((await post('/regions/cells/classes', { all: true })).body, { A: 2, B: 1 });
+  assert.deepEqual((await post('/regions/cells/classes', { all: true, exclude: ['a'] })).body, { A: 1, B: 1 });
+
   const page = (await post('/regions/cells/index', { z: 0, offset: 0, limit: 10, exclude: ['a'] })).body;
   assert.deepEqual(page.rows.map((r) => r.id), ['b']);
 
@@ -113,6 +117,9 @@ test('a folder set: one slice per file, ids qualified by slice', async () => {
   assert.deepEqual(info.style, { fillOpacity: 1, labels: true });
   assert.deepEqual((await post('/regions/plates/classes', { z: 1 })).body, { root: 1, grey: 1 });
   assert.deepEqual((await post('/regions/plates/classes', { z: 1, exclude: ['1:8', '0:997'] })).body, { root: 1 });
+  assert.deepEqual((await post('/regions/plates/classes', { all: true })).body, { root: 2, grey: 1 });
+  assert.deepEqual((await post('/regions/plates/classes', { all: true, exclude: ['1:8'] })).body, { root: 2 });
+  assert.equal((await post('/regions/plates/classes', {})).status, 400);
   const labelled = (await get('/regions/plates/tile/1/0/0/0')).body.features[0];
   assert.equal(labelled.labels.length, 3);
   assert.deepEqual((await post('/regions/plates/index', { z: 1, offset: 0, limit: 9, classes: ['grey'] })).body.rows.map((r) => r.id), ['1:8']);

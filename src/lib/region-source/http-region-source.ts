@@ -163,8 +163,9 @@ class HttpRegionSource implements RegionSource {
     }));
   }
 
-  getClassCounts(z: number, exclude: readonly string[] = []): Promise<Record<string, number>> {
-    return this.http.json<Record<string, number>>('classes', { z, exclude });
+  getClassCounts(z: number | null, exclude: readonly string[] = []): Promise<Record<string, number>> {
+    // Every plane is `all` (a plane must be a number: a server that predates it answers 400).
+    return this.http.json<Record<string, number>>('classes', z === null ? { all: true, exclude } : { z, exclude });
   }
 
   exportGeoJson(exclude: readonly string[], extra: readonly object[]): Promise<string> {

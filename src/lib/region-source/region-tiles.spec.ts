@@ -286,6 +286,15 @@ describe('region-tiles', () => {
       expect(table.classCounts(3)).toEqual({});
     });
 
+    it('counts features per class on every plane', () => {
+      const all = table.classCounts(null);
+      const planes = table.info().planes.map((z) => table.classCounts(z));
+      const summed: Record<string, number> = {};
+      for (const p of planes) for (const [k, n] of Object.entries(p)) summed[k] = (summed[k] ?? 0) + n;
+      expect(all).toEqual(summed);
+      expect(table.classCounts(null, ['a'])).toEqual({ ...summed, CTX: summed['CTX'] - 1 });
+    });
+
     it('labels each part at its pole, dropping parts too small for the level', () => {
       const two = (level: number) => table.tile(0, level, 0, 0).features.find((f) => f.id === 'two')!;
       const exact = two(0).labels!;

@@ -44,8 +44,11 @@ export interface RegionSource {
     level: number,
     exclude?: readonly string[],
   ): Promise<ClassOutlines[]>;
-  /** How many features of each class plane `z` has, without the `exclude`d ids. */
-  getClassCounts(z: number, exclude?: readonly string[]): Promise<Record<string, number>>;
+  /**
+   * How many features of each class plane `z` has (null: every plane, the whole stack), without
+   * the `exclude`d ids.
+   */
+  getClassCounts(z: number | null, exclude?: readonly string[]): Promise<Record<string, number>>;
   /**
    * The whole set as a GeoJSON FeatureCollection string, through the working set: `exclude`d
    * features (taken for editing, or deleted) left out, `extra` features appended.

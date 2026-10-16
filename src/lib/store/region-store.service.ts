@@ -925,11 +925,35 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return taken;
   }
 
-  /** Features per class still in the slice's region source (not taken); {} without one. */
-  async getRegionSourceClassCounts(): Promise<Record<string, number>> {
+  /**
+   * Features per class still in the slice's region source (not taken); {} without one. With
+   * `stack`, a z-stack's over every slice: its source's planes, or each slice's source added up.
+   */
+  async getRegionSourceClassCounts(stack = false): Promise<Record<string, number>> {
     const view = this.sourceView$.value;
-    if (!view) return {};
-    return view.source.getClassCounts(view.plane, Array.from(view.taken));
+    const image = this.scope.activeImage;
+    if (!stack || !this.scope.stackMode) {
+      return view ? view.source.getClassCounts(view.plane, Array.from(view.taken)) : {};
+    }
+    if (this.sources.hasPlanesSource(image)) {
+      const binding = await this.sources.binding(image, this.sourceSlice);
+      if (!binding) return {};
+      try {
+        return await binding.source.getClassCounts(null, this.sources.allTaken(image));
+      } catch (err) {
+        // A tile server that predates counting every plane: the slice's counts.
+        console.warn('[regions] could not count the classes of every slice', err);
+        return view ? view.source.getClassCounts(view.plane, Array.from(view.taken)) : {};
+      }
+    }
+    const counts: Record<string, number> = {};
+    for (const slice of this.sources.slicesWithSource(image)) {
+      const binding = await this.sources.binding(image, slice);
+      if (!binding) continue;
+      const own = await binding.source.getClassCounts(binding.plane, Array.from(this.sources.taken(image, slice)));
+      for (const [label, n] of Object.entries(own)) counts[label] = (counts[label] ?? 0) + n;
+    }
+    return counts;
   }
 
   /**

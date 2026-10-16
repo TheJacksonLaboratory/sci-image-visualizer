@@ -22,7 +22,7 @@ export type RegionSourceRequest =
   | { op: 'tile'; handle: number; z: number; level: number; gx: number; gy: number }
   | { op: 'features'; handle: number; ids: readonly string[] }
   | { op: 'index'; handle: number; z: number; query: RegionIndexQuery }
-  | { op: 'classes'; handle: number; z: number; exclude?: readonly string[] }
+  | { op: 'classes'; handle: number; z: number | null; exclude?: readonly string[] }
   | {
       op: 'outlines';
       handle: number;

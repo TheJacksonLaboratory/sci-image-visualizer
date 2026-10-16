@@ -25,7 +25,7 @@
 //   GET  /regions/:id/tile/:z/:level/:gx/:gy  -> { features: [...] }
 //   POST /regions/:id/features { ids }        -> { features: [{ id, feature }] }
 //   POST /regions/:id/index { z, offset, limit, label?, exclude?, classes? } -> { total, rows }
-//   POST /regions/:id/classes { z, exclude? }  -> { <class>: count }
+//   POST /regions/:id/classes { z | all: true, exclude? }  -> { <class>: count } (all: every plane)
 //   POST /regions/:id/outlines { classes, level, exclude? } -> { slices: [{ z, rings, lines?, … }] }
 //        (each ring's feature in ringGroups; classes null: every class, each outline labelled
 //        in ringLabels / lineLabels)
@@ -769,8 +769,9 @@ app.post('/regions/:id/index', (req, res) => {
   return withRegionSet(req, res, (set) => set.index(intParam(b.z, 0), query));
 });
 app.post('/regions/:id/classes', (req, res) => {
-  const z = intParam(req.body?.z, NaN);
-  if (!Number.isFinite(z) || z < 0) return res.status(400).json({ error: 'bad plane' });
+  // `all`: every plane's (the whole stack's), else plane z's.
+  const z = req.body?.all === true ? null : intParam(req.body?.z, NaN);
+  if (z !== null && (!Number.isFinite(z) || z < 0)) return res.status(400).json({ error: 'bad plane' });
   const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [];
   return withRegionSet(req, res, (set) => set.classes(z, exclude));
 });

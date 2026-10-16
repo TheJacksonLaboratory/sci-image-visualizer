@@ -109,6 +109,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private plotDiv = '';
   /** Whether a napari volume view is the current plot type. */
   private readonly volumeView$ = new BehaviorSubject<boolean>(false);
+  /** Whether the volume view's slice pane is wanted (see {@link setSliceEditor}). */
+  private readonly sliceEditor$ = new BehaviorSubject<boolean>(false);
   /** Region reconstructions built so far, by image, resolution and classes (with those classes). */
   private readonly meshCache = new Map<string, { mesh: Mesh; classes: readonly string[] }>();
   /** Bumped per {@link showRegionClasses3d} (and per new image), so only the latest one shows. */
@@ -390,6 +392,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    */
   async setSliceEditor(div: string | null): Promise<boolean> {
     this.sliceDiv = div;
+    if (this.sliceEditor$.value !== !!div) this.sliceEditor$.next(!!div);
     if (!div) {
       this.unmountSlice();
       return false;
@@ -765,6 +768,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return this.volumeView$.asObservable();
   }
 
+  /** Whether the volume view's slice pane is wanted (it shows while a volume view is on screen). */
+  getSliceEditor$(): Observable<boolean> {
+    return this.sliceEditor$.asObservable();
+  }
+
   /** The class groups shown in 3D on this image ([] after a switch to another image). */
   getRegionClasses3d$(): Observable<ReadonlyArray<{ key: string; classes: readonly string[] }>> {
     return this.classes3d$.asObservable();
@@ -891,8 +899,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return Object.fromEntries(await this.regionStore.classVolumes(classes));
   }
 
-  getRegionSourceClassCounts(): Promise<Record<string, number>> {
-    return this.regionStore.getRegionSourceClassCounts();
+  getRegionSourceClassCounts(stack?: boolean): Promise<Record<string, number>> {
+    return this.regionStore.getRegionSourceClassCounts(stack);
   }
   getHiddenClasses$(): Observable<ReadonlySet<string>> {
     return this.regionStore.getHiddenClasses$();

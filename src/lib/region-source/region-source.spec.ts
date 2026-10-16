@@ -218,6 +218,7 @@ describe('openHttpRegionSource', () => {
         };
       } else if (path === 'features') out = { features: table.features(body.ids) };
       else if (path === 'index') out = table.index(body.z, body);
+      else if (path === 'classes') out = table.classCounts(body.all === true ? null : body.z, body.exclude);
       else if (path === 'export')
         return { ok: true, status: 200, text: async () => table.exportGeoJson(body.exclude, body.extra) };
       else return { ok: false, status: 404, text: async () => '' };
@@ -242,6 +243,20 @@ describe('openHttpRegionSource', () => {
     ]);
     const post = fetchFn.mock.calls.find((c) => c[0].endsWith('/features'))![1] as RequestInit;
     expect(post.method).toBe('POST');
+  });
+
+  it("asks for one plane's class counts, or every plane's as `all`", async () => {
+    const fetchFn = server();
+    const source = await openHttpRegionSource('http://x/regions', { fetch: fetchFn as unknown as typeof fetch });
+    expect(await source.getClassCounts(0)).toEqual(table.classCounts(0));
+    expect(await source.getClassCounts(null, ['a'])).toEqual(table.classCounts(null, ['a']));
+    const bodies = fetchFn.mock.calls
+      .filter((c) => c[0].endsWith('/classes'))
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string));
+    expect(bodies).toEqual([
+      { z: 0, exclude: [] },
+      { all: true, exclude: ['a'] },
+    ]);
   });
 
   it('fails on an HTTP error', async () => {

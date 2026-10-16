@@ -231,7 +231,7 @@ class WorkerRegionSource implements RegionSource {
     return this.call((handle) => ({ op: 'outlines', handle, classes, level, exclude }));
   }
 
-  getClassCounts(z: number, exclude?: readonly string[]): Promise<Record<string, number>> {
+  getClassCounts(z: number | null, exclude?: readonly string[]): Promise<Record<string, number>> {
     return this.call((handle) => ({ op: 'classes', handle, z, exclude }));
   }
 

@@ -1787,9 +1787,15 @@ describe('RegionEditorComponent with a region source', () => {
   } as unknown as RegionSourceView;
   const settle = () => new Promise((r) => setTimeout(r));
   let presets$: BehaviorSubject<PresetSet>;
+  let volume$: BehaviorSubject<boolean>;
+  let slicePane$: BehaviorSubject<boolean>;
 
   beforeEach(async () => {
     const drawn = Object.assign(new Region(), { id: 1, name: 'shape1', label: 'MB', color: '#f00' });
+    // Another slice's region: counted only with the whole stack.
+    const elsewhere = Object.assign(new Region(), { id: 2, name: 'shape2', label: 'CTX', color: '#0f0', z: 4 });
+    volume$ = new BehaviorSubject(false);
+    slicePane$ = new BehaviorSubject(false);
     presets$ = new BehaviorSubject<PresetSet>({
       classes: [],
       fallbackPalette: ['#123456'],
@@ -1813,7 +1819,13 @@ describe('RegionEditorComponent with a region source', () => {
         total: rows.length,
         rows: rows.slice(q.offset, q.offset + q.limit),
       })),
-      getRegionSourceClassCounts: async () => ({ CTX: 3, MB: 9 }),
+      getRegionSourceClassCounts: jest.fn(async (stack?: boolean) =>
+        stack ? { CTX: 30, MB: 90 } : { CTX: 3, MB: 9 },
+      ),
+      getSliceAnnotationRegions: () => [drawn, elsewhere],
+      getVolumeView$: () => volume$,
+      getSliceEditor$: () => slicePane$,
+      getClassVolumes: async () => ({}),
       selectSourceFeatures: jest.fn(async () => []),
       deleteSourceFeatures: jest.fn(),
       selectRegionClasses: jest.fn(async () => undefined),
@@ -1843,6 +1855,25 @@ describe('RegionEditorComponent with a region source', () => {
   });
 
   const page = (): Region[] => (component as any).pagedRegions;
+
+  it("counts the whole stack's classes in a volume view, and the slice's with its slice pane", async () => {
+    const tree = () => Object.fromEntries((component as any).treeCounts);
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    volume$.next(true);
+    await settle();
+    // Every slice's regions and source features (the 2D slice's would be the last one shown).
+    expect(tree()).toEqual({ MB: 91, CTX: 31 });
+    expect((api.getRegionSourceClassCounts as jest.Mock).mock.calls.at(-1)[0]).toBe(true);
+    slicePane$.next(true);
+    await settle();
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    slicePane$.next(false);
+    volume$.next(false);
+    await settle();
+    expect(tree()).toEqual({ MB: 10, CTX: 3 });
+    // The table lists the slice's regions throughout.
+    expect((component as any).tableTotal).toBe(13);
+  });
 
   it('lists the regions, then the source features, in one table', () => {
     expect((component as any).tableTotal).toBe(13);
