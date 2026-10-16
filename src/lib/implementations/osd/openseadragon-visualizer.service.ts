@@ -22,6 +22,7 @@ import {
 } from '../../contracts/visualizer.contract';
 import { ViewerCapabilities, ViewerFeature, capabilitiesOf } from '../../contracts/capabilities.contract';
 import { OsdRegionOverlay } from './osd-region-overlay';
+import { OsdTileLoading } from './osd-tile-loading';
 import { OsdScaleBar } from './osd-scale-bar';
 import { IRegionOverlay, RegionToolMode } from '../../contracts/region-overlay.contract';
 import { ICoordinateTransform } from '../../contracts/coordinate-transform.contract';
@@ -100,6 +101,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
   private viewer: OpenSeadragon.Viewer | null = null;
   private overlay: IRegionOverlay | null = null;
   private scaleBar: OsdScaleBar | null = null;
+  /** "Image reloading…" while the view fetches its tiles. */
+  private tileLoading: OsdTileLoading | null = null;
   private descriptor: TileDescriptor | null = null;
   /** Base64 RawFileInfo + current z-slice, kept so setZIndex can rebuild the
    *  tile source and swap slices live (stack navigation). */
@@ -436,6 +439,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.overlay = new OsdRegionOverlay(viewer, this.regionStore);
     this.coordTransform = new OsdCoordinateTransform(viewer);
     this.scaleBar = new OsdScaleBar(viewer, d.mppX ?? 0);
+    this.tileLoading?.destroy();
+    this.tileLoading = new OsdTileLoading(viewer as unknown as ConstructorParameters<typeof OsdTileLoading>[0]);
     if (simple) {
       // A single, self-contained image — no slice cache to seed. Its z-scrub and
       // recomposite re-open the viewer; one persistent handler reports a failed
@@ -498,6 +503,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       this.scaleBar.destroy();
       this.scaleBar = null;
     }
+    this.tileLoading?.destroy();
+    this.tileLoading = null;
     if (this.viewer) {
       this.viewer.destroy();
       this.viewer = null;

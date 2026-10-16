@@ -125,6 +125,7 @@ describe('RegionEditorComponent (DOM)', () => {
       'pi pi-tag',
       'pi pi-stop-circle',
       'pi pi-upload',
+      'pi pi-folder-open',
       'pi pi-download',
       'pi pi-save',
       '',
@@ -141,6 +142,7 @@ describe('RegionEditorComponent (DOM)', () => {
     );
     // Selection-dependent actions (tags, palette, trash) start disabled.
     expect(disabled).toEqual([
+      false,
       false,
       false,
       false,

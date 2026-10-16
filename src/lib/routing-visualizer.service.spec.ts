@@ -165,6 +165,55 @@ describe('RoutingVisualizerService (characterization)', () => {
 
   beforeEach(() => setup());
 
+  // ── imported region sources ───────────────────────────────────────────
+  describe('imported region sources', () => {
+    const open = () => Promise.resolve({ info: { planes: [0] } } as never);
+    let attach: jest.SpyInstance;
+    beforeEach(() => {
+      attach = jest.spyOn(regionStore, 'attachRegionSource').mockImplementation(() => undefined);
+      jest.spyOn(regionStore, 'detachRegionSources').mockImplementation(() => undefined);
+    });
+
+    it('gives each slice of a stack its own source, every slice emptied first', () => {
+      (router as any).plottedInfo = { isStack: true, tiled: false };
+      const openers = new Map([
+        [0, open],
+        [1, open],
+        [2, open],
+      ]);
+      expect(router.importSliceRegionSources(openers)).toBe(3);
+      expect(router.isStackMode()).toBe(true);
+      expect(router.getStackSaveLayout()).toBe('per-slice-file');
+      expect(attach.mock.calls.map((c) => c[1])).toEqual([{ slice: 0 }, { slice: 1 }, { slice: 2 }]);
+    });
+
+    it("gives a single image slice 0's source only", () => {
+      (router as any).plottedInfo = { isStack: false };
+      expect(
+        router.importSliceRegionSources(
+          new Map([
+            [0, open],
+            [1, open],
+          ]),
+        ),
+      ).toBe(1);
+      expect(attach.mock.calls.map((c) => c[1])).toEqual([{ slice: 0 }]);
+    });
+
+    it('lays a served set over every slice when it is z-indexed, else on the slice shown', async () => {
+      (router as any).plottedInfo = { isStack: true, tiled: true };
+      await router.importRegionSourceOpener(() => Promise.resolve({ info: { planes: [0, 1, 2] } } as never));
+      expect(attach.mock.calls[0][1]).toBe('planes');
+      expect(router.isStackMode()).toBe(true);
+      expect(router.getStackSaveLayout()).toBe('combined');
+
+      attach.mockClear();
+      router.setDisplaySlice(1);
+      await router.importRegionSourceOpener(open);
+      expect(attach.mock.calls[0][1]).toEqual({ slice: 1 });
+    });
+  });
+
   // ── regions in 3D ─────────────────────────────────────────────────────
   it('names a 3D build on the loading badge until it settles, once per mesh', async () => {
     const done = jest.fn();
