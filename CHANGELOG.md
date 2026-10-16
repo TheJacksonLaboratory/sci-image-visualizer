@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-16
+
 ### Added
 
 - **Large region sets drawn by level of detail.** An image's ROI GeoJSON of at least
@@ -40,12 +42,23 @@ file was added.
   tree node with its subclasses) can be shown as its 3D reconstruction from every slice's
   outlines — a translucent surface in its colour inside the volume, following its Z stretch.
   The Region Editor button is on the toolbar in those views.
+- **A volume view's classes count the whole stack**: the Region Editor's class tree and panel count
+  every slice's regions and region-source features (a source's `getClassCounts(null)`, an HTTP
+  source's `classes { all: true }`, which the example tile server answers), not the last slice
+  shown in 2D; with the volume view's slice pane open, the slice's. (#49)
+- **"Regions through volume"**: in a volume view the Region Editor toggles whether the volume hides
+  the parts of the 3D regions behind what it shows (the default) or none of them (napari-js's
+  `'translucent_no_depth'`), for surfaces traced inside its bright structures, such as an OCT's
+  layer boundaries. (#49)
 - **Regions keep their GeoJSON feature id and other properties** (`Region.sourceId`,
   `Region.properties`) through an import and a save, e.g. QuPath's `id` and `objectType`, or an
   atlas structure's acronym and id.
 
 ### Changed
 
+- **napari-js 0.18**: 3D regions are drawn by depth with the volume (a region behind what the
+  volume shows is hidden by it), and a translucent region shows its near side over its far side
+  from every angle. Requires `napari-js ^0.18.0`. (#49)
 - **A volume takes its slice spacing from the tile server's descriptor** (`TileDescriptor.mppZ`)
   as it already took its pixel size, so a tiled stack whose server reports it (jit-service for a
   NRRD atlas volume) is drawn to scale without the host copying it into `imageMeta`.
@@ -56,6 +69,16 @@ file was added.
   file gives it (QuPath's `classification.color`), not a generated one. Preset classes keep their
   preset colour, and a class colour set later recolours the class as before. The imported colours
   last for the session and are never saved with the presets.
+
+### Fixed
+
+- **Orbiting a large spatial point cloud is smooth again**: the 3D hover no longer hit-tests
+  while a button is held, which re-projected the whole cloud every frame (the 3.7M-cell MERFISH
+  dataset orbited at about 6 fps). (#49)
+- **A closed Region Editor asks the region source nothing**: in a volume view it read the
+  source's features, class counts and class volumes while hidden, competing with the volume's
+  slice loading (an atlas's Volume view opened in 23 s instead of 12 s against the example
+  server). (#49)
 
 ## [0.9.0] — 2026-10-13
 
