@@ -18,6 +18,11 @@ file was added.
   being converted ("The image could not be decoded"). A hidden channel now loads nothing (its
   queued requests are dropped when it is hidden), at most 12 tile requests are in flight, and
   the tile cache grows with the channel count (up to 1200 tiles).
+- **A viewer created outside the document draws once it is attached.** A visualizer built while
+  detached (jit-ui's pipeline preview, projected into a closed dialog) drew a published spatial
+  dataset at once, found no plot element and alerted "Could not draw the dataset … the renderer
+  could not start" over the main viewer. Its view now counts as ready only once its element is in
+  the document, so an image-less draw waits until then.
 
 ## [0.10.0] — 2026-10-16
 
