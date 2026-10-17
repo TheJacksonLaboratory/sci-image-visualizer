@@ -482,11 +482,20 @@ export class SliceCache {
     return it ? [it] : [];
   }
 
-  /** Whether slice z's tiles are still streaming (any cached image not fully loaded). */
+  /** Whether slice z's tiles are still streaming (any cached image not fully loaded). A hidden
+   *  channel loads nothing, so it never becomes fully loaded: only the visible channels count, or
+   *  the background loader would wait on it forever. */
   private sliceTilesLoading(z: number): boolean {
     const g = this.sliceGroup(z);
     if (!g.length) return false;
-    return g.some((it) => it && typeof it.getFullyLoaded === 'function' && !it.getFullyLoaded());
+    const multi = this.host.isMultiChannel();
+    return g.some(
+      (it, c) =>
+        it &&
+        (!multi || this.host.channelVisible(c)) &&
+        typeof it.getFullyLoaded === 'function' &&
+        !it.getFullyLoaded(),
+    );
   }
 
   /** Remove slice z's cached image(s) from the world and the active cache. */

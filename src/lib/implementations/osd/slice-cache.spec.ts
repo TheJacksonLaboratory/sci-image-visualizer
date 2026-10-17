@@ -253,6 +253,59 @@ describe('SliceCache', () => {
     expect(c1.setOpacity).toHaveBeenLastCalledWith(1);
   });
 
+  it('prefetches past a channel hidden from the start, which never loads', () => {
+    host.state.isMultiChannel = true;
+    host.state.currentZ = 2;
+    host.state.visible = [true, false];
+    cache.showSlice(2);
+    viewer.succeedNext(2, true); // the visible channel's tiles are in
+    viewer.succeedNext(2, false); // the hidden one loads nothing: never fully loaded
+    viewer.addTiledImage.mockClear();
+
+    cache.schedulePrefetch();
+    jest.advanceTimersByTime(250);
+    // Not held back by the hidden channel: slice 1's group is added (one image per channel).
+    expect(viewer.addTiledImage.mock.calls.map((c: [OsdAddTiledImageOptions]) => c[0].tileSource)).toEqual([
+      { z: 1, channel: 0 },
+      { z: 1, channel: 1 },
+    ]);
+    const bg0 = viewer.succeedNext(1, false);
+    viewer.succeedNext(1, false);
+    jest.advanceTimersByTime(250); // slice 1's visible channel still streaming → wait
+    expect(viewer.addTiledImage).toHaveBeenCalledTimes(2);
+    bg0.fullyLoaded = true; // its visible channel lands; the hidden one never does
+    jest.advanceTimersByTime(250);
+    expect(viewer.addTiledImage).toHaveBeenCalledTimes(4);
+    expect(viewer.addTiledImage.mock.calls[2][0].tileSource).toMatchObject({ z: 3 });
+  });
+
+  it('prefetches once a channel hidden while loading is the only one left, and waits again when it is shown', () => {
+    host.state.isMultiChannel = true;
+    host.state.currentZ = 2;
+    cache.showSlice(2);
+    const c0 = Object.assign(viewer.succeedNext(2, false), { setPreload: jest.fn() });
+    const c1 = Object.assign(viewer.succeedNext(2, false), { setPreload: jest.fn() });
+    viewer.addTiledImage.mockClear();
+
+    host.state.visible = [true, false];
+    cache.revealChannelSlice(2); // channel 1 hidden before its tiles finished
+    c0.fullyLoaded = true;
+    cache.schedulePrefetch();
+    jest.advanceTimersByTime(250);
+    expect(viewer.addTiledImage).toHaveBeenCalledTimes(2); // slice 1's group
+
+    host.state.visible = [true, true];
+    cache.revealChannelSlice(2); // shown again: it loads, and the background loader yields to it
+    expect(c1.setPreload).toHaveBeenLastCalledWith(true);
+    viewer.succeedNext(1, true);
+    viewer.succeedNext(1, true);
+    jest.advanceTimersByTime(250);
+    expect(viewer.addTiledImage).toHaveBeenCalledTimes(2);
+    c1.fullyLoaded = true;
+    jest.advanceTimersByTime(250);
+    expect(viewer.addTiledImage).toHaveBeenCalledTimes(4);
+  });
+
   it("drops a hidden channel's queued tile requests, keeping the visible ones'", () => {
     host.state.isMultiChannel = true;
     host.state.currentZ = 0;
