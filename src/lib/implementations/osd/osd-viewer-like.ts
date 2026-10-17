@@ -49,6 +49,15 @@ export interface OsdViewerLike {
   /** OSD's own pan/zoom (drag + wheel); region tools switch it off. */
   setMouseNavEnabled(enabled: boolean): unknown;
   isMouseNavEnabled(): boolean;
+  /** OSD's tile request queue: the jobs not started yet (see OsdQueuedTileJob). */
+  imageLoader?: { jobQueue?: unknown[] };
+}
+
+/** A tile request waiting in OSD's queue: `abort` (before it starts) only marks the tile as
+ *  not loading, so it is requested again when it is needed. */
+export interface OsdQueuedTileJob {
+  tile?: { tiledImage?: unknown };
+  abort?: () => void;
 }
 
 /** A point in any OSD space (viewer-element px, viewport units or image px —
@@ -74,6 +83,8 @@ export interface OsdTiledImageLike {
   imageToViewportRectangle(r: OpenSeadragon.Rect): OpenSeadragon.Rect;
   viewportToImageRectangle(r: OsdRectLike): OsdRectLike;
   setOpacity(opacity: number): void;
+  /** Load tiles even while hidden (opacity 0); without it a hidden item loads nothing. */
+  setPreload?(preload: boolean): void;
   /** False while any of the image's tiles are still loading. */
   getFullyLoaded(): boolean;
   /** Re-run the tile pipeline (restore + re-process) for this image's tiles;

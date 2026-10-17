@@ -1,5 +1,5 @@
 import { OSD, quiet } from './osd-lib';
-import { OsdTiledImageLike, OsdViewerLike } from './osd-viewer-like';
+import { OsdQueuedTileJob, OsdTiledImageLike, OsdViewerLike } from './osd-viewer-like';
 
 /**
  * Stack-slice cache for the OpenSeadragon backend (refactoring plan, Step 3 —
@@ -225,7 +225,10 @@ export class SliceCache {
   /**
    * Add slice z's channel group: one additively-composited ('lighter' = Fiji
    * "Composite") TiledImage per channel, hidden (opacity 0) until revealed.
-   * Each is preloaded so the background loader can pre-fill every slice.
+   * The visible channels' are preloaded, so the background loader can pre-fill
+   * every slice; a hidden channel's loads nothing until it is shown (a 22-channel
+   * plate fetched and decoded every channel's tiles, overflowing the tile cache:
+   * tiles evicted mid-conversion failed to decode).
    * Cached so a revisit is an instant opacity toggle — no re-fetch, no
    * white-flicker. Mirrors addSlice for the composite path.
    */
@@ -261,7 +264,7 @@ export class SliceCache {
           width: 1,
           opacity: 0, // revealed by revealChannelSlice once the group is in
           compositeOperation: 'lighter',
-          preload: true,
+          preload: this.host.channelVisible(c),
           success: (e) => {
             const item = e?.item;
             if (token !== this.sliceLoadToken) {
@@ -283,16 +286,34 @@ export class SliceCache {
   }
 
   /** Reveal slice z's channel group (each visible channel → opacity 1) and
-   *  hide every other cached slice's group. Instant; no fetch/decode. */
+   *  hide every other cached slice's group. Instant; no fetch/decode. Only the
+   *  visible channels keep loading (preload): a hidden channel's tiles are not
+   *  fetched or decoded until it is shown. */
   revealChannelSlice(z: number): void {
+    const hidden = new Set<OsdTiledImageLike>();
     for (const [zz, group] of this.channelSliceItems) {
       const active = zz === z;
       group.forEach((it, c) => {
         if (!it) return;
         const visible = this.host.channelVisible(c);
+        if (!visible) hidden.add(it);
+        quiet(() => it.setPreload?.(visible));
         quiet(() => it.setOpacity(active && visible ? 1 : 0));
       });
     }
+    this.dropQueuedTiles(hidden);
+  }
+
+  /** Drop the tile requests still waiting in OSD's queue for `items` (channels just hidden), so
+   *  the visible channels' tiles are not stuck behind them. A request already sent completes. */
+  private dropQueuedTiles(items: Set<OsdTiledImageLike>): void {
+    const loader = this.host.viewer()?.imageLoader;
+    if (!items.size || !Array.isArray(loader?.jobQueue)) return;
+    loader.jobQueue = (loader.jobQueue as OsdQueuedTileJob[]).filter((job) => {
+      if (!items.has(job?.tile?.tiledImage as OsdTiledImageLike)) return true;
+      quiet(() => job.abort?.());
+      return false;
+    });
   }
 
   /** Show the given composite slice (opacity 1) and hide all other cached slices. */
@@ -461,11 +482,20 @@ export class SliceCache {
     return it ? [it] : [];
   }
 
-  /** Whether slice z's tiles are still streaming (any cached image not fully loaded). */
+  /** Whether slice z's tiles are still streaming (any cached image not fully loaded). A hidden
+   *  channel loads nothing, so it never becomes fully loaded: only the visible channels count, or
+   *  the background loader would wait on it forever. */
   private sliceTilesLoading(z: number): boolean {
     const g = this.sliceGroup(z);
     if (!g.length) return false;
-    return g.some((it) => it && typeof it.getFullyLoaded === 'function' && !it.getFullyLoaded());
+    const multi = this.host.isMultiChannel();
+    return g.some(
+      (it, c) =>
+        it &&
+        (!multi || this.host.channelVisible(c)) &&
+        typeof it.getFullyLoaded === 'function' &&
+        !it.getFullyLoaded(),
+    );
   }
 
   /** Remove slice z's cached image(s) from the world and the active cache. */

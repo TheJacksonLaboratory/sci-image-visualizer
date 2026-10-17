@@ -420,6 +420,7 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       authHeaders: this.authHeaders,
       sliceCount: d.z ?? 1,
       maxSlices: this.cache.maxSlices(),
+      channelImages: this.isMultiChannel ? (d.channels ?? 1) : 1,
     });
     this.viewer = createViewer(options);
     return openViewer(this.viewer, tileSource, (v) => this.onViewerOpened(v, d, simple, plotDiv));
