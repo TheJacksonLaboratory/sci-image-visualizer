@@ -117,6 +117,12 @@ export { openGeoJsonRegionSource } from './lib/region-source/worker-region-sourc
 export { openHttpRegionSource } from './lib/region-source/http-region-source';
 export type { HttpRegionSourceOptions, WireTileFeature } from './lib/region-source/http-region-source';
 export { REGION_SOURCE_MIN_CHARS } from './lib/region-source/region-source';
+export { isLabelVolumeName, readLabelVolume } from './lib/region-import/label-volume';
+export type { LabelVolume } from './lib/region-import/label-volume';
+export { labelClasses, labelSliceGeoJson } from './lib/region-import/label-classes';
+export type { LabelClasses } from './lib/region-import/label-classes';
+export { importFile, planRegionImport } from './lib/region-import/region-import';
+export type { RegionImportFile, RegionImportPlan } from './lib/region-import/region-import';
 export type { RegionSource, RegionSourceView, SourceFeature } from './lib/region-source/region-source';
 export type {
   RegionIndexPage,

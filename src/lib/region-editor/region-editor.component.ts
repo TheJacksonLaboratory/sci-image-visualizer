@@ -32,6 +32,18 @@ import { colorForLabel, presetKey } from '../store/class-color.util';
 import { ConfirmationService, MessageService, SharedModule } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
+import { HttpClient } from '@angular/common/http';
+import type { RegionSourceOpener } from '../store/region-source-scope';
+import { openGeoJsonRegionSource } from '../region-source/worker-region-source';
+import { openHttpRegionSource } from '../region-source/http-region-source';
+import { readLabelVolume } from '../region-import/label-volume';
+import { labelClasses, labelSliceGeoJson } from '../region-import/label-classes';
+import {
+  RegionImportFile,
+  folderSliceGeoJson,
+  importFile,
+  planRegionImport,
+} from '../region-import/region-import';
 import { RegionPersistenceService, SliceGeoJson } from './region-persistence.service';
 import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialog/region-color-dialog.component';
 import { ClassesPanelComponent } from './classes-panel/classes-panel.component';
@@ -109,6 +121,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     }
   }
   private isActive = true;
+  /** The host's HttpClient: a served region set's requests go through it (its auth). */
+  private readonly http = inject(HttpClient, { optional: true });
 
   protected regions: Region[] = [];
   protected selectedRegions: Region[] = [];
@@ -1222,8 +1236,161 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.changed();
   }
 
+  /** The files chosen in the import inputs: one GeoJSON, a label volume with its ontology, or a
+   *  folder of per-slice GeoJSON files. */
   protected importRois(event: Event) {
-    this.persistence.readChosenFile(event, (text) => void this.applyImportedRois(text));
+    const files = Array.from((event.target as HTMLInputElement).files ?? []);
+    if (files.length) void this.importRegionFiles(files.map((f) => importFile(f, f.webkitRelativePath || f.name)));
+  }
+
+  /** Whether the host can pick regions on its server ("Import regions from server"). */
+  protected get canImportFromServer(): boolean {
+    return this.persistence.canPickServerRegions();
+  }
+  /** An import from the server is in flight. */
+  protected importing = false;
+
+  /** "Import regions from server": the host picks files or a served region set; they import as chosen files do. */
+  protected importFromServer(): void {
+    this.importing = true;
+    this.changed();
+    this.persistence.pickServerRegions().subscribe({
+      next: (pick) => {
+        if (!pick) return;
+        if (pick.kind === 'files') {
+          void this.importRegionFiles(pick.files.map((f) => importFile(f.data, f.name)));
+          return;
+        }
+        void this.importServedRegionSet(pick.url, pick.name);
+      },
+      error: (err) => this.importFailed(err),
+      complete: () => {
+        this.importing = false;
+        this.changed();
+      },
+    });
+  }
+
+  /**
+   * Import `files` (see planRegionImport): one GeoJSON file as before; a label volume as one
+   * region source per slice, traced from it the first time the slice is shown, its classes named
+   * (and treed) by the ontology chosen with it; a folder as one source per slice file. Either
+   * replaces the regions and sources of every slice.
+   */
+  private async importRegionFiles(files: RegionImportFile[]): Promise<void> {
+    const plan = planRegionImport(files);
+    if (!plan) {
+      this.importFailed(
+        new Error('Choose a GeoJSON file, a folder of GeoJSON files, or a .nii, .nii.gz or .nrrd label volume.'),
+      );
+      return;
+    }
+    if (plan.kind === 'single') {
+      await this.applyImportedRois(await plan.file.text());
+      return;
+    }
+    const attach = this.regionApi.importSliceRegionSources?.bind(this.regionApi);
+    if (!attach) {
+      this.importFailed(new Error('This viewer cannot hold region sources.'));
+      return;
+    }
+    // Taken before the files are read: decoding a volume takes a while, and the import must land
+    // on the image it was started for, not on one shown meanwhile.
+    const ticket = this.regionApi.regionImportTicket?.();
+    try {
+      const openers = new Map<number, RegionSourceOpener>();
+      let summary: string;
+      if (plan.kind === 'volume') {
+        const volume = await readLabelVolume(plan.volume.name, await plan.volume.bytes());
+        const classes = labelClasses(plan.ontology ? JSON.parse(await plan.ontology.text()) : undefined);
+        for (let z = 0; z < volume.slices; z++) {
+          openers.set(z, () => openGeoJsonRegionSource(labelSliceGeoJson(volume, z, classes)));
+        }
+        summary = `${volume.slices} slices of ${volume.width} × ${volume.height}`;
+        this.warnIfSizeDiffers(volume.width, volume.height);
+      } else {
+        const regionSet = plan.regionSet ? JSON.parse(await plan.regionSet.text()) : null;
+        plan.slices.forEach((file, z) =>
+          openers.set(z, async () => openGeoJsonRegionSource(await folderSliceGeoJson(file, regionSet))),
+        );
+        summary = `${plan.slices.length} slice files`;
+      }
+      const attached = attach(openers, ticket);
+      if (attached === null) {
+        this.importStale();
+        return;
+      }
+      this.afterSourceImport();
+      this.toast(
+        'success',
+        'Regions imported',
+        `${summary}; ${attached} slice${attached === 1 ? '' : 's'} annotated.`,
+      );
+    } catch (err) {
+      this.importFailed(err);
+    }
+  }
+
+  /** A region set the host's server serves (jit-service's /regions/{id}/), read through its HttpClient. */
+  private async importServedRegionSet(url: string, name?: string): Promise<void> {
+    const importSource = this.regionApi.importRegionSourceOpener?.bind(this.regionApi);
+    if (!importSource) {
+      this.importFailed(new Error('This viewer cannot hold region sources.'));
+      return;
+    }
+    const ticket = this.regionApi.regionImportTicket?.();
+    try {
+      const applied = await importSource(
+        () => openHttpRegionSource(url, { http: this.http ?? undefined }),
+        ticket,
+      );
+      if (applied === false) {
+        this.importStale();
+        return;
+      }
+      this.afterSourceImport();
+      this.toast('success', 'Regions imported', name ?? url);
+    } catch (err) {
+      this.importFailed(err);
+    }
+  }
+
+  /** An import that finished after another image was shown (or another import began): dropped. */
+  private importStale(): void {
+    this.toast('info', 'Import discarded', 'The image changed while the regions were being read.');
+    this.changed();
+  }
+
+  /** The table and selection after the regions were replaced by imported sources. */
+  private afterSourceImport(): void {
+    this.selectedRegions = [];
+    this.paginatorFirst = 0;
+    this.commit([]);
+    this.onSelectionChanged();
+  }
+
+  /** Warn when an imported volume's slices are not the image's size: its outlines would not fit. */
+  private warnIfSizeDiffers(width: number, height: number): void {
+    const meta = this.regionApi.getMaskImageSize();
+    if (meta && (meta.width !== width || meta.height !== height)) {
+      this.toast(
+        'info',
+        'Different size',
+        `The volume's slices are ${width} × ${height}; the image is ${meta.width} × ${meta.height}.`,
+      );
+    }
+  }
+
+  private importFailed(err: unknown): void {
+    this.importing = false;
+    this.messageService.add({
+      key: VIZ_TOAST_KEY,
+      severity: 'error',
+      summary: 'Error importing regions',
+      detail: `${(err as Error)?.message ?? err}`,
+    });
+    console.error('Error importing regions:', err);
+    this.changed();
   }
 
   /**

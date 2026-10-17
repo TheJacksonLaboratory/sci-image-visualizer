@@ -23,7 +23,24 @@ export interface RegionIoPort {
    * every slice has been written. (jit-ui#93)
    */
   saveSliceGeoJsons(slices: { z: number; geoJsonStr: string }[]): Observable<void>;
+  /**
+   * "Import regions from server": let the user pick region files or a region set in the host's
+   * storage (the current project's bucket, say) and hand them over. Emits null when the user
+   * cancels. Without it, the Region Editor shows no server import.
+   */
+  pickServerRegions?(): Observable<ServerRegionPick | null>;
 }
+
+/**
+ * Regions picked on the host's server (see {@link RegionIoPort.pickServerRegions}): files it
+ * downloaded, imported as the Region Editor imports chosen files (one GeoJSON; a label volume
+ * `.nii` / `.nii.gz` / `.nrrd` with its ontology JSON; a folder's per-slice GeoJSON files with its
+ * `regionset.json`), or a region set its server serves by level of detail (jit-service's
+ * `/regions/{id}/`), read through the host's `HttpClient` without downloading it.
+ */
+export type ServerRegionPick =
+  | { kind: 'files'; files: Array<{ name: string; data: Blob | ArrayBuffer | Uint8Array | string }> }
+  | { kind: 'source'; url: string; name?: string };
 
 /** DI token for the host's {@link RegionIoPort}. Required by the region editor. */
 export const REGION_IO_PORT = new InjectionToken<RegionIoPort>('REGION_IO_PORT');

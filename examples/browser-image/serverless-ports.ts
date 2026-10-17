@@ -1,9 +1,10 @@
-import { Inject, Injectable, OnDestroy } from '@angular/core';
+import { Inject, Injectable, OnDestroy, inject } from '@angular/core';
 import { BehaviorSubject, EMPTY, from, Observable, of } from 'rxjs';
 import {
   ImageStatePort,
   TileAccessPort,
   RegionIoPort,
+  ServerRegionPick,
   IImageInfo,
   Rectangle,
   VIZ_CONFIG,
@@ -349,13 +350,37 @@ function toBase64Url(s: string): string {
     .replace(/=+$/, '');
 }
 
-/** Region-I/O stub: no GeoJSON persistence here (regions live in memory). */
+/**
+ * Region-I/O stub: no GeoJSON persistence here (regions live in memory). With a tile server
+ * (VITE_TILE_SERVER), "Import regions from server" offers its region sets (`GET /regions`, the
+ * files and folders under its REGION_DIR), served by level of detail.
+ */
 @Injectable()
 export class StubRegionIoAdapter implements RegionIoPort {
+  private readonly server = inject(VIZ_CONFIG, { optional: true })?.slideCropServer ?? '';
+
   getSelectedFileName(): string | undefined { return undefined; }
   roiFileExists(_name: string): Observable<boolean> { return of(false); }
   saveGeoJson(_g: string, _f: string): Observable<void> { return of(undefined); }
   saveSliceGeoJsons(_s: { z: number; geoJsonStr: string }[]): Observable<void> { return of(undefined); }
+
+  pickServerRegions(): Observable<ServerRegionPick | null> {
+    if (!this.server) return of(null);
+    return from(
+      fetch(`${this.server}regions`)
+        .then((r) => (r.ok ? r.json() : { sets: [] }))
+        .then(({ sets }: { sets: Array<{ id: string; kind: string }> }) => {
+          if (!sets.length) {
+            window.alert('The tile server has no region sets (see its REGION_DIR).');
+            return null;
+          }
+          const list = sets.map((s, i) => `${i + 1}. ${s.id} (${s.kind})`).join('\n');
+          const choice = Number(window.prompt(`Import which region set?\n${list}`, '1'));
+          const set = sets[choice - 1];
+          return set ? ({ kind: 'source', url: `${this.server}regions/${set.id}/`, name: set.id } as ServerRegionPick) : null;
+        }),
+    );
+  }
 }
 
 interface DecodedSlice { width: number; height: number; blobUrl: string; }

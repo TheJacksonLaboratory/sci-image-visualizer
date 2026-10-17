@@ -165,6 +165,109 @@ describe('RoutingVisualizerService (characterization)', () => {
 
   beforeEach(() => setup());
 
+  // ── imported region sources ───────────────────────────────────────────
+  describe('imported region sources', () => {
+    const open = () => Promise.resolve({ info: { planes: [0] } } as never);
+    let attach: jest.SpyInstance;
+    beforeEach(() => {
+      attach = jest.spyOn(regionStore, 'attachRegionSource').mockImplementation(() => undefined);
+      jest.spyOn(regionStore, 'detachRegionSources').mockImplementation(() => undefined);
+    });
+
+    it('gives each slice of a stack its own source, every slice emptied first', () => {
+      (router as any).plottedInfo = { isStack: true, tiled: false };
+      const openers = new Map([
+        [0, open],
+        [1, open],
+        [2, open],
+      ]);
+      expect(router.importSliceRegionSources(openers)).toBe(3);
+      expect(router.isStackMode()).toBe(true);
+      expect(router.getStackSaveLayout()).toBe('per-slice-file');
+      expect(attach.mock.calls.map((c) => c[1])).toEqual([{ slice: 0 }, { slice: 1 }, { slice: 2 }]);
+    });
+
+    it("gives a single image slice 0's source only", () => {
+      (router as any).plottedInfo = { isStack: false };
+      expect(
+        router.importSliceRegionSources(
+          new Map([
+            [0, open],
+            [1, open],
+          ]),
+        ),
+      ).toBe(1);
+      expect(attach.mock.calls.map((c) => c[1])).toEqual([{ slice: 0 }]);
+    });
+
+    it('lays a served set over every slice when it is z-indexed, else on the slice shown', async () => {
+      (router as any).plottedInfo = { isStack: true, tiled: true };
+      await router.importRegionSourceOpener(() => Promise.resolve({ info: { planes: [0, 1, 2] } } as never));
+      expect(attach.mock.calls[0][1]).toBe('planes');
+      expect(router.isStackMode()).toBe(true);
+      expect(router.getStackSaveLayout()).toBe('combined');
+
+      attach.mockClear();
+      router.setDisplaySlice(1);
+      await router.importRegionSourceOpener(open);
+      expect(attach.mock.calls[0][1]).toEqual({ slice: 1 });
+    });
+  });
+
+  describe('imports that finish late', () => {
+    let attach: jest.SpyInstance;
+    let setRegions: jest.SpyInstance;
+    const deferred = () => {
+      let resolve!: (s: unknown) => void;
+      const source = { info: { planes: [0] }, dispose: jest.fn() };
+      const promise = new Promise((r) => (resolve = r));
+      return { open: () => promise as Promise<never>, done: () => resolve(source), source };
+    };
+    beforeEach(() => {
+      attach = jest.spyOn(regionStore, 'attachRegionSource').mockImplementation(() => undefined);
+      jest.spyOn(regionStore, 'detachRegionSources').mockImplementation(() => undefined);
+      setRegions = jest.spyOn(regionStore, 'setRegions');
+      (router as any).plottedInfo = { isStack: false, fileName: 'a.tif' };
+    });
+
+    it('changes nothing on another image when the source opens after it was shown', async () => {
+      const a = deferred();
+      const applied = router.importRegionSourceOpener(a.open);
+      (router as any).plottedInfo = { isStack: false, fileName: 'b.tif' }; // image B shown meanwhile
+      a.done();
+      expect(await applied).toBe(false);
+      expect(attach).not.toHaveBeenCalled();
+      expect(setRegions).not.toHaveBeenCalled();
+      expect(a.source.dispose).toHaveBeenCalled();
+    });
+
+    it('lets the newer import win when two complete in reverse order', async () => {
+      const first = deferred();
+      const second = deferred();
+      const one = router.importRegionSourceOpener(first.open);
+      const two = router.importRegionSourceOpener(second.open);
+      second.done();
+      expect(await two).toBe(true);
+      first.done();
+      expect(await one).toBe(false);
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(first.source.dispose).toHaveBeenCalled();
+    });
+
+    it("drops decoded slices whose ticket went stale (the editor's volume and folder imports)", () => {
+      const ticket = router.regionImportTicket();
+      (router as any).plottedInfo = { isStack: false, fileName: 'b.tif' };
+      expect(
+        router.importSliceRegionSources(new Map([[0, () => Promise.resolve({} as never)]]), ticket),
+      ).toBeNull();
+      expect(attach).not.toHaveBeenCalled();
+      (router as any).plottedInfo = { isStack: false, fileName: 'a.tif' };
+      const fresh = router.regionImportTicket();
+      expect(router.importSliceRegionSources(new Map([[0, () => Promise.resolve({} as never)]]), fresh)).toBe(1);
+      expect(attach).toHaveBeenCalledWith(expect.any(Function), { slice: 0 }, true);
+    });
+  });
+
   // ── regions in 3D ─────────────────────────────────────────────────────
   it('names a 3D build on the loading badge until it settles, once per mesh', async () => {
     const done = jest.fn();

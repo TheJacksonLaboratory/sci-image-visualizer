@@ -39,7 +39,7 @@
       size="small"
       [text]="true"
       styleClass="mr-2"
-      pTooltip="Upload and display regions from geojson file."
+      pTooltip="Import regions: a GeoJSON file, or a label volume (.nii, .nii.gz, .nrrd) chosen with its ontology JSON for the class tree."
       tooltipPosition="bottom"
       (click)="roiFileInput.click()"
     >
@@ -47,9 +47,29 @@
     <input
       #roiFileInput
       type="file"
-      accept=".geojson,.json"
+      accept=".geojson,.json,.nii,.gz,.nrrd"
+      multiple
       hidden
       (change)="importRois($event); roiFileInput.value = ''"
+    />
+    <p-button
+      icon="pi pi-folder-open"
+      size="small"
+      [text]="true"
+      styleClass="mr-2"
+      pTooltip="Import a folder of per-slice GeoJSON files (one per slice, in name order, with its regionset.json class tree)."
+      tooltipPosition="bottom"
+      ariaLabel="Import a folder of regions"
+      (click)="roiFolderInput.click()"
+    >
+    </p-button>
+    <input
+      #roiFolderInput
+      type="file"
+      webkitdirectory
+      multiple
+      hidden
+      (change)="importRois($event); roiFolderInput.value = ''"
     />
     <p-button
       size="small"
@@ -70,6 +90,19 @@
       tooltipPosition="bottom"
       (click)="persistRegions()"
       [disabled]="(!regions || !regions.length) && !hasRegionSource"
+    >
+    </p-button>
+    <p-button
+      *ngIf="canImportFromServer"
+      icon="pi pi-cloud-download"
+      size="small"
+      [text]="true"
+      styleClass="mr-2"
+      pTooltip="Import regions from server: a GeoJSON file, a folder of per-slice GeoJSON files or a label volume (.nii, .nii.gz, .nrrd)."
+      tooltipPosition="bottom"
+      ariaLabel="Import regions from server"
+      [loading]="importing"
+      (click)="importFromServer()"
     >
     </p-button>
     <p-button

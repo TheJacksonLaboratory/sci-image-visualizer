@@ -31,6 +31,9 @@ interface ImageSources {
   perSlice: Map<number, Entry>;
   /** Source feature ids taken into the working set (or deleted), per slice. */
   taken: Map<number, ReadonlySet<string>>;
+  /** Slices whose source was imported (not the image's own regions): a save writes them, though
+   *  nothing was taken, since they are on no file yet. */
+  imported: Set<number>;
 }
 
 const NONE: ReadonlySet<string> = new Set<string>();
@@ -53,8 +56,17 @@ export class RegionSourceScope {
   /** The entry of the slice on screen: kept open. */
   private shown: Entry | null = null;
 
-  /** Attach `open` to `image` for `slices`, replacing (and closing) what was there. */
-  attach(image: string, open: RegionSourceOpener, slices: RegionSourceSlices): void {
+  /**
+   * Attach `open` to `image` for `slices`, replacing (and closing) what was there. `imported` names
+   * the slices it brings that a save must write (see {@link importedSlices}): for a source of one
+   * slice, that slice when non-empty; for a `'planes'` source, the slices its planes cover.
+   */
+  attach(
+    image: string,
+    open: RegionSourceOpener,
+    slices: RegionSourceSlices,
+    imported: readonly number[] = [],
+  ): void {
     const sources = this.imageSources(image);
     const entry: Entry = { open, source: null, ready: null };
     if (slices === 'planes') {
@@ -63,12 +75,15 @@ export class RegionSourceScope {
       sources.perSlice.forEach((e) => this.close(e));
       sources.perSlice.clear();
       sources.taken.clear();
+      sources.imported = new Set(imported);
     } else {
       const old = sources.perSlice.get(slices.slice);
       if (old) this.close(old);
       entry.plane = slices.plane ?? 0;
       sources.perSlice.set(slices.slice, entry);
       sources.taken.delete(slices.slice);
+      if (imported.length) sources.imported.add(slices.slice);
+      else sources.imported.delete(slices.slice);
     }
   }
 
@@ -89,6 +104,7 @@ export class RegionSourceScope {
     this.close(entry);
     sources.perSlice.delete(slice);
     sources.taken.delete(slice);
+    sources.imported.delete(slice);
   }
 
   /** The slice on screen (null: none): its source stays open while others are read. */
@@ -139,6 +155,12 @@ export class RegionSourceScope {
     return taken ? Array.from(taken.values()).flatMap((ids) => Array.from(ids)) : [];
   }
 
+  /** The slices of `image` whose source was imported (see {@link attach}), in order. */
+  importedSlices(image: string | undefined): number[] {
+    const imported = image ? this.images.get(image)?.imported : undefined;
+    return imported ? Array.from(imported).sort((a, b) => a - b) : [];
+  }
+
   /** The slices of `image` with anything taken from their source. */
   slicesWithTaken(image: string | undefined): number[] {
     const taken = image ? this.images.get(image)?.taken : undefined;
@@ -162,7 +184,7 @@ export class RegionSourceScope {
   private imageSources(image: string): ImageSources {
     let sources = this.images.get(image);
     if (!sources) {
-      sources = { planes: null, perSlice: new Map(), taken: new Map() };
+      sources = { planes: null, perSlice: new Map(), taken: new Map(), imported: new Set() };
       this.images.set(image, sources);
     }
     return sources;

@@ -3,7 +3,7 @@ import { Observable } from 'rxjs';
 import { Region } from '../models/region';
 import { ClassPreset, PresetSet } from '../models/class-preset';
 import { IImageMetadata } from './image.contract';
-import type { RegionSourceView } from '../region-source/region-source';
+import type { RegionSource, RegionSourceView } from '../region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-tiles';
 import type { RegionStyle } from '../region-overlay/region-style';
 
@@ -107,6 +107,27 @@ export interface IRegionEditorApi {
    * and should be imported as regions; rejects when it is not a GeoJSON FeatureCollection.
    */
   importRegionSource?(geoJsonStr: string): Promise<boolean>;
+  /**
+   * A ticket for an import about to read or decode its files: an import method given a stale one
+   * (another import took a ticket since, or another image was plotted) changes nothing.
+   */
+  regionImportTicket?(): number;
+  /**
+   * Replace the regions and region sources with one source per slice (an imported label volume,
+   * or a folder of per-slice region files): openers by slice index, each opened the first time its
+   * slice is shown. A single image takes slice 0's. Returns how many slices have one, or null
+   * (changing nothing) when `ticket` is stale. A save writes every imported slice.
+   */
+  importSliceRegionSources?(
+    openers: ReadonlyMap<number, () => Promise<RegionSource>>,
+    ticket?: number,
+  ): number | null;
+  /**
+   * Replace them with one imported source (a region set a server serves): over every slice of a
+   * stack when z-indexed, else on the slice shown. Resolves false, changing nothing, when the
+   * import went stale while the source opened.
+   */
+  importRegionSourceOpener?(open: () => Promise<RegionSource>, ticket?: number): Promise<boolean>;
   /**
    * Drop the slice's region source, for regions imported in its place (a small file replacing a
    * large one). The other slices keep theirs.
