@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-17
+
 ### Added
 
 - **Import label volumes as regions**: the Region Editor's import takes a NIfTI (`.nii`,
@@ -2294,7 +2296,9 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.8.1...v0.8.2
