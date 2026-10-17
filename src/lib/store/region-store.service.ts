@@ -387,8 +387,12 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    */
   getStackSaveSlices(): Map<number, Region[]> {
     const slices = this.scope.stackSaveSlices(this.regions);
-    // A slice whose region source lost features (taken, deleted) is re-written too.
-    const changed = this.sources.slicesWithTaken(this.scope.activeImage).filter((z) => !slices.has(z));
+    // A slice whose region source lost features (taken, deleted) is re-written too, and so is one
+    // whose source was imported: it is on no file yet.
+    const image = this.scope.activeImage;
+    const changed = [
+      ...new Set([...this.sources.slicesWithTaken(image), ...this.sources.importedSlices(image)]),
+    ].filter((z) => !slices.has(z));
     if (!changed.length) return slices;
     for (const z of changed) slices.set(z, []);
     return new Map(Array.from(slices).sort((a, b) => a[0] - b[0]));
@@ -818,15 +822,23 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * source was closed to save memory). `slices` says which slice of the current image it
    * serves: one (default: the slice shown; plane 0 of the source), or `'planes'`, every slice z
    * from plane z of a z-indexed source. Replaces the source those slices had.
+   *
+   * `imported` marks a source brought in over the image (an imported volume, folder or served set)
+   * rather than the image's own regions: it is on no file yet, so a save writes its slices though
+   * nothing was taken from it — `true` for a source of one slice, the slices its planes cover for a
+   * `'planes'` source. The image's own sources are not marked: loading them changes nothing to save.
    */
   attachRegionSource(
     source: RegionSource | RegionSourceOpener,
     slices: RegionSourceSlices = { slice: this.sourceSlice },
+    imported: boolean | readonly number[] = false,
   ): void {
     const image = this.scope.activeImage;
     if (!image) return;
     const open: RegionSourceOpener = typeof source === 'function' ? source : () => Promise.resolve(source);
-    this.sources.attach(image, open, slices);
+    const importedSlices =
+      imported === false ? [] : imported === true ? (slices === 'planes' ? [] : [slices.slice]) : imported;
+    this.sources.attach(image, open, slices, importedSlices);
     this.sourcesVersion++;
     this.refreshSourceView();
   }
@@ -1214,21 +1226,48 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   }
 
   /**
-   * `regions` as a GeoJSON FeatureCollection string merged with the region source behind them:
-   * the source's features that were not taken (or deleted), then `regions`. Without a source,
-   * {@link getGeoJsonString}. `slice` names a folder stack's slice (default the one shown);
-   * on a z-indexed stack's source (`'planes'`) the export spans every slice.
+   * `regions` as a GeoJSON FeatureCollection string merged with the region sources behind them:
+   * the sources' features that were not taken (or deleted), then `regions`. Without a source,
+   * {@link getGeoJsonString}.
+   *
+   * `slice` names one slice-file of a folder stack (a per-slice-file save): its source's features,
+   * on the file's own plane — of a z-indexed source over every slice, only that slice's plane.
+   * Without it, the export is the image's: on a stack saved as one file, every slice's source
+   * (each feature on its slice's plane, `geometry.plane.z`) and a z-indexed source's every plane;
+   * otherwise the source of the slice shown.
    */
-  async getGeoJsonWithSource(regions: Region[], slice = this.sourceSlice): Promise<string> {
+  async getGeoJsonWithSource(regions: Region[], slice?: number): Promise<string> {
     const image = this.scope.activeImage;
     const planes = this.scope.stackMode && this.sources.hasPlanesSource(image);
-    const binding = await this.sources.binding(image, slice);
-    if (!binding) return regionsToGeoJson(regions);
     const features = regions
       .filter((r) => !r.isProfile?.())
       .map((r) => featureFromRegion(r))
       .filter((f): f is object => !!f);
-    const exclude = planes ? this.sources.allTaken(image) : Array.from(this.sources.taken(image, slice));
+    if (slice === undefined && this.scope.stackMode && this.scope.saveLayout === 'combined' && !planes) {
+      const sliced = this.sources.slicesWithSource(image);
+      if (sliced.length) {
+        const sourceFeatures: object[] = [];
+        for (const z of sliced) {
+          const binding = await this.sources.binding(image, z);
+          if (!binding) continue;
+          const exported = await binding.source.exportGeoJson(Array.from(this.sources.taken(image, z)), []);
+          sourceFeatures.push(...onPlane(planeFeatures(exported, binding.plane), z));
+        }
+        return JSON.stringify({ type: 'FeatureCollection', features: [...sourceFeatures, ...features] });
+      }
+    }
+    const at = slice ?? this.sourceSlice;
+    const binding = await this.sources.binding(image, at);
+    if (!binding) return regionsToGeoJson(regions);
+    if (planes && slice !== undefined) {
+      // One slice-file of a z-indexed source: that slice's plane, written on the file's plane 0.
+      const exported = await binding.source.exportGeoJson(this.sources.allTaken(image), []);
+      return JSON.stringify({
+        type: 'FeatureCollection',
+        features: [...onPlane(planeFeatures(exported, binding.plane), 0), ...features],
+      });
+    }
+    const exclude = planes ? this.sources.allTaken(image) : Array.from(this.sources.taken(image, at));
     return binding.source.exportGeoJson(exclude, features);
   }
 
@@ -1477,4 +1516,23 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   private indexOfId(id: number): number {
     return this.regions.findIndex((r) => r.id === id);
   }
+}
+
+/** The features of an exported FeatureCollection on `plane` (a missing plane is plane 0). */
+function planeFeatures(geoJson: string, plane: number): GeoFeature[] {
+  const features = (JSON.parse(geoJson)?.features ?? []) as GeoFeature[];
+  return features.filter((f) => (f?.geometry?.plane?.z ?? 0) === plane);
+}
+
+/** `features` moved onto plane `z`, as QuPath writes it: `geometry.plane`, left out for plane 0. */
+function onPlane(features: GeoFeature[], z: number): GeoFeature[] {
+  return features.map((f) => {
+    const { plane: _plane, ...geometry } = f.geometry ?? {};
+    return { ...f, geometry: z === 0 ? geometry : { ...geometry, plane: { c: -1, z, t: 0 } } };
+  });
+}
+
+interface GeoFeature {
+  geometry?: { plane?: { z?: number }; [key: string]: unknown };
+  [key: string]: unknown;
 }

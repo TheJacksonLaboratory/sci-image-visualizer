@@ -1294,6 +1294,9 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.importFailed(new Error('This viewer cannot hold region sources.'));
       return;
     }
+    // Taken before the files are read: decoding a volume takes a while, and the import must land
+    // on the image it was started for, not on one shown meanwhile.
+    const ticket = this.regionApi.regionImportTicket?.();
     try {
       const openers = new Map<number, RegionSourceOpener>();
       let summary: string;
@@ -1312,7 +1315,11 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         );
         summary = `${plan.slices.length} slice files`;
       }
-      const attached = attach(openers);
+      const attached = attach(openers, ticket);
+      if (attached === null) {
+        this.importStale();
+        return;
+      }
       this.afterSourceImport();
       this.toast(
         'success',
@@ -1331,13 +1338,27 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.importFailed(new Error('This viewer cannot hold region sources.'));
       return;
     }
+    const ticket = this.regionApi.regionImportTicket?.();
     try {
-      await importSource(() => openHttpRegionSource(url, { http: this.http ?? undefined }));
+      const applied = await importSource(
+        () => openHttpRegionSource(url, { http: this.http ?? undefined }),
+        ticket,
+      );
+      if (applied === false) {
+        this.importStale();
+        return;
+      }
       this.afterSourceImport();
       this.toast('success', 'Regions imported', name ?? url);
     } catch (err) {
       this.importFailed(err);
     }
+  }
+
+  /** An import that finished after another image was shown (or another import began): dropped. */
+  private importStale(): void {
+    this.toast('info', 'Import discarded', 'The image changed while the regions were being read.');
+    this.changed();
   }
 
   /** The table and selection after the regions were replaced by imported sources. */

@@ -2076,7 +2076,7 @@ describe('RegionEditorComponent importing region sets', () => {
       setSelectedRegions: jest.fn(),
       getMaskImageSize: () => ({ width: 2, height: 2 }),
       importSliceRegionSources: jest.fn((openers: ReadonlyMap<number, unknown>) => openers.size),
-      importRegionSourceOpener: jest.fn(async () => undefined),
+      importRegionSourceOpener: jest.fn(async () => true),
     });
     shallowEditor();
     await TestBed.configureTestingModule({
@@ -2180,8 +2180,24 @@ describe('RegionEditorComponent importing region sets', () => {
     picked.next({ kind: 'source', url: 'https://server/api/regions/ID/', name: 'annotation_25_coronal' });
     picked.complete();
     await settle();
-    expect(api.importRegionSourceOpener).toHaveBeenCalledWith(expect.any(Function));
+    // No ticket: this host's API has no regionImportTicket.
+    expect(api.importRegionSourceOpener).toHaveBeenCalledWith(expect.any(Function), undefined);
     expect((component as any).importing).toBe(false);
+  });
+
+  it('discards an import that finished after the image changed, saying so', async () => {
+    (api as any).regionImportTicket = jest.fn(() => 7);
+    (api.importSliceRegionSources as jest.Mock).mockReturnValueOnce(null);
+    await importFiles([
+      { name: 'annotation.nrrd', data: nrrd() },
+      { name: 'ontology/structure_graph_1.json', data: JSON.stringify(allen) },
+    ]);
+    // The ticket taken before decoding travels with the import.
+    expect((api.importSliceRegionSources as jest.Mock).mock.calls[0][1]).toBe(7);
+    expect(toasts).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'info', summary: 'Import discarded' }),
+    );
+    expect(toasts).not.toHaveBeenCalledWith(expect.objectContaining({ summary: 'Regions imported' }));
   });
 
   it('says why when the chosen files are not regions', async () => {

@@ -37,6 +37,7 @@ import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-da
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
+import { RegionScopeCache } from './store/region-scope-cache';
 import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
 import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
 import type { RegionStyle } from './region-overlay/region-style';
@@ -150,6 +151,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private readonly sectionSubs = new Subscription();
   /** The image info and screen height of the last plot (what the slice pane mounts). */
   private plottedInfo: IImageInfo | null = null;
+  /** The current region import (see regionImportTicket): its id and the image it was taken for. */
+  private importTicket: { id: number; image: string | undefined } = { id: 0, image: undefined };
   private plottedHeight = 0;
 
   constructor(
@@ -747,12 +750,35 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /**
+   * A ticket for a region import that is about to read or decode its files: the import methods
+   * given it change nothing once it is stale — another import took a ticket since, another image
+   * was plotted, or the service was destroyed — so an import that finishes late never lands on an
+   * image it was not started for.
+   */
+  regionImportTicket(): number {
+    this.importTicket = { id: this.importTicket.id + 1, image: this.importImageKey() };
+    return this.importTicket.id;
+  }
+
+  /** Whether `ticket` is still the current import's, on the image it was taken for. */
+  private importTicketValid(ticket: number): boolean {
+    return ticket === this.importTicket.id && this.importTicket.image === this.importImageKey();
+  }
+
+  private importImageKey(): string | undefined {
+    return RegionScopeCache.imageKey(this.plottedInfo ?? undefined);
+  }
+
+  /**
    * Replace the image's regions and region sources with one source per slice, as an imported label
    * volume or folder of per-slice region files gives them: `openers` by slice index, each opened
-   * the first time its slice is shown. A single image takes slice 0's. Resolves how many slices
-   * have a source.
+   * the first time its slice is shown. A single image takes slice 0's. Returns how many slices
+   * have a source, or null (changing nothing) when `ticket` is stale (see
+   * {@link regionImportTicket}). The sources are marked imported, so a save writes every slice.
    */
-  importSliceRegionSources(openers: ReadonlyMap<number, RegionSourceOpener>): number {
+  importSliceRegionSources(openers: ReadonlyMap<number, RegionSourceOpener>, ticket?: number): number | null {
+    if (ticket !== undefined && !this.importTicketValid(ticket)) return null;
+    this.regionImportTicket(); // supersedes any import still in flight
     const info = this.plottedInfo;
     this.regionStore.detachRegionSources();
     if (!info?.isStack) {
@@ -760,37 +786,47 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.regionStore.setRegions([]);
       this.regionStore.resetUndoHistory();
       if (!first) return 0;
-      this.regionStore.attachRegionSource(first, { slice: 0 });
+      this.regionStore.attachRegionSource(first, { slice: 0 }, true);
       return 1;
     }
     this.enterImportedStack(info);
-    for (const [z, open] of openers) this.regionStore.attachRegionSource(open, { slice: z });
+    for (const [z, open] of openers) this.regionStore.attachRegionSource(open, { slice: z }, true);
     return openers.size;
   }
 
   /**
    * Replace the image's regions and region sources with one imported source (a region set the
    * host's server serves): over every slice of a stack when it is z-indexed, else on the slice
-   * shown, as {@link applyImageRois} lays out an image's own.
+   * shown, as {@link applyImageRois} lays out an image's own. Resolves false, changing nothing
+   * (and disposing the source), when the import went stale while it opened: another import, or
+   * another image (see {@link regionImportTicket}; one is taken here when `ticket` is not given).
    */
-  async importRegionSourceOpener(open: RegionSourceOpener): Promise<void> {
+  async importRegionSourceOpener(open: RegionSourceOpener, ticket?: number): Promise<boolean> {
+    const mine = ticket ?? this.regionImportTicket();
+    if (!this.importTicketValid(mine)) return false;
     let first: RegionSource | null = await open();
+    if (!this.importTicketValid(mine)) {
+      first.dispose();
+      return false;
+    }
     const reuse: RegionSourceOpener = () => {
       const source = first;
       first = null;
       return source ? Promise.resolve(source) : open();
     };
     const info = this.plottedInfo;
-    const zIndexed = !!info?.isStack && first.info.planes.some((p) => p !== 0);
+    const planes = first.info.planes;
+    const zIndexed = !!info?.isStack && planes.some((p) => p !== 0);
     this.regionStore.detachRegionSources();
     if (zIndexed) {
       this.enterImportedStack(info as IImageInfo);
-      this.regionStore.attachRegionSource(reuse, 'planes');
-      return;
+      this.regionStore.attachRegionSource(reuse, 'planes', [...planes]);
+      return true;
     }
     this.regionStore.setRegions([]);
     this.regionStore.resetUndoHistory();
-    this.regionStore.attachRegionSource(reuse, { slice: this.regionStore.getDisplaySlice() });
+    this.regionStore.attachRegionSource(reuse, { slice: this.regionStore.getDisplaySlice() }, true);
+    return true;
   }
 
   /** Empty every slice of a stack (its regions and undo history) for regions imported over it. */
@@ -1295,6 +1331,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    *  component for a `provideVisualization()` chain. The dataset subscription would
    *  otherwise keep the whole isolated chain reachable from the root data port. */
   ngOnDestroy(): void {
+    this.importTicket = { id: this.importTicket.id + 1, image: undefined }; // a late import changes nothing
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
     this.regionUpdates.unsubscribe();

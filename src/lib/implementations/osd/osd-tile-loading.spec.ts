@@ -1,20 +1,29 @@
 import { OsdTileLoading } from './osd-tile-loading';
 
-type Handler = (e: { fullyLoaded: boolean }) => void;
+type Handler = () => void;
 
-/** An OSD world item: loaded or not, firing `fully-loaded-change` as it changes. */
-function item(fullyLoaded: boolean) {
+/** An OSD world item: loaded or not, shown or not, firing `fully-loaded-change` and
+ *  `opacity-change` as they change. */
+function item(fullyLoaded: boolean, opacity = 1) {
   const handlers = new Set<Handler>();
   return {
     loaded: fullyLoaded,
+    opacity,
     getFullyLoaded() {
       return this.loaded;
+    },
+    getOpacity() {
+      return this.opacity;
     },
     addHandler: (_: string, h: Handler) => handlers.add(h),
     removeHandler: (_: string, h: Handler) => handlers.delete(h),
     set(loaded: boolean) {
       this.loaded = loaded;
-      handlers.forEach((h) => h({ fullyLoaded: loaded }));
+      handlers.forEach((h) => h());
+    },
+    setOpacity(o: number) {
+      this.opacity = o;
+      handlers.forEach((h) => h());
     },
     handlers,
   };
@@ -69,6 +78,38 @@ describe('OsdTileLoading', () => {
     expect(loading.text).toBe('Image reloading…');
     b.set(true);
     expect(loading.text).toBe('');
+    loading.destroy();
+  });
+
+  it('ignores a hidden channel, which loads nothing by design, while the shown one is ready', () => {
+    const shown = item(true);
+    const hidden = item(false, 0); // opacity 0, not preloaded: never fully loaded
+    const loading = new OsdTileLoading(viewer([shown, hidden]));
+    expect(loading.text).toBe('');
+    loading.destroy();
+  });
+
+  it('stops counting a channel hidden while loading, and counts it again when shown', () => {
+    const channel = item(false);
+    const loading = new OsdTileLoading(viewer([channel]));
+    expect(loading.text).toBe('Image reloading…');
+    channel.setOpacity(0);
+    expect(loading.text).toBe('');
+    channel.setOpacity(1); // shown again: it loads now
+    expect(loading.text).toBe('Image reloading…');
+    channel.set(true);
+    expect(loading.text).toBe('');
+    loading.destroy();
+  });
+
+  it('ignores a slice loading in the background (added hidden) until it is revealed', () => {
+    const v = viewer([item(true)]);
+    const loading = new OsdTileLoading(v);
+    const background = item(false, 0);
+    v.fire('add-item', background);
+    expect(loading.text).toBe('');
+    background.setOpacity(1); // scrubbed to it before its tiles are in
+    expect(loading.text).toBe('Image reloading…');
     loading.destroy();
   });
 

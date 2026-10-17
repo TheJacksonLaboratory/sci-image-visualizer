@@ -320,6 +320,81 @@ describe('RegionStore region sources', () => {
     expect(out.features).toEqual([]);
   });
 
+  describe('imported sources (a label volume, a folder, a served set) are saved', () => {
+    const ids = (geoJson: string) => JSON.parse(geoJson).features.map((f: { id: string }) => f.id);
+    const planes = (geoJson: string) =>
+      JSON.parse(geoJson).features.map((f: { geometry: { plane?: { z: number } } }) => f.geometry.plane?.z ?? 0);
+
+    it('writes every untouched imported slice of a folder stack, each on its own file', async () => {
+      store.enterStackMode(new Map(), 0, 'per-slice-file');
+      store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 }, true);
+      store.attachRegionSource(tableSource([feature('b', 0)]), { slice: 1 }, true);
+      expect(Array.from(store.getStackSaveSlices().keys())).toEqual([0, 1]);
+      const slice1 = await store.getGeoJsonWithSource([], 1);
+      expect(ids(slice1)).toEqual(['b']);
+      expect(planes(slice1)).toEqual([0]); // the file's own plane
+    });
+
+    it('still writes the other imported slices after one is edited', async () => {
+      store.enterStackMode(new Map(), 0, 'per-slice-file');
+      store.attachRegionSource(tableSource([feature('a', 0), feature('a2', 20)]), { slice: 0 }, true);
+      store.attachRegionSource(tableSource([feature('b', 0)]), { slice: 1 }, true);
+      store.setDisplaySlice(0);
+      await flush();
+      store.deleteSourceFeatures(['a2']);
+      expect(Array.from(store.getStackSaveSlices().keys())).toEqual([0, 1]);
+      expect(ids(await store.getGeoJsonWithSource([], 0))).toEqual(['a']);
+      expect(ids(await store.getGeoJsonWithSource([], 1))).toEqual(['b']);
+    });
+
+    it("leaves an image's own sources out of a save until something is taken from them", () => {
+      store.enterStackMode(new Map(), 0, 'per-slice-file');
+      store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 });
+      store.attachRegionSource(tableSource([feature('b', 0)]), { slice: 1 });
+      expect(store.getStackSaveSlices().size).toBe(0);
+    });
+
+    it('exports every slice of a stack saved as one file, each feature on its slice, without what was taken', async () => {
+      store.enterStackMode(new Map(), 0, 'combined');
+      store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 }, true);
+      store.attachRegionSource(tableSource([feature('b', 0), feature('b2', 20)]), { slice: 1 }, true);
+      store.attachRegionSource(tableSource([feature('c', 0)]), { slice: 2 }, true);
+      store.setDisplaySlice(1);
+      await flush();
+      store.deleteSourceFeatures(['b2']);
+      store.setDisplaySlice(0); // the slice shown does not limit the export
+      await flush();
+      const out = await store.getGeoJsonWithSource(store.getSliceRegions());
+      expect(ids(out)).toEqual(['a', 'b', 'c']);
+      expect(planes(out)).toEqual([0, 1, 2]);
+    });
+
+    it('keeps a region taken from a slice on that slice in the one-file export', async () => {
+      store.enterStackMode(new Map(), 0, 'combined');
+      store.attachRegionSource(tableSource([feature('a', 0)]), { slice: 0 }, true);
+      store.attachRegionSource(tableSource([feature('b', 0)]), { slice: 2 }, true);
+      store.setDisplaySlice(2);
+      await flush();
+      const [taken] = await store.takeSourceFeatures(['b']);
+      store.moveRegion(taken, 5, 0);
+      const out = JSON.parse(await store.getGeoJsonWithSource(store.getSliceRegions()));
+      expect(out.features).toHaveLength(2);
+      const moved = out.features.find(
+        (f: { geometry: { coordinates: number[][][] } }) => f.geometry.coordinates[0][0][0] === 5,
+      );
+      expect(moved.geometry.plane.z).toBe(2);
+    });
+
+    it("writes each slice-file of a z-indexed source with that slice's plane only", async () => {
+      store.enterStackMode(new Map(), 0, 'per-slice-file');
+      store.attachRegionSource(tableSource([feature('a', 0, 'A', 0), feature('b', 0, 'A', 1)]), 'planes', [0, 1]);
+      expect(Array.from(store.getStackSaveSlices().keys())).toEqual([0, 1]);
+      const slice1 = await store.getGeoJsonWithSource([], 1);
+      expect(ids(slice1)).toEqual(['b']);
+      expect(planes(slice1)).toEqual([0]);
+    });
+  });
+
   it('exports a z-indexed source over every slice, without what any slice took', async () => {
     store.enterStackMode(new Map(), 0, 'combined');
     store.attachRegionSource(tableSource([feature('a', 0, 'A', 0), feature('b', 0, 'A', 1)]), 'planes');

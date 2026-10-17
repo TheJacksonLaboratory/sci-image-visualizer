@@ -24,8 +24,15 @@ file was added.
   `RegionIoPort.pickServerRegions`: the host picks files (imported as chosen ones) or a region set
   its server serves (`{ kind: 'source', url }`, read through its `HttpClient`). The example app
   offers its tile server's region sets.
+- **Imported region sources are saved, and land only on the image they were started for.** A save
+  writes every slice an import brought, untouched ones included: a folder stack one file per slice
+  (a z-indexed set's plane for each), a stack saved as one file every slice's features on their
+  own plane. An import that finishes after another image was shown, or after a newer import began,
+  changes nothing ("Import discarded"); the host's `RegionEditorApi.regionImportTicket` ties an
+  import to the image it was started on.
 - **A loading message in the OpenSeadragon image view**: "Image reloading…" while it fetches the
-  tiles of what it shows, as napari's views show it for their image, cells and transcripts.
+  tiles of what it shows (hidden channels and slices cached in the background do not count), as
+  napari's views show it for their image, cells and transcripts.
 
 ### Fixed
 
@@ -41,24 +48,6 @@ file was added.
   dataset at once, found no plot element and alerted "Could not draw the dataset … the renderer
   could not start" over the main viewer. Its view now counts as ready only once its element is in
   the document, so an image-less draw waits until then.
-
-### Added
-
-- **Import label volumes as regions**: the Region Editor's import takes a NIfTI (`.nii`,
-  `.nii.gz`) or NRRD (`.nrrd`) label volume, chosen with its ontology JSON (an Allen
-  `structure_graph`, or a `regionset.json` naming each label), as one region source per slice:
-  each slice's labels traced into outlines the first time it is shown, classed and listed as the
-  ontology's tree. Sliced as the server opens the image: a 3D NRRD along its first axis (jit-service's
-  coronal sections of the Allen CCF), a NIfTI along its third. The CCF annotation imports identical
-  to the brain-atlas example's per-slice GeoJSON.
-- **Import a folder of per-slice GeoJSON files** (the new folder button): one region source per
-  slice, in natural name order, with the folder's `regionset.json` class tree and style.
-- **"Import regions from server"** beside "Save regions to server", when the host implements
-  `RegionIoPort.pickServerRegions`: the host picks files (imported as chosen ones) or a region set
-  its server serves (`{ kind: 'source', url }`, read through its `HttpClient`). The example app
-  offers its tile server's region sets.
-- **A loading message in the OpenSeadragon image view**: "Image reloading…" while it fetches the
-  tiles of what it shows, as napari's views show it for their image, cells and transcripts.
 
 ## [0.10.0] — 2026-10-16
 
