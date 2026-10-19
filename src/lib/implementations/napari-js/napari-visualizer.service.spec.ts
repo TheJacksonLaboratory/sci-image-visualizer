@@ -3023,19 +3023,44 @@ describe('NapariVisualizerService', () => {
       expect(screen.canvasTransform()).toEqual([1, 0, 0, 1, 0, 0]);
     });
 
-    it('an orbit clears only the regions drawn in 3D, not the ones it found', async () => {
+    /** A lasso drawn in the 3D view: committed through its overlay, as the drawing tools do. */
+    const lasso = (x: number, y: number) =>
+      (
+        service.getRegionOverlay() as unknown as {
+          commitRectangle(x: number, y: number, w: number, h: number): void;
+        }
+      ).commitRectangle(x, y, 5, 5);
+
+    it('an orbit clears only the regions drawn in 3D, not the ones it found or was given', async () => {
       // Regression (NAPARI-SVC-11): every camera change with any region present emptied the
       // app-wide RegionStore — including the image's own regions, which have nothing to do
-      // with a screen-space lasso.
+      // with a screen-space lasso. And regions put in the store after the view mounted (the
+      // structures a tree click takes from an imported atlas) are image-space too: an orbit
+      // deleting them lost them for good.
       regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
       const [found] = regionStore.getRegions();
       await mount3d();
-      regionStore.addRegion({ bounds: { x: 10, y: 10, width: 5, height: 5 } } as never);
-      expect(regionStore.getRegions()).toHaveLength(2);
+      lasso(10, 10);
+      regionStore.addRegion({ bounds: { x: 40, y: 40, width: 5, height: 5 } } as never);
+      const given = regionStore.getRegions().at(-1)!;
+      expect(regionStore.getRegions()).toHaveLength(3);
 
       const { camera3d } = (service as unknown as { viewer: Viewer }).viewer;
       camera3d.orbit(0.1, 0);
-      expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id]);
+      expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id, given.id]);
+    });
+
+    it('draws only its own lassos over the cloud, not image-space regions flat at canvas pixels', async () => {
+      // Regression: an atlas imported onto the volume, its structures taken into the store by a
+      // tree click, was drawn flat in the corner of the 3D view at its image coordinates.
+      regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
+      await mount3d();
+      regionStore.addRegion({ bounds: { x: 40, y: 40, width: 5, height: 5 } } as never);
+      lasso(10, 10);
+      const overlay = service.getRegionOverlay() as unknown as { redraw(): void; svg: SVGSVGElement };
+      overlay.redraw();
+      const drawn = Array.from(overlay.svg.querySelectorAll('rect[vector-effect="non-scaling-stroke"]'));
+      expect(drawn.map((r) => r.getAttribute('x'))).toEqual(['10']);
     });
 
     it('projects observations to canvas pixels through the 3D camera', async () => {

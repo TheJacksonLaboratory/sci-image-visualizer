@@ -170,23 +170,25 @@ export class NapariToolBridge {
    * A screen-space shape stops meaning anything the moment the camera moves, so an orbit clears
    * the regions drawn in this view (and only those). The SELECTION they produced is kept: that is
    * the durable artefact, and the highlighted points stay highlighted from every angle.
+   *
+   * Every other region in the store is in image space - the image's own, an imported set,
+   * structures a tree click took from a region source - so the overlay neither draws nor picks it
+   * (it would lie flat at canvas pixels over the cloud), and an orbit leaves it alone: they show
+   * in 3D as their reconstructions instead.
    */
   install3dInteraction(viewer: Viewer, host: HTMLElement): void {
     const { regionStore } = this.deps;
     // World here is the canvas, not the image: no region source to draw.
-    this.regionOverlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), regionStore, {
+    const overlay = new NapariRegionOverlay(host, this.screenSpaceViewer(viewer), regionStore, {
       regionSource: false,
+      screenSpace: true,
     });
+    this.regionOverlay = overlay;
     this.buildCoordinateTransform();
-    // Regions already in the shared store when the 3D view mounted (the image's own, say) are
-    // not screen-space shapes and must survive an orbit; only those drawn here are cleared.
     // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
-    const foreign = new Set(regionStore.getRegions().map((r) => r.id));
     this.cameraOff = viewer.camera3d.changed.connect(() => {
-      const drawn = regionStore
-        .getRegions()
-        .filter((r) => !foreign.has(r.id))
-        .map((r) => r.id);
+      const present = new Set(regionStore.getRegions().map((r) => r.id));
+      const drawn = overlay.ownRegionIds().filter((id) => present.has(id));
       // Not an edit of the user's: no undo step (NAPARI-SVC-11).
       if (drawn.length) this.host.inZone(() => regionStore.removeRegions(drawn, { recordUndo: false }));
     });

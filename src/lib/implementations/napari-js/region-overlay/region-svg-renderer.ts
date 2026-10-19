@@ -39,15 +39,20 @@ export class NapariRegionSvgRenderer {
   /** Dedicated marquee rect element, updated directly during the drag (no full region redraw). */
   private marqueeEl: SVGRectElement | null = null;
 
+  /**
+   * @param draws which regions are this overlay's to draw (default: every one); the others are
+   *        left out of the shapes and handles, keeping the store's indices
+   */
   constructor(
     private readonly svg: SVGSVGElement,
     private readonly store: RegionStore,
+    private readonly draws: (region: Region) => boolean = () => true,
   ) {
     this.renderer = new SvgRegionRenderer(svg, {
       rectElement: 'rect',
       styleShape: (el, region, selected) => this.style(el, this.strokeOf(region), selected),
       decorate: (region, _i, _selected, layer) => this.drawLabel(region, layer),
-      skip: (region) => !!region.isProfile?.() || store.isClassHidden(region.label),
+      skip: (region) => !!region.isProfile?.() || store.isClassHidden(region.label) || !draws(region),
     });
   }
 
@@ -66,7 +71,7 @@ export class NapariRegionSvgRenderer {
     this.renderer.renderOverlay((layer) => {
       for (const i of selected) {
         const region = regions[i];
-        if (region && !region.isProfile?.()) this.drawHandles(region, layer);
+        if (region && !region.isProfile?.() && this.draws(region)) this.drawHandles(region, layer);
       }
       this.drawDraft(draft, layer);
     });
