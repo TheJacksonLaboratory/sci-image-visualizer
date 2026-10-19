@@ -129,7 +129,7 @@ let opened = 0;
 /**
  * The image `files`' annotations are shown on by themselves (see the module comment). Throws when
  * there are none, or when their regions span more than {@link ANNOTATION_IMAGE_MAX_DIM} pixels
- * (open them on their own image instead).
+ * (they are then imported onto the image they were drawn on).
  */
 export async function openAnnotations(
   files: readonly RegionImportFile[],
@@ -328,7 +328,7 @@ function checkSize(width: number, height: number): void {
   if (Math.max(width, height) > ANNOTATION_IMAGE_MAX_DIM) {
     throw new Error(
       `The annotations span ${width} × ${height} pixels, more than ${ANNOTATION_IMAGE_MAX_DIM} on a side: ` +
-        'open them on their own image instead.',
+        'open the image they were drawn on, and import them onto it from the Region Editor.',
     );
   }
 }

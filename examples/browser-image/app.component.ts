@@ -17,6 +17,7 @@ import {
   ExampleImageStateAdapter,
   ServerTileAccessAdapter,
   StubRegionIoAdapter,
+  SupersededAnnotationsError,
 } from './serverless-ports';
 
 interface Sample {
@@ -942,6 +943,8 @@ export class AppComponent implements OnDestroy {
 
   /** What the last "Open annotations…" opened, or why it could not. */
   annotationStatus = '';
+  /** Bumped by every "Open annotations…" choice: only the latest's outcome is shown. */
+  private annotationChoice = 0;
 
   async onAnnotations(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
@@ -950,14 +953,18 @@ export class AppComponent implements OnDestroy {
     if (!files.length) return;
     this.active = files[0].webkitRelativePath.split('/')[0] || files[0].name;
     this.spatialData.clear();
+    const choice = ++this.annotationChoice;
     this.loading = true;
     this.annotationStatus = 'Reading annotations…';
     try {
       this.annotationStatus = await this.imageState.setAnnotationsFromFiles(files);
     } catch (err) {
+      // A later choice is showing (or on its way): this one says nothing.
+      if (err instanceof SupersededAnnotationsError || choice !== this.annotationChoice) return;
       this.annotationStatus = `Could not open them: ${(err as Error)?.message ?? err}`;
     } finally {
-      this.loading = false;
+      // A later choice still reading keeps the loading state.
+      if (choice === this.annotationChoice) this.loading = false;
     }
   }
 

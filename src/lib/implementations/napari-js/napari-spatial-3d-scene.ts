@@ -149,11 +149,15 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * own: image pixel (x, y) is voxel (x, y), slice k is voxel plane k, and the box is the volume's
    * voxels times its voxel size, centred on the origin as napari centres the volume (and the cloud
    * is offset to sit in it). Only when the plotted image IS that volume's stack: regions drawn on
-   * another image (a tissue image) have no place in it, and are not shown.
+   * another image (a tissue image) have no place in it, and are not shown - nor are surfaces
+   * placed in a volume this one replaced.
    */
   private placeRegionMeshes(dataset: SpatialDataset): void {
     const meta = dataset.volume;
-    if (!meta || !this.isVolumeStack(meta)) return;
+    if (!meta || !this.isVolumeStack(meta)) {
+      this.regionMeshes.clearFrame();
+      return;
+    }
     const [vx, vy, vz] = meta.voxelSize;
     this.regionMeshes.setFrame({
       size: [meta.width, meta.height, meta.depth],
@@ -806,6 +810,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume = null;
       this.volumeKey = null;
     }
+    // The surfaces sat in the volume just removed (or there was none): down until one is placed.
+    this.regionMeshes.clearFrame();
     this.origin = [0, 0, 0];
     if (!meta || !port?.getVolume) return;
 
@@ -842,6 +848,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   /** Drop every layer of the cloud (the dataset went away, or has no z). */
   private removeLayers(viewer: Viewer): void {
+    this.regionMeshes.clearFrame();
     for (const layer of [this.points, this.volume, this.geneMapLayer, ...this.densityLayers]) {
       if (layer) viewer.layers.remove(layer);
     }

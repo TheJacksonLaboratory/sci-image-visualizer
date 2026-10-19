@@ -200,7 +200,9 @@ describe('openAnnotations, the sources it measures', () => {
     const opened = [fake([0, 0, 100, 100]), fake([0, 0, 20000, 9000])];
     let i = 0;
     const openGeoJson = async () => opened[i++];
-    await expect(openAnnotations(slices(2), { openGeoJson })).rejects.toThrow(/8192/);
+    await expect(openAnnotations(slices(2), { openGeoJson })).rejects.toThrow(
+      /more than 8192 on a side: open the image they were drawn on, and import them onto it/,
+    );
     expect(opened.map((s) => s.dispose.mock.calls.length)).toEqual([1, 1]);
   });
 

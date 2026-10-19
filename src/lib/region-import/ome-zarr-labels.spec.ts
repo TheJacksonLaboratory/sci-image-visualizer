@@ -141,3 +141,36 @@ describe('readOmeZarrLabels, slices read at once', () => {
     expect(Array.from(await stack.labels(0))).toEqual([10]);
   });
 });
+
+describe('readOmeZarrLabels, chunk contents', () => {
+  /** A one-image label store in memory: `zarray` its array metadata, `chunks` its chunk files. */
+  const store = (zarray: object, chunks: Record<string, Uint8Array>) => [
+    importFile(
+      JSON.stringify({ 'image-label': {}, multiscales: [{ axes: ['z', 'y', 'x'], datasets: [{ path: '0' }] }] }),
+      'labels/a/.zattrs',
+    ),
+    importFile(JSON.stringify({ fill_value: 0, order: 'C', compressor: null, ...zarray }), 'labels/a/0/.zarray'),
+    ...Object.entries(chunks).map(([key, data]) => importFile(data, `labels/a/0/${key}`)),
+  ];
+
+  it('reads an edge chunk, which zarr stores whole (padded), along x as along y', async () => {
+    // Width 3 in chunks of 2: the second chunk holds x = 2 and a padding voxel.
+    const files = store(
+      { shape: [1, 1, 3], chunks: [1, 1, 2], dtype: '|u1' },
+      { '0.0.0': new Uint8Array([1, 2]), '0.0.1': new Uint8Array([3, 0]) },
+    );
+    expect(Array.from(await (await readOmeZarrLabels(files))!.stack.labels(0))).toEqual([1, 2, 3]);
+  });
+
+  it('reads 64-bit labels that fit 32 bits, and refuses one that does not rather than narrow it', async () => {
+    const u64 = (v: bigint) => {
+      const b = new Uint8Array(8);
+      new DataView(b.buffer).setBigUint64(0, v, true);
+      return b;
+    };
+    const fits = store({ shape: [1, 1, 1], chunks: [1, 1, 1], dtype: '<u8' }, { '0.0.0': u64(4294967295n) });
+    expect(Array.from(await (await readOmeZarrLabels(fits))!.stack.labels(0))).toEqual([4294967295]);
+    const wide = store({ shape: [1, 1, 1], chunks: [1, 1, 1], dtype: '<u8' }, { '0.0.0': u64(4294967296n + 5n) });
+    await expect((await readOmeZarrLabels(wide))!.stack.labels(0)).rejects.toThrow(/does not fit 32 bits/);
+  });
+});

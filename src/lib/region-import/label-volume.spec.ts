@@ -80,6 +80,12 @@ describe('readLabelVolume', () => {
     );
     expect(mm.spacing?.map((n) => Math.round(n))).toEqual([50, 25, 200]);
     expect((await readLabelVolume('a.nrrd', nrrd(fields(''), data))).spacing).toBeUndefined();
+    // One unit per axis: axis 0 (the sections) in mm, the others in um.
+    const mixed = await readLabelVolume(
+      'a.nrrd',
+      nrrd(fields('spacings: 0.2 25 25\nspace units: "mm" "um" "um"'), data),
+    );
+    expect(mixed.spacing?.map((n) => Math.round(n))).toEqual([25, 25, 200]);
   });
 
   it("gives a NIfTI's voxel size from its pixdim, in micrometres", async () => {

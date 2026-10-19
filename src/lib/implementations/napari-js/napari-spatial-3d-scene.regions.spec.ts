@@ -48,6 +48,24 @@ describe('Spatial3dScene region surfaces', () => {
     expect(s.voxelStep()).toBe(1);
   });
 
+  it("takes the surfaces down when the dataset's volume no longer matches the stack, and back when it does", () => {
+    const { s, surfaces } = scene(STACK);
+    s.setRegionMeshes([square()]);
+    (s as any).placeRegionMeshes(DATASET);
+    expect(surfaces()).toHaveLength(1);
+    // Another dataset, its volume another size: these surfaces have no box in it.
+    (s as any).placeRegionMeshes({ id: 'other', volume: { ...VOLUME, width: 8 } });
+    expect(surfaces()).toHaveLength(0);
+    // And a dataset with no volume at all.
+    (s as any).placeRegionMeshes(DATASET);
+    expect(surfaces()).toHaveLength(1);
+    (s as any).placeRegionMeshes({ id: 'none' });
+    expect(surfaces()).toHaveLength(0);
+    // The meshes are kept: the matching volume brings them back.
+    (s as any).placeRegionMeshes(DATASET);
+    expect(surfaces()).toHaveLength(1);
+  });
+
   it('shows none over an image that is not the volume stack', () => {
     const { s, surfaces } = scene({ isStack: false, trueImageSize: [400, 200], urls: ['tissue'] });
     s.setRegionMeshes([square()]);

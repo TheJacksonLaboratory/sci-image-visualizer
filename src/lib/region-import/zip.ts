@@ -176,6 +176,13 @@ export function crc32(data: Uint8Array): number {
 async function platformInflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream === 'undefined')
     throw new Error('zip: deflated members need DecompressionStream');
-  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  let inflater: DecompressionStream;
+  try {
+    // Compression Streams' raw DEFLATE (Chrome 103, Firefox 113, Safari 16.4 on).
+    inflater = new DecompressionStream('deflate-raw');
+  } catch {
+    throw new Error('zip: this browser cannot inflate zip members (no DecompressionStream "deflate-raw")');
+  }
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(inflater);
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }

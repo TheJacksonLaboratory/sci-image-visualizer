@@ -144,9 +144,18 @@ function nrrdSpacing(field: Record<string, string>, dims: number): number[] | un
     sizes = field['spacings'].split(/\s+/).map(Number);
   }
   if (!sizes || sizes.length !== dims || sizes.some((n) => !(n > 0))) return undefined;
-  const unit = (field['space units'] ?? '').replace(/"/g, '').trim().split(/\s+/)[0]?.toLowerCase();
-  const factor = unit === 'mm' || unit === 'millimeters' ? 1e3 : unit === 'm' || unit === 'meters' ? 1e6 : 1;
-  return [...sizes.map((n) => n * factor), ...(dims === 2 ? [1] : [])];
+  // One unit per axis (`space units: "mm" "um" "um"`), each axis scaled by its own.
+  const units =
+    (field['space units'] ?? '').match(/"[^"]*"|\S+/g)?.map((u) => u.replace(/"/g, '').toLowerCase()) ?? [];
+  const factor = (unit: string | undefined) =>
+    unit === 'mm' || unit === 'millimeter' || unit === 'millimeters'
+      ? 1e3
+      : unit === 'm' || unit === 'meter' || unit === 'meters'
+        ? 1e6
+        : unit === 'nm' || unit === 'nanometer' || unit === 'nanometers'
+          ? 1e-3
+          : 1; // micrometres, or none said
+  return [...sizes.map((n, i) => n * factor(units[i])), ...(dims === 2 ? [1] : [])];
 }
 
 function readNifti(bytes: Uint8Array): LabelVolume {

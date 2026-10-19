@@ -91,6 +91,16 @@ export class VolumeRegionMeshes {
     this.wanted = [];
   }
 
+  /**
+   * The volume the surfaces sat in is gone (or no longer theirs): take every surface down, keeping
+   * the meshes wanted, so they come back when a frame is set again.
+   */
+  clearFrame(): void {
+    this.frame = null;
+    for (const [key, e] of [...this.layers]) this.remove(key, e.layer);
+    this.viewer.requestRender();
+  }
+
   private sync(): void {
     const keep = new Map(this.wanted.map((m) => [m.key, m]));
     for (const [key, e] of [...this.layers]) {

@@ -206,6 +206,10 @@ function labelStack(
                 const i = local.reduce((p, n, d) => p + n * strides[d], 0);
                 v = a.dtype.read(view, i * a.dtype.bytes);
               }
+              if (v > 0xffffffff) {
+                // A label id past 32 bits would be another label once narrowed: refuse it.
+                throw new Error(`zarr ${path}: label ${v} does not fit 32 bits`);
+              }
               out[y * width + x] = v > 0 ? v : 0;
             }
           }
