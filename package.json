@@ -55,6 +55,7 @@
   "dependencies": {
     "cellpose-js": "^0.6.0",
     "fast-png": "^6.4.0",
+    "fzstd": "^0.1.1",
     "napari-js": "^0.18.0",
     "openseadragon": "^6.0.2",
     "plotly.js-dist-min": "^3.0.1",

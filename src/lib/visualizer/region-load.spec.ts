@@ -46,6 +46,47 @@ describe('applyImageRois', () => {
     expect(layout).toBe('per-slice-file');
   });
 
+  it('an annotations image attaches its own per-slice sources over every other region field', () => {
+    const attachRegionSource = jest.fn();
+    const open0 = jest.fn();
+    const open1 = jest.fn();
+    applyImageRois(
+      info({
+        tiled: false,
+        regionSlices: new Map([
+          [0, open0],
+          [1, open1],
+        ]),
+        roiJsonStrs: ['A', 'A'],
+        regionSourceUrl: 'http://x/',
+      }),
+      { ...target, attachRegionSource },
+      1,
+    );
+    expect(target.enterStackMode).toHaveBeenCalledWith(new Map(), 1, 'per-slice-file');
+    expect(attachRegionSource.mock.calls).toEqual([
+      [open0, { slice: 0 }],
+      [open1, { slice: 1 }],
+    ]);
+    expect(target.importRegions).not.toHaveBeenCalled();
+    // Opened lazily, by the store, when their slice is shown.
+    expect(open0).not.toHaveBeenCalled();
+  });
+
+  it('a single-slice annotations image attaches its one source afresh', () => {
+    const attachRegionSource = jest.fn();
+    const open0 = jest.fn();
+    applyImageRois(
+      info({ isStack: false, regionSlices: new Map([[0, open0]]) }),
+      { ...target, attachRegionSource },
+      0,
+    );
+    expect(target.setRegions).toHaveBeenCalledWith([]);
+    expect(target.resetUndoHistory).toHaveBeenCalled();
+    expect(attachRegionSource).toHaveBeenCalledWith(open0, { slice: 0 });
+    expect(target.enterStackMode).not.toHaveBeenCalled();
+  });
+
   it('a z-indexed single-file stack is bucketed by slice', () => {
     applyImageRois(info({ roiJsonStr: 'Z' }), target, 0);
     const [slices] = target.enterStackMode.mock.calls[0];

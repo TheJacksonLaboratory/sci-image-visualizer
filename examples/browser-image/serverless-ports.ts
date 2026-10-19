@@ -8,6 +8,8 @@ import {
   IImageInfo,
   Rectangle,
   VIZ_CONFIG,
+  importFile,
+  openAnnotations,
 } from '@jax-data-science/sci-image-visualizer';
 import { decodeDicom } from './dicom';
 import { decodeTiffStack, DecodedTiff } from './tiff';
@@ -32,12 +34,35 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   /** Object URLs WE created (decoded TIFF/DICOM blobs, or a picked File) — revoke
    *  these on the next load. Bundled asset URLs aren't ours, so they never go here. */
   private ownedUrls: string[] = [];
+  /** Bumped by every "Open annotations…" choice: an open that finds it changed was superseded. */
+  private annotationOpens = 0;
   /** For a TILED (Mode A) image, the opaque base64 token the tile server decodes
    *  ({ image }); null in serverless mode. Read by ServerTileAccessAdapter so OSD
    *  polls /tiles/info instead of opening a blob. */
   private currentInfoB64: string | null = null;
 
   constructor(@Inject(VIZ_CONFIG) private readonly config: { slideCropServer: string }) {}
+
+  /**
+   * Open annotations by themselves (the "Open annotations…" inputs): a label volume with its
+   * ontology, an OME-Zarr store's labels, GeoJSON files or a folder of them, or a zip of any —
+   * shown on the image the library builds for them. Resolves what was opened, for the status line.
+   */
+  async setAnnotationsFromFiles(files: File[]): Promise<string> {
+    // Two choices can overlap (the second finishing first): only the latest is published, and a
+    // superseded one releases what it built rather than revoke the latest's slices.
+    const generation = ++this.annotationOpens;
+    const opened = await openAnnotations(files.map((f) => importFile(f, f.webkitRelativePath || f.name)));
+    if (generation !== this.annotationOpens) {
+      opened.dispose();
+      throw new SupersededAnnotationsError();
+    }
+    this.revoke();
+    this.ownedUrls = opened.info.urls;
+    this.imageInfo$.next(opened.info);
+    this.filename$.next(opened.info.fileName);
+    return opened.summary;
+  }
 
   /** Load a user-picked File (the "Load your own…" input). */
   async setImageFromFile(file: File | null): Promise<void> {
@@ -396,4 +421,12 @@ function readImageSize(url: string): Promise<{ width: number; height: number }> 
     img.onerror = () => reject(new Error('could not decode image'));
     img.src = url;
   });
+}
+
+/** An "Open annotations…" choice that a later one replaced before it finished. */
+export class SupersededAnnotationsError extends Error {
+  constructor() {
+    super('superseded by a later choice');
+    this.name = 'SupersededAnnotationsError';
+  }
 }

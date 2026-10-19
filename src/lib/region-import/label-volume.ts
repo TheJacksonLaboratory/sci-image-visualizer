@@ -21,6 +21,10 @@ export interface LabelVolume {
   height: number;
   /** Number of slices. */
   slices: number;
+  /** Size of a voxel along the slice's x, its y and across slices, in micrometres, when the file
+   *  says (NRRD `space directions`/`spacings`, micrometres unless `space units` says otherwise;
+   *  NIfTI `pixdim`, in its `xyzt_units`, millimetres when unset). */
+  spacing?: [number, number, number];
   /** Slice `z`'s labels, row-major (`height` rows of `width`). */
   sliceLabels(z: number): Uint32Array;
 }
@@ -126,7 +130,32 @@ async function readNrrd(bytes: Uint8Array, gunzip: Gunzip): Promise<LabelVolume>
   // A 3D volume: sections along axis 0, each axis 2 wide and axis 1 high (jit-service's cut).
   const [n0, n1, n2] = sizes.length === 3 ? sizes : [sizes[0], sizes[1], 1];
   const axes = sizes.length === 3 ? { z: 0, x: 2, y: 1 } : { z: 2, x: 0, y: 1 };
-  return volume('nrrd', [n0, n1, n2], axes, data, SAMPLES[type], little);
+  return volume('nrrd', [n0, n1, n2], axes, data, SAMPLES[type], little, nrrdSpacing(field, sizes.length));
+}
+
+/** Per file axis, the voxel size in micrometres (see {@link LabelVolume.spacing}), or undefined. */
+function nrrdSpacing(field: Record<string, string>, dims: number): number[] | undefined {
+  let sizes: number[] | undefined;
+  const directions = field['space directions'];
+  if (directions) {
+    const vectors = directions.match(/\(([^)]*)\)|none/g) ?? [];
+    sizes = vectors.filter((v) => v !== 'none').map((v) => Math.hypot(...v.slice(1, -1).split(',').map(Number)));
+  } else if (field['spacings']) {
+    sizes = field['spacings'].split(/\s+/).map(Number);
+  }
+  if (!sizes || sizes.length !== dims || sizes.some((n) => !(n > 0))) return undefined;
+  // One unit per axis (`space units: "mm" "um" "um"`), each axis scaled by its own.
+  const units =
+    (field['space units'] ?? '').match(/"[^"]*"|\S+/g)?.map((u) => u.replace(/"/g, '').toLowerCase()) ?? [];
+  const factor = (unit: string | undefined) =>
+    unit === 'mm' || unit === 'millimeter' || unit === 'millimeters'
+      ? 1e3
+      : unit === 'm' || unit === 'meter' || unit === 'meters'
+        ? 1e6
+        : unit === 'nm' || unit === 'nanometer' || unit === 'nanometers'
+          ? 1e-3
+          : 1; // micrometres, or none said
+  return [...sizes.map((n, i) => n * factor(units[i])), ...(dims === 2 ? [1] : [])];
 }
 
 function readNifti(bytes: Uint8Array): LabelVolume {
@@ -148,7 +177,19 @@ function readNifti(bytes: Uint8Array): LabelVolume {
   const offset = Math.max(352, Math.round(view.getFloat32(108, little)));
   const [n0, n1, n2] = [dims[0], dims[1], ndim >= 3 ? dims[2] : 1];
   // Slices along axis 2, each axis 0 wide and axis 1 high (Bio-Formats' planes).
-  return volume('nifti', [n0, n1, n2], { z: 2, x: 0, y: 1 }, bytes.subarray(offset), SAMPLES[type], little);
+  const pixdim = [1, 2, 3].map((i) => Math.abs(view.getFloat32(76 + 4 * i, little)));
+  const units = bytes[123] & 7;
+  const factor = units === 1 ? 1e6 : units === 3 ? 1 : 1e3; // metres, micrometres, else millimetres
+  const spacing = pixdim.every((n) => n > 0) ? pixdim.map((n) => n * factor) : undefined;
+  return volume(
+    'nifti',
+    [n0, n1, n2],
+    { z: 2, x: 0, y: 1 },
+    bytes.subarray(offset),
+    SAMPLES[type],
+    little,
+    spacing,
+  );
 }
 
 function volume(
@@ -158,6 +199,7 @@ function volume(
   data: Uint8Array,
   sample: Sample,
   little: boolean,
+  spacing?: number[],
 ): LabelVolume {
   const count = n[0] * n[1] * n[2];
   if (!(count > 0)) throw new Error(`${format}: empty volume`);
@@ -173,6 +215,9 @@ function volume(
     width,
     height,
     slices: n[axes.z],
+    ...(spacing
+      ? { spacing: [spacing[axes.x], spacing[axes.y], spacing[axes.z]] as [number, number, number] }
+      : {}),
     sliceLabels(z: number): Uint32Array {
       const out = new Uint32Array(width * height);
       const base = z * stride[axes.z];

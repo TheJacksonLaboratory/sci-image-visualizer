@@ -33,17 +33,10 @@ import { ConfirmationService, MessageService, SharedModule } from 'primeng/api';
 import { IRegionEditorApi, REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { VIZ_TOAST_KEY } from '../toast-outlets';
 import { HttpClient } from '@angular/common/http';
-import type { RegionSourceOpener } from '../store/region-source-scope';
-import { openGeoJsonRegionSource } from '../region-source/worker-region-source';
 import { openHttpRegionSource } from '../region-source/http-region-source';
-import { readLabelVolume } from '../region-import/label-volume';
-import { labelClasses, labelSliceGeoJson } from '../region-import/label-classes';
-import {
-  RegionImportFile,
-  folderSliceGeoJson,
-  importFile,
-  planRegionImport,
-} from '../region-import/region-import';
+import { RegionImportFile, importFile, planRegionImport } from '../region-import/region-import';
+import { readAnnotationSlices, splitByPlane } from '../region-import/open-annotations';
+import { isZipName } from '../region-import/zip';
 import { RegionPersistenceService, SliceGeoJson } from './region-persistence.service';
 import { ClassColorEdit, RegionColorDialogComponent } from './region-color-dialog/region-color-dialog.component';
 import { ClassesPanelComponent } from './classes-panel/classes-panel.component';
@@ -1272,50 +1265,44 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Import `files` (see planRegionImport): one GeoJSON file as before; a label volume as one
-   * region source per slice, traced from it the first time the slice is shown, its classes named
-   * (and treed) by the ontology chosen with it; a folder as one source per slice file. Either
-   * replaces the regions and sources of every slice.
+   * Import `files`: one GeoJSON file as before (its regions, editable); anything else (see
+   * readAnnotationSlices) as one region source per slice, replacing the regions and sources of
+   * every slice: a label volume or an OME-Zarr label image traced the first time a slice is shown,
+   * its classes named (and treed) by its ontology; a folder as one source per slice file; a
+   * z-indexed GeoJSON one per plane; a zip of any of these.
    */
   private async importRegionFiles(files: RegionImportFile[]): Promise<void> {
-    const plan = planRegionImport(files);
-    if (!plan) {
-      this.importFailed(
-        new Error('Choose a GeoJSON file, a folder of GeoJSON files, or a .nii, .nii.gz or .nrrd label volume.'),
-      );
-      return;
-    }
-    if (plan.kind === 'single') {
-      await this.applyImportedRois(await plan.file.text());
-      return;
-    }
-    const attach = this.regionApi.importSliceRegionSources?.bind(this.regionApi);
-    if (!attach) {
-      this.importFailed(new Error('This viewer cannot hold region sources.'));
-      return;
-    }
-    // Taken before the files are read: decoding a volume takes a while, and the import must land
-    // on the image it was started for, not on one shown meanwhile.
-    const ticket = this.regionApi.regionImportTicket?.();
+    // Every step, reading the files included, reports its failure here rather than rejecting:
+    // the inputs call this without waiting on it.
     try {
-      const openers = new Map<number, RegionSourceOpener>();
-      let summary: string;
-      if (plan.kind === 'volume') {
-        const volume = await readLabelVolume(plan.volume.name, await plan.volume.bytes());
-        const classes = labelClasses(plan.ontology ? JSON.parse(await plan.ontology.text()) : undefined);
-        for (let z = 0; z < volume.slices; z++) {
-          openers.set(z, () => openGeoJsonRegionSource(labelSliceGeoJson(volume, z, classes)));
+      const plan = files.some((f) => isZipName(f.name)) ? null : planRegionImport(files);
+      if (plan?.kind === 'single') {
+        const text = await plan.file.text();
+        if (onePlane(text)) {
+          await this.applyImportedRois(text);
+          return;
         }
-        summary = `${volume.slices} slices of ${volume.width} × ${volume.height}`;
-        this.warnIfSizeDiffers(volume.width, volume.height);
-      } else {
-        const regionSet = plan.regionSet ? JSON.parse(await plan.regionSet.text()) : null;
-        plan.slices.forEach((file, z) =>
-          openers.set(z, async () => openGeoJsonRegionSource(await folderSliceGeoJson(file, regionSet))),
-        );
-        summary = `${plan.slices.length} slice files`;
       }
-      const attached = attach(openers, ticket);
+      const attach = this.regionApi.importSliceRegionSources?.bind(this.regionApi);
+      if (!attach) {
+        this.importFailed(new Error('This viewer cannot hold region sources.'));
+        return;
+      }
+      // Taken before the files are read: decoding a volume takes a while, and the import must land
+      // on the image it was started for, not on one shown meanwhile.
+      const ticket = this.regionApi.regionImportTicket?.();
+      const set = await readAnnotationSlices(files);
+      if (!set) {
+        this.importFailed(
+          new Error(
+            'Choose a GeoJSON file, a folder of GeoJSON files, a .nii, .nii.gz or .nrrd label volume, ' +
+              'an OME-Zarr store, or a .zip of any of these.',
+          ),
+        );
+        return;
+      }
+      if (set.size) this.warnIfSizeDiffers(set.size[0], set.size[1]);
+      const attached = attach(set.openers, ticket);
       if (attached === null) {
         this.importStale();
         return;
@@ -1324,7 +1311,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       this.toast(
         'success',
         'Regions imported',
-        `${summary}; ${attached} slice${attached === 1 ? '' : 's'} annotated.`,
+        `${set.summary}; ${attached} slice${attached === 1 ? '' : 's'} annotated.`,
       );
     } catch (err) {
       this.importFailed(err);
@@ -1648,5 +1635,17 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   private toast(severity: 'success' | 'error' | 'info', summary: string, detail: string): void {
     this.messageService.add({ key: VIZ_TOAST_KEY, severity, summary, detail });
+  }
+}
+
+/**
+ * Whether one GeoJSON file holds a single plane (its regions imported as they always were). One
+ * that does not parse is taken as one too, so the regions import reports it as it always has.
+ */
+function onePlane(text: string): boolean {
+  try {
+    return splitByPlane(text).length === 1;
+  } catch {
+    return true;
   }
 }

@@ -2185,6 +2185,40 @@ describe('RegionEditorComponent importing region sets', () => {
     expect((component as any).importing).toBe(false);
   });
 
+  it('reports a GeoJSON file that does not parse, rather than rejecting', async () => {
+    await expect(importFiles([{ name: 'bad.geojson', data: '{bad' }])).resolves.toBeUndefined();
+    expect(toasts).toHaveBeenCalledWith(expect.objectContaining({ severity: 'error' }));
+    expect(api.importSliceRegionSources).not.toHaveBeenCalled();
+  });
+
+  it('reports a file that cannot be read, rather than rejecting', async () => {
+    const unreadable = {
+      name: 'gone.geojson',
+      text: () => Promise.reject(new Error('the file went away')),
+      bytes: () => Promise.reject(new Error('the file went away')),
+    };
+    await expect((component as any).importRegionFiles([unreadable])).resolves.toBeUndefined();
+    expect(toasts).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', detail: expect.stringContaining('the file went away') }),
+    );
+  });
+
+  it('splits a z-indexed GeoJSON file into one source per slice', async () => {
+    const feature = (z: number) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [1, 1], plane: { c: -1, z, t: 0 } },
+      properties: { classification: { name: 'A' } },
+    });
+    await importFiles([
+      {
+        name: 'stack.geojson',
+        data: JSON.stringify({ type: 'FeatureCollection', features: [feature(0), feature(2)] }),
+      },
+    ]);
+    const openers = (api.importSliceRegionSources as jest.Mock).mock.calls[0][0] as Map<number, unknown>;
+    expect([...openers.keys()]).toEqual([0, 1, 2]);
+  });
+
   it('discards an import that finished after the image changed, saying so', async () => {
     (api as any).regionImportTicket = jest.fn(() => 7);
     (api.importSliceRegionSources as jest.Mock).mockReturnValueOnce(null);

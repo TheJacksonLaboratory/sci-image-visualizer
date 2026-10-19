@@ -67,6 +67,20 @@ export function applyImageRois(
   const asSource = (json: string | null | undefined): json is string =>
     !!attach && !!json && json.length >= minSourceChars;
 
+  if (info.regionSlices && attach) {
+    // An image built from annotations: its regions are its own sources, one per slice.
+    if (info.isStack) {
+      target.enterStackMode(new Map(), z, 'per-slice-file');
+      for (const [s, open] of info.regionSlices) attach(open, { slice: s });
+      return;
+    }
+    target.setRegions([]);
+    target.resetUndoHistory();
+    const first = info.regionSlices.get(0) ?? info.regionSlices.values().next().value;
+    if (first) attach(first, { slice: 0 });
+    return;
+  }
+
   if (info.isStack && info.tiled === false) {
     const perSlice = info.roiJsonStrs;
     const sliceCount = info.urls?.length ?? perSlice?.length ?? 0;
