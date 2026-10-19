@@ -186,12 +186,21 @@ export class NapariToolBridge {
     this.regionOverlay = overlay;
     this.buildCoordinateTransform();
     // (No mid-gesture case to guard: the overlay disables the camera controls while drawing.)
-    this.cameraOff = viewer.camera3d.changed.connect(() => {
-      const present = new Set(regionStore.getRegions().map((r) => r.id));
-      const drawn = overlay.ownRegionIds().filter((id) => present.has(id));
-      // Not an edit of the user's: no undo step (NAPARI-SVC-11).
-      if (drawn.length) this.host.inZone(() => regionStore.removeRegions(drawn, { recordUndo: false }));
-    });
+    this.cameraOff = viewer.camera3d.changed.connect(() => this.clearOwnLassos());
+  }
+
+  /**
+   * Remove the regions the 3D overlay drew in screen space (only those) from the store: a lasso
+   * means nothing once the camera it was drawn under moves or the scene goes. Not an edit of the
+   * user's: no undo step (NAPARI-SVC-11).
+   */
+  private clearOwnLassos(): void {
+    const overlay = this.regionOverlay;
+    if (!overlay) return;
+    const { regionStore } = this.deps;
+    const present = new Set(regionStore.getRegions().map((r) => r.id));
+    const drawn = overlay.ownRegionIds().filter((id) => present.has(id));
+    if (drawn.length) this.host.inZone(() => regionStore.removeRegions(drawn, { recordUndo: false }));
   }
 
   /**
@@ -215,6 +224,10 @@ export class NapariToolBridge {
   /** End the scene's interaction: the overlay, the camera hook, the pending timers and the
    *  pixels read from the old canvas. The armed tool and the pixel-tool set persist. */
   teardown(): void {
+    // The overlay's record of its lassos goes with it: remove them first, or they would stay in
+    // the store unowned - hidden by the next 3D overlay, beyond an orbit's reach, and still
+    // feeding "Select from ROIs" with screen coordinates of a camera that is gone.
+    this.clearOwnLassos();
     this.regionOverlay?.destroy();
     this.regionOverlay = null;
     this.cachedImage = null;

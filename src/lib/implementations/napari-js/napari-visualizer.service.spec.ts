@@ -3050,6 +3050,29 @@ describe('NapariVisualizerService', () => {
       expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id, given.id]);
     });
 
+    it("a replot takes the old view's lassos down with it, and nothing else", async () => {
+      // Review of #59: the overlay's record of its lassos went with it on a replot (even of the same
+      // image, in place), leaving them in the store unowned - hidden by the new overlay, beyond an
+      // orbit's reach, and still feeding "Select from ROIs" with a gone camera's coordinates.
+      regionStore.setRegions([{ bounds: { x: 1, y: 2, width: 3, height: 4 } }] as never, true, true);
+      const [found] = regionStore.getRegions();
+      await mount3d();
+      lasso(10, 10);
+      regionStore.addRegion({ bounds: { x: 40, y: 40, width: 5, height: 5 } } as never);
+      const given = regionStore.getRegions().at(-1)!;
+      expect(regionStore.getRegions()).toHaveLength(3);
+
+      const loaded = await service.load(imageInfo(), 0);
+      await service.plot('spatial3d-host', loaded, imageInfo(), 600, PlotType.SPATIAL_OMICS_3D, true);
+      await flush();
+      // What ROI selection reads: the image's own region and the one given, no stale lasso.
+      expect(regionStore.getRegions().map((r) => r.id)).toEqual([found.id, given.id]);
+      // And the new view draws none of them (they are image-space).
+      const overlay = service.getRegionOverlay() as unknown as { redraw(): void; svg: SVGSVGElement };
+      overlay.redraw();
+      expect(overlay.svg.querySelectorAll('rect[vector-effect="non-scaling-stroke"]').length).toBe(0);
+    });
+
     it('draws only its own lassos over the cloud, not image-space regions flat at canvas pixels', async () => {
       // Regression: an atlas imported onto the volume, its structures taken into the store by a
       // tree click, was drawn flat in the corner of the 3D view at its image coordinates.

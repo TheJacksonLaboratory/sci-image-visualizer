@@ -19,7 +19,8 @@ file was added.
   their reconstructions ("Show in 3D").
 - **An orbit in the 3D cloud no longer deletes regions it did not draw.** It cleared every region
   added after the view mounted - including structures a tree click had taken from an imported
-  region source, which were then gone for good. It clears only its own lassos.
+  region source, which were then gone for good. It clears only its own lassos - and takes them
+  down when the view is rebuilt (a replot, even in place), so none is left behind unowned.
 
 ## [0.12.0] — 2026-10-19
 
