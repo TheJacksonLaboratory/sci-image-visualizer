@@ -4,6 +4,7 @@ import { gunzipSync, inflateSync } from 'zlib';
 import { decode as decodePng } from 'fast-png';
 
 import { importFile, RegionImportFile } from './region-import';
+import type { RegionSource } from '../region-source/region-source';
 import { openAnnotations, readAnnotationSlices, splitByPlane } from './open-annotations';
 
 const decoders = {
@@ -183,6 +184,46 @@ describe('openAnnotations', () => {
       /20000 × 9000/,
     );
     await expect(openAnnotations([importFile('x', 'notes.txt')])).rejects.toThrow(/Choose a label volume/);
+  });
+});
+
+describe('openAnnotations, the sources it measures', () => {
+  /** A region source of `bounds` whose disposal is recorded. */
+  const fake = (bounds: [number, number, number, number]) =>
+    ({ info: { bounds, planes: [0] }, dispose: jest.fn() }) as unknown as RegionSource & { dispose: jest.Mock };
+  const slices = (n: number) =>
+    Array.from({ length: n }, (_, z) =>
+      importFile('{"type":"FeatureCollection","features":[]}', `roi/s_${z}.geojson`),
+    );
+
+  it('releases them when the regions are too large to show', async () => {
+    const opened = [fake([0, 0, 100, 100]), fake([0, 0, 20000, 9000])];
+    let i = 0;
+    const openGeoJson = async () => opened[i++];
+    await expect(openAnnotations(slices(2), { openGeoJson })).rejects.toThrow(/8192/);
+    expect(opened.map((s) => s.dispose.mock.calls.length)).toEqual([1, 1]);
+  });
+
+  it('releases the ones already open when a later slice fails to open', async () => {
+    const first = fake([0, 0, 10, 10]);
+    let i = 0;
+    const openGeoJson = async () => {
+      if (i++ === 0) return first;
+      throw new Error('bad slice');
+    };
+    await expect(openAnnotations(slices(2), { openGeoJson })).rejects.toThrow('bad slice');
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands a source to the store once, and releases on dispose only those the store never took', async () => {
+    const opened = [fake([0, 0, 10, 10]), fake([0, 0, 20, 20])];
+    let i = 0;
+    const openGeoJson = async () => opened[i++] ?? fake([0, 0, 1, 1]);
+    const result = await openAnnotations(slices(2), { openGeoJson });
+    expect(await result.info.regionSlices!.get(0)!()).toBe(opened[0]); // the store takes slice 0's
+    result.dispose();
+    expect(opened[0].dispose).not.toHaveBeenCalled(); // the store's now
+    expect(opened[1].dispose).toHaveBeenCalledTimes(1);
   });
 });
 

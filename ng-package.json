@@ -5,5 +5,12 @@
     "entryFile": "src/index.ts"
   },
   "assets": ["src/lib/assets", "src/lib/styles"],
-  "allowedNonPeerDependencies": ["cellpose-js", "fast-png", "fzstd", "napari-js", "openseadragon", "plotly.js-dist-min"]
+  "allowedNonPeerDependencies": [
+    "cellpose-js",
+    "fast-png",
+    "fzstd",
+    "napari-js",
+    "openseadragon",
+    "plotly.js-dist-min"
+  ]
 }

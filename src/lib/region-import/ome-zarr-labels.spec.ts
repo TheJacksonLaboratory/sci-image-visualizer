@@ -72,3 +72,72 @@ describe('readOmeZarrLabels', () => {
     expect(slice.slice(4, 8)).toEqual(expected(1).slice(4, 8));
   });
 });
+
+describe('readOmeZarrLabels, slices read at once', () => {
+  /**
+   * An uncompressed uint8 label store in memory: `slices` slices of 1 x `width`, chunked one voxel
+   * a chunk, voxel (z, x) = 10 * (z + 1) + x; `hold` names chunk files whose reads wait for release.
+   */
+  function memoryStore(slices: number, width: number, hold: Set<string>) {
+    const waiting = new Map<string, () => void>();
+    const files: RegionImportFile[] = [
+      importFile(
+        JSON.stringify({ 'image-label': {}, multiscales: [{ axes: ['z', 'y', 'x'], datasets: [{ path: '0' }] }] }),
+        'labels/a/.zattrs',
+      ),
+      importFile(
+        JSON.stringify({
+          shape: [slices, 1, width],
+          chunks: [1, 1, 1],
+          dtype: '|u1',
+          compressor: null,
+          fill_value: 0,
+          order: 'C',
+        }),
+        'labels/a/0/.zarray',
+      ),
+    ];
+    for (let z = 0; z < slices; z++) {
+      for (let x = 0; x < width; x++) {
+        const name = `labels/a/0/${z}.0.${x}`;
+        const data = new Uint8Array([10 * (z + 1) + x]);
+        files.push({
+          name,
+          text: async () => '',
+          bytes: () =>
+            hold.has(name)
+              ? new Promise<Uint8Array>((resolve) => waiting.set(name, () => resolve(data)))
+              : Promise.resolve(data),
+        });
+      }
+    }
+    return { files, release: (name: string) => waiting.get(name)?.() };
+  }
+
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it.each([
+    ['one chunk a slice', 1],
+    ['a slice across several chunks', 2],
+  ])('keeps a read on its own chunk layer while another layer is read (%s)', async (_, width) => {
+    const store = memoryStore(2, width, new Set(['labels/a/0/0.0.0']));
+    const { stack } = (await readOmeZarrLabels(store.files))!;
+    const first = stack.labels(0); // waits on its first chunk
+    await tick();
+    expect(Array.from(await stack.labels(1))).toEqual(Array.from({ length: width }, (_, x) => 20 + x));
+    store.release('labels/a/0/0.0.0');
+    expect(Array.from(await first)).toEqual(Array.from({ length: width }, (_, x) => 10 + x));
+  });
+
+  it('reads a chunk again after it failed to decode', async () => {
+    const store = memoryStore(1, 1, new Set());
+    let fail = true;
+    const chunk = store.files.find((f) => f.name.endsWith('0.0.0'))!;
+    const ok = chunk.bytes;
+    chunk.bytes = () => (fail ? Promise.reject(new Error('network')) : ok());
+    const { stack } = (await readOmeZarrLabels(store.files))!;
+    await expect(stack.labels(0)).rejects.toThrow('network');
+    fail = false;
+    expect(Array.from(await stack.labels(0))).toEqual([10]);
+  });
+});

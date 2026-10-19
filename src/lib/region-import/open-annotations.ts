@@ -119,7 +119,8 @@ export async function readAnnotationSlices(
 export interface OpenedAnnotations {
   info: IImageInfo;
   summary: string;
-  /** Revoke the image's blob URLs (once another image replaced it). */
+  /** Revoke the image's blob URLs, and release the slices' sources the region store never took
+   *  (once another image replaced it). */
   dispose(): void;
 }
 
@@ -141,28 +142,33 @@ export async function openAnnotations(
         'GeoJSON files or a folder of them, or a .zip of any of these.',
     );
   }
-  let urls: string[];
+  let urls: string[] = [];
   let width: number;
   let height: number;
   let openers = set.openers;
-  if (set.labels && set.size) {
-    [width, height] = set.size;
-    checkSize(width, height);
-    urls = await labelSliceUrls(set.labels.stack, set.labels.classes);
-  } else {
-    // Regions alone: a blank stack as large as they reach, measured on the sources (kept open for
-    // their slices, so each is parsed once).
-    const measured = await measure(set.openers);
-    openers = measured.openers;
-    [width, height] = measured.size;
-    checkSize(width, height);
-    const blank = new Blob(
-      [encodePng({ width, height, data: new Uint8Array(width * height), channels: 1, depth: 8 }) as BlobPart],
-      {
-        type: 'image/png',
-      },
-    );
-    urls = Array.from({ length: set.slices }, () => URL.createObjectURL(blank));
+  // Releases the sources measuring opened that the store has not taken (none for a label image).
+  let release = () => undefined as void;
+  try {
+    if (set.labels && set.size) {
+      [width, height] = set.size;
+      checkSize(width, height);
+      urls = await labelSliceUrls(set.labels.stack, set.labels.classes);
+    } else {
+      // Regions alone: a blank stack as large as they reach, measured on the sources (kept open
+      // for their slices, so each is parsed once).
+      const measured = await measure(set.openers);
+      openers = measured.openers;
+      release = measured.release;
+      [width, height] = measured.size;
+      checkSize(width, height);
+      const png = encodePng({ width, height, data: new Uint8Array(width * height), channels: 1, depth: 8 });
+      const blank = new Blob([png as BlobPart], { type: 'image/png' });
+      urls = Array.from({ length: set.slices }, () => URL.createObjectURL(blank));
+    }
+  } catch (err) {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    release();
+    throw err;
   }
   const [mx, my, mz] = set.spacing ?? [];
   const isStack = set.slices > 1;
@@ -195,7 +201,10 @@ export async function openAnnotations(
   return {
     info,
     summary: `${set.summary}, ${width} × ${height}`,
-    dispose: () => urls.forEach((u) => URL.revokeObjectURL(u)),
+    dispose: () => {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      release();
+    },
   };
 }
 
@@ -273,30 +282,46 @@ async function labelSliceUrls(stack: LabelStack, classes: LabelClasses): Promise
 
 /**
  * Open every slice's source to learn how far the regions reach (the image is as large, from the
- * origin, as region coordinates are image pixels); each opener then hands its already-open source
- * over the first time, and opens anew after.
+ * origin, as region coordinates are image pixels). Each opener then hands its already-open source
+ * over the first time (the region store owns it from then on) and opens anew after. `release`
+ * disposes the sources not handed over yet; they are released here when measuring fails.
  */
 async function measure(
   openers: Map<number, Opener>,
-): Promise<{ openers: Map<number, Opener>; size: [number, number] }> {
+): Promise<{ openers: Map<number, Opener>; size: [number, number]; release: () => void }> {
+  // Sources opened here and not yet handed to the store: theirs to release until then.
+  const held = new Map<number, RegionSource>();
+  const release = () => {
+    for (const source of held.values()) source.dispose();
+    held.clear();
+  };
   let x1 = 0;
   let y1 = 0;
+  try {
+    for (const [z, open] of openers) {
+      const source = await open();
+      held.set(z, source);
+      const bounds = source.info.bounds;
+      if (bounds) {
+        x1 = Math.max(x1, bounds[2]);
+        y1 = Math.max(y1, bounds[3]);
+      }
+    }
+    if (!(x1 > 0 && y1 > 0)) throw new Error('The regions have no extent to show.');
+  } catch (err) {
+    release();
+    throw err;
+  }
   const reused = new Map<number, Opener>();
   for (const [z, open] of openers) {
-    let source: RegionSource | null = await open();
-    const bounds = source.info.bounds;
-    if (bounds) {
-      x1 = Math.max(x1, bounds[2]);
-      y1 = Math.max(y1, bounds[3]);
-    }
     reused.set(z, () => {
-      const first = source;
-      source = null;
-      return first ? Promise.resolve(first) : open();
+      const first = held.get(z);
+      if (!first) return open();
+      held.delete(z);
+      return Promise.resolve(first);
     });
   }
-  if (!(x1 > 0 && y1 > 0)) throw new Error('The regions have no extent to show.');
-  return { openers: reused, size: [Math.ceil(x1), Math.ceil(y1)] };
+  return { openers: reused, size: [Math.ceil(x1), Math.ceil(y1)], release };
 }
 
 function checkSize(width: number, height: number): void {

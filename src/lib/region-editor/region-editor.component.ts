@@ -1272,23 +1272,25 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * z-indexed GeoJSON one per plane; a zip of any of these.
    */
   private async importRegionFiles(files: RegionImportFile[]): Promise<void> {
-    const plan = files.some((f) => isZipName(f.name)) ? null : planRegionImport(files);
-    if (plan?.kind === 'single') {
-      const text = await plan.file.text();
-      if (splitByPlane(text).length === 1) {
-        await this.applyImportedRois(text);
+    // Every step, reading the files included, reports its failure here rather than rejecting:
+    // the inputs call this without waiting on it.
+    try {
+      const plan = files.some((f) => isZipName(f.name)) ? null : planRegionImport(files);
+      if (plan?.kind === 'single') {
+        const text = await plan.file.text();
+        if (onePlane(text)) {
+          await this.applyImportedRois(text);
+          return;
+        }
+      }
+      const attach = this.regionApi.importSliceRegionSources?.bind(this.regionApi);
+      if (!attach) {
+        this.importFailed(new Error('This viewer cannot hold region sources.'));
         return;
       }
-    }
-    const attach = this.regionApi.importSliceRegionSources?.bind(this.regionApi);
-    if (!attach) {
-      this.importFailed(new Error('This viewer cannot hold region sources.'));
-      return;
-    }
-    // Taken before the files are read: decoding a volume takes a while, and the import must land
-    // on the image it was started for, not on one shown meanwhile.
-    const ticket = this.regionApi.regionImportTicket?.();
-    try {
+      // Taken before the files are read: decoding a volume takes a while, and the import must land
+      // on the image it was started for, not on one shown meanwhile.
+      const ticket = this.regionApi.regionImportTicket?.();
       const set = await readAnnotationSlices(files);
       if (!set) {
         this.importFailed(
@@ -1633,5 +1635,17 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   private toast(severity: 'success' | 'error' | 'info', summary: string, detail: string): void {
     this.messageService.add({ key: VIZ_TOAST_KEY, severity, summary, detail });
+  }
+}
+
+/**
+ * Whether one GeoJSON file holds a single plane (its regions imported as they always were). One
+ * that does not parse is taken as one too, so the regions import reports it as it always has.
+ */
+function onePlane(text: string): boolean {
+  try {
+    return splitByPlane(text).length === 1;
+  } catch {
+    return true;
   }
 }

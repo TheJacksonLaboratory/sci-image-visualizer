@@ -161,8 +161,10 @@ function labelStack(
   const slices = iz < 0 ? 1 : a.shape[iz];
   const cx = a.chunks[ix];
   const cy = a.chunks[iy];
-  // The decoded chunks of the last chunk layer along z read (a slice's neighbours share it).
-  let layer: { kz: number; chunks: Map<string, Uint8Array | null> } | null = null;
+  // The chunks (their decodes, pending or done) of the last chunk layer along z read: a slice's
+  // neighbours share it. A read keeps the layer it started with, so a read of another layer
+  // replacing this cache while it awaits a chunk cannot change what it reads.
+  let layer: { kz: number; chunks: Map<string, Promise<Uint8Array | null>> } | null = null;
   const chunk = async (index: number[]): Promise<Uint8Array | null> => {
     const file = byPath.get(join(path, a.key(index)));
     if (!file) return null;
@@ -176,6 +178,7 @@ function labelStack(
       if (z < 0 || z >= slices) throw new Error(`slice ${z} of ${slices}`);
       const kz = iz < 0 ? 0 : Math.floor(z / a.chunks[iz]);
       if (layer?.kz !== kz) layer = { kz, chunks: new Map() };
+      const mine = layer;
       const out = new Uint32Array(width * height);
       const strides = a.chunks.map((_, d) => a.chunks.slice(d + 1).reduce((p, n) => p * n, 1));
       for (let gy = 0; gy * cy < height; gy++) {
@@ -183,8 +186,14 @@ function labelStack(
           // Every other axis (time, channel) at its first index.
           const index = a.shape.map((_, d) => (d === ix ? gx : d === iy ? gy : d === iz ? kz : 0));
           const key = index.join(',');
-          if (!layer.chunks.has(key)) layer.chunks.set(key, await chunk(index));
-          const data = layer.chunks.get(key) ?? null;
+          let pending = mine.chunks.get(key);
+          if (!pending) {
+            pending = chunk(index);
+            mine.chunks.set(key, pending);
+            // A chunk that failed to decode is not kept: the next read tries it again.
+            pending.catch(() => mine.chunks.delete(key));
+          }
+          const data = await pending;
           const view = data ? new DataView(data.buffer, data.byteOffset, data.byteLength) : null;
           const inZ = iz < 0 ? 0 : z - kz * a.chunks[iz];
           for (let y = gy * cy; y < Math.min(height, (gy + 1) * cy); y++) {
