@@ -64,6 +64,34 @@ describe('readLabelVolume', () => {
     expect(Array.from(vol.sliceLabels(1))).toEqual([100, 101, 110, 111, 120, 121]);
   });
 
+  it("gives a NRRD's voxel size per slice axis, in micrometres, as the Allen CCF's header says it", async () => {
+    const data = coded([2, 3, 4]);
+    const fields = (extra: string) =>
+      `type: uint16\ndimension: 3\nsizes: 2 3 4\nencoding: raw\nendian: little\n${extra}`;
+    // Sections along axis 0 (200 um apart), each axis 2 wide and axis 1 high (25 um pixels).
+    const ccf = await readLabelVolume(
+      'a.nrrd',
+      nrrd(fields('space directions: (200,0,0) (0,25,0) (0,0,25)'), data),
+    );
+    expect(ccf.spacing).toEqual([25, 25, 200]);
+    const mm = await readLabelVolume(
+      'a.nrrd',
+      nrrd(fields('spacings: 0.2 0.025 0.05\nspace units: "mm" "mm" "mm"'), data),
+    );
+    expect(mm.spacing?.map((n) => Math.round(n))).toEqual([50, 25, 200]);
+    expect((await readLabelVolume('a.nrrd', nrrd(fields(''), data))).spacing).toBeUndefined();
+  });
+
+  it("gives a NIfTI's voxel size from its pixdim, in micrometres", async () => {
+    const file = nifti([4, 3, 2], 512, coded([4, 3, 2]));
+    const v = new DataView(file.buffer);
+    [10, 10, 200].forEach((d, i) => v.setFloat32(80 + 4 * i, d / 1000, true)); // mm, the NIfTI default
+    expect((await readLabelVolume('a.nii', file)).spacing?.map((n) => Math.round(n))).toEqual([10, 10, 200]);
+    file[123] = 3; // micrometres
+    [10, 10, 200].forEach((d, i) => v.setFloat32(80 + 4 * i, d, true));
+    expect((await readLabelVolume('a.nii', file)).spacing).toEqual([10, 10, 200]);
+  });
+
   it('reads a 2D NRRD as one slice', async () => {
     const data = new Uint8Array([1, 2, 3, 4, 5, 6]);
     const vol = await readLabelVolume(

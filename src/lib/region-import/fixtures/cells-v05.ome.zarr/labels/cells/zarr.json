@@ -1,0 +1,168 @@
+{
+  "attributes": {
+    "ome": {
+      "version": "0.5",
+      "multiscales": [
+        {
+          "axes": [
+            {
+              "name": "z",
+              "type": "space"
+            },
+            {
+              "name": "y",
+              "type": "space"
+            },
+            {
+              "name": "x",
+              "type": "space"
+            }
+          ],
+          "datasets": [
+            {
+              "path": "s0",
+              "coordinateTransformations": [
+                {
+                  "type": "scale",
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                },
+                {
+                  "type": "translation",
+                  "translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              ]
+            },
+            {
+              "path": "s1",
+              "coordinateTransformations": [
+                {
+                  "type": "scale",
+                  "scale": [
+                    1.0,
+                    2.0,
+                    2.0
+                  ]
+                },
+                {
+                  "type": "translation",
+                  "translation": [
+                    0.0,
+                    0.5,
+                    0.5
+                  ]
+                }
+              ]
+            },
+            {
+              "path": "s2",
+              "coordinateTransformations": [
+                {
+                  "type": "scale",
+                  "scale": [
+                    1.0,
+                    6.0,
+                    4.0
+                  ]
+                },
+                {
+                  "type": "translation",
+                  "translation": [
+                    0.0,
+                    2.5,
+                    1.5
+                  ]
+                }
+              ]
+            },
+            {
+              "path": "s3",
+              "coordinateTransformations": [
+                {
+                  "type": "scale",
+                  "scale": [
+                    1.0,
+                    6.0,
+                    8.0
+                  ]
+                },
+                {
+                  "type": "translation",
+                  "translation": [
+                    0.0,
+                    2.5,
+                    3.5
+                  ]
+                }
+              ]
+            },
+            {
+              "path": "s4",
+              "coordinateTransformations": [
+                {
+                  "type": "scale",
+                  "scale": [
+                    1.0,
+                    6.0,
+                    8.0
+                  ]
+                },
+                {
+                  "type": "translation",
+                  "translation": [
+                    0.0,
+                    2.5,
+                    3.5
+                  ]
+                }
+              ]
+            }
+          ],
+          "name": "cells"
+        }
+      ],
+      "image-label": {
+        "colors": [
+          {
+            "label-value": 1,
+            "rgba": [
+              255,
+              0,
+              0,
+              255
+            ]
+          },
+          {
+            "label-value": 70000,
+            "rgba": [
+              0,
+              0,
+              255,
+              255
+            ]
+          }
+        ],
+        "properties": [
+          {
+            "label-value": 1,
+            "class": "Nucleus"
+          },
+          {
+            "label-value": 70000,
+            "class": "Membrane"
+          }
+        ],
+        "version": "0.5"
+      }
+    }
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}

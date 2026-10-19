@@ -108,8 +108,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private plottedFileName: string | undefined;
   /** The div the backends render into (every backend shares it); '' before the first plot. */
   private plotDiv = '';
-  /** Whether a napari volume view is the current plot type. */
+  /**
+   * Whether regions can be shown in 3D on screen: a napari volume (or isosurface) view, or the 3D
+   * spatial cloud over a stack image (its reference volume's, see showVolumeAsImage). Both draw the
+   * region reconstructions the same way (VolumeRegionMeshes), in the volume's box.
+   */
   private readonly volumeView$ = new BehaviorSubject<boolean>(false);
+  /** Whether a napari volume (or isosurface) view is the current plot type: the slice pane's. */
+  private imageVolumeView = false;
   /** Whether the volume view's slice pane is wanted (see {@link setSliceEditor}). */
   private readonly sliceEditor$ = new BehaviorSubject<boolean>(false);
   /** Whether the volume view draws the region reconstructions through the volume. */
@@ -353,13 +359,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     inPlace?: boolean,
   ): Promise<boolean> {
     this.currentPlotType = plotType;
-    this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
     this.plottedFileName = imageInfo?.fileName;
     this.plottedInfo = imageInfo ?? null;
     this.plottedHeight = screenHeight;
+    this.updateVolumeView(plotType);
     // The slice pane belongs to the volume view: another plot type takes it down (OSD may be
     // about to draw the main view, which must not find the pane's viewer still mounted).
-    if (!this.volumeView$.value) this.unmountSlice();
+    if (!this.imageVolumeView) this.unmountSlice();
     // Region surfaces belong to the image they were built from: another image drops them.
     if (this.classes3d$.value.length && this.plottedFileName !== this.classes3dImage) this.clearRegionClasses3d();
     this.plotDiv = plotDiv;
@@ -378,7 +384,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     }
     this.lastRendered = next;
     const plotted = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
-    if (!this.sliceDiv || !this.volumeView$.value) return plotted;
+    if (!this.sliceDiv || !this.imageVolumeView) return plotted;
     // The split volume view: the slice pane follows the image (a new one, or its sharper pass).
     return plotted.then((ok) => {
       if (ok && (!this.sliceMounted || this.sliceFile !== imageInfo?.fileName || inPlace)) {
@@ -409,7 +415,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private async mountSlice(inPlace: boolean): Promise<boolean> {
     const div = this.sliceDiv;
     const info = this.plottedInfo;
-    if (!div || !info?.urls?.length || !this.volumeView$.value) return false;
+    if (!div || !info?.urls?.length || !this.imageVolumeView) return false;
     const request = ++this.sliceRequest;
     try {
       const loaded = await this.osd.load(info, this.currentZIndex);
@@ -537,7 +543,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;
-    this.volumeView$.next(isNapariVolume(plotType) || isNapariIsosurface(plotType));
+    this.updateVolumeView(plotType);
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
@@ -857,6 +863,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.regionStore.setRegionStyle(patch);
   }
   // ── Regions in 3D: their reconstructions shown in the volume view ─────
+
+  /** Recompute which 3D view is on screen for `plotType` (see {@link volumeView$}). */
+  private updateVolumeView(plotType: PlotType): void {
+    this.imageVolumeView = isNapariVolume(plotType) || isNapariIsosurface(plotType);
+    const regions3d = this.imageVolumeView || (isSpatialOmics3d(plotType) && !!this.plottedInfo?.isStack);
+    // Every plot, as before: the Region Editor drops its per-class volumes on each (a new image).
+    this.volumeView$.next(regions3d);
+  }
 
   /** Whether a napari volume (or isosurface) view is on screen: regions can be shown in 3D. */
   getVolumeView$(): Observable<boolean> {

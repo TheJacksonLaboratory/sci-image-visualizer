@@ -8,6 +8,8 @@
  * structurally, so the host keeps passing its own instances unchanged.
  */
 
+import type { RegionSource } from '../region-source/region-source';
+
 /** Per-channel metadata from the server descriptor (issue #76). */
 export interface IChannelInfo {
   name: string;
@@ -68,6 +70,12 @@ export interface IImageInfo {
    *  its regions are drawn from the server's level-of-detail tiles instead of being loaded
    *  from `roiJsonStr`. On a stack, slice z shows the source's plane z. */
   regionSourceUrl?: string;
+  /** The image's own regions, one region source per slice, opened the first time its slice is
+   *  shown: what an image built from annotations alone carries (see `openAnnotations`: a label
+   *  volume traced slice by slice, a folder of per-slice GeoJSON). Attached when the image lands,
+   *  replacing its regions, as an imported label volume or folder is; takes precedence over
+   *  `roiJsonStrs`, `roiJsonStr` and `regionSourceUrl`. Keyed by slice index. */
+  regionSlices?: ReadonlyMap<number, () => Promise<RegionSource>>;
   /** Per-slice, per-channel plane URLs for a SERVERLESS multichannel image
    *  (`tiled: false` + `imageMeta[0].channelCount > 1`). `channelUrls[z][c]`
    *  is a complete single-band image of channel c at slice z. The OSD simple

@@ -251,6 +251,14 @@ async function warmUp(base: string): Promise<void> {
         color: #555;
         margin-left: auto;
       }
+      header .upload.annotations {
+        margin-left: 12px;
+      }
+      header .annotation-status {
+        font-size: 12px;
+        color: #555;
+        margin-left: 8px;
+      }
     `,
     `
       .body {
@@ -455,6 +463,15 @@ async function warmUp(base: string): Promise<void> {
         >Load your own…
         <input type="file" accept="image/*,.tif,.tiff,.dcm" (change)="onFile($event)" />
       </label>
+      <label class="upload annotations" title="A label volume (.nii, .nii.gz, .nrrd) with its ontology JSON, GeoJSON files, or a .zip of any — shown by themselves"
+        >Open annotations…
+        <input type="file" multiple accept=".geojson,.json,.nii,.gz,.nrrd,.zip" (change)="onAnnotations($event)" />
+      </label>
+      <label class="upload annotations" title="A folder of per-slice GeoJSON, a label volume with its ontology, or an OME-Zarr store (its labels/)"
+        >…folder
+        <input type="file" webkitdirectory multiple (change)="onAnnotations($event)" />
+      </label>
+      <span class="annotation-status" *ngIf="annotationStatus">{{ annotationStatus }}</span>
     </header>
     <div class="body">
       <aside class="gallery" #galleryRef>
@@ -918,6 +935,27 @@ export class AppComponent implements OnDestroy {
     this.loading = true;
     try {
       await this.imageState.setImageFromUrl(s.url, s.name);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /** What the last "Open annotations…" opened, or why it could not. */
+  annotationStatus = '';
+
+  async onAnnotations(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = ''; // the same choice again opens again
+    if (!files.length) return;
+    this.active = files[0].webkitRelativePath.split('/')[0] || files[0].name;
+    this.spatialData.clear();
+    this.loading = true;
+    this.annotationStatus = 'Reading annotations…';
+    try {
+      this.annotationStatus = await this.imageState.setAnnotationsFromFiles(files);
+    } catch (err) {
+      this.annotationStatus = `Could not open them: ${(err as Error)?.message ?? err}`;
     } finally {
       this.loading = false;
     }

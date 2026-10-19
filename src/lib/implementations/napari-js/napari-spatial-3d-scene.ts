@@ -23,6 +23,8 @@ import {
 } from '../../spatial/spatial-expression';
 import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
+import type { IImageInfo } from '../../contracts/image.contract';
+import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
 import { isAbortError } from '../tile-server';
 import {
   DensityGroup,
@@ -96,12 +98,84 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    *  one; a rebuild that leaves the key alone lets it finish. */
   private readonly densityLoads = new Supersede();
   private readonly geneMapLoads = new Supersede();
+  /**
+   * The region reconstructions (an atlas's structures, imported onto the reference volume's image
+   * stack), drawn by the same {@link VolumeRegionMeshes} as the Volume view's, so a structure is the
+   * same surface in both. Placed in the reference volume's box, once it is there and the image the
+   * regions were drawn on is that volume's stack (see {@link placeRegionMeshes}).
+   */
+  private readonly regionMeshes: VolumeRegionMeshes;
+  /** Whether the reference volume lets every region surface through (see setRegionsThroughVolume). */
+  private regionsThrough = false;
   /** The store's invert setting, which the density volumes follow (no other subscription of
    *  this scene carries it). */
   private invertSub: Subscription | null = null;
 
-  constructor(ctx: SceneContext, session: SpatialSession) {
+  /**
+   * @param info the image plotted with the cloud: the reference volume's stack (the 2D view's
+   *        image, see showVolumeAsImage) when the dataset has a volume, which the regions are on
+   */
+  constructor(
+    ctx: SceneContext,
+    session: SpatialSession,
+    private readonly info?: IImageInfo,
+  ) {
     super(ctx, session, true);
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+  }
+
+  /** Show these region reconstructions with the cloud (replacing the ones shown). */
+  setRegionMeshes(meshes: readonly RegionMesh3D[]): void {
+    this.regionMeshes.set(meshes);
+  }
+
+  setRegionHighlight(keys: readonly string[]): void {
+    this.regionMeshes.setHighlight(keys);
+  }
+
+  setRegionHidden(keys: readonly string[]): void {
+    this.regionMeshes.setHidden(keys);
+  }
+
+  /** As the Volume view: the reference volume hides the surfaces behind what it shows, or none. */
+  setRegionsThroughVolume(through: boolean): void {
+    this.regionsThrough = through;
+    if (this.volume) this.volume.blending = through ? 'translucent_no_depth' : 'translucent';
+    this.ctx.viewer.requestRender();
+  }
+
+  /**
+   * Place the region surfaces in the reference volume's box, as the Volume view places them in its
+   * own: image pixel (x, y) is voxel (x, y), slice k is voxel plane k, and the box is the volume's
+   * voxels times its voxel size, centred on the origin as napari centres the volume (and the cloud
+   * is offset to sit in it). Only when the plotted image IS that volume's stack: regions drawn on
+   * another image (a tissue image) have no place in it, and are not shown.
+   */
+  private placeRegionMeshes(dataset: SpatialDataset): void {
+    const meta = dataset.volume;
+    if (!meta || !this.isVolumeStack(meta)) return;
+    const [vx, vy, vz] = meta.voxelSize;
+    this.regionMeshes.setFrame({
+      size: [meta.width, meta.height, meta.depth],
+      world: [meta.width * vx, meta.height * vy, meta.depth * vz],
+    });
+  }
+
+  /**
+   * Image px per voxel of the volume the surfaces sit in: 1, the reference volume being the stack's
+   * own voxels, as the Volume view's is at full resolution, so both reconstruct a class alike (and
+   * share its cached surface). Null while there is no volume stack to place them in.
+   */
+  voxelStep(): number | null {
+    const meta = this.session.latest?.[0]?.volume;
+    return this.volume && meta && this.isVolumeStack(meta) ? 1 : null;
+  }
+
+  /** Whether the plotted image is the reference volume's stack: its size and slice count. */
+  private isVolumeStack(meta: NonNullable<SpatialDataset['volume']>): boolean {
+    const info = this.info;
+    const [w, h] = info?.trueImageSize ?? [0, 0];
+    return !!info?.isStack && w === meta.width && h === meta.height && (info.urls?.length ?? 0) === meta.depth;
   }
 
   async mount(): Promise<void> {
@@ -154,6 +228,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   dispose(): void {
+    this.regionMeshes.clear();
     this.disposeSpatial();
     this.invertSub?.unsubscribe();
     this.invertSub = null;
@@ -756,9 +831,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       opacity: view.volumeOpacity,
       voxelSize: [vx, vy, vz],
     });
+    if (this.regionsThrough) this.volume.blending = 'translucent_no_depth';
     // Half the box, negated: the observations' origin is the box's near corner,
     // and the box is centred on the world origin.
     this.origin = [-(meta.width * vx) / 2, -(meta.height * vy) / 2, -(meta.depth * vz) / 2];
+    this.placeRegionMeshes(dataset);
     // Force a geometry rebuild: the offset changed, so cached positions are stale.
     this.layerKey = null;
   }

@@ -324,6 +324,46 @@ describe('RoutingVisualizerService (characterization)', () => {
   // ── the split volume view (slice editor) ─────────────────────────────
   const STACK: any = { ...IMAGE_INFO, isStack: true, urls: ['s0', 's1', 's2'] };
 
+  it('offers regions in 3D over the 3D spatial cloud on a volume stack, without its slice pane', async () => {
+    const views: boolean[] = [];
+    router.getVolumeView$().subscribe((v) => views.push(v));
+    // A dataset's reference volume published as the image (showVolumeAsImage): a stack.
+    await router.plot('div', {}, STACK, 600, PlotType.SPATIAL_OMICS_3D);
+    expect(views[views.length - 1]).toBe(true);
+    // The slice pane is the Volume view's: it does not mount over the cloud.
+    await expect(router.setSliceEditor('div-slice')).resolves.toBe(false);
+    expect(osd.load).not.toHaveBeenCalled();
+    await router.setSliceEditor(null);
+    // Over a single (tissue) image the cloud has no volume to place regions in.
+    await router.plot('div', {}, IMAGE_INFO, 600, PlotType.SPATIAL_OMICS_3D);
+    expect(views[views.length - 1]).toBe(false);
+    await router.plot('div', {}, STACK, 600, PlotType.SPATIAL_OMICS);
+    expect(views[views.length - 1]).toBe(false);
+    router.setPlotType(PlotType.SPATIAL_OMICS_3D);
+    expect(views[views.length - 1]).toBe(true);
+  });
+
+  it('builds the same surfaces for the 3D spatial cloud as for the Volume view', async () => {
+    napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+    napari.regionVoxelStep = jest.fn().mockReturnValue(1);
+    napari.setRegionMeshes = jest.fn();
+    napari.setRegionHighlight = jest.fn();
+    const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+    const reconstruct = jest
+      .spyOn(regionStore, 'reconstructClasses')
+      .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.showRegionClasses3d([{ key: 'HPF', classes: ['HPF'], color: '#7ed04b' }]);
+    // Over the cloud, on the same stack: the cached surface, not a second reconstruction.
+    await router.plot('div', {}, STACK, 600, PlotType.SPATIAL_OMICS_3D);
+    await router.showRegionClasses3d([{ key: 'HPF', classes: ['HPF'], color: '#7ed04b' }]);
+    expect(reconstruct).toHaveBeenCalledTimes(1);
+    expect(napari.setRegionMeshes).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ key: 'HPF', vertices: mesh.vertices })],
+      'test.tif',
+    );
+  });
+
   it('splits a volume view: OSD shows the displayed slice beside it and takes the region tools', async () => {
     osd.getRegionOverlay.mockReturnValue({ kind: 'slice overlay' });
     napari.getRegionOverlay.mockReturnValue({ kind: '3d overlay' });

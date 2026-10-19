@@ -380,7 +380,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     info: IImageInfo | undefined,
     noImage: boolean,
   ): NapariScene {
-    if (isSpatialOmics3d(plotType)) return new Spatial3dScene(ctx, this.spatial);
+    if (isSpatialOmics3d(plotType)) return new Spatial3dScene(ctx, this.spatial, info);
     if (isSpatialOmics(plotType)) return new Spatial2dScene(ctx, this.spatial, noImage);
     if (isNapariScatter(plotType)) return new ScatterRegionsScene(ctx);
     if (isNapariScatter3d(plotType)) return new Scatter3dScene(ctx, info);

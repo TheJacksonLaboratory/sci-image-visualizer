@@ -123,6 +123,12 @@ export { labelClasses, labelSliceGeoJson } from './lib/region-import/label-class
 export type { LabelClasses } from './lib/region-import/label-classes';
 export { importFile, planRegionImport } from './lib/region-import/region-import';
 export type { RegionImportFile, RegionImportPlan } from './lib/region-import/region-import';
+export { ANNOTATION_IMAGE_MAX_DIM, openAnnotations, readAnnotationSlices } from './lib/region-import/open-annotations';
+export type { AnnotationDecoders, AnnotationSlices, OpenedAnnotations } from './lib/region-import/open-annotations';
+export { hasZarrMetadata, readOmeZarrLabels } from './lib/region-import/ome-zarr-labels';
+export type { LabelStack, OmeZarrLabels } from './lib/region-import/ome-zarr-labels';
+export { expandZips, isZipName, readZip } from './lib/region-import/zip';
+export type { ZipEntry } from './lib/region-import/zip';
 export type { RegionSource, RegionSourceView, SourceFeature } from './lib/region-source/region-source';
 export type {
   RegionIndexPage,

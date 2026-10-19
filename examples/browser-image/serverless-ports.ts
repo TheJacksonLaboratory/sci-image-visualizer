@@ -8,6 +8,8 @@ import {
   IImageInfo,
   Rectangle,
   VIZ_CONFIG,
+  importFile,
+  openAnnotations,
 } from '@jax-data-science/sci-image-visualizer';
 import { decodeDicom } from './dicom';
 import { decodeTiffStack, DecodedTiff } from './tiff';
@@ -38,6 +40,20 @@ export class ExampleImageStateAdapter implements ImageStatePort, OnDestroy {
   private currentInfoB64: string | null = null;
 
   constructor(@Inject(VIZ_CONFIG) private readonly config: { slideCropServer: string }) {}
+
+  /**
+   * Open annotations by themselves (the "Open annotations…" inputs): a label volume with its
+   * ontology, an OME-Zarr store's labels, GeoJSON files or a folder of them, or a zip of any —
+   * shown on the image the library builds for them. Resolves what was opened, for the status line.
+   */
+  async setAnnotationsFromFiles(files: File[]): Promise<string> {
+    const opened = await openAnnotations(files.map((f) => importFile(f, f.webkitRelativePath || f.name)));
+    this.revoke();
+    this.ownedUrls = opened.info.urls;
+    this.imageInfo$.next(opened.info);
+    this.filename$.next(opened.info.fileName);
+    return opened.summary;
+  }
 
   /** Load a user-picked File (the "Load your own…" input). */
   async setImageFromFile(file: File | null): Promise<void> {

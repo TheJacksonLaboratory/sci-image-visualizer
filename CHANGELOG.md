@@ -9,6 +9,40 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Open annotations by themselves**, with no image under them: `openAnnotations(files)` builds
+  the image they are shown on and hands it to the host to publish like any other, so every view
+  takes it (OpenSeadragon, napari, Plotly, a stack when there are several slices, the Volume and
+  Isosurface views with their 3D region surfaces). It reads a label volume (`.nii`, `.nii.gz`,
+  `.nrrd`, with its ontology JSON), an OME-Zarr store's label image, a folder of per-slice GeoJSON,
+  one GeoJSON (split per slice when its features name `geometry.plane.z`), or a `.zip` of any of
+  these. A label volume's slices are drawn in gray levels (each label at its class colour's
+  luminance, so the 3D views take the stack) with its regions filled over them in the classes'
+  colours and outlined; regions alone get a blank stack as large as they reach (at most 8192 px a
+  side, OpenSeadragon's limit for an untiled image). The voxel size (NRRD `space directions` /
+  `spacings`, NIfTI `pixdim`, OME-Zarr `scale`) sets the scale bar, areas, volumes and 3D
+  proportions. The example app offers it as "Open annotations…" (files) and "…folder".
+- **`IImageInfo.regionSlices`**: an image's own regions as one region source per slice, attached
+  when it lands (what `openAnnotations` uses; takes precedence over the other region fields).
+- **OME-Zarr label images** (NGFF 0.4 on zarr v2, 0.5 on zarr v3; `readOmeZarrLabels`): the
+  full-resolution level of a store's first label image, sliced along z, decoded chunk by chunk as
+  slices are read, its classes named and coloured by its `image-label` metadata. Chunks through
+  Blosc (lz4, zstd, zlib inner codecs, with byte shuffle), zstd, gzip or zlib.
+- **Zip archives** (`readZip`, `expandZips`): stored or deflated members, ZIP64, CRC-checked, read
+  on demand. The Region Editor's import now takes a zip and an OME-Zarr store too, and splits a
+  z-indexed GeoJSON across the slices instead of piling it onto the one shown.
+- **Region surfaces in the 3D spatial view**: the region reconstructions the Volume view draws are
+  drawn the same way (the same `VolumeRegionMeshes`, the same cached meshes) over the 3D spatial
+  cloud, in its reference volume's box, when the image is that volume's stack — regions imported
+  onto an atlas-registered dataset's volume show in 3D among its cells. The Region Editor's 3D
+  toggles and "regions through the volume" are offered there too.
+- `LabelVolume.spacing`: a label volume's voxel size in micrometres, when its header says.
+
+### Dependencies
+
+- `fzstd` (MIT, no dependencies) decodes zstd chunks.
+
 ## [0.11.0] — 2026-10-17
 
 ### Added
