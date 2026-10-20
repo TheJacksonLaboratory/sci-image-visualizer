@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-10-19
+
 ### Fixed
 
 - **The 3D views no longer draw image-space regions flat over the scene.** The 3D cloud's region
@@ -2345,7 +2347,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.9.0...v0.10.0
