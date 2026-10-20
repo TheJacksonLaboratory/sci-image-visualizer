@@ -125,12 +125,21 @@ export class NapariRegionOverlay implements IRegionOverlay {
    *  rectangle corner. `anchor` is the fixed opposite corner for a rectangle resize. */
   private edit: RegionEdit | null = null;
 
+  /**
+   * Screen space (the 3D view's lassos): the regions this overlay drew itself, by id. Only those
+   * are drawn, picked or edited here; every other region in the store is in image space (the
+   * image's own, an imported set, structures a tree click took from a source) and means nothing
+   * at canvas pixels. Null: every region (world is the image).
+   */
+  private readonly own: Set<number> | null;
+
   constructor(
     private readonly host: HTMLElement,
     private readonly viewer: OverlayViewer,
     private readonly store: RegionStore,
-    opts: { regionSource?: boolean } = {},
+    opts: { regionSource?: boolean; screenSpace?: boolean } = {},
   ) {
+    this.own = opts.screenSpace ? new Set() : null;
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     this.svg = document.createElementNS(SVG_NS, 'svg');
     Object.assign(this.svg.style, {
@@ -143,7 +152,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
       touchAction: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.host.appendChild(this.svg);
-    this.renderer = new NapariRegionSvgRenderer(this.svg, this.store);
+    this.renderer = new NapariRegionSvgRenderer(this.svg, this.store, (r) => this.draws(r));
     this.projection = new OverlayProjection(this.svg, this.viewer);
     this.sourceLayer =
       opts.regionSource === false ? null : new RegionSourceLayer(this.svg, this.store.getRegionSourceView$());
@@ -384,11 +393,22 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.redraw();
   };
 
-  /** The currently-selected region (single selection), or null. */
+  /** The currently-selected region (single selection) this overlay draws, or null. */
   private selectedRegion(): Region | null {
     const regions = this.store.getRegions();
     const i = this.selected[0];
-    return i != null && i >= 0 && i < regions.length ? regions[i] : null;
+    const region = i != null && i >= 0 && i < regions.length ? regions[i] : null;
+    return region && this.draws(region) ? region : null;
+  }
+
+  /** Whether this overlay draws (and lets the pointer pick) `region`: see {@link own}. */
+  private draws(region: Region): boolean {
+    return !this.own || this.own.has(region.id);
+  }
+
+  /** The regions this overlay drew in screen space (the 3D view's lassos); [] in image space. */
+  ownRegionIds(): number[] {
+    return this.own ? [...this.own] : [];
   }
 
   /**
@@ -412,7 +432,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     const regions = this.store.getRegions();
     const [wx, wy] = this.projection.toWorld(e.clientX, e.clientY);
     for (let i = regions.length - 1; i >= 0; i--) {
-      if (this.store.isClassHidden(regions[i].label)) continue;
+      if (this.store.isClassHidden(regions[i].label) || !this.draws(regions[i])) continue;
       if (regionContains(regions[i], wx, wy, { toScreen: this.projection.toScreen, tolPx: OPEN_PATH_HIT_PX })) {
         this.store.selectRegion(regions[i]);
         this.store.beginBatch();
@@ -487,7 +507,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.store.setSelectedShapeIndices(
       regionsInRect(regions, x0, y0, x1, y1, {
         skipProfiles: true,
-        skip: (r) => this.store.isClassHidden(r.label),
+        skip: (r) => this.store.isClassHidden(r.label) || !this.draws(r),
       }),
     );
     const features = this.sourceLayer?.featuresInRect(x0, y0, x1, y1) ?? [];
@@ -510,6 +530,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     region.bounds = rect;
     region.color = this.store.getShapeColor();
     this.store.addRegion(region);
+    this.own?.add(region.id);
   }
 
   private commitPolygon(points: Array<[number, number]>, closed: boolean): void {
@@ -524,6 +545,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     region.color = this.store.getShapeColor();
     region.label = 'Region';
     this.store.addRegion(region);
+    this.own?.add(region.id);
   }
 
   // ── rendering ─────────────────────────────────────────────────────────────

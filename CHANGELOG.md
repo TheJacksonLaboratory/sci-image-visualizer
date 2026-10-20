@@ -9,6 +9,19 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The 3D views no longer draw image-space regions flat over the scene.** The 3D cloud's region
+  overlay works in screen space (its lassos), but it drew every region in the store at its image
+  coordinates as if they were canvas pixels: an atlas imported onto a spatial dataset's volume,
+  its structures taken into the store by a tree click, lay flat in a corner of Spatial omics 3D.
+  It now draws, picks and edits only the shapes it drew itself; image-space regions show in 3D as
+  their reconstructions ("Show in 3D").
+- **An orbit in the 3D cloud no longer deletes regions it did not draw.** It cleared every region
+  added after the view mounted - including structures a tree click had taken from an imported
+  region source, which were then gone for good. It clears only its own lassos - and takes them
+  down when the view is rebuilt (a replot, even in place), so none is left behind unowned.
+
 ## [0.12.0] — 2026-10-19
 
 ### Added
