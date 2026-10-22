@@ -107,8 +107,20 @@ describe('SpatialControlsFacade selectFromRegions', () => {
     voxelStep = null;
     regions = [rect(1, 60, 60, 20, 20)];
     lassos = [1];
-    expect(await facade().controls.selectFromRegions()).toBe(1);
+    const { controls } = facade();
+    // The panel is told the same: it describes the lasso selection, not the classes.
+    expect(controls.roiSelectionMode!()).toBe('regions');
+    expect(await controls.selectFromRegions()).toBe(1);
     expect(classSliceOutlines).not.toHaveBeenCalled();
+  });
+
+  it('reports the class-volume mode exactly when the selection runs in it', () => {
+    const { controls } = facade();
+    expect(controls.roiSelectionMode!()).toBe('regions'); // nothing picked
+    picked = ['fiber tracts'];
+    expect(controls.roiSelectionMode!()).toBe('class-volumes');
+    plotType = PlotType.SPATIAL_OMICS;
+    expect(controls.roiSelectionMode!()).toBe('regions'); // the 2D view
   });
 
   it('in 2D, selects by the regions drawn over the section on screen, pick or not', async () => {

@@ -21,7 +21,7 @@ import { DialogModule } from 'primeng/dialog';
 import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
 
-import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
+import { VISUALIZER, IVisualizer, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
@@ -155,6 +155,8 @@ export class SpatialControlsComponent implements OnInit {
   /** An ROI selection that matched nothing, so the UI can say so rather than
    *  looking like the button did nothing. */
   protected selectionMissed = false;
+  /** The mode of the selection that {@link selectionMissed}: what it found nothing inside. */
+  protected missedMode: RoiSelectionMode = 'regions';
   /** The region classes picked in the Region Editor: in 3D, "Select from ROIs" selects inside them. */
   protected pickedClasses: readonly string[] = [];
   /** While "Select from ROIs" reads the picked classes' outlines. */
@@ -298,6 +300,8 @@ export class SpatialControlsComponent implements OnInit {
   protected async selectFromRegions(): Promise<void> {
     if (!this.controls || this.selectingFromRegions) return;
     this.selectingFromRegions = true;
+    // The mode the selection runs in (decided as it starts), for what a miss says it missed.
+    const mode = this.roiSelectionMode;
     this.cdr.markForCheck();
     let count: number | null = 0;
     try {
@@ -312,12 +316,18 @@ export class SpatialControlsComponent implements OnInit {
       if (count === null) return;
       this.selectedCategory = null;
       this.selectionMissed = count === 0;
+      this.missedMode = mode;
     });
   }
 
   /** In 3D with classes picked, "Select from ROIs" selects inside their volumes. */
   protected get selectsClassVolumes(): boolean {
-    return this.is3d && !!this.dataset?.volume && this.pickedClasses.length > 0;
+    return this.roiSelectionMode === 'class-volumes';
+  }
+
+  /** How "Select from ROIs" selects now: the controls' own rule, the one the selection runs by. */
+  private get roiSelectionMode(): RoiSelectionMode {
+    return this.controls?.roiSelectionMode?.() ?? 'regions';
   }
 
   /** Legend click: select one category. Clicking the active row clears it, so a

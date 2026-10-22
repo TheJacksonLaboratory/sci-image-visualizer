@@ -9,7 +9,7 @@ import {
   SpatialSelectionMask,
   isCategoricalColumn,
 } from '../contracts/spatial-dataset.contract';
-import { ISpatialControls } from '../contracts/visualizer.contract';
+import { ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { RegionStore } from '../store/region-store.service';
 import { SpatialSelectionStore } from '../store/spatial-selection.service';
 import { VisualizerStore } from '../store/visualizer-store.service';
@@ -96,6 +96,23 @@ export class SpatialControlsFacade {
     this.sub.unsubscribe();
     // A class-volume selection still reading its outlines publishes nothing.
     this.roiRequest++;
+  }
+
+  /**
+   * How "Select from ROIs" selects now — the one rule its executor and the panel's description
+   * share: inside the picked classes' volumes in the 3D cloud, when the dataset has a reference
+   * volume (and no tissue image) and the plotted image is that volume's stack, so the regions sit
+   * in its grid; by the drawn regions otherwise.
+   */
+  private roiSelectionMode(): RoiSelectionMode {
+    const dataset = this.dataset;
+    const eligible =
+      !!dataset?.volume &&
+      !dataset.imageRef &&
+      isSpatialOmics3d(this.ctx.plotType()) &&
+      this.ctx.regionStore.getPickedClasses().length > 0 &&
+      this.ctx.napari.regionVoxelStep() !== null;
+    return eligible ? 'class-volumes' : 'regions';
   }
 
   private build(): ISpatialControls {
@@ -202,12 +219,12 @@ export class SpatialControlsFacade {
         const dataset = this.dataset;
         if (!dataset) return 0;
         const is3d = isSpatialOmics3d(this.ctx.plotType());
+        const volume = !dataset.imageRef ? dataset.volume : undefined;
         // In the 3D cloud, region classes picked in the Region Editor (a class
         // tree node with its subclasses, a surface clicked in 3D) select the
         // cells inside their volumes — the structures shown among the cells.
-        const classes = is3d ? this.ctx.regionStore.getPickedClasses() : [];
-        const volume = !dataset.imageRef ? dataset.volume : undefined;
-        if (classes.length && volume && this.ctx.napari.regionVoxelStep() !== null) {
+        if (volume && this.roiSelectionMode() === 'class-volumes') {
+          const classes = this.ctx.regionStore.getPickedClasses();
           const request = ++this.roiRequest;
           const revision = this.ctx.selectionStore.revision();
           const outlines = await this.ctx.regionStore.classSliceOutlines(classes);
@@ -219,7 +236,7 @@ export class SpatialControlsFacade {
             request !== this.roiRequest ||
             revision !== this.ctx.selectionStore.revision() ||
             this.dataset !== dataset ||
-            !isSpatialOmics3d(this.ctx.plotType()) ||
+            this.roiSelectionMode() !== 'class-volumes' ||
             current.length !== classes.length ||
             current.some((c, i) => c !== classes[i])
           ) {
@@ -257,6 +274,8 @@ export class SpatialControlsFacade {
         this.ctx.selectionStore.set(selection);
         return selection.count;
       },
+
+      roiSelectionMode: () => this.roiSelectionMode(),
 
       getPickedRegionClasses$: () => this.ctx.regionStore.getPickedClasses$(),
 

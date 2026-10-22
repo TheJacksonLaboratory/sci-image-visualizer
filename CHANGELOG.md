@@ -16,7 +16,9 @@ file was added.
   button selects the cells inside those classes' volumes, through every section of the dataset's
   reference volume, as their reconstructions show them; the panel says which classes it will use.
   Drawing a region replaces the pick, and the button selects by the lassos again. Needs the regions
-  on the reference volume's stack (as the 3D surfaces do). `ISpatialControls.getPickedRegionClasses$`
+  on the reference volume's stack (as the 3D surfaces do); with classes picked that are not, the
+  panel says it selects by the lassos instead. `ISpatialControls.roiSelectionMode()` is the one rule
+  the selection runs by and the panel describes it by. `ISpatialControls.getPickedRegionClasses$`
   and `IRegionEditorApi.getPickedRegionClasses$` report the pick.
 
 ### Changed

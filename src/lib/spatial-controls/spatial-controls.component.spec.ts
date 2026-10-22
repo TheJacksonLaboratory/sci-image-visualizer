@@ -6,7 +6,7 @@ import { BehaviorSubject, Observable, of } from 'rxjs';
 
 import { SpatialControlsComponent, parseGeneGroups } from './spatial-controls.component';
 import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
-import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
+import { VISUALIZER, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
@@ -460,24 +460,39 @@ describe('SpatialControlsComponent', () => {
   });
 
   describe('picked region classes', () => {
-    it('in 3D, says it selects inside the classes picked in the Region Editor', async () => {
-      const picked$ = new BehaviorSubject<readonly string[]>([]);
-      (controls as { getPickedRegionClasses$?: () => Observable<readonly string[]> }).getPickedRegionClasses$ =
-        jest.fn(() => picked$);
+    let mode: RoiSelectionMode;
+    let picked$: BehaviorSubject<readonly string[]>;
+
+    beforeEach(async () => {
+      mode = 'regions';
+      picked$ = new BehaviorSubject<readonly string[]>([]);
+      Object.assign(controls, {
+        getPickedRegionClasses$: jest.fn(() => picked$),
+        roiSelectionMode: jest.fn(() => mode),
+      });
       await build(controls);
       component.is3d = true;
-      dataset$.next({ ...dataset, volume: { width: 4, height: 4, depth: 2, voxelSize: [1, 1, 1] } });
-      expect(component['selectsClassVolumes']).toBe(false);
+    });
 
+    it('describes the selection by the mode the controls will run it in', () => {
       picked$.next(['fiber tracts', 'cbf']);
+      mode = 'class-volumes';
       expect(component['selectsClassVolumes']).toBe(true);
-      // The 2D view selects by the drawn regions on the slice, as before.
-      component.is3d = false;
+      // Picked, but not on the reference volume shown (another image plotted, no volume yet):
+      // the controls select by the lassos, and the panel says so rather than naming the classes.
+      mode = 'regions';
       expect(component['selectsClassVolumes']).toBe(false);
-      // No reference volume: nothing for the classes to be a volume of.
-      component.is3d = true;
-      dataset$.next(dataset);
-      expect(component['selectsClassVolumes']).toBe(false);
+    });
+
+    it('says what a selection that found nothing missed: the mode it ran in', async () => {
+      mode = 'class-volumes';
+      controls.selectFromRegions.mockImplementationOnce(async () => {
+        mode = 'regions'; // the pick dropped since, say
+        return 0;
+      });
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(true);
+      expect(component['missedMode']).toBe('class-volumes');
     });
   });
 
