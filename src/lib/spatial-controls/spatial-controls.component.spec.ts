@@ -399,6 +399,13 @@ describe('SpatialControlsComponent', () => {
       expect(component['hasSelection']).toBe(false);
     });
 
+    it('says nothing of a selection that was superseded while it ran', async () => {
+      controls.selectFromRegions.mockResolvedValueOnce(null);
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(false);
+      expect(component['selectingFromRegions']).toBe(false);
+    });
+
     it('says the selection missed when reading the classes fails, and lets the button go again', async () => {
       controls.selectFromRegions.mockRejectedValueOnce(new Error('offline'));
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);

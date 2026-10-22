@@ -299,7 +299,7 @@ export class SpatialControlsComponent implements OnInit {
     if (!this.controls || this.selectingFromRegions) return;
     this.selectingFromRegions = true;
     this.cdr.markForCheck();
-    let count = 0;
+    let count: number | null = 0;
     try {
       count = await this.controls.selectFromRegions();
     } catch (err) {
@@ -308,6 +308,8 @@ export class SpatialControlsComponent implements OnInit {
     // The classes' outlines are read in a worker, whose answer lands outside the zone.
     this.runAndMark(() => {
       this.selectingFromRegions = false;
+      // Superseded (null): a newer selection stands, and says what it is itself.
+      if (count === null) return;
       this.selectedCategory = null;
       this.selectionMissed = count === 0;
     });

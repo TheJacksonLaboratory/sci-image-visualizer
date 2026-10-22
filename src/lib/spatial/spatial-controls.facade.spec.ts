@@ -120,4 +120,66 @@ describe('SpatialControlsFacade selectFromRegions', () => {
     expect(Array.from(selection.current().mask)).toEqual([1, 0, 0]);
     expect(classSliceOutlines).not.toHaveBeenCalled();
   });
+
+  describe('a class-volume selection superseded while its outlines are read', () => {
+    let release: Array<(o: SliceOutlines[]) => void>;
+
+    beforeEach(() => {
+      picked = ['fiber tracts'];
+      release = [];
+      classSliceOutlines = jest.fn(() => new Promise<SliceOutlines[]>((r) => release.push(r)));
+    });
+
+    it('publishes nothing once the selection was cleared meanwhile', async () => {
+      const { controls } = facade();
+      selection.set({ mask: Uint8Array.from([0, 1, 0]), count: 1 });
+      const pending = controls.selectFromRegions();
+      controls.clearSelection();
+      release[0](structure);
+      expect(await pending).toBeNull();
+      expect(selection.current().count).toBe(0);
+    });
+
+    it('leaves a newer linked selection standing', async () => {
+      const { controls } = facade();
+      const pending = controls.selectFromRegions();
+      controls.selectIndices([1]);
+      release[0](structure);
+      expect(await pending).toBeNull();
+      expect(Array.from(selection.current().mask)).toEqual([0, 1, 0]);
+    });
+
+    it('lets only the latest of two requests publish', async () => {
+      const { controls } = facade();
+      const first = controls.selectFromRegions();
+      const second = controls.selectFromRegions();
+      release[1](structure);
+      expect(await second).toBe(2);
+      release[0]([]);
+      expect(await first).toBeNull();
+      expect(Array.from(selection.current().mask)).toEqual([1, 0, 1]);
+    });
+
+    it('publishes nothing when the pick or the view changed, or the facade was disposed', async () => {
+      let built = facade();
+      let pending = built.controls.selectFromRegions();
+      picked = ['cbf'];
+      release[0](structure);
+      expect(await pending).toBeNull();
+
+      picked = ['fiber tracts'];
+      pending = built.controls.selectFromRegions();
+      plotType = PlotType.SPATIAL_OMICS;
+      release[1](structure);
+      expect(await pending).toBeNull();
+
+      plotType = PlotType.SPATIAL_OMICS_3D;
+      built = facade();
+      pending = built.controls.selectFromRegions();
+      built.dispose();
+      release[2](structure);
+      expect(await pending).toBeNull();
+      expect(selection.current().count).toBe(0);
+    });
+  });
 });

@@ -446,9 +446,11 @@ export interface ISpatialControls {
    * picked in the Region Editor (see {@link getPickedRegionClasses$}) select the
    * observations inside their volumes instead, when the regions sit on the
    * dataset's reference volume; without a pick, the lassos drawn over the cloud.
-   * Resolves how many were selected.
+   * Resolves how many were selected — or null when it was superseded while the
+   * classes' outlines were read (a newer selection, a Clear, another dataset, view
+   * or pick), in which case nothing was published.
    */
-  selectFromRegions(): Promise<number>;
+  selectFromRegions(): Promise<number | null>;
   /**
    * The region classes the region selection was picked as (a class tree node with
    * its subclasses, a surface clicked in 3D); [] for any other selection.

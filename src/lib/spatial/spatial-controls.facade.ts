@@ -68,6 +68,8 @@ export class SpatialControlsFacade {
    *  screen — it runs from a button click and must not await a round-trip. */
   private dataset: SpatialDataset | null = null;
   private readonly sub: Subscription;
+  /** Bumped per class-volume selection (and on dispose): only the latest may publish. */
+  private roiRequest = 0;
 
   constructor(
     private readonly port: SpatialDataPort,
@@ -92,6 +94,8 @@ export class SpatialControlsFacade {
   /** Release the port subscription (the router's injector is being destroyed). */
   dispose(): void {
     this.sub.unsubscribe();
+    // A class-volume selection still reading its outlines publishes nothing.
+    this.roiRequest++;
   }
 
   private build(): ISpatialControls {
@@ -204,9 +208,23 @@ export class SpatialControlsFacade {
         const classes = is3d ? this.ctx.regionStore.getPickedClasses() : [];
         const volume = !dataset.imageRef ? dataset.volume : undefined;
         if (classes.length && volume && this.ctx.napari.regionVoxelStep() !== null) {
+          const request = ++this.roiRequest;
+          const revision = this.ctx.selectionStore.revision();
           const outlines = await this.ctx.regionStore.classSliceOutlines(classes);
-          // The dataset changed while the outlines were read: its mask is stale.
-          if (this.dataset !== dataset) return 0;
+          // Superseded while the outlines were read: a newer request, any newer selection
+          // (a Clear, a legend click, a linked chart's brush), another dataset, view or pick,
+          // or the facade disposed. Its mask would overwrite what the user did since.
+          const current = this.ctx.regionStore.getPickedClasses();
+          if (
+            request !== this.roiRequest ||
+            revision !== this.ctx.selectionStore.revision() ||
+            this.dataset !== dataset ||
+            !isSpatialOmics3d(this.ctx.plotType()) ||
+            current.length !== classes.length ||
+            current.some((c, i) => c !== classes[i])
+          ) {
+            return null;
+          }
           const selection = selectInClassVolumes(dataset.observations, volume, outlines);
           this.ctx.selectionStore.set(selection);
           return selection.count;

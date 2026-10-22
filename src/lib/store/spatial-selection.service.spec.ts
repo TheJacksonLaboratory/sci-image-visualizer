@@ -49,4 +49,13 @@ describe('SpatialSelectionStore', () => {
     store.clear();
     expect(seen).toEqual([0]); // only the initial emission
   });
+
+  it('counts every write, a clear of nothing included, so a pending selection can tell it was superseded', () => {
+    const store = new SpatialSelectionStore();
+    const start = store.revision();
+    store.clear();
+    expect(store.revision()).toBe(start + 1);
+    store.set({ mask: Uint8Array.from([1]), count: 1 });
+    expect(store.revision()).toBe(start + 2);
+  });
 });

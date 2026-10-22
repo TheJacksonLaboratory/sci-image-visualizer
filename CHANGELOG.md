@@ -21,8 +21,11 @@ file was added.
 
 ### Changed
 
-- `ISpatialControls.selectFromRegions()` resolves its count (`Promise<number>`): the classes'
-  outlines are read from their region sources.
+- `ISpatialControls.selectFromRegions()` resolves its count (`Promise<number | null>`): the
+  classes' outlines are read from their region sources. It resolves null, publishing nothing, when
+  it was superseded while they were read (a newer selection or Clear, another dataset, view or
+  pick), so a slow read never overwrites what the user did since. `SpatialSelectionStore.revision()`
+  counts the writes it compares.
 
 ### Fixed
 
