@@ -401,6 +401,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.scene?.screenProjection?.(obs) ?? null;
   }
 
+  /** The ids of the regions drawn over the 3D cloud in screen space (its lassos); [] in 2D. Every
+   *  other region in the store is in image space, and means nothing at canvas pixels. */
+  getSpatialLassoIds(): number[] {
+    return this.tools.regionOverlay?.ownRegionIds() ?? [];
+  }
+
   private fitCameraSoon(): void {
     const run = (): void => {
       if (this.viewer && this.canvas && this.imageW > 0 && this.imageH > 0) {

@@ -1790,6 +1790,7 @@ describe('RegionEditorComponent with a region source', () => {
   let presets$: BehaviorSubject<PresetSet>;
   let volume$: BehaviorSubject<boolean>;
   let slicePane$: BehaviorSubject<boolean>;
+  let pickedRegionClasses$: BehaviorSubject<readonly string[]>;
 
   beforeEach(async () => {
     const drawn = Object.assign(new Region(), { id: 1, name: 'shape1', label: 'MB', color: '#f00' });
@@ -1797,6 +1798,7 @@ describe('RegionEditorComponent with a region source', () => {
     const elsewhere = Object.assign(new Region(), { id: 2, name: 'shape2', label: 'CTX', color: '#0f0', z: 4 });
     volume$ = new BehaviorSubject(false);
     slicePane$ = new BehaviorSubject(false);
+    pickedRegionClasses$ = new BehaviorSubject<readonly string[]>([]);
     presets$ = new BehaviorSubject<PresetSet>({
       classes: [],
       fallbackPalette: ['#123456'],
@@ -1830,6 +1832,7 @@ describe('RegionEditorComponent with a region source', () => {
       selectSourceFeatures: jest.fn(async () => []),
       deleteSourceFeatures: jest.fn(),
       selectRegionClasses: jest.fn(async () => undefined),
+      getPickedRegionClasses$: () => pickedRegionClasses$,
     });
     shallowEditor();
     await TestBed.configureTestingModule({
@@ -1933,6 +1936,16 @@ describe('RegionEditorComponent with a region source', () => {
     await (component as any).pickClasses({ name: 'grey', classes: ['grey', 'CTX', 'MB'], additive: false });
     expect(api.selectRegionClasses).toHaveBeenCalledWith(['grey', 'CTX', 'MB'], false);
     expect((component as any).pickedClass).toBe('grey');
+  });
+
+  it("drops the tree's pick once another selection replaces it (a region drawn on the canvas)", async () => {
+    await (component as any).pickClasses({ name: 'grey', classes: ['grey', 'CTX', 'MB'], additive: false });
+    pickedRegionClasses$.next(['grey', 'CTX', 'MB']);
+    expect((component as any).pickedClass).toBe('grey');
+
+    pickedRegionClasses$.next([]);
+    expect((component as any).pickedClass).toBeNull();
+    expect((component as any).pickedClasses).toEqual([]);
   });
 
   it('shows classes in 3D in a volume view, each with its subtree, and hides them again', async () => {

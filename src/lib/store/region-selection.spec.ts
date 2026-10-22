@@ -39,4 +39,27 @@ describe('RegionSelection', () => {
     sel.selectIndices([1], regs(1, 2));
     expect(seen).toEqual([[], [1]]);
   });
+
+  it('holds the classes a selection was picked as, through edits, until another selection', () => {
+    const classes: Array<readonly string[]> = [];
+    sel.classes$.subscribe((c) => classes.push(c));
+    sel.replace([10], ['fiber tracts', 'cbf']);
+    expect(classes).toEqual([[]]);
+    sel.sync(regs(10, 11));
+    expect(sel.classes).toEqual(['fiber tracts', 'cbf']);
+
+    // An edit keeps the pick: the classes are volumes, not the regions on the slice.
+    sel.retain(() => false);
+    sel.sync(regs(11));
+    expect(sel.ids).toEqual([]);
+    expect(sel.classes).toEqual(['fiber tracts', 'cbf']);
+
+    sel.selectIndices([0], regs(11));
+    expect(sel.classes).toEqual([]);
+    sel.replace([11], ['VS']);
+    sel.sync(regs(11));
+    sel.replace([11]);
+    sel.sync(regs(11));
+    expect(classes).toEqual([[], ['fiber tracts', 'cbf'], [], ['VS'], []]);
+  });
 });

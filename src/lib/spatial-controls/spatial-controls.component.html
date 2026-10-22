@@ -94,8 +94,13 @@
             icon="pi pi-object-group"
             size="small"
             [outlined]="true"
+            [loading]="selectingFromRegions"
             (onClick)="selectFromRegions()"
-            pTooltip="Select every observation inside the drawn regions"
+            [pTooltip]="
+              selectsClassVolumes
+                ? 'Select every observation inside the volumes of the classes picked in the Region Editor'
+                : 'Select every observation inside the drawn regions'
+            "
             tooltipPosition="top"
           ></p-button>
           <p-button
@@ -109,9 +114,24 @@
         <small class="sc-hint" *ngIf="hasSelection">
           {{ selection.count | number }} of {{ ds.observations.count | number }} selected — the rest are muted.
         </small>
-        <small class="sc-hint" *ngIf="selectionMissed"> No observations fell inside the drawn regions. </small>
-        <small class="sc-hint" *ngIf="is3d">
+        <small class="sc-hint" *ngIf="selectionMissed">
+          No observations fell inside the
+          {{ missedMode === 'class-volumes' ? 'picked classes' : 'drawn regions' }}.
+        </small>
+        <small class="sc-hint" *ngIf="selectsClassVolumes">
+          Selects inside the volume of {{ pickedClasses[0]
+          }}{{ pickedClasses.length > 1 ? ' and ' + (pickedClasses.length - 1 | number) + ' more classes' : '' }},
+          picked in the Region Editor. Draw a region to select by it instead.
+        </small>
+        <small class="sc-hint" *ngIf="is3d && !selectsClassVolumes && pickedClasses.length">
+          The classes picked in the Region Editor are not on the reference volume shown here, so this selects by
+          the regions drawn over the cloud instead.
+        </small>
+        <small class="sc-hint" *ngIf="is3d && !selectsClassVolumes">
           In 3D a region cuts through the cloud's full depth. Orbit and draw again to cut from another angle.
+          <ng-container *ngIf="!pickedClasses.length">
+            Pick classes in the Region Editor's class tree to select inside their volumes.
+          </ng-container>
         </small>
       </div>
     </div>

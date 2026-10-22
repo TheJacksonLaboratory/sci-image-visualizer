@@ -1038,6 +1038,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   async selectRegionClasses(classes: readonly string[], additive?: boolean): Promise<void> {
     await this.regionStore.selectClasses(classes, additive);
   }
+  getPickedRegionClasses$(): Observable<readonly string[]> {
+    return this.regionStore.getPickedClasses$();
+  }
   getGeoJsonStringWithSource(regions: Region[], slice?: number): Promise<string> {
     return this.regionStore.getGeoJsonWithSource(regions, slice);
   }

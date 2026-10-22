@@ -354,6 +354,13 @@ export interface SpatialCategoricalView {
 }
 
 /**
+ * How "Select from ROIs" selects: inside the volumes of the region classes picked
+ * in the Region Editor (Spatial omics 3D, the regions on the dataset's reference
+ * volume shown), or by the drawn regions.
+ */
+export type RoiSelectionMode = 'class-volumes' | 'regions';
+
+/**
  * Controls for the SPATIAL_OMICS plot type: what the observation markers are
  * coloured by, and how they are drawn. Capability-gated like
  * {@link IIsosurfaceControls} — `getSpatialControls()` returns null unless a
@@ -442,9 +449,26 @@ export interface ISpatialControls {
   /**
    * Select every observation inside the currently-drawn regions (their union).
    * Reuses the existing ROI tools — rectangle, polygon, freehand, wand, brush —
-   * so there is no separate marquee to learn. Returns how many were selected.
+   * so there is no separate marquee to learn. In the 3D cloud, the region classes
+   * picked in the Region Editor (see {@link getPickedRegionClasses$}) select the
+   * observations inside their volumes instead, when the regions sit on the
+   * dataset's reference volume; without a pick, the lassos drawn over the cloud.
+   * Resolves how many were selected — or null when it was superseded while the
+   * classes' outlines were read (a newer selection, a Clear, another dataset, view
+   * or pick), in which case nothing was published.
    */
-  selectFromRegions(): number;
+  selectFromRegions(): Promise<number | null>;
+  /**
+   * How {@link selectFromRegions} would select now: inside the picked classes'
+   * volumes, or by the drawn regions. The rule it runs by, so a panel describing
+   * the button can never disagree with what it does.
+   */
+  roiSelectionMode?(): RoiSelectionMode;
+  /**
+   * The region classes the region selection was picked as (a class tree node with
+   * its subclasses, a surface clicked in 3D); [] for any other selection.
+   */
+  getPickedRegionClasses$?(): Observable<readonly string[]>;
   /** Select every observation in one category of a categorical column — the
    *  legend click. Rejects for an unknown or continuous column. */
   selectCategory(column: string, categoryIndex: number): Promise<number>;

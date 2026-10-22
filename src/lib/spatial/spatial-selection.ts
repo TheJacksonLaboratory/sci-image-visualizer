@@ -1,6 +1,12 @@
 import { Region } from '../models/region';
+import { SliceOutlines, fillOutlines } from '../geometry/reconstruct';
 import { RingBounds as Bounds, pointInRing as ringContainsPoint, ringBounds } from '../geometry/ring';
-import { SpatialImageRef, SpatialObservations, SpatialSelectionMask } from '../contracts/spatial-dataset.contract';
+import {
+  SpatialImageRef,
+  SpatialObservations,
+  SpatialSelectionMask,
+  SpatialVolumeMeta,
+} from '../contracts/spatial-dataset.contract';
 
 /**
  * Which observations fall inside a set of drawn regions.
@@ -263,6 +269,71 @@ export function selectInRegionsProjected(
     }
   }
   return { mask, count: hits };
+}
+
+/**
+ * Observations inside the VOLUME a stack of outlines encloses: a region class (an
+ * atlas structure with its substructures) through every section of the dataset's
+ * reference volume, as its 3D reconstruction shows it.
+ *
+ * The outlines are in the volume's own grid — x, y in voxels, z the slice — which
+ * is where regions imported onto the volume's stack sit. An observation is in voxel
+ * `(⌊x / vx⌋, ⌊y / vy⌋, ⌊z / vz⌋)` (see `volumeImageRef`), and selected when its
+ * slice's outlines cover that voxel, filled as the reconstruction fills them. One
+ * slice is rasterised at a time, so a structure through the whole brain costs one
+ * slice's mask, not the volume's. An observation outside the volume, or without a
+ * z, is never selected.
+ */
+export function selectInClassVolumes(
+  observations: SpatialObservations,
+  volume: SpatialVolumeMeta,
+  slices: readonly SliceOutlines[],
+): SpatialSelectionMask {
+  const n = observations.count;
+  const mask = new Uint8Array(n);
+  const z = observations.z;
+  const { width, height, depth } = volume;
+  const [vx, vy, vz] = volume.voxelSize;
+  const bySlice = new Map<number, SliceOutlines[]>();
+  for (const s of slices) {
+    if (!s.rings.length || s.z < 0 || s.z >= depth) continue;
+    const list = bySlice.get(s.z);
+    if (list) list.push(s);
+    else bySlice.set(s.z, [s]);
+  }
+  if (!z || !bySlice.size) return { mask, count: 0 };
+
+  // The observations of each outlined slice (a counting sort by slice).
+  const sliceOf = new Int32Array(n).fill(-1);
+  const counts = new Uint32Array(depth + 1);
+  for (let i = 0; i < n; i++) {
+    const k = Math.floor(z[i] / vz);
+    if (!bySlice.has(k)) continue;
+    sliceOf[i] = k;
+    counts[k + 1]++;
+  }
+  for (let k = 0; k < depth; k++) counts[k + 1] += counts[k];
+  const order = new Uint32Array(counts[depth]);
+  const at = counts.slice(0, depth);
+  for (let i = 0; i < n; i++) if (sliceOf[i] >= 0) order[at[sliceOf[i]]++] = i;
+
+  const plane = new Uint8Array(width * height);
+  let count = 0;
+  for (const [k, outlines] of bySlice) {
+    plane.fill(0);
+    for (const s of outlines) fillOutlines(plane, width, height, s);
+    for (let o = counts[k]; o < counts[k + 1]; o++) {
+      const i = order[o];
+      const px = Math.floor(observations.x[i] / vx);
+      const py = Math.floor(observations.y[i] / vy);
+      if (px < 0 || py < 0 || px >= width || py >= height) continue;
+      if (plane[py * width + px]) {
+        mask[i] = 1;
+        count++;
+      }
+    }
+  }
+  return { mask, count };
 }
 
 /**

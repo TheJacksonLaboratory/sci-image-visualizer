@@ -21,7 +21,7 @@ import { DialogModule } from 'primeng/dialog';
 import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
 
-import { VISUALIZER, IVisualizer, ISpatialControls } from '../contracts/visualizer.contract';
+import { VISUALIZER, IVisualizer, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
@@ -155,6 +155,12 @@ export class SpatialControlsComponent implements OnInit {
   /** An ROI selection that matched nothing, so the UI can say so rather than
    *  looking like the button did nothing. */
   protected selectionMissed = false;
+  /** The mode of the selection that {@link selectionMissed}: what it found nothing inside. */
+  protected missedMode: RoiSelectionMode = 'regions';
+  /** The region classes picked in the Region Editor: in 3D, "Select from ROIs" selects inside them. */
+  protected pickedClasses: readonly string[] = [];
+  /** While "Select from ROIs" reads the picked classes' outlines. */
+  protected selectingFromRegions = false;
 
   /**
    * Whether the Distribution section is expanded. Collapsed by default: the
@@ -235,11 +241,22 @@ export class SpatialControlsComponent implements OnInit {
     this.controls
       .getSelection$()
       .pipe(untilDestroyed())
-      .subscribe((selection) => {
-        this.selection = selection;
-        if (selection.count === 0) this.selectedCategory = null;
-        this.cdr.markForCheck();
-      });
+      .subscribe((selection) =>
+        // Set from outside the zone too: a selection from the region classes' volumes.
+        this.runAndMark(() => {
+          this.selection = selection;
+          if (selection.count === 0) this.selectedCategory = null;
+        }),
+      );
+
+    this.controls
+      .getPickedRegionClasses$?.()
+      ?.pipe(untilDestroyed())
+      .subscribe((classes) =>
+        this.runAndMark(() => {
+          this.pickedClasses = classes;
+        }),
+      );
 
     // The colour bar must use the colormap the renderer is using.
     combineLatest([this.viz.getColormap(), this.viz.getReverseScale()])
@@ -278,11 +295,39 @@ export class SpatialControlsComponent implements OnInit {
 
   // ── selection ───────────────────────────────────────────────────────────
 
-  /** Select every observation inside the drawn regions (their union). */
-  protected selectFromRegions(): void {
-    const count = this.controls?.selectFromRegions() ?? 0;
-    this.selectedCategory = null;
-    this.selectionMissed = count === 0;
+  /** Select every observation inside the drawn regions (their union) — in 3D, inside the
+   *  picked classes' volumes. */
+  protected async selectFromRegions(): Promise<void> {
+    if (!this.controls || this.selectingFromRegions) return;
+    this.selectingFromRegions = true;
+    // The mode the selection runs in (decided as it starts), for what a miss says it missed.
+    const mode = this.roiSelectionMode;
+    this.cdr.markForCheck();
+    let count: number | null = 0;
+    try {
+      count = await this.controls.selectFromRegions();
+    } catch (err) {
+      console.warn('[spatial] could not select from the regions', err);
+    }
+    // The classes' outlines are read in a worker, whose answer lands outside the zone.
+    this.runAndMark(() => {
+      this.selectingFromRegions = false;
+      // Superseded (null): a newer selection stands, and says what it is itself.
+      if (count === null) return;
+      this.selectedCategory = null;
+      this.selectionMissed = count === 0;
+      this.missedMode = mode;
+    });
+  }
+
+  /** In 3D with classes picked, "Select from ROIs" selects inside their volumes. */
+  protected get selectsClassVolumes(): boolean {
+    return this.roiSelectionMode === 'class-volumes';
+  }
+
+  /** How "Select from ROIs" selects now: the controls' own rule, the one the selection runs by. */
+  private get roiSelectionMode(): RoiSelectionMode {
+    return this.controls?.roiSelectionMode?.() ?? 'regions';
   }
 
   /** Legend click: select one category. Clicking the active row clears it, so a

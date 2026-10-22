@@ -8,11 +8,12 @@ import {
   sameSelection,
   selectByCategory,
   selectByIndices,
+  selectInClassVolumes,
   selectInRegions,
   selectInRegionsProjected,
 } from './spatial-selection';
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
-import { SpatialObservations } from '../contracts/spatial-dataset.contract';
+import { SpatialObservations, SpatialVolumeMeta } from '../contracts/spatial-dataset.contract';
 
 /** Observations at the given [x, y] pairs. */
 function obs(...points: [number, number][]): SpatialObservations {
@@ -344,5 +345,58 @@ describe('selectByIndices', () => {
     const sel = selectByIndices([], 3);
     expect(sel.count).toBe(0);
     expect(sel.mask).toHaveLength(3);
+  });
+});
+
+describe('selectInClassVolumes', () => {
+  /** A 10 × 10 × 3 volume of 20 µm voxels (40 µm sections). */
+  const volume: SpatialVolumeMeta = { width: 10, height: 10, depth: 3, voxelSize: [20, 20, 40] };
+  /** Observations at [x, y, z] in µm. */
+  function cells(...points: [number, number, number][]): SpatialObservations {
+    return {
+      ...obs(...points.map(([x, y]) => [x, y] as [number, number])),
+      z: Float32Array.from(points.map((p) => p[2])),
+    };
+  }
+  /** An axis-aligned square ring, in voxels. */
+  const square = (x0: number, y0: number, x1: number, y1: number) => [x0, y0, x1, y0, x1, y1, x0, y1];
+
+  it("selects the observations inside their own section's outlines, not another's", () => {
+    const observations = cells(
+      [50, 50, 10], // voxel (2, 2) of slice 0: inside
+      [50, 50, 50], // slice 1: no outline there
+      [150, 150, 90], // voxel (7, 7) of slice 2: inside
+      [150, 150, 10], // slice 0, but outside its square
+    );
+    const selection = selectInClassVolumes(observations, volume, [
+      { z: 0, rings: [square(1, 1, 4, 4)] },
+      { z: 2, rings: [square(6, 6, 9, 9)] },
+    ]);
+    expect(Array.from(selection.mask)).toEqual([1, 0, 1, 0]);
+    expect(selection.count).toBe(2);
+  });
+
+  it('fills each feature even-odd (its holes) and the features as their union', () => {
+    const observations = cells([50, 50, 0], [110, 110, 0], [170, 30, 0]);
+    const selection = selectInClassVolumes(observations, volume, [
+      {
+        z: 0,
+        // Feature 0: a ring with a hole over voxel (2, 2); feature 1 over that hole's corner.
+        rings: [square(0, 0, 8, 8), square(1, 1, 4, 4), square(5, 5, 7, 7), square(8, 1, 9, 2)],
+        ringGroups: [0, 0, 1, 2],
+      },
+    ]);
+    // (2, 2) is in feature 0's hole; (5, 5) is in feature 0 and in feature 1 (no hole cut);
+    // (8, 1) is in feature 2 alone.
+    expect(Array.from(selection.mask)).toEqual([0, 1, 1]);
+  });
+
+  it('never selects observations outside the volume, or a dataset without z', () => {
+    const outlines = [{ z: 0, rings: [square(0, 0, 10, 10)] }];
+    expect(
+      selectInClassVolumes(cells([-5, 50, 0], [50, 50, -1], [50, 250, 0], [50, 50, 200]), volume, outlines).count,
+    ).toBe(0);
+    expect(selectInClassVolumes(obs([50, 50]), volume, outlines).count).toBe(0);
+    expect(selectInClassVolumes(cells([50, 50, 0]), volume, []).count).toBe(0);
   });
 });

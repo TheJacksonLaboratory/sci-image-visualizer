@@ -191,6 +191,9 @@ export interface IRegionEditorApi {
   setClassesHidden?(classes: readonly string[], hidden: boolean): void;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
+  /** The classes the selection was picked as by {@link selectRegionClasses}; [] once anything
+   *  else is selected (a row, a region drawn or clicked). */
+  getPickedRegionClasses$?(): Observable<readonly string[]>;
   /** {@link getGeoJsonString} merged with the region source behind the regions (see
    *  `RegionStore.getGeoJsonWithSource`); `slice` names a folder stack's slice. */
   getGeoJsonStringWithSource?(regions: Region[], slice?: number): Promise<string>;

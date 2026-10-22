@@ -12,13 +12,28 @@ interface HasId {
  * owner calls {@link sync} once the region array it projects onto is final,
  * which prunes ids that no longer exist and emits {@link indices$} only when
  * the index set changed.
+ *
+ * A selection made by picking classes (the class tree, a surface in 3D) also
+ * holds those classes: a class is a volume through the whole stack, whether or
+ * not it has a region on the slice. Any other selection drops them; an edit
+ * ({@link retain}, {@link sync}) keeps them.
  */
 export class RegionSelection {
   private selected: number[] = [];
+  private picked: readonly string[] = [];
   private readonly indicesSubject = new BehaviorSubject<number[]>([]);
+  private readonly classesSubject = new BehaviorSubject<readonly string[]>([]);
 
   /** The selected regions' current array indices (emits on change only). */
   readonly indices$: Observable<number[]> = this.indicesSubject.asObservable();
+
+  /** The classes the selection was picked as ([] for any other selection; emits on change only). */
+  readonly classes$: Observable<readonly string[]> = this.classesSubject.asObservable();
+
+  /** The classes the selection was picked as, as last emitted by {@link sync}. */
+  get classes(): readonly string[] {
+    return this.classesSubject.value;
+  }
 
   /** The selected indices as last projected by {@link sync}. */
   get indices(): number[] {
@@ -30,9 +45,10 @@ export class RegionSelection {
     return this.selected;
   }
 
-  /** Replace the selected ids (no emit until {@link sync}). */
-  replace(ids: number[]): void {
+  /** Replace the selected ids, picked as `classes` if they were (no emit until {@link sync}). */
+  replace(ids: number[], classes: readonly string[] = []): void {
     this.selected = ids.slice();
+    this.picked = classes.slice();
   }
 
   /** Keep only the ids `keep` accepts (no emit until {@link sync}). */
@@ -56,11 +72,12 @@ export class RegionSelection {
       }
     }
     this.selected = ids;
+    this.picked = [];
     this.sync(regions);
   }
 
   /** Project the selected ids onto `regions`, pruning ids it no longer holds,
-   *  and emit if the index set changed. */
+   *  and emit if the index set (or the picked classes) changed. */
   sync(regions: readonly HasId[]): void {
     const indexOf = new Map<number, number>();
     regions.forEach((r, i) => {
@@ -77,10 +94,11 @@ export class RegionSelection {
     }
     this.selected = live;
     if (!sameIndices(this.indicesSubject.value, indices)) this.indicesSubject.next(indices);
+    if (!sameIndices(this.classesSubject.value, this.picked)) this.classesSubject.next(this.picked);
   }
 }
 
-function sameIndices(a: number[], b: number[]): boolean {
+function sameIndices<T>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;

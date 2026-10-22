@@ -386,6 +386,18 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       ?.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(({ key, additive }) => this.onPicked3d(key, additive));
 
+    // Another selection replaced the class tree's pick (a region drawn or clicked on the canvas).
+    this.regionApi
+      .getPickedRegionClasses$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((classes) => {
+        if (classes.length || !this.pickedClasses.length) return;
+        this.pickedClass = null;
+        this.pickedClasses = [];
+        this.updateSelectionHighlight();
+        this.changed();
+      });
+
     this.persistence
       .fileExists(this.saveAsCheck$)
       .pipe(takeUntilDestroyed(this.destroyRef))

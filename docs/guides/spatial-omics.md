@@ -152,6 +152,13 @@ polygon, freehand shape, wand or brush region, then _Select from ROIs_ selects
 every observation inside their union and mutes the rest. Legend rows select
 their category on click.
 
+In **Spatial omics 3D**, regions imported onto the dataset's reference volume
+(an atlas registered to it) select by their volumes: pick a class in the Region
+Editor's class tree — it comes with its subclasses — or click its surface in the
+3D view, and _Select from ROIs_ selects the cells inside it through every
+section. Without a pick, or once a region is drawn over the cloud, it selects
+by the drawn lassos, which cut through the cloud's full depth.
+
 **Linked distributions** sit in the same panel, below the colour controls, over
 whatever the map is coloured by: histogram, violin or box for a continuous column
 or a gene, and per-category **counts** for a categorical one — a histogram of a

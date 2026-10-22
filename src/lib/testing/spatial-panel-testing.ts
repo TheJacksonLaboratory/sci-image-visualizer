@@ -185,7 +185,7 @@ export function fakeSpatialControls(dataset: SpatialDataset | null): SpatialCont
     searchFeatures: jest.fn(async () => ['Ttr']),
     categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
     getSelection$: jest.fn(() => selection$),
-    selectFromRegions: jest.fn(() => 0),
+    selectFromRegions: jest.fn(async () => 0),
     selectCategory: jest.fn(async () => 0),
     clearSelection: jest.fn(() => selection$.next(emptySelection())),
     sampledSections: jest.fn(() => Float32Array.from([0, 10, 20])),

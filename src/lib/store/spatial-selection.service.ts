@@ -14,6 +14,17 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
 @Injectable({ providedIn: 'root' })
 export class SpatialSelectionStore {
   private readonly selection$ = new BehaviorSubject<SpatialSelectionMask>(emptySelection());
+  /** Bumped by every write, a clear of nothing included (see {@link revision}). */
+  private writes = 0;
+
+  /**
+   * How many times the selection was written (set or cleared, by any writer). A selection
+   * computed asynchronously compares it before publishing: a newer write — a Clear, a legend
+   * click, a linked chart's brush — supersedes it.
+   */
+  revision(): number {
+    return this.writes;
+  }
 
   /** Emits on every change, including a clear. */
   getSelection$(): Observable<SpatialSelectionMask> {
@@ -34,10 +45,12 @@ export class SpatialSelectionStore {
    *  "selected nothing" ROI visibly clears rather than silently keeping the
    *  previous selection on screen. */
   set(selection: SpatialSelectionMask): void {
+    this.writes++;
     this.selection$.next(selection);
   }
 
   clear(): void {
+    this.writes++;
     if (this.selection$.value.count === 0 && this.selection$.value.mask.length === 0) return;
     this.selection$.next(emptySelection());
   }

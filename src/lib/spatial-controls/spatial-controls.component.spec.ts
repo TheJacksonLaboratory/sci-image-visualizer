@@ -2,11 +2,11 @@ import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
 import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Observable, of } from 'rxjs';
 
 import { SpatialControlsComponent, parseGeneGroups } from './spatial-controls.component';
 import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
-import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
+import { VISUALIZER, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
@@ -98,7 +98,7 @@ describe('SpatialControlsComponent', () => {
       searchFeatures: jest.fn(async () => ['Ttr']),
       categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
       getSelection$: jest.fn(() => selection$),
-      selectFromRegions: jest.fn(() => {
+      selectFromRegions: jest.fn(async () => {
         selection$.next({ mask: new Uint8Array([1, 0, 1]), count: 2 });
         return 2;
       }),
@@ -384,19 +384,35 @@ describe('SpatialControlsComponent', () => {
   describe('selection', () => {
     beforeEach(async () => build(controls));
 
-    it('selects from the drawn ROIs and reports the count', () => {
-      component['selectFromRegions']();
+    it('selects from the drawn ROIs and reports the count', async () => {
+      await component['selectFromRegions']();
       expect(controls.selectFromRegions).toHaveBeenCalled();
       expect(component['hasSelection']).toBe(true);
       expect(component['selection'].count).toBe(2);
       expect(component['selectionMissed']).toBe(false);
     });
 
-    it('says so when the ROIs matched nothing, rather than looking inert', () => {
-      controls.selectFromRegions.mockReturnValueOnce(0);
-      component['selectFromRegions']();
+    it('says so when the ROIs matched nothing, rather than looking inert', async () => {
+      controls.selectFromRegions.mockResolvedValueOnce(0);
+      await component['selectFromRegions']();
       expect(component['selectionMissed']).toBe(true);
       expect(component['hasSelection']).toBe(false);
+    });
+
+    it('says nothing of a selection that was superseded while it ran', async () => {
+      controls.selectFromRegions.mockResolvedValueOnce(null);
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(false);
+      expect(component['selectingFromRegions']).toBe(false);
+    });
+
+    it('says the selection missed when reading the classes fails, and lets the button go again', async () => {
+      controls.selectFromRegions.mockRejectedValueOnce(new Error('offline'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(true);
+      expect(component['selectingFromRegions']).toBe(false);
+      warn.mockRestore();
     });
 
     it('selects a category from the legend', async () => {
@@ -435,11 +451,48 @@ describe('SpatialControlsComponent', () => {
       expect(component['selectedCategory']).toBeNull();
     });
 
-    it('reset clears the selection as well as the view state', () => {
-      component['selectFromRegions']();
+    it('reset clears the selection as well as the view state', async () => {
+      await component['selectFromRegions']();
       component['reset']();
       expect(controls.clearSelection).toHaveBeenCalled();
       expect(component['hasSelection']).toBe(false);
+    });
+  });
+
+  describe('picked region classes', () => {
+    let mode: RoiSelectionMode;
+    let picked$: BehaviorSubject<readonly string[]>;
+
+    beforeEach(async () => {
+      mode = 'regions';
+      picked$ = new BehaviorSubject<readonly string[]>([]);
+      Object.assign(controls, {
+        getPickedRegionClasses$: jest.fn(() => picked$),
+        roiSelectionMode: jest.fn(() => mode),
+      });
+      await build(controls);
+      component.is3d = true;
+    });
+
+    it('describes the selection by the mode the controls will run it in', () => {
+      picked$.next(['fiber tracts', 'cbf']);
+      mode = 'class-volumes';
+      expect(component['selectsClassVolumes']).toBe(true);
+      // Picked, but not on the reference volume shown (another image plotted, no volume yet):
+      // the controls select by the lassos, and the panel says so rather than naming the classes.
+      mode = 'regions';
+      expect(component['selectsClassVolumes']).toBe(false);
+    });
+
+    it('says what a selection that found nothing missed: the mode it ran in', async () => {
+      mode = 'class-volumes';
+      controls.selectFromRegions.mockImplementationOnce(async () => {
+        mode = 'regions'; // the pick dropped since, say
+        return 0;
+      });
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(true);
+      expect(component['missedMode']).toBe('class-volumes');
     });
   });
 

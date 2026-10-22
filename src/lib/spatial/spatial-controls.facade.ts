@@ -3,8 +3,13 @@ import { Observable, Subscription, firstValueFrom } from 'rxjs';
 import { PlotType, isSpatialOmics3d } from '../contracts/plot-type';
 import { SpatialDataPort } from '../contracts/ports/spatial-data.port';
 import { SpatialColorBy } from '../contracts/display-types';
-import { SpatialDataset, SpatialObservations, isCategoricalColumn } from '../contracts/spatial-dataset.contract';
-import { ISpatialControls } from '../contracts/visualizer.contract';
+import {
+  SpatialDataset,
+  SpatialObservations,
+  SpatialSelectionMask,
+  isCategoricalColumn,
+} from '../contracts/spatial-dataset.contract';
+import { ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { RegionStore } from '../store/region-store.service';
 import { SpatialSelectionStore } from '../store/spatial-selection.service';
 import { VisualizerStore } from '../store/visualizer-store.service';
@@ -15,6 +20,7 @@ import {
   emptySelection,
   selectByCategory,
   selectByIndices,
+  selectInClassVolumes,
   selectInRegions,
   selectInRegionsProjected,
 } from './spatial-selection';
@@ -26,6 +32,11 @@ export interface SpatialRendererFeeds {
   readonly densityStats$: { asObservable(): Observable<{ lo: number; hi: number; max: number } | null> };
   /** Observations projected to canvas pixels by the 3D camera, or null when the cloud is not mounted. */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null;
+  /** The ids of the regions drawn over the 3D cloud in screen space (its lassos). */
+  getSpatialLassoIds(): number[];
+  /** Image px per voxel of the volume the region surfaces sit in; null when the plotted image is
+   *  not a volume's stack (the regions are then not in the reference volume's grid). */
+  regionVoxelStep(): number | null;
 }
 
 /** What the facade works over: the shared stores, the renderer feeds and the router's view state. */
@@ -53,10 +64,12 @@ export interface SpatialControlsContext {
 export class SpatialControlsFacade {
   /** The controls; one object for the facade's life, so consumers can hold it. */
   readonly controls: ISpatialControls;
-  /** Latest dataset, mirrored so `selectFromRegions()` can answer synchronously — it
-   *  runs from a button click and must not await a round-trip. */
+  /** Latest dataset, mirrored so `selectFromRegions()` answers from the dataset on
+   *  screen — it runs from a button click and must not await a round-trip. */
   private dataset: SpatialDataset | null = null;
   private readonly sub: Subscription;
+  /** Bumped per class-volume selection (and on dispose): only the latest may publish. */
+  private roiRequest = 0;
 
   constructor(
     private readonly port: SpatialDataPort,
@@ -81,6 +94,25 @@ export class SpatialControlsFacade {
   /** Release the port subscription (the router's injector is being destroyed). */
   dispose(): void {
     this.sub.unsubscribe();
+    // A class-volume selection still reading its outlines publishes nothing.
+    this.roiRequest++;
+  }
+
+  /**
+   * How "Select from ROIs" selects now — the one rule its executor and the panel's description
+   * share: inside the picked classes' volumes in the 3D cloud, when the dataset has a reference
+   * volume (and no tissue image) and the plotted image is that volume's stack, so the regions sit
+   * in its grid; by the drawn regions otherwise.
+   */
+  private roiSelectionMode(): RoiSelectionMode {
+    const dataset = this.dataset;
+    const eligible =
+      !!dataset?.volume &&
+      !dataset.imageRef &&
+      isSpatialOmics3d(this.ctx.plotType()) &&
+      this.ctx.regionStore.getPickedClasses().length > 0 &&
+      this.ctx.napari.regionVoxelStep() !== null;
+    return eligible ? 'class-volumes' : 'regions';
   }
 
   private build(): ISpatialControls {
@@ -183,35 +215,69 @@ export class SpatialControlsFacade {
 
       getSelection$: () => this.ctx.selectionStore.getSelection$(),
 
-      selectFromRegions: () => {
+      selectFromRegions: async () => {
         const dataset = this.dataset;
         if (!dataset) return 0;
-        const regions = this.ctx.regionStore.getRegions();
-        // The union of every drawn region — so every ROI tool the library
-        // already has doubles as a spatial selection tool.
+        const is3d = isSpatialOmics3d(this.ctx.plotType());
+        const volume = !dataset.imageRef ? dataset.volume : undefined;
+        // In the 3D cloud, region classes picked in the Region Editor (a class
+        // tree node with its subclasses, a surface clicked in 3D) select the
+        // cells inside their volumes — the structures shown among the cells.
+        if (volume && this.roiSelectionMode() === 'class-volumes') {
+          const classes = this.ctx.regionStore.getPickedClasses();
+          const request = ++this.roiRequest;
+          const revision = this.ctx.selectionStore.revision();
+          const outlines = await this.ctx.regionStore.classSliceOutlines(classes);
+          // Superseded while the outlines were read: a newer request, any newer selection
+          // (a Clear, a legend click, a linked chart's brush), another dataset, view or pick,
+          // or the facade disposed. Its mask would overwrite what the user did since.
+          const current = this.ctx.regionStore.getPickedClasses();
+          if (
+            request !== this.roiRequest ||
+            revision !== this.ctx.selectionStore.revision() ||
+            this.dataset !== dataset ||
+            this.roiSelectionMode() !== 'class-volumes' ||
+            current.length !== classes.length ||
+            current.some((c, i) => c !== classes[i])
+          ) {
+            return null;
+          }
+          const selection = selectInClassVolumes(dataset.observations, volume, outlines);
+          this.ctx.selectionStore.set(selection);
+          return selection.count;
+        }
+        // Otherwise the union of every drawn region — so every ROI tool the
+        // library already has doubles as a spatial selection tool.
         //
         // In the 3D cloud there is no data-space affine to push a drawn shape
         // through, so the observations are projected to canvas pixels by the
-        // renderer (which owns the camera) and tested in screen space instead.
-        // Falls back to the 2D path whenever the cloud is not mounted.
-        const projected = isSpatialOmics3d(this.ctx.plotType())
-          ? this.ctx.napari.getSpatialScreenProjection(dataset.observations)
-          : null;
-        // In the 2D view of a volume-backed dataset the shape was drawn over ONE
-        // section, in the volume's pixel grid: it selects the cells of that
-        // section, not the whole depth of brain standing behind them.
-        const volume = !dataset.imageRef ? dataset.volume : undefined;
-        const selection = projected
-          ? selectInRegionsProjected(projected, dataset.observations.count, regions)
-          : selectInRegions(
-              dataset.observations,
-              volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
-              regions,
-              volume ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex()) : undefined,
-            );
+        // renderer (which owns the camera) and tested in screen space instead —
+        // against the lassos drawn there only: every other region is in image
+        // space. Falls back to the 2D path whenever the cloud is not mounted.
+        const projected = is3d ? this.ctx.napari.getSpatialScreenProjection(dataset.observations) : null;
+        let selection: SpatialSelectionMask;
+        if (projected) {
+          const lassos = new Set(this.ctx.napari.getSpatialLassoIds());
+          const regions = this.ctx.regionStore.getRegions().filter((r) => lassos.has(r.id));
+          selection = selectInRegionsProjected(projected, dataset.observations.count, regions);
+        } else {
+          // In the 2D view of a volume-backed dataset the shape was drawn over ONE
+          // section, in the volume's pixel grid: it selects the cells of that
+          // section, not the whole depth of brain standing behind them.
+          selection = selectInRegions(
+            dataset.observations,
+            volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
+            this.ctx.regionStore.getRegions(),
+            volume ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex()) : undefined,
+          );
+        }
         this.ctx.selectionStore.set(selection);
         return selection.count;
       },
+
+      roiSelectionMode: () => this.roiSelectionMode(),
+
+      getPickedRegionClasses$: () => this.ctx.regionStore.getPickedClasses$(),
 
       selectCategory: async (column: string, categoryIndex: number) => {
         const loaded = await port.getColumn(column);
