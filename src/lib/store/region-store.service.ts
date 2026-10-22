@@ -971,7 +971,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   /**
    * Select every region of these classes on the slice — the regions', and the region source's,
    * which are taken into the regions (at most {@link SELECT_CLASSES_LIMIT} of them). Added to the
-   * selection with `additive`. Resolves the selected region ids.
+   * selection with `additive`. The selection holds the classes too (see {@link getPickedClasses}).
+   * Resolves the selected region ids.
    */
   async selectClasses(classes: readonly string[], additive = false): Promise<number[]> {
     const wanted = new Set(classes);
@@ -986,9 +987,33 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
       if (page.rows.length) await this.takeSourceFeatures(page.rows.map((r) => r.id));
     }
     const ids = this.regions.filter((r) => !r.isProfile?.() && r.label && wanted.has(r.label)).map((r) => r.id);
-    this.selection.replace(additive ? [...new Set([...this.selection.ids, ...ids])] : ids);
+    this.selection.replace(
+      additive ? [...new Set([...this.selection.ids, ...ids])] : ids,
+      additive ? [...new Set([...this.selection.classes, ...classes])] : classes,
+    );
     this.emitSelection();
     return ids;
+  }
+
+  /**
+   * The classes the selection was picked as by {@link selectClasses} (a class tree node with its
+   * subclasses, a surface clicked in 3D); [] once anything else selected. Each is a volume through
+   * the whole stack, whether or not it has a region on the slice.
+   */
+  getPickedClasses(): readonly string[] {
+    return this.selection.classes;
+  }
+
+  getPickedClasses$(): Observable<readonly string[]> {
+    return this.selection.classes$;
+  }
+
+  /**
+   * Every slice's exact outlines of these classes, the region sources' and the regions' (as the
+   * 3D reconstruction reads them at the stack's own resolution): what is inside their volume.
+   */
+  classSliceOutlines(classes: readonly string[]): Promise<SliceOutlines[]> {
+    return this.classOutlines(classes, 0);
   }
 
   /**

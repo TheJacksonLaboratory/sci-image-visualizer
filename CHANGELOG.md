@@ -9,6 +9,27 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **"Select from ROIs" selects inside region volumes in Spatial omics 3D.** With classes picked in
+  the Region Editor (a class tree node with its subclasses, or a surface clicked in 3D), the
+  button selects the cells inside those classes' volumes, through every section of the dataset's
+  reference volume, as their reconstructions show them; the panel says which classes it will use.
+  Drawing a region replaces the pick, and the button selects by the lassos again. Needs the regions
+  on the reference volume's stack (as the 3D surfaces do). `ISpatialControls.getPickedRegionClasses$`
+  and `IRegionEditorApi.getPickedRegionClasses$` report the pick.
+
+### Changed
+
+- `ISpatialControls.selectFromRegions()` resolves its count (`Promise<number>`): the classes'
+  outlines are read from their region sources.
+
+### Fixed
+
+- **"Select from ROIs" in Spatial omics 3D selects by the lassos drawn over the cloud only.** It
+  tested every region in the store in screen space, including the structures a tree click had
+  taken from a region source, whose image coordinates mean nothing at canvas pixels.
+
 ## [0.12.1] — 2026-10-19
 
 ### Fixed

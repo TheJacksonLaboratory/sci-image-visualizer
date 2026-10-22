@@ -191,7 +191,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       categoricalColumns: jest.fn(() => ['graphclust', 'kmeans_2', 'kmeans_3']),
       continuousValues: jest.fn(async () => new Float32Array(4)),
       getSelection$: jest.fn(() => selection$),
-      selectFromRegions: jest.fn(() => {
+      selectFromRegions: jest.fn(async () => {
         selection$.next({ mask: new Uint8Array([1, 0, 1, 0]), count: 2 });
         return 2;
       }),
@@ -489,6 +489,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ showAnnotations: false });
       const panel = await openSection('Annotations');
       emit(one(panel, 'p-button[label="Select from ROIs"]'), 'onClick');
+      await fixture.whenStable();
       fixture.detectChanges();
       expect(controls.selectFromRegions).toHaveBeenCalled();
       expect(panelNamed(root, 'Annotations').textContent).toContain('2 of 4 selected');

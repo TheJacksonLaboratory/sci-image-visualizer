@@ -490,6 +490,35 @@ describe('RegionStore region sources', () => {
     expect(store.getSelectedShapeIndices()).toEqual([0, 1, 2]);
   });
 
+  it('remembers the classes picked until another selection replaces them', async () => {
+    store.attachRegionSource(tableSource([feature('a', 0, 'X'), feature('c', 40, 'Y')]));
+    await flush();
+    // A class with no region on the slice is picked all the same: it is a volume through the stack.
+    await store.selectClasses(['X', 'Z']);
+    expect(store.getPickedClasses()).toEqual(['X', 'Z']);
+    await store.selectClasses(['Y'], true);
+    expect(store.getPickedClasses()).toEqual(['X', 'Z', 'Y']);
+    await store.selectClasses(['Y']);
+    expect(store.getPickedClasses()).toEqual(['Y']);
+
+    const region = new Region();
+    region.bounds = Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 });
+    store.addRegion(region);
+    expect(store.getPickedClasses()).toEqual([]);
+  });
+
+  it("reads a class's outlines on every slice, the source's and the regions'", async () => {
+    store.enterStackMode(new Map(), 0, 'combined');
+    store.attachRegionSource(
+      tableSource([feature('a', 0, 'X', 0), feature('b', 0, 'X', 2), feature('c', 20, 'Y', 1)]),
+      'planes',
+    );
+    await flush();
+    const outlines = await store.classSliceOutlines(['X']);
+    expect(outlines.map((o) => o.z).sort()).toEqual([0, 2]);
+    expect(outlines.every((o) => o.rings.length > 0)).toBe(true);
+  });
+
   it("applies the source's style hint, and the user's choice over it", async () => {
     const styled = tableSource([feature('a', 0)]);
     (styled.info as { style?: object }).style = { fillOpacity: 0.8, labels: true, stroke: '#222' };

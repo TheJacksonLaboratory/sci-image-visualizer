@@ -101,6 +101,17 @@ function fill(slices: readonly SliceOutlines[], opts: ReconstructOptions): Mesh 
   return mesh;
 }
 
+/**
+ * Fill one slice's outlines into `mask`, a `width × height` grid of image px (pixel i spanning
+ * [i, i + 1)), as the reconstruction fills them: each feature even-odd, the features as their
+ * union, sampled at pixel centres. Cells already set stay set. Open lines enclose nothing.
+ */
+export function fillOutlines(mask: Uint8Array, width: number, height: number, outlines: SliceOutlines): void {
+  for (const rings of featureRings(outlines.rings, outlines.ringGroups)) {
+    fillSlice(mask, width, height, 0, rings, 0, 0, 1);
+  }
+}
+
 /** `a` and `b` as one mesh. */
 function mergeMeshes(a: Mesh, b: Mesh): Mesh {
   if (!b.faces.length) return a;

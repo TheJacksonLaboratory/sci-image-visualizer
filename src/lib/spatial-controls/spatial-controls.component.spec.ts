@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormsModule } from '@angular/forms';
 import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
-import { BehaviorSubject, of } from 'rxjs';
+import { BehaviorSubject, Observable, of } from 'rxjs';
 
 import { SpatialControlsComponent, parseGeneGroups } from './spatial-controls.component';
 import { GENE_OPTIONS_MAX } from '../spatial/gene-search';
@@ -98,7 +98,7 @@ describe('SpatialControlsComponent', () => {
       searchFeatures: jest.fn(async () => ['Ttr']),
       categoryColors: jest.fn(async () => ['#ff0000', '#0000ff']),
       getSelection$: jest.fn(() => selection$),
-      selectFromRegions: jest.fn(() => {
+      selectFromRegions: jest.fn(async () => {
         selection$.next({ mask: new Uint8Array([1, 0, 1]), count: 2 });
         return 2;
       }),
@@ -384,19 +384,28 @@ describe('SpatialControlsComponent', () => {
   describe('selection', () => {
     beforeEach(async () => build(controls));
 
-    it('selects from the drawn ROIs and reports the count', () => {
-      component['selectFromRegions']();
+    it('selects from the drawn ROIs and reports the count', async () => {
+      await component['selectFromRegions']();
       expect(controls.selectFromRegions).toHaveBeenCalled();
       expect(component['hasSelection']).toBe(true);
       expect(component['selection'].count).toBe(2);
       expect(component['selectionMissed']).toBe(false);
     });
 
-    it('says so when the ROIs matched nothing, rather than looking inert', () => {
-      controls.selectFromRegions.mockReturnValueOnce(0);
-      component['selectFromRegions']();
+    it('says so when the ROIs matched nothing, rather than looking inert', async () => {
+      controls.selectFromRegions.mockResolvedValueOnce(0);
+      await component['selectFromRegions']();
       expect(component['selectionMissed']).toBe(true);
       expect(component['hasSelection']).toBe(false);
+    });
+
+    it('says the selection missed when reading the classes fails, and lets the button go again', async () => {
+      controls.selectFromRegions.mockRejectedValueOnce(new Error('offline'));
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await component['selectFromRegions']();
+      expect(component['selectionMissed']).toBe(true);
+      expect(component['selectingFromRegions']).toBe(false);
+      warn.mockRestore();
     });
 
     it('selects a category from the legend', async () => {
@@ -435,11 +444,33 @@ describe('SpatialControlsComponent', () => {
       expect(component['selectedCategory']).toBeNull();
     });
 
-    it('reset clears the selection as well as the view state', () => {
-      component['selectFromRegions']();
+    it('reset clears the selection as well as the view state', async () => {
+      await component['selectFromRegions']();
       component['reset']();
       expect(controls.clearSelection).toHaveBeenCalled();
       expect(component['hasSelection']).toBe(false);
+    });
+  });
+
+  describe('picked region classes', () => {
+    it('in 3D, says it selects inside the classes picked in the Region Editor', async () => {
+      const picked$ = new BehaviorSubject<readonly string[]>([]);
+      (controls as { getPickedRegionClasses$?: () => Observable<readonly string[]> }).getPickedRegionClasses$ =
+        jest.fn(() => picked$);
+      await build(controls);
+      component.is3d = true;
+      dataset$.next({ ...dataset, volume: { width: 4, height: 4, depth: 2, voxelSize: [1, 1, 1] } });
+      expect(component['selectsClassVolumes']).toBe(false);
+
+      picked$.next(['fiber tracts', 'cbf']);
+      expect(component['selectsClassVolumes']).toBe(true);
+      // The 2D view selects by the drawn regions on the slice, as before.
+      component.is3d = false;
+      expect(component['selectsClassVolumes']).toBe(false);
+      // No reference volume: nothing for the classes to be a volume of.
+      component.is3d = true;
+      dataset$.next(dataset);
+      expect(component['selectsClassVolumes']).toBe(false);
     });
   });
 
