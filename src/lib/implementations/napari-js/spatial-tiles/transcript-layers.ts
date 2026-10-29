@@ -183,11 +183,11 @@ export class TranscriptLayers {
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
     // Every gene's individual transcripts are counted by the dataset's gene list, when it has one.
     const allGeneNames = dataset.transcriptTiles?.genes;
-    const loadedKind = loaded.kind ?? job.kind;
+    const kind = loaded.kind ?? job.kind;
     this.countSource =
-      loadedKind === 'genes' && !loaded.clustered
+      kind === 'genes' && !loaded.clustered
         ? { merged: loaded.merged, genes: [...view.transcriptGenes] }
-        : loadedKind === 'individual' && allGeneNames
+        : kind === 'individual' && allGeneNames
           ? { merged: loaded.merged, genes: allGeneNames }
           : null;
     const hidden = await this.lookup.hiddenCodes(dataset, view);
@@ -199,9 +199,9 @@ export class TranscriptLayers {
           loaded.merged,
           loaded.px,
           hidden,
-          loadedKind === 'genes'
+          kind === 'genes'
             ? hiddenGeneSlots(view)
-            : loadedKind === 'individual'
+            : kind === 'individual'
               ? hiddenAllGeneCodes(view, allGeneNames)
               : null,
         );
@@ -213,7 +213,6 @@ export class TranscriptLayers {
       const g = groupSelection(merged, view, loaded.ladder, pxPerUnit);
       if (g) ({ merged, px, bin: selectionBin, group: entryGroup, names: groupNames } = g);
     }
-    const kind = loadedKind;
     const colorView = colorViewFor(view, kind, !!loaded.clustered, cellTypeColumnFor(dataset, view) !== null);
     // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
     const geneCluster = view.transcriptGenes.map(
@@ -241,7 +240,7 @@ export class TranscriptLayers {
         : this.drawTranscriptGlyphs(merged, diam, rgba, view, place, pxPerUnit);
     this.hover.setDrawn(
       {
-        kind: loaded.kind ?? job.kind,
+        kind,
         bin: selectionBin
           ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
           : loaded.kind
@@ -249,7 +248,7 @@ export class TranscriptLayers {
             : job.bin,
         merged,
         layer,
-        genes: loadedKind === 'individual' ? (allGeneNames ?? []) : [...view.transcriptGenes],
+        genes: kind === 'individual' ? (allGeneNames ?? []) : [...view.transcriptGenes],
         ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
         ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
       },
