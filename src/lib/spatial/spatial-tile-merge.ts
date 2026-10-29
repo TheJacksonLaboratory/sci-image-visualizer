@@ -57,13 +57,35 @@ export function hiddenGeneSlots(view: SpatialViewState): Uint8Array | null {
 
 /**
  * Whether "All genes" is switched off as a whole with the gene tree's root eye: its hidden
- * list then holds {@link ALL_GENES}. Hiding every gene by name would need the gene list,
- * which a dataset need not have.
+ * list is `[ALL_GENES]` (every gene hidden, none excepted). Hiding every gene by name would
+ * need the gene list, which a dataset need not have.
  */
 export function allGenesHidden(
-  view: Pick<SpatialViewState, 'transcriptAllGenes' | 'transcriptHiddenGenes'>,
+  view: Pick<SpatialViewState, 'transcriptAllGenes' | 'transcriptAllGenesHidden'>,
 ): boolean {
-  return view.transcriptAllGenes && view.transcriptHiddenGenes.includes(ALL_GENES);
+  return view.transcriptAllGenes && everyGeneOff(view.transcriptAllGenesHidden);
+}
+
+/** Whether an "All genes" hidden list hides every gene, none excepted. */
+export function everyGeneOff(off: readonly string[]): boolean {
+  return off.length === 1 && off[0] === ALL_GENES;
+}
+
+/** Whether a gene of "All genes" is drawn, by its hidden list (see `transcriptAllGenesHidden`). */
+export function allGeneShownBy(off: readonly string[]): (gene: string) => boolean {
+  const listed = new Set(off);
+  const except = off[0] === ALL_GENES;
+  return (gene) => listed.has(gene) === except;
+}
+
+/** "All genes"'s hidden list with `gene` shown (`on`) or hidden, in the list's own form. */
+export function toggleAllGeneHidden(off: readonly string[], gene: string, on: boolean): string[] {
+  const except = off[0] === ALL_GENES;
+  // Hidden by name: listed means off. Led by ALL_GENES: listed means on.
+  const listed = new Set(except ? off.slice(1) : off);
+  if (on === except) listed.add(gene);
+  else listed.delete(gene);
+  return except ? [ALL_GENES, ...listed] : [...listed];
 }
 
 /**
@@ -71,12 +93,12 @@ export function allGenesHidden(
  * toggle while every gene is drawn; null when none is, or without the gene list.
  */
 export function hiddenAllGeneCodes(
-  view: SpatialViewState,
+  view: Pick<SpatialViewState, 'transcriptAllGenesHidden'>,
   genes: readonly string[] | undefined,
 ): Uint8Array | null {
-  if (!genes || !view.transcriptHiddenGenes.length) return null;
-  const off = new Set(view.transcriptHiddenGenes);
-  const codes = Uint8Array.from(genes, (g) => (off.has(g) ? 1 : 0));
+  if (!genes || !view.transcriptAllGenesHidden.length) return null;
+  const shown = allGeneShownBy(view.transcriptAllGenesHidden);
+  const codes = Uint8Array.from(genes, (g) => (shown(g) ? 0 : 1));
   return codes.includes(1) ? codes : null;
 }
 

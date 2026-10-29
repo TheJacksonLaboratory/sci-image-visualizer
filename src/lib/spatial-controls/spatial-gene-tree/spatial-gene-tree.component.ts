@@ -28,7 +28,7 @@ import {
   glyphPoints,
   toggleHidden,
 } from '../../spatial/spatial-panel-model';
-import { allGenesHidden } from '../../spatial/spatial-tile-merge';
+import { allGeneShownBy, allGenesHidden, toggleAllGeneHidden } from '../../spatial/spatial-tile-merge';
 import { Supersede } from '../../util/supersede';
 
 /** Rows of the all-genes list drawn at once; the filter narrows the rest. */
@@ -168,8 +168,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
       return;
     }
     const needle = this.allGenesFilter.trim().toLowerCase();
-    const allHidden = allGenesHidden(this.view);
-    const hidden = new Set(this.view.transcriptHiddenGenes);
+    const shown = allGeneShownBy(this.view.transcriptAllGenesHidden);
     const rows: AllGeneRowView[] = [];
     let matched = 0;
     list.forEach((gene, code) => {
@@ -179,7 +178,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
       if (rows.length >= ALL_GENES_ROWS) return;
       rows.push({
         gene,
-        shown: !allHidden && !hidden.has(gene),
+        shown: shown(gene),
         swatch: this.canHideAllGenes ? this.allGeneColorOf(gene, code) : null,
         count: this.geneCountOf(gene),
       });
@@ -192,8 +191,8 @@ export class SpatialGeneTreeComponent implements OnChanges {
   private anyOfAllGenesShown(): boolean {
     if (allGenesHidden(this.view)) return false;
     if (!this.canHideAllGenes || !this.allGeneList) return true;
-    const hidden = new Set(this.view.transcriptHiddenGenes);
-    return this.allGeneList.some((g) => g && !hidden.has(g));
+    const shown = allGeneShownBy(this.view.transcriptAllGenesHidden);
+    return this.allGeneList.some((g) => g && shown(g));
   }
 
   /** A gene of "All genes" in its colour by gene: its chosen one, else the palette's by code. */
@@ -233,18 +232,15 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   /** The root eye while every gene is drawn: hide or show them all (the '±' leaves "All genes"). */
   protected onAllGenesShown(on: boolean): void {
-    this.controls?.setViewState({ transcriptHiddenGenes: on ? [] : [ALL_GENES] });
+    this.controls?.setViewState({ transcriptAllGenesHidden: on ? [] : [ALL_GENES] });
   }
 
-  /** One gene's eye in the all-genes list. Showing one while all are off hides the others. */
+  /** One gene's eye in the all-genes list. Showing one while all are off shows it alone. */
   protected onAllGeneShown(gene: string, on: boolean): void {
-    if (!this.canHideAllGenes || !this.allGeneList) return;
-    const hidden = allGenesHidden(this.view)
-      ? on
-        ? this.allGeneList.filter((g) => g && g !== gene)
-        : [ALL_GENES]
-      : toggleHidden(this.view.transcriptHiddenGenes, [gene], on);
-    this.controls?.setViewState({ transcriptHiddenGenes: hidden });
+    if (!this.canHideAllGenes) return;
+    this.controls?.setViewState({
+      transcriptAllGenesHidden: toggleAllGeneHidden(this.view.transcriptAllGenesHidden, gene, on),
+    });
   }
 
   protected onGeneColor(gene: string, hex: string): void {

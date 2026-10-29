@@ -26,7 +26,6 @@ import { TreeSelectModule } from 'primeng/treeselect';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import {
   ColormapNode,
   DEFAULT_SPATIAL_VIEW,
@@ -35,6 +34,7 @@ import {
 } from '../../contracts/display-types';
 import { defaultGlyphFor } from '../../spatial/spatial-tiles';
 import { cellTypeColumnFor } from '../../spatial/lod';
+import { everyGeneOff } from '../../spatial/spatial-tile-merge';
 import {
   GLYPH_OPTIONS,
   PanelOption,
@@ -243,12 +243,10 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   }
 
   onTranscriptAllGenes(on: boolean): void {
-    // "All genes" switched off whole with the tree's root eye stays a property of that one visit.
-    const hidden = this.view.transcriptHiddenGenes;
-    this.controls?.setViewState({
-      transcriptAllGenes: on,
-      ...(hidden.includes(ALL_GENES) ? { transcriptHiddenGenes: hidden.filter((g) => g !== ALL_GENES) } : {}),
-    });
+    // "All genes" switched off whole with the tree's root eye stays a property of that one visit;
+    // genes hidden one by one are kept for the next.
+    const wholeOff = everyGeneOff(this.view.transcriptAllGenesHidden);
+    this.controls?.setViewState({ transcriptAllGenes: on, ...(wholeOff ? { transcriptAllGenesHidden: [] } : {}) });
   }
 
   /** '±': every gene, or back to the chosen list. */
@@ -316,7 +314,8 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
 
   /** Genes of "All genes" hidden one by one (not the whole set switched off). */
   protected get allGenesSomeHidden(): boolean {
-    return this.view.transcriptAllGenes && this.view.transcriptHiddenGenes.some((g) => g !== ALL_GENES);
+    const off = this.view.transcriptAllGenesHidden;
+    return this.view.transcriptAllGenes && off.length > 0 && !everyGeneOff(off);
   }
 
   protected onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {

@@ -16,14 +16,17 @@ file was added.
   each gene's colour and transcripts in view. A gene's eye hides it once the markers are individual
   transcripts (grouped markers mix genes). This needs `SpatialTranscriptTilesMeta.genes`, the
   genes the all-gene tiles' codes index, in code order. Without it, the tree lists
-  `features.names` with the eyes disabled.
+  `features.names` with the eyes disabled. "All genes" keeps its hidden genes in a list of its
+  own, `SpatialViewState.transcriptAllGenesHidden`, apart from the selection's
+  `transcriptHiddenGenes`. Led by `'*'`, it lists the genes still shown, so showing one gene of
+  thousands stores one name.
 
 ### Fixed
 
 - **The gene tree's root eye hides "All genes" instead of leaving it.** It used to switch "All
   genes" off, which fell back to the chosen genes. On a dataset with no marker genes that list was
   empty, so the eye seemed to turn every transcript off for good. It now hides or shows every
-  transcript (`transcriptHiddenGenes: ['*']`), points and density map alike. The '±' button
+  transcript (`transcriptAllGenesHidden: ['*']`), points and density map alike. The '±' button
   still leaves "All genes".
 - **"Colour by" works on datasets without cell types.** `cellTypeColumnFor` no longer picks a
   categorical column of one category, such as the `region` column a SpatialData table links its

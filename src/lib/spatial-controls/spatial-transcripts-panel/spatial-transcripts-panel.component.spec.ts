@@ -141,10 +141,27 @@ describe('SpatialTranscriptsPanelComponent', () => {
 
   it('leaves "All genes" switched off whole behind when the ± leaves or re-enters it', async () => {
     await build();
-    setView({ transcriptAllGenes: true, transcriptHiddenGenes: ['*', 'KRT5'] });
+    setView({ transcriptAllGenes: true, transcriptAllGenesHidden: ['*'] });
+    expect(component['allGenesSomeHidden']).toBe(false);
+    component.onTranscriptAllGenes(false);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual([]);
+  });
+
+  it("keeps each mode's hidden genes to itself across the ±", async () => {
+    await build();
+    // In "All genes", every gene but KRT5 hidden; in the selection, CD3E hidden.
+    setView({
+      transcriptGenes: ['CD3E', 'KRT5'],
+      transcriptHiddenGenes: ['CD3E'],
+      transcriptAllGenes: true,
+      transcriptAllGenesHidden: ['*', 'KRT5'],
+    });
     expect(component['allGenesSomeHidden']).toBe(true);
     component.onTranscriptAllGenes(false);
-    expect(fake.view$.value.transcriptHiddenGenes).toEqual(['KRT5']);
+    expect(fake.view$.value.transcriptHiddenGenes).toEqual(['CD3E']);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual(['*', 'KRT5']);
+    component.onTranscriptAllGenes(true);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual(['*', 'KRT5']);
   });
 
   it('says when "All genes" is still being prepared on the server', async () => {

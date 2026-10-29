@@ -94,10 +94,10 @@ describe('SpatialGeneTreeComponent', () => {
     const rootEye = () => root.querySelector('.sc-gene-root .sc-eye') as HTMLElement;
     rootEye().click();
     expect(fake.view$.value.transcriptAllGenes).toBe(true);
-    expect(fake.view$.value.transcriptHiddenGenes).toEqual([ALL_GENES]);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual([ALL_GENES]);
     expect(rootEye().querySelector('i')!.classList.contains('pi-eye-slash')).toBe(true);
     rootEye().click();
-    expect(fake.view$.value.transcriptHiddenGenes).toEqual([]);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual([]);
   });
 
   describe('with "All genes" on', () => {
@@ -128,21 +128,36 @@ describe('SpatialGeneTreeComponent', () => {
         ['KRT5', true],
       ]);
       (root.querySelectorAll('.sc-gene-leaf .sc-eye')[1] as HTMLElement).click();
-      expect(fake.view$.value.transcriptHiddenGenes).toEqual(['CD3E']);
+      expect(fake.view$.value.transcriptAllGenesHidden).toEqual(['CD3E']);
+      // The selection's hidden genes are left alone.
+      expect(fake.view$.value.transcriptHiddenGenes).toEqual([]);
       expect(rowsShown()[1]).toEqual(['CD3E', false]);
       // The root eye stays open while any gene is shown.
       expect(component['rootShown']).toBe(true);
     });
 
-    it('shows one gene of a set switched off whole by hiding the others', async () => {
+    it('shows one gene of a set switched off whole by naming it alone', async () => {
       fake.dataset$.next(CODED as SpatialDataset);
       await build();
-      setView({ transcriptAllGenes: true, transcriptHiddenGenes: [ALL_GENES] });
+      setView({ transcriptAllGenes: true, transcriptAllGenesHidden: [ALL_GENES] });
       expand();
       expect(rowsShown().every(([, shown]) => !shown)).toBe(true);
       component['onAllGeneShown']('KRT5', true);
-      expect(fake.view$.value.transcriptHiddenGenes).toEqual(['ACTA2', 'CD3E']);
+      expect(fake.view$.value.transcriptAllGenesHidden).toEqual([ALL_GENES, 'KRT5']);
+      expect(rowsShown()).toEqual([
+        ['ACTA2', false],
+        ['CD3E', false],
+        ['KRT5', true],
+      ]);
       expect(component['rootShown']).toBe(true);
+    });
+
+    it('does not take the selection\'s hidden genes for hidden genes of "All genes"', async () => {
+      fake.dataset$.next(CODED as SpatialDataset);
+      await build();
+      setView({ transcriptGenes: ['CD3E'], transcriptHiddenGenes: ['CD3E'], transcriptAllGenes: true });
+      expand();
+      expect(rowsShown()[1]).toEqual(['CD3E', true]);
     });
 
     it('colours each gene by its code, or by its chosen colour', async () => {
@@ -187,19 +202,19 @@ describe('SpatialGeneTreeComponent', () => {
       expect(rowsShown().map(([g]) => g)).toEqual(['A', 'B']);
       expect((root.querySelector('.sc-gene-leaf .sc-eye') as HTMLButtonElement).disabled).toBe(true);
       component['onAllGeneShown']('A', false);
-      expect(fake.view$.value.transcriptHiddenGenes).toEqual([]);
+      expect(fake.view$.value.transcriptAllGenesHidden).toEqual([]);
     });
 
     it('leaves out the blank names of codes no transcript carries (control probes)', async () => {
       const genes = ['ACTA2', '', 'KRT5'];
       fake.dataset$.next({ ...CODED, transcriptTiles: { ...CODED.transcriptTiles, genes } } as SpatialDataset);
       await build();
-      setView({ transcriptAllGenes: true, transcriptHiddenGenes: [ALL_GENES] });
+      setView({ transcriptAllGenes: true, transcriptAllGenesHidden: [ALL_GENES] });
       expect(component['allRows'].map((r) => r.gene)).toEqual(['ACTA2', 'KRT5']);
       // The swatch keeps the code's colour: KRT5 is code 2.
       expect(component['allRows'][1].swatch).toBe(DEFAULT_CATEGORICAL_PALETTE[2]);
       component['onAllGeneShown']('KRT5', true);
-      expect(fake.view$.value.transcriptHiddenGenes).toEqual(['ACTA2']);
+      expect(fake.view$.value.transcriptAllGenesHidden).toEqual([ALL_GENES, 'KRT5']);
     });
 
     it('has nothing to expand without a gene list', async () => {

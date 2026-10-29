@@ -79,6 +79,7 @@ function transcriptPlanKey(
     pxPerUnit.toPrecision(4),
     view.hiddenGroups.join('\u0001'),
     view.transcriptHiddenGenes.join(','),
+    view.transcriptAllGenesHidden.join(','),
     JSON.stringify(view.transcriptGeneColors),
     JSON.stringify(view.transcriptGeneGroups),
   ].join('|');
