@@ -8,6 +8,7 @@ import type { SpatialDataset, SpatialTranscriptCounts } from '../../../contracts
 import { lutFor } from '../../../spatial/spatial-encoding';
 import { visibleArea, visibleDataRect } from '../../../spatial/lod';
 import { densityAutoRange } from '../../../spatial/density-raster';
+import { allGenesHidden } from '../../../spatial/spatial-tile-merge';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
 
@@ -51,7 +52,12 @@ export class DensityLayer {
   /** Draw the view's density, or drop it; an unchanged (genes, bin, window, colormap) is a no-op. */
   async plan(dataset: SpatialDataset, view: SpatialViewState, ctx: PlanContext): Promise<void> {
     const hiddenGenes = new Set(view.transcriptHiddenGenes);
-    const genes = view.transcriptAllGenes ? [ALL_GENES] : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
+    // Every gene's density is one raster: hiding a gene of it hides nothing, hiding all hides it.
+    const genes = view.transcriptAllGenes
+      ? allGenesHidden(view)
+        ? []
+        : [ALL_GENES]
+      : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
     if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
       this.groups.drop('density');
       this.stats = null;
@@ -170,7 +176,9 @@ export class TranscriptEstimator {
     const b = counts.bounds;
     const share = Math.min(1, visibleArea(inView, b) / Math.max(1, (b[2] - b[0]) * (b[3] - b[1])));
     const selected = view.transcriptAllGenes
-      ? counts.total
+      ? allGenesHidden(view)
+        ? 0
+        : counts.total
       : genes.reduce((sum, g) => sum + (counts.counts[g] ?? 0), 0);
     this.changed({ points: Math.round(selected * share), max: view.transcriptBudget });
   }

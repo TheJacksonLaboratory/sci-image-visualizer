@@ -696,7 +696,7 @@ describe('NapariSpatialTileLayers: a column request that fails', () => {
     offsets: new Uint32Array([0, 4]),
     observation: new Uint32Array([0]),
   });
-  const meta = { kind: 'categorical', name: 'cluster', categories: ['A'] };
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['A', 'B'] };
 
   function setup() {
     let columnCalls = 0;

@@ -295,6 +295,13 @@ export interface SpatialTranscriptTilesMeta {
   count?: number;
   /** Real genes (control probes excluded). Names come from the feature search. */
   geneCount: number;
+  /**
+   * The genes an all-gene tile's `gene` codes index, in code order (the port's
+   * `TranscriptTileQuery.genes` with `[ALL_GENES]`); an empty name is a code those tiles never
+   * carry (a control probe). Optional: without it "All genes" still draws, but cannot hide one
+   * of its genes.
+   */
+  genes?: string[];
   hasZ: boolean;
   levels: (SpatialTileLevel & {
     /** True when an entry stands for several transcripts (see {@link SpatialTranscriptTile.weight}). */

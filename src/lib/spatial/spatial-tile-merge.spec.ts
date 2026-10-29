@@ -6,10 +6,13 @@ import {
   SpatialPolygonTile,
   SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
+import { ALL_GENES } from '../contracts/ports/spatial-data.port';
 import {
+  allGenesHidden,
   clusterMarkers,
   filterRings,
   filterTranscripts,
+  hiddenAllGeneCodes,
   hiddenGeneSlots,
   median,
   mergePolygonTiles,
@@ -104,6 +107,29 @@ describe('filtering hidden groups and genes', () => {
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptGenes: ['A', 'B', 'C'], transcriptHiddenGenes: ['B'] };
     expect(Array.from(hiddenGeneSlots(view)!)).toEqual([0, 1, 0]);
     expect(hiddenGeneSlots({ ...view, transcriptHiddenGenes: [] })).toBeNull();
+  });
+});
+
+describe('hiding genes of "All genes"', () => {
+  const all = { ...DEFAULT_SPATIAL_VIEW, transcriptAllGenes: true };
+
+  it('is switched off whole only by the ALL_GENES entry, and only while every gene is drawn', () => {
+    expect(allGenesHidden(all)).toBe(false);
+    expect(allGenesHidden({ ...all, transcriptHiddenGenes: [ALL_GENES] })).toBe(true);
+    expect(allGenesHidden({ ...all, transcriptAllGenes: false, transcriptHiddenGenes: [ALL_GENES] })).toBe(false);
+  });
+
+  it("maps hidden names onto the dataset's codes, null with none hidden or no gene list", () => {
+    const view = { ...all, transcriptHiddenGenes: ['CD3E', 'NOT_A_GENE'] };
+    expect(hiddenAllGeneCodes(view, ['ACTA2', 'CD3E', 'KRT5'])).toEqual(Uint8Array.from([0, 1, 0]));
+    expect(hiddenAllGeneCodes(view, undefined)).toBeNull();
+    expect(hiddenAllGeneCodes(all, ['ACTA2'])).toBeNull();
+    expect(hiddenAllGeneCodes({ ...all, transcriptHiddenGenes: ['NOT_A_GENE'] }, ['ACTA2'])).toBeNull();
+    // Codes drop entries by gene, as a selection's slots do.
+    const t = tile([1, 2, 3], [1, 2, 3]);
+    t.gene.set([0, 1, 2]);
+    const codes = hiddenAllGeneCodes(view, ['ACTA2', 'CD3E', 'KRT5']);
+    expect(Array.from(filterTranscripts(t, new Float32Array(3), null, codes).merged.gene)).toEqual([0, 2]);
   });
 });
 

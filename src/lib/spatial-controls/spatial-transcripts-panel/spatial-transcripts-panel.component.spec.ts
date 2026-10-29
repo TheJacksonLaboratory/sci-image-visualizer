@@ -125,6 +125,28 @@ describe('SpatialTranscriptsPanelComponent', () => {
     expect(component['canShowAllGenes']).toBe(false);
   });
 
+  it('offers "Cell type" colouring only for a dataset with cell types', async () => {
+    await build();
+    expect(component['transcriptColorOptions'].map((o) => o.label)).toEqual(['Cluster', 'Cell type', 'Gene']);
+    expect(component['transcriptColorOptions']).toBe(component['transcriptColorOptions']);
+    // A Vizgen table's only categorical is the one-category region its cells are linked by.
+    fake.dataset$.next({
+      ...TILED_DATASET,
+      columns: [{ kind: 'categorical', name: 'region', categories: ['cell_boundaries'] }],
+    });
+    expect(component['transcriptColorOptions'].map((o) => o.label)).toEqual(['Cluster', 'Gene']);
+    setView({ transcriptColorBy: 'cellType' });
+    expect(component['transcriptColorShown']).toBe('gene');
+  });
+
+  it('leaves "All genes" switched off whole behind when the ± leaves or re-enters it', async () => {
+    await build();
+    setView({ transcriptAllGenes: true, transcriptHiddenGenes: ['*', 'KRT5'] });
+    expect(component['allGenesSomeHidden']).toBe(true);
+    component.onTranscriptAllGenes(false);
+    expect(fake.view$.value.transcriptHiddenGenes).toEqual(['KRT5']);
+  });
+
   it('says when "All genes" is still being prepared on the server', async () => {
     const { transcriptBins: _bins, ...rest } = TILED_DATASET;
     void _bins;

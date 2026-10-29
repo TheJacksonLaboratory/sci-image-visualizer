@@ -18,7 +18,7 @@ import {
   quantileOf,
   transcriptMarkerPx,
 } from '../../../spatial/transcript-grouping';
-import { clusterMarkers, mergeTranscriptTiles } from '../../../spatial/spatial-tile-merge';
+import { allGenesHidden, clusterMarkers, mergeTranscriptTiles } from '../../../spatial/spatial-tile-merge';
 import type { PlanContext } from './plan-context';
 import type { TranscriptBin, TranscriptKind } from './transcript-hover';
 
@@ -84,6 +84,7 @@ export class TranscriptJobPlanner {
   ): TranscriptJob | null {
     const mode = view.transcriptMode;
     if (mode !== 'circles' && mode !== 'glyphs') return null;
+    if (allGenesHidden(view)) return null;
     const geneBins = this.port.getTranscriptGeneBins && dataset.transcriptGeneBins;
     if (!this.port.getTranscriptTile && !geneBins) return null;
     return view.transcriptAllGenes

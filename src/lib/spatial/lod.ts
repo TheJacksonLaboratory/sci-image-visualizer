@@ -16,6 +16,7 @@
 import { worldViewport } from 'napari-js';
 
 import type {
+  CategoricalColumnMeta,
   SpatialBounds,
   SpatialDataset,
   SpatialImageRef,
@@ -59,17 +60,20 @@ export function isCuratedColumn(name: string): boolean {
  * The categorical column that names each cell's type: the view's choice when it is a
  * column of this dataset, else the first categorical column that is not a curated
  * annotation (a pipeline's clustering is the default; curation is opted into), else
- * any categorical column.
+ * any categorical column. A column of one category, such as the `region` a SpatialData
+ * table links its cells to their shapes with, names no type and is only used when chosen;
+ * a dataset with nothing else has no cell types (null).
  */
 export function cellTypeColumnFor(
   dataset: SpatialDataset,
   view: Pick<SpatialViewState, 'cellTypeColumn'>,
 ): string | null {
-  const categorical = dataset.columns.filter((c) => c.kind === 'categorical');
+  const categorical = dataset.columns.filter((c): c is CategoricalColumnMeta => c.kind === 'categorical');
   if (view.cellTypeColumn && categorical.some((c) => c.name === view.cellTypeColumn)) {
     return view.cellTypeColumn;
   }
-  return (categorical.find((c) => !isCuratedColumn(c.name)) ?? categorical[0])?.name ?? null;
+  const typed = categorical.filter((c) => c.categories.length > 1);
+  return (typed.find((c) => !isCuratedColumn(c.name)) ?? typed[0])?.name ?? null;
 }
 
 // ── Tiles in view ─────────────────────────────────────────────────────────────────────

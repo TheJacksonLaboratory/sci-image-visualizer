@@ -7,6 +7,7 @@
  */
 
 import type { SpatialViewState } from '../contracts/display-types';
+import { ALL_GENES } from '../contracts/ports/spatial-data.port';
 import {
   NO_CATEGORY,
   NO_OBSERVATION,
@@ -52,6 +53,31 @@ export function hiddenGeneSlots(view: SpatialViewState): Uint8Array | null {
   if (!view.transcriptHiddenGenes.length) return null;
   const off = new Set(view.transcriptHiddenGenes);
   return Uint8Array.from(view.transcriptGenes, (g) => (off.has(g) ? 1 : 0));
+}
+
+/**
+ * Whether "All genes" is switched off as a whole with the gene tree's root eye: its hidden
+ * list then holds {@link ALL_GENES}. Hiding every gene by name would need the gene list,
+ * which a dataset need not have.
+ */
+export function allGenesHidden(
+  view: Pick<SpatialViewState, 'transcriptAllGenes' | 'transcriptHiddenGenes'>,
+): boolean {
+  return view.transcriptAllGenes && view.transcriptHiddenGenes.includes(ALL_GENES);
+}
+
+/**
+ * Codes (indices into `genes`, the dataset's all-gene code order) switched off with their eye
+ * toggle while every gene is drawn; null when none is, or without the gene list.
+ */
+export function hiddenAllGeneCodes(
+  view: SpatialViewState,
+  genes: readonly string[] | undefined,
+): Uint8Array | null {
+  if (!genes || !view.transcriptHiddenGenes.length) return null;
+  const off = new Set(view.transcriptHiddenGenes);
+  const codes = Uint8Array.from(genes, (g) => (off.has(g) ? 1 : 0));
+  return codes.includes(1) ? codes : null;
 }
 
 /** Entries in a hidden group's cell, or of a hidden gene, removed (with their sizes). */
