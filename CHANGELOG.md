@@ -14,7 +14,8 @@ file was added.
 - **"All genes" lists its genes in the Transcripts gene tree.** With "All genes" on, the "Genes"
   root expands (closed at first) to every gene of the dataset, filtered by name past 200 rows, with
   each gene's colour and transcripts in view. A gene's eye hides it once the markers are individual
-  transcripts (grouped markers mix genes). This needs `SpatialTranscriptTilesMeta.genes`, the
+  transcripts (grouped markers mix genes); in Density mode, whose one raster holds every gene, the
+  eyes are disabled and the tree says why. This needs `SpatialTranscriptTilesMeta.genes`, the
   genes the all-gene tiles' codes index, in code order. Without it, the tree lists
   `features.names` with the eyes disabled. "All genes" keeps its hidden genes in a list of its
   own, `SpatialViewState.transcriptAllGenesHidden`, apart from the selection's

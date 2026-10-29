@@ -48,11 +48,14 @@
     <small class="sc-hint" *ngIf="!canHideAllGenes">
       This dataset does not say which transcripts are whose, so its genes cannot be hidden one by one.
     </small>
+    <small class="sc-hint" *ngIf="canHideAllGenes && view.transcriptMode === 'density'">
+      The density map draws every gene as one raster: genes are hidden one by one as circles or icons.
+    </small>
     <div class="sc-gene-row sc-gene-leaf nested" *ngFor="let row of allRows; trackBy: trackByAllRow">
       <button
         type="button"
         class="sc-eye"
-        [disabled]="!canHideAllGenes"
+        [disabled]="!canHideAllGenes || view.transcriptMode === 'density'"
         (click)="onAllGeneShown(row.gene, !row.shown)"
       >
         <i class="pi" [class.pi-eye]="row.shown" [class.pi-eye-slash]="!row.shown"></i>

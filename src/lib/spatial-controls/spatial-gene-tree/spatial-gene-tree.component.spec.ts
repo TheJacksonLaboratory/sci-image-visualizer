@@ -217,6 +217,18 @@ describe('SpatialGeneTreeComponent', () => {
       expect(fake.view$.value.transcriptAllGenesHidden).toEqual([ALL_GENES, 'KRT5']);
     });
 
+    it('disables the eyes in Density mode, whose one raster holds every gene', async () => {
+      fake.dataset$.next(CODED as SpatialDataset);
+      await build();
+      setView({ transcriptAllGenes: true, transcriptMode: 'density' });
+      expand();
+      const eye = root.querySelector('.sc-gene-leaf .sc-eye') as HTMLButtonElement;
+      expect(eye.disabled).toBe(true);
+      expect(root.textContent).toContain('The density map draws every gene as one raster');
+      setView({ transcriptMode: 'circles' });
+      expect(eye.disabled).toBe(false);
+    });
+
     it('has nothing to expand without a gene list', async () => {
       await build();
       setView({ transcriptAllGenes: true });
