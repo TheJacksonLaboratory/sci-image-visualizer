@@ -249,7 +249,7 @@ export class TranscriptLayers {
             : job.bin,
         merged,
         layer,
-        genes: [...view.transcriptGenes],
+        genes: loadedKind === 'individual' ? (allGeneNames ?? []) : [...view.transcriptGenes],
         ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
         ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
       },
