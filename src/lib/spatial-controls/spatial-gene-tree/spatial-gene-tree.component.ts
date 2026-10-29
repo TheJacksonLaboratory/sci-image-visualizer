@@ -159,9 +159,12 @@ export class SpatialGeneTreeComponent implements OnChanges {
     this.rebuildAllRows();
   }
 
-  /** The all-genes list's rows: the genes matching the filter, up to the cap. */
+  /**
+   * The all-genes list's rows: the genes matching the filter, up to the cap. Built only while
+   * the list is open: the counts in view change with every pan, and the list can be thousands.
+   */
   private rebuildAllRows(): void {
-    const list = this.view.transcriptAllGenes ? this.allGeneList : null;
+    const list = this.view.transcriptAllGenes && this.allGenesOpen ? this.allGeneList : null;
     if (!list) {
       this.allRows = [];
       this.allGenesMatched = 0;
@@ -201,6 +204,11 @@ export class SpatialGeneTreeComponent implements OnChanges {
       this.view.transcriptGeneColors[gene] ||
       DEFAULT_CATEGORICAL_PALETTE[code % DEFAULT_CATEGORICAL_PALETTE.length]
     );
+  }
+
+  protected toggleAllGenesOpen(): void {
+    this.allGenesOpen = !this.allGenesOpen;
+    this.rebuildAllRows();
   }
 
   protected onAllGenesFilter(text: string): void {

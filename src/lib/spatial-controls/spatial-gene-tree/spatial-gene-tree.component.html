@@ -27,7 +27,7 @@
     <button
       type="button"
       class="sc-icon-btn"
-      (click)="allGenesOpen = !allGenesOpen"
+      (click)="toggleAllGenesOpen()"
       *ngIf="view.transcriptAllGenes && allGeneList?.length"
       [attr.aria-label]="allGenesOpen ? 'Hide the gene list' : 'Show every gene'"
     >

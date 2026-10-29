@@ -119,8 +119,9 @@ describe('SpatialGeneTreeComponent', () => {
       fake.dataset$.next(CODED as SpatialDataset);
       await build();
       setView({ transcriptAllGenes: true });
-      // Closed until asked: the list can run to thousands.
+      // Closed until asked: the list can run to thousands, so its rows are not even built.
       expect(root.querySelectorAll('.sc-gene-leaf').length).toBe(0);
+      expect(component['allRows']).toEqual([]);
       expand();
       expect(rowsShown()).toEqual([
         ['ACTA2', true],
@@ -164,6 +165,7 @@ describe('SpatialGeneTreeComponent', () => {
       fake.dataset$.next(CODED as SpatialDataset);
       await build();
       setView({ transcriptAllGenes: true, transcriptGeneColors: { KRT5: '#123456' } });
+      expand();
       expect(component['allRows'].map((r) => r.swatch)).toEqual([
         DEFAULT_CATEGORICAL_PALETTE[0],
         DEFAULT_CATEGORICAL_PALETTE[1],
@@ -176,6 +178,7 @@ describe('SpatialGeneTreeComponent', () => {
       fake.dataset$.next({ ...CODED, transcriptTiles: { ...CODED.transcriptTiles, genes } } as SpatialDataset);
       await build();
       setView({ transcriptAllGenes: true });
+      expand();
       expect(component['allRows'].length).toBe(200);
       expect(component['allGenesMatched']).toBe(450);
       component['onAllGenesFilter']('g44');
@@ -210,6 +213,7 @@ describe('SpatialGeneTreeComponent', () => {
       fake.dataset$.next({ ...CODED, transcriptTiles: { ...CODED.transcriptTiles, genes } } as SpatialDataset);
       await build();
       setView({ transcriptAllGenes: true, transcriptAllGenesHidden: [ALL_GENES] });
+      expand();
       expect(component['allRows'].map((r) => r.gene)).toEqual(['ACTA2', 'KRT5']);
       // The swatch keeps the code's colour: KRT5 is code 2.
       expect(component['allRows'][1].swatch).toBe(DEFAULT_CATEGORICAL_PALETTE[2]);
