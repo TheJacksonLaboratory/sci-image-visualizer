@@ -6,7 +6,7 @@ import { ClassPreset, PresetSet, defaultPresetSet } from '../models/class-preset
 import { findPreset, presetKey } from './class-color.util';
 import { PREFERENCES_PORT, PreferencesPort } from '../contracts/ports/preferences.port';
 
-import { IImageMetadata } from '../contracts/image.contract';
+import { IChannelInfo, IImageMetadata } from '../contracts/image.contract';
 import { defaultChannelVisible, IChannelState } from '../contracts/channel-histogram-api.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
@@ -199,6 +199,46 @@ export class VisualizerStore {
     if (hasY) meta[0].mppY = mppY;
     this.imageMeta$.next(meta);
   }
+  /**
+   * Fill in the channel names and tints the host's image meta left out, from the image's tile
+   * descriptor: the server reads them from the file (an OME-TIFF's channel names, such as Cytos's
+   * "Actin" or "Cell-Membrane"), where a host's metadata (jit-ui's `/metadata`) carries none, so
+   * the Channels pane showed "Channel 1", "Channel 2"… The host's own names and tints win; only a
+   * channel still showing its derived default takes the descriptor's, so an edit made in the pane
+   * stays. A no-op when the channel counts differ, or for RGB.
+   */
+  adoptChannelInfo(info: ReadonlyArray<{ name?: string; color?: string }> | null | undefined): void {
+    const meta = this.imageMeta$.value;
+    const m0 = meta?.[0];
+    const current = this.channelStates$.value;
+    if (!info?.length || !m0 || (m0.rgbChannels ?? 1) >= 3) return;
+    if ((m0.channelCount ?? 1) !== info.length || current.length !== info.length) return;
+    const host = m0.channelInfo ?? [];
+    const merged: IChannelInfo[] = info.map((d, i) => ({
+      ...(host[i] ?? {}),
+      name: host[i]?.name || d.name || '',
+      color: host[i]?.color || d.color || '',
+    }));
+    const before = this.defaultChannelStates;
+    const nextMeta = meta.map((e, k) => (k === 0 ? { ...e, channelInfo: merged } : e));
+    this.imageMeta$.next(nextMeta);
+    const next = this.deriveChannels(nextMeta);
+    this.defaultChannelStates = next.map((c) => ({ ...c }));
+    let changed = false;
+    const states = current.map((st, i) => {
+      const was = before[i];
+      const now = next[i];
+      if (!was || !now) return st;
+      const patch: Partial<IChannelState> = {};
+      if (st.name === was.name && now.name !== was.name) patch.name = now.name;
+      if (st.color === was.color && now.color !== was.color) patch.color = now.color;
+      if (!Object.keys(patch).length) return st;
+      changed = true;
+      return { ...st, ...patch };
+    });
+    if (changed) this.channelStates$.next(states);
+  }
+
   /**
    * Publish the current image's metadata and derive its channels.
    *

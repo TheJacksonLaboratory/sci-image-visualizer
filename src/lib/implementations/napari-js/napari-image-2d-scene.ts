@@ -286,6 +286,8 @@ export class Image2dScene implements NapariScene {
    */
   private async renderTiled(z: number, desc: TileDescriptor, scene: AbortSignal): Promise<void> {
     const { ctx } = this;
+    // The descriptor's channel names and tints, which a host's image meta may not carry.
+    ctx.store.adoptChannelInfo(desc.channelInfo);
     const states = ctx.store.currentChannelStates();
     const channelCount = desc.channels ?? (states.length || 1);
     const multichannel = !!desc.multichannel && channelCount > 1;
