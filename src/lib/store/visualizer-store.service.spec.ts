@@ -326,3 +326,58 @@ describe('defaultChannelVisible', () => {
     expect(defaultChannelVisible(10, 22, null)).toBe(false);
   });
 });
+
+/**
+ * Channel names and tints from the tile descriptor: a host's image meta (jit-ui's /metadata)
+ * carries none, so the Channels pane showed "Channel 1", "Channel 2"… for an OME-TIFF that
+ * names every channel.
+ */
+describe('VisualizerStore.adoptChannelInfo', () => {
+  const meta = (count: number, info?: IImageMetadata['channelInfo']): IImageMetadata[] => [
+    { channelCount: count, rgbChannels: 1, x: 10, y: 10, z: 1, channelInfo: info } as IImageMetadata,
+  ];
+  const named = [
+    { name: 'Mitochondria', color: '#00ffff' },
+    { name: 'Cell-Membrane', color: '#00ff00' },
+    { name: 'Nucleus', color: '#0000ff' },
+  ];
+
+  it("names the channels from the descriptor when the host's meta has none", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(3), 'plate.ome.tif');
+    expect(store.currentChannelStates().map((c) => c.name)).toEqual(['Channel 1', 'Channel 2', 'Channel 3']);
+    store.adoptChannelInfo(named);
+    expect(store.currentChannelStates().map((c) => c.name)).toEqual(['Mitochondria', 'Cell-Membrane', 'Nucleus']);
+    expect(store.currentChannelStates().map((c) => c.color)).toEqual(['#00ffff', '#00ff00', '#0000ff']);
+  });
+
+  it("keeps the host's own names, and a name or tint edited in the pane", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(3, [{ name: 'DAPI', color: '#ffffff' }] as IImageMetadata['channelInfo']), 'img');
+    store.setChannelState(1, { color: '#ff8800' });
+    store.adoptChannelInfo(named);
+    const s = store.currentChannelStates();
+    expect(s.map((c) => c.name)).toEqual(['DAPI', 'Cell-Membrane', 'Nucleus']);
+    expect(s[0].color).toBe('#ffffff');
+    expect(s[1].color).toBe('#ff8800');
+  });
+
+  it('leaves the visibility alone', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(6), 'plate');
+    const before = store.currentChannelStates().map((c) => c.visible);
+    store.adoptChannelInfo(Array.from({ length: 6 }, (_, i) => ({ name: `c${i}`, color: '#ffffff' })));
+    expect(store.currentChannelStates().map((c) => c.visible)).toEqual(before);
+  });
+
+  it('ignores a descriptor of another channel count, and an RGB image', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(2), 'two');
+    store.adoptChannelInfo(named);
+    expect(store.currentChannelStates().map((c) => c.name)).toEqual(['Channel 1', 'Channel 2']);
+    const rgb = new VisualizerStore();
+    rgb.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata]);
+    rgb.adoptChannelInfo(named);
+    expect(rgb.currentChannelStates().map((c) => c.name)).toEqual(['Red', 'Green', 'Blue']);
+  });
+});

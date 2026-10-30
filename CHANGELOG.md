@@ -51,6 +51,19 @@ file was added.
 
 ### Fixed
 
+- **The Channels pane names each channel as the image does.** A host's image metadata (jit-ui's
+  `/metadata`) carries no channel names, so a multichannel image's channels showed as "Channel 1",
+  "Channel 2"… although its tile descriptor (`/tiles/info`) names them from the file, as an
+  OME-TIFF's are (Cytos's "Mitochondria", "Cell-Membrane", "Actin"…). The store now takes the
+  descriptor's names and tints for the channels the host left unnamed
+  (`VisualizerStore.adoptChannelInfo`, from OSD and the napari-js 2D view); the host's own names, and
+  a name or tint edited in the pane, are kept.
+- **Spatial omics keeps a multichannel tissue's hidden channels hidden.** Showing the tissue of a
+  dataset that brings one set every image layer visible, so a 22-channel plate opened with all 22
+  drawn (and their tiles fetched) although only four were on, until a channel was clicked. The
+  channel states now decide which layers draw (`Image2dScene.reapplyDisplayState`); an RGB image's
+  composite layer likewise stays hidden under its band layers.
+
 - **The gene tree's root eye hides "All genes" instead of leaving it.** It used to switch "All
   genes" off, which fell back to the chosen genes. On a dataset with no marker genes that list was
   empty, so the eye seemed to turn every transcript off for good. It now hides or shows every

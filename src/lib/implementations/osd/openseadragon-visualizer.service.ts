@@ -366,6 +366,8 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     // authoritative — push it into the shared meta so the Region Editor reports
     // areas in µm²/mm², matching the scale bar built from `d.mppX` below.
     this.store.setPhysicalPixelSize(d.mppX, d.mppY);
+    // Its channel names and tints too, which a host's image meta may not carry.
+    this.store.adoptChannelInfo(d.channelInfo);
     // Use the SAME grayscale flag the colormap dropdown / Plotly use
     // (imageInfo.isGrayscale ← rgbChannels === 1). The descriptor's `channels`
     // (channelCount) diverges from rgbChannels for stacks, which left grayscale
