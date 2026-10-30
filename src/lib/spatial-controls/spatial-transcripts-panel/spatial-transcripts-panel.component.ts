@@ -33,6 +33,8 @@ import {
   TranscriptGlyphName,
 } from '../../contracts/display-types';
 import { defaultGlyphFor } from '../../spatial/spatial-tiles';
+import { cellTypeColumnFor } from '../../spatial/lod';
+import { everyGeneOff } from '../../spatial/spatial-tile-merge';
 import {
   GLYPH_OPTIONS,
   PanelOption,
@@ -113,11 +115,13 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
 
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
   protected readonly geneVirtualScrollFrom = 200;
-  protected readonly transcriptColorOptions: PanelOption<SpatialViewState['transcriptColorBy']>[] = [
-    { label: 'Cluster', value: 'cluster' },
-    { label: 'Cell type', value: 'cellType' },
-    { label: 'Gene', value: 'gene' },
-  ];
+  /**
+   * Colourings on offer: "Cell type" only for a dataset with cell types. Rebuilt only when that
+   * changes, for the same reason as {@link transcriptModeOptions}.
+   */
+  protected transcriptColorOptions: PanelOption<SpatialViewState['transcriptColorBy']>[] = [];
+  /** Whether the dataset has a column naming each cell's type (see `cellTypeColumnFor`). */
+  protected hasCellTypes = false;
   protected readonly glyphOptions = GLYPH_OPTIONS;
   protected readonly budgetOptions = [25_000, 50_000, 100_000, 200_000, 400_000].map((n) => ({
     label: n.toLocaleString(),
@@ -171,6 +175,17 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
       this.hasMarkerColumns = markerColumnOptions(this.dataset?.columns).length > 0;
     }
     if (changes['view'] || changes['dataset'] || changes['controls']) this.geneMenu = this.buildGeneMenu();
+    if (changes['view'] || changes['dataset']) {
+      const hasCellTypes = !!this.dataset && cellTypeColumnFor(this.dataset, this.view) !== null;
+      if (hasCellTypes !== this.hasCellTypes || !this.transcriptColorOptions.length) {
+        this.hasCellTypes = hasCellTypes;
+        this.transcriptColorOptions = [
+          { label: 'Cluster', value: 'cluster' },
+          ...(hasCellTypes ? [{ label: 'Cell type', value: 'cellType' as const }] : []),
+          { label: 'Gene', value: 'gene' },
+        ];
+      }
+    }
     if (changes['view'] || changes['colormapOptions']) {
       this.selectedDensityColormapNode = colormapNodeFor(this.colormapOptions, this.view.densityColormap);
     }
@@ -228,7 +243,10 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   }
 
   onTranscriptAllGenes(on: boolean): void {
-    this.controls?.setViewState({ transcriptAllGenes: on });
+    // "All genes" switched off whole with the tree's root eye stays a property of that one visit;
+    // genes hidden one by one are kept for the next.
+    const wholeOff = everyGeneOff(this.view.transcriptAllGenesHidden);
+    this.controls?.setViewState({ transcriptAllGenes: on, ...(wholeOff ? { transcriptAllGenesHidden: [] } : {}) });
   }
 
   /** '±': every gene, or back to the chosen list. */
@@ -287,6 +305,17 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
 
   protected onTranscriptBudget(n: number): void {
     this.controls?.setViewState({ transcriptBudget: n });
+  }
+
+  /** The colouring in use: "Cell type" without cell types colours by gene (as the markers do). */
+  protected get transcriptColorShown(): SpatialViewState['transcriptColorBy'] {
+    return this.view.transcriptColorBy === 'cellType' && !this.hasCellTypes ? 'gene' : this.view.transcriptColorBy;
+  }
+
+  /** Genes of "All genes" hidden one by one (not the whole set switched off). */
+  protected get allGenesSomeHidden(): boolean {
+    const off = this.view.transcriptAllGenesHidden;
+    return this.view.transcriptAllGenes && off.length > 0 && !everyGeneOff(off);
   }
 
   protected onTranscriptColorBy(by: SpatialViewState['transcriptColorBy']): void {

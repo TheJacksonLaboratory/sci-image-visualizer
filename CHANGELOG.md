@@ -9,6 +9,19 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **"All genes" lists its genes in the Transcripts gene tree.** With "All genes" on, the "Genes"
+  root expands (closed at first) to every gene of the dataset, filtered by name past 200 rows, with
+  each gene's colour and transcripts in view. A gene's eye hides it once the markers are individual
+  transcripts (grouped markers mix genes); in Density mode, whose one raster holds every gene, the
+  eyes are disabled and the tree says why. This needs `SpatialTranscriptTilesMeta.genes`, the
+  genes the all-gene tiles' codes index, in code order. Without it, the tree lists
+  `features.names` with the eyes disabled. "All genes" keeps its hidden genes in a list of its
+  own, `SpatialViewState.transcriptAllGenesHidden`, apart from the selection's
+  `transcriptHiddenGenes`. Led by `'*'`, it lists the genes still shown, so showing one gene of
+  thousands stores one name.
+
 ### Changed
 
 - **An image with many channels starts with only its first four visible**
@@ -17,6 +30,21 @@ file was added.
   on every pan and zoom. The other channels start hidden, fetch no tiles, and show with their eye
   toggle. An image with four channels or fewer shows them all, as before. `IChannelInfo.visible`
   lets a descriptor say which channels start visible; `defaultChannelVisible` is the rule.
+
+### Fixed
+
+- **The gene tree's root eye hides "All genes" instead of leaving it.** It used to switch "All
+  genes" off, which fell back to the chosen genes. On a dataset with no marker genes that list was
+  empty, so the eye seemed to turn every transcript off for good. It now hides or shows every
+  transcript (`transcriptAllGenesHidden: ['*']`), points and density map alike. The '±' button
+  still leaves "All genes".
+- **"Colour by" works on datasets without cell types.** `cellTypeColumnFor` no longer picks a
+  categorical column of one category, such as the `region` column a SpatialData table links its
+  cells to their shapes with. That column is still used when chosen explicitly. A Vizgen MERSCOPE
+  dataset took `region` for its cell types, so every transcript was drawn in the palette's first
+  colour (blue) whatever was chosen. With no cell types, the Transcripts panel no longer offers
+  "Cell type" and colours by gene instead. All-gene bins, which mix genes, are drawn in one colour
+  until you zoom in, and the panel says so.
 
 ## [0.13.0] — 2026-10-22
 

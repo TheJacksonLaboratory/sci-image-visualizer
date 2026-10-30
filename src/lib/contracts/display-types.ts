@@ -267,6 +267,13 @@ export interface SpatialViewState {
    */
   transcriptAllGenes: boolean;
   /**
+   * Genes of "All genes" switched off with their eye toggle — its own list, so hiding a gene
+   * there leaves the selection's {@link transcriptHiddenGenes} alone, and the other way round.
+   * Led by `'*'` (`ALL_GENES`), it lists the genes still shown instead: `['*']` hides every
+   * gene, `['*', 'KRT5']` shows KRT5 alone, without naming the thousands of others.
+   */
+  transcriptAllGenesHidden: string[];
+  /**
    * Most transcript markers drawn at once. The level of detail is chosen to stay under it,
    * which is what keeps pan and zoom responsive however dense the data is.
    */
@@ -334,6 +341,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   transcriptGeneColors: {},
   transcriptGeneGroups: [],
   transcriptAllGenes: false,
+  transcriptAllGenesHidden: [],
   transcriptBudget: 100_000,
   transcriptMode: 'off',
   transcriptColorBy: 'cellType',

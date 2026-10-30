@@ -173,7 +173,9 @@ export class TranscriptHover {
       return lines;
     }
     if (d.kind === 'individual') {
-      const gene = s?.topGenes?.[0]?.name;
+      // Named by its code when the dataset lists its genes; else by the server's summary of
+      // the spot, which can name a neighbour's gene.
+      const gene = d.genes[t.gene[i]] || s?.topGenes?.[0]?.name;
       return [
         gene ? `${gene} transcript` : 'Transcript',
         cellLine(obs, 'in cell'),
@@ -213,6 +215,10 @@ export interface DrawnTranscripts {
   merged: SpatialTranscriptTile;
   /** The layer the entries are drawn in, one marker per entry in the same order. */
   layer: PointsLayer;
+  /**
+   * The genes the entries' `gene` codes index: the selection's, or for every gene's individual
+   * transcripts the dataset's gene list (`transcriptTiles.genes`; empty without one).
+   */
   genes: string[];
   /** For a grouped gene selection: each entry's group, and the groups' names. */
   entryGroup?: Int32Array;

@@ -16,6 +16,7 @@ import { TooltipModule } from 'primeng/tooltip';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
 import { parseCssColor, rgbToHex } from '../../contracts/color';
 import { DEFAULT_CATEGORICAL_PALETTE } from '../../spatial/spatial-encoding';
@@ -27,7 +28,11 @@ import {
   glyphPoints,
   toggleHidden,
 } from '../../spatial/spatial-panel-model';
+import { allGeneShownBy, allGenesHidden, toggleAllGeneHidden } from '../../spatial/spatial-tile-merge';
 import { Supersede } from '../../util/supersede';
+
+/** Rows of the all-genes list drawn at once; the filter narrows the rest. */
+const ALL_GENES_ROWS = 200;
 
 /** One gene row as the template draws it, derived once per input change. */
 interface GeneRowView {
@@ -39,11 +44,22 @@ interface GeneRowView {
   count: number | null;
 }
 
+/** One row of the all-genes list. */
+interface AllGeneRowView {
+  gene: string;
+  shown: boolean;
+  /** Its colour when coloured by gene, or null when the dataset's code order is unknown. */
+  swatch: string | null;
+  count: number | null;
+}
+
 /**
  * The selected transcript genes as Xenium Explorer's tree: the gene groups, then the
  * ungrouped genes, each row with an eye that hides it without deselecting it, its marker
  * in its colour (opening one icon-and-colour picker per gene), and its transcript count in
- * view.
+ * view. With "All genes" on, the root eye hides or shows every transcript and the root
+ * expands to every gene of the dataset, each with its eye when the dataset lists its genes
+ * in code order (`transcriptTiles.genes`), filtered by name past a few hundred.
  *
  * Writes only through `controls.setViewState`.
  */
@@ -81,6 +97,18 @@ export class SpatialGeneTreeComponent implements OnChanges {
   protected rootShown = false;
   protected collapsedGeneGroups = new Set<string>();
   protected geneTreeOpen = true;
+  /** The all-genes list starts closed: it can run to thousands of genes. */
+  protected allGenesOpen = false;
+  /** The genes "All genes" lists, or null when the dataset names none. */
+  protected allGeneList: readonly string[] | null = null;
+  /** Whether a gene of "All genes" can be hidden: the dataset lists its genes in code order. */
+  protected canHideAllGenes = false;
+  protected allGenesFilter = '';
+  /** The list's rows matching the filter, at most {@link ALL_GENES_ROWS}. */
+  protected allRows: AllGeneRowView[] = [];
+  /** How many genes match the filter, for the "showing n of m" line. */
+  protected allGenesMatched = 0;
+  protected readonly allGenesRowCap = ALL_GENES_ROWS;
   /** The gene the open picker edits. */
   protected styleGene: string | null = null;
 
@@ -99,7 +127,12 @@ export class SpatialGeneTreeComponent implements OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['view']) this.geneTree = buildGeneTree(this.view.transcriptGenes, this.view.transcriptGeneGroups);
     // A same-named grouping of a new dataset is not the old one.
-    if (changes['dataset']) this.cellGroupColorsFor = undefined;
+    if (changes['dataset']) {
+      this.cellGroupColorsFor = undefined;
+      const coded = this.dataset?.transcriptTiles?.genes;
+      this.canHideAllGenes = !!coded?.length;
+      this.allGeneList = coded?.length ? coded : (this.dataset?.features?.names ?? null);
+    }
     this.rebuildRows();
     void this.refreshCellGroupColors();
   }
@@ -122,7 +155,65 @@ export class SpatialGeneTreeComponent implements OnChanges {
         .filter((node) => node.name)
         .map((node) => [node.name as string, this.areGenesShown(node.genes)]),
     );
-    this.rootShown = this.areGenesShown(genes);
+    this.rootShown = this.view.transcriptAllGenes ? this.anyOfAllGenesShown() : this.areGenesShown(genes);
+    this.rebuildAllRows();
+  }
+
+  /**
+   * The all-genes list's rows: the genes matching the filter, up to the cap. Built only while
+   * the list is open: the counts in view change with every pan, and the list can be thousands.
+   */
+  private rebuildAllRows(): void {
+    const list = this.view.transcriptAllGenes && this.allGenesOpen ? this.allGeneList : null;
+    if (!list) {
+      this.allRows = [];
+      this.allGenesMatched = 0;
+      return;
+    }
+    const needle = this.allGenesFilter.trim().toLowerCase();
+    const shown = allGeneShownBy(this.view.transcriptAllGenesHidden);
+    const rows: AllGeneRowView[] = [];
+    let matched = 0;
+    list.forEach((gene, code) => {
+      // An empty name is a code no transcript carries (a control probe).
+      if (!gene || (needle && !gene.toLowerCase().includes(needle))) return;
+      matched++;
+      if (rows.length >= ALL_GENES_ROWS) return;
+      rows.push({
+        gene,
+        shown: shown(gene),
+        swatch: this.canHideAllGenes ? this.allGeneColorOf(gene, code) : null,
+        count: this.geneCountOf(gene),
+      });
+    });
+    this.allRows = rows;
+    this.allGenesMatched = matched;
+  }
+
+  /** Whether "All genes" draws anything: not switched off whole, nor every listed gene hidden. */
+  private anyOfAllGenesShown(): boolean {
+    if (allGenesHidden(this.view)) return false;
+    if (!this.canHideAllGenes || !this.allGeneList) return true;
+    const shown = allGeneShownBy(this.view.transcriptAllGenesHidden);
+    return this.allGeneList.some((g) => g && shown(g));
+  }
+
+  /** A gene of "All genes" in its colour by gene: its chosen one, else the palette's by code. */
+  private allGeneColorOf(gene: string, code: number): string {
+    return (
+      this.view.transcriptGeneColors[gene] ||
+      DEFAULT_CATEGORICAL_PALETTE[code % DEFAULT_CATEGORICAL_PALETTE.length]
+    );
+  }
+
+  protected toggleAllGenesOpen(): void {
+    this.allGenesOpen = !this.allGenesOpen;
+    this.rebuildAllRows();
+  }
+
+  protected onAllGenesFilter(text: string): void {
+    this.allGenesFilter = text;
+    this.rebuildAllRows();
   }
 
   protected toggleGeneGroup(name: string): void {
@@ -147,10 +238,17 @@ export class SpatialGeneTreeComponent implements OnChanges {
     });
   }
 
-  /** The root eye while every gene is shown: back to the chosen list. */
-  protected onToggleAllGenes(): void {
-    if (!this.dataset?.transcriptBins) return;
-    this.controls?.setViewState({ transcriptAllGenes: !this.view.transcriptAllGenes });
+  /** The root eye while every gene is drawn: hide or show them all (the '±' leaves "All genes"). */
+  protected onAllGenesShown(on: boolean): void {
+    this.controls?.setViewState({ transcriptAllGenesHidden: on ? [] : [ALL_GENES] });
+  }
+
+  /** One gene's eye in the all-genes list. Showing one while all are off shows it alone. */
+  protected onAllGeneShown(gene: string, on: boolean): void {
+    if (!this.canHideAllGenes) return;
+    this.controls?.setViewState({
+      transcriptAllGenesHidden: toggleAllGeneHidden(this.view.transcriptAllGenesHidden, gene, on),
+    });
   }
 
   protected onGeneColor(gene: string, hex: string): void {
@@ -231,6 +329,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   protected trackByNode = (_i: number, node: { name: string | null }) => node.name ?? '';
   protected trackByLabelString = (_i: number, s: string) => s;
+  protected trackByAllRow = (_i: number, row: AllGeneRowView) => row.gene;
 
   /**
    * The cluster colours, rebuilt only when what they come from changes. The template asks

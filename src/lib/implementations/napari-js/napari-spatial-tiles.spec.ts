@@ -148,8 +148,17 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     gene: new Uint16Array(n),
   });
 
-  function setup(individualCount: number, colorBy: 'cellType' | 'gene') {
-    const getTranscriptTile = jest.fn(() => Promise.resolve(tile(individualCount)));
+  function setup(
+    individualCount: number,
+    colorBy: 'cellType' | 'gene',
+    o: { codes?: number[]; genes?: string[]; view?: Partial<typeof DEFAULT_SPATIAL_VIEW> } = {},
+  ) {
+    const coded = () => {
+      const t = tile(individualCount);
+      if (o.codes) t.gene.set(o.codes);
+      return t;
+    };
+    const getTranscriptTile = jest.fn(() => Promise.resolve(coded()));
     const getTranscriptBins = jest.fn(() => Promise.resolve({ ...tile(4), aggregated: true }));
     const port = { getTranscriptTile, getTranscriptBins } as unknown as SpatialDataPort;
     // Sparse on average (10 transcripts over the bounds), so the plan starts individual.
@@ -158,7 +167,12 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
       name: 'd',
       columns: [],
       observations: { count: 1, x: new Float32Array([5]), y: new Float32Array([5]) },
-      transcriptTiles: { bounds: [0, 0, 100, 100], count: 10, levels: [{ tileSize: 200 }] },
+      transcriptTiles: {
+        bounds: [0, 0, 100, 100],
+        count: 10,
+        levels: [{ tileSize: 200 }],
+        ...(o.genes ? { genes: o.genes } : {}),
+      },
       transcriptBins: {
         bounds: [0, 0, 100, 100],
         origin: [0, 0],
@@ -173,6 +187,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
       transcriptGenes: [],
       transcriptBudget: 1000,
       transcriptColorBy: colorBy,
+      ...o.view,
     };
     const host: SpatialTileHost = {
       latest: () => [dataset, view, emptySelection(1)],
@@ -215,6 +230,31 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const { tiles, colors } = setup(100, 'gene');
     await (tiles as unknown as { plan(): Promise<void> }).plan();
     expect((colors.mock.calls[0][1] as { transcriptColorBy: string }).transcriptColorBy).toBe('gene');
+    tiles.detach();
+  });
+
+  it("hides, counts, colours and names individual transcripts by the dataset's gene list", async () => {
+    // Codes index the dataset's genes; the blank one is a control probe no transcript carries.
+    const { tiles, colors } = setup(3, 'gene', {
+      codes: [0, 2, 2],
+      genes: ['ACTA2', '', 'KRT5'],
+      view: {
+        transcriptAllGenesHidden: ['ACTA2'],
+        transcriptGeneColors: { KRT5: '#ff0000' },
+        // The selection's hidden genes are its own: they hide nothing here.
+        transcriptHiddenGenes: ['KRT5'],
+      },
+    });
+    await (tiles as unknown as { plan(): Promise<void> }).plan();
+    const drawn = drawnOf<{ kind: string; merged: SpatialTranscriptTile; genes: string[] }>(tiles);
+    expect(drawn.kind).toBe('individual');
+    // ACTA2 is hidden; both KRT5 transcripts are drawn, in KRT5's chosen colour.
+    expect(Array.from(drawn.merged.gene)).toEqual([2, 2]);
+    const rgba = (await colors.mock.results[0].value) as Float32Array;
+    expect(Array.from(rgba.subarray(0, 4))).toEqual([1, 0, 0, 1]);
+    // Counts in view are taken before hiding, by name; the hover names a code by the same list.
+    expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toMatchObject({ ACTA2: 1, KRT5: 2 });
+    expect(drawn.genes).toEqual(['ACTA2', '', 'KRT5']);
     tiles.detach();
   });
 });
@@ -696,7 +736,7 @@ describe('NapariSpatialTileLayers: a column request that fails', () => {
     offsets: new Uint32Array([0, 4]),
     observation: new Uint32Array([0]),
   });
-  const meta = { kind: 'categorical', name: 'cluster', categories: ['A'] };
+  const meta = { kind: 'categorical', name: 'cluster', categories: ['A', 'B'] };
 
   function setup() {
     let columnCalls = 0;

@@ -56,6 +56,14 @@ describe('TranscriptJobPlanner', () => {
     expect((await dense.load(ctx())).merged.aggregated).toBe(true);
   });
 
+  it('plans nothing while "All genes" is switched off whole with the root eye', () => {
+    const jobs = new TranscriptJobPlanner(port);
+    const all = { ...view, transcriptAllGenes: true, transcriptBudget: 1000 };
+    expect(jobs.jobFor(dataset(10), { ...all, transcriptAllGenesHidden: ['*'] }, rect, 4)).toBeNull();
+    expect(jobs.jobFor(dataset(10), { ...all, transcriptAllGenesHidden: ['A'] }, rect, 4)).not.toBeNull();
+    expect(jobs.jobFor(dataset(10), { ...all, transcriptAllGenesHidden: ['*', 'A'] }, rect, 4)).not.toBeNull();
+  });
+
   it('keys a gene selection so a small pan is a no-op and a new gene is not', () => {
     const jobs = new TranscriptJobPlanner(port);
     const key = (r: typeof rect, v = view) => jobs.jobFor(dataset(10), v, r, 4)!.key;

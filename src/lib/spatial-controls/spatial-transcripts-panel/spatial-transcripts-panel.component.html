@@ -130,18 +130,24 @@
           [options]="transcriptColorOptions"
           optionLabel="label"
           optionValue="value"
-          [ngModel]="view.transcriptColorBy"
+          [ngModel]="transcriptColorShown"
           (ngModelChange)="onTranscriptColorBy($event)"
           [allowEmpty]="false"
           styleClass="sc-buttons"
         ></p-selectButton>
       </div>
-      <small
-        class="sc-hint"
-        *ngIf="view.transcriptAllGenes && view.transcriptColorBy === 'gene' && estimateOverMax"
-      >
-        Grouped markers mix genes, so they are coloured by cell type until you zoom in to individual transcripts.
-      </small>
+      <ng-container *ngIf="view.transcriptAllGenes && estimateOverMax">
+        <small class="sc-hint" *ngIf="hasCellTypes && transcriptColorShown !== 'cellType'">
+          Grouped markers mix genes, so they are coloured by cell type until you zoom in to individual transcripts.
+        </small>
+        <small class="sc-hint" *ngIf="!hasCellTypes">
+          Grouped markers mix genes and this dataset has no cell types, so they are drawn in one colour until you
+          zoom in to individual transcripts.
+        </small>
+        <small class="sc-hint" *ngIf="allGenesSomeHidden">
+          Grouped markers hold every gene: hidden genes are left out once you zoom in to individual transcripts.
+        </small>
+      </ng-container>
       <div class="sc-row" *ngIf="view.transcriptAllGenes && view.transcriptMode === 'glyphs'">
         <span class="sc-lbl">Icon</span>
         <p-dropdown
