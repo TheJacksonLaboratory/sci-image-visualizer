@@ -261,6 +261,41 @@ describe('VisualizerStore default channel visibility', () => {
     expect(store.currentChannelStates()[10].visible).toBe(true);
   });
 
+  it.each([2, 3, 4])('shows every channel of a %i-channel image, as before', (count) => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(count));
+    expect(visible(store)).toEqual(Array(count).fill(true));
+  });
+
+  it('shows the one channel of a grayscale image, and of one with no channel count', () => {
+    const one = new VisualizerStore();
+    one.setImageMeta(plate(1));
+    expect(visible(one)).toEqual([true]);
+    const unknown = new VisualizerStore();
+    unknown.setImageMeta([{ rgbChannels: 1, x: 10, y: 10, z: 1 } as IImageMetadata]);
+    expect(visible(unknown)).toEqual([true]);
+  });
+
+  it('hides from the fifth channel on, once there are more than DEFAULT_VISIBLE_CHANNELS', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(DEFAULT_VISIBLE_CHANNELS + 1));
+    expect(visible(store)).toEqual([...Array(DEFAULT_VISIBLE_CHANNELS).fill(true), false]);
+  });
+
+  it('shows every channel of a few-channel image whose channelInfo is partial or says nothing', () => {
+    const store = new VisualizerStore();
+    // A descriptor that names one channel of three, and sends an empty visibility for it.
+    const info = [{ name: 'DAPI', color: '#0000ff', visible: null as unknown as boolean }];
+    store.setImageMeta(plate(3, info));
+    expect(visible(store)).toEqual([true, true, true]);
+  });
+
+  it('leaves RGB and RGBA channels visible', () => {
+    const rgba = new VisualizerStore();
+    rgba.setImageMeta([{ rgbChannels: 4, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata]);
+    expect(visible(rgba)).toEqual([true, true, true]);
+  });
+
   it('leaves RGB channels visible', () => {
     const store = new VisualizerStore();
     store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata]);
@@ -278,5 +313,16 @@ describe('defaultChannelVisible', () => {
   it('an image-specified visibility wins either way', () => {
     expect(defaultChannelVisible(20, 22, true)).toBe(true);
     expect(defaultChannelVisible(0, 2, false)).toBe(false);
+  });
+
+  it('shows every channel of up to DEFAULT_VISIBLE_CHANNELS', () => {
+    for (let count = 1; count <= DEFAULT_VISIBLE_CHANNELS; count++) {
+      for (let i = 0; i < count; i++) expect(defaultChannelVisible(i, count)).toBe(true);
+    }
+  });
+
+  it('treats an empty (null) visibility as unspecified', () => {
+    expect(defaultChannelVisible(1, 3, null)).toBe(true);
+    expect(defaultChannelVisible(10, 22, null)).toBe(false);
   });
 });

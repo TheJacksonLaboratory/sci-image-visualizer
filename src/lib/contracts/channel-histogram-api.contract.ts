@@ -30,10 +30,12 @@ export const DEFAULT_VISIBLE_CHANNELS = 4;
 
 /**
  * Whether channel `index` of `count` starts visible: as the image says when its
- * `channelInfo` does, else the first {@link DEFAULT_VISIBLE_CHANNELS}.
+ * `channelInfo` does, else every channel of an image with at most
+ * {@link DEFAULT_VISIBLE_CHANNELS}, and the first {@link DEFAULT_VISIBLE_CHANNELS} of one with more.
+ * Only a boolean says: a descriptor's `null` (a JSON field left empty) leaves the default.
  */
-export function defaultChannelVisible(index: number, count: number, specified?: boolean): boolean {
-  if (specified !== undefined) return specified;
+export function defaultChannelVisible(index: number, count: number, specified?: boolean | null): boolean {
+  if (typeof specified === 'boolean') return specified;
   return count <= DEFAULT_VISIBLE_CHANNELS || index < DEFAULT_VISIBLE_CHANNELS;
 }
 
