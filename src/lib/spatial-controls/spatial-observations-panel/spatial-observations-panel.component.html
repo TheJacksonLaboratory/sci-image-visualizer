@@ -66,7 +66,8 @@
 
         <!-- Which observations are drawn at all, by what they express. Several genes at
        once, unlike the colour, which reads one: picking genes here hides every
-       observation that expresses none of them (or not all of them). -->
+       observation that expresses none of them (or not all of them), and by default
+       colours (and, in 2D, marks) each drawn one by its gene. -->
         <div class="sc-section" *ngIf="ds.features">
           <label class="sc-lbl" for="sc-show-genes">Show observations expressing</label>
           <p-multiSelect
@@ -92,7 +93,17 @@
             [selectedItemsLabel]="'{0} genes'"
             [maxSelectedLabels]="3"
             styleClass="sc-full"
-          ></p-multiSelect>
+          >
+            <!-- A picked gene shows its icon in its colour; clicking it edits them. -->
+            <ng-template let-option pTemplate="item">
+              <div class="sc-obs-gene-option">
+                <span class="sc-obs-gene-name">{{ option.label }}</span>
+                <ng-container *ngIf="isObservationGene(option.value)">
+                  <ng-container *ngTemplateOutlet="geneMark; context: { $implicit: option.value }"></ng-container>
+                </ng-container>
+              </div>
+            </ng-template>
+          </p-multiSelect>
           <p-selectButton
             *ngIf="view.observationGenes.length > 1"
             [options]="matchOptions"
@@ -103,7 +114,41 @@
             [allowEmpty]="false"
             styleClass="sc-buttons"
           ></p-selectButton>
+          <!-- The picked genes: each one's icon and colour (click to edit), and a way out. -->
+          <div class="sc-obs-genes" *ngIf="view.observationGenes.length">
+            <div class="sc-obs-gene-row" *ngFor="let g of view.observationGenes; trackBy: trackByGene">
+              <ng-container *ngTemplateOutlet="geneMark; context: { $implicit: g }"></ng-container>
+              <span class="sc-obs-gene-name">{{ g }}</span>
+              <button
+                type="button"
+                class="sc-icon-btn"
+                [attr.aria-label]="'Stop showing ' + g"
+                pTooltip="Remove"
+                tooltipPosition="top"
+                (click)="removeObservationGene(g)"
+              >
+                <i class="pi pi-times"></i>
+              </button>
+            </div>
+          </div>
+          <div class="sc-row" *ngIf="view.observationGenes.length">
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="view.observationGenesColorBy"
+              (onChange)="onObservationGenesColorBy($event.checked)"
+              label="Colour by these genes"
+              pTooltip="Each observation in the colour (and, in 2D, the icon) of the picked gene it expresses most, relative to that gene's highest value. Off, Colour by column or gene applies."
+              tooltipPosition="top"
+            ></p-checkbox>
+          </div>
           <small class="sc-hint" *ngIf="view.observationGenes.length">{{ geneFilterHint }}</small>
+          <!-- The filter is never dropped silently: a failed expression read keeps the observations
+               as they were drawn, and says so. -->
+          <small class="sc-hint sc-error" *ngIf="view.observationGenes.length && (geneFilterFailed$ | async)">
+            The expression of the picked genes could not be read, so the observations still show the previous
+            filter.
+            <a href="" (click)="$event.preventDefault(); retryGeneFilter()">Try again</a>
+          </small>
         </div>
       </ng-container>
 
@@ -348,4 +393,36 @@
       <span class="sc-val"></span>
     </div>
   </div>
+
+  <!-- A gene's icon in its colour: the button that opens its icon and colour picker. -->
+  <ng-template #geneMark let-g>
+    <button
+      type="button"
+      class="sc-gene-icon"
+      [style.color]="geneColorOf(g)"
+      [attr.aria-label]="'Icon and colour for ' + g"
+      pTooltip="Icon and colour"
+      tooltipPosition="top"
+      (click)="openGeneStyle($event, g, genePop)"
+    >
+      <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
+        <polygon [attr.points]="glyphPointsOf(g)"></polygon>
+      </svg>
+    </button>
+  </ng-template>
+  <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+    <ng-template pTemplate="content">
+      <spatial-gene-style
+        *ngIf="styleGene as g"
+        [gene]="g"
+        what="Observation"
+        [color]="geneColorOf(g)"
+        [glyph]="geneGlyphOf(g)"
+        iconHint="Icons show on the 2D observation markers."
+        (colorChange)="onGeneColor(g, $event)"
+        (glyphChange)="onGeneGlyph(g, $event)"
+        (resetStyle)="resetGeneStyle(g)"
+      ></spatial-gene-style>
+    </ng-template>
+  </p-overlayPanel>
 </ng-container>

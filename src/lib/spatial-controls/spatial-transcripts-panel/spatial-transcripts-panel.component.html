@@ -123,6 +123,20 @@
       </small>
     </ng-container>
 
+    <!-- The density raster and the grouped markers drawn from it carry no cells, so they
+         cannot follow the Observations gene filter: they are not drawn while it is on. -->
+    <small class="sc-hint" *ngIf="observationsFiltered && view.transcriptMode === 'density'">
+      Observations are filtered by gene, and the density map sums every cell's transcripts, so it is hidden. Use
+      Circles or Icons to see the transcripts of the observations shown.
+    </small>
+    <small
+      class="sc-hint"
+      *ngIf="observationsFiltered && (view.transcriptMode === 'circles' || view.transcriptMode === 'glyphs')"
+    >
+      Observations are filtered by gene: only the transcripts of the observations shown are drawn. Transcripts
+      grouped by area when zoomed out carry no cells, so they are hidden; zoom in to see them.
+    </small>
+
     <ng-container *ngIf="view.transcriptMode === 'circles' || view.transcriptMode === 'glyphs'">
       <div class="sc-row">
         <span class="sc-lbl">Colour by</span>

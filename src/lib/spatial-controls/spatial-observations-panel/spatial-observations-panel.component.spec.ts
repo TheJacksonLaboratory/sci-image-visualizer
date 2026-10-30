@@ -1,7 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialObservationsPanelComponent } from './spatial-observations-panel.component';
+import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
+import { GenePickerModel } from '../spatial-gene-picker';
 import { ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
@@ -32,7 +34,9 @@ describe('SpatialObservationsPanelComponent', () => {
   let dataset$: BehaviorSubject<SpatialDataset | null>;
 
   async function build(inputs: Record<string, unknown> = {}) {
-    shallowPanel(SpatialObservationsPanelComponent);
+    // The key is a child component: kept (shallow), so opening the section binds its inputs.
+    shallowPanel(SpatialKeyComponent);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
     await TestBed.configureTestingModule({ imports: [SpatialObservationsPanelComponent] }).compileComponents();
     fixture = TestBed.createComponent(SpatialObservationsPanelComponent);
     component = fixture.componentInstance;
@@ -109,6 +113,50 @@ describe('SpatialObservationsPanelComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
+    it("writes a gene's colour and icon, and resets both", () => {
+      view$.next({ ...view$.value, observationGenes: ['Ttr', 'Mbp'] });
+      fixture.detectChanges();
+      component['onGeneColor']('Mbp', '#123456');
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGeneColors: { Mbp: '#123456' } });
+      component['onGeneGlyph']('Ttr', 'star');
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGeneGlyphs: { Ttr: 'star' } });
+      view$.next({
+        ...view$.value,
+        observationGeneColors: { Mbp: '#123456' },
+        observationGeneGlyphs: { Mbp: 'x' },
+      });
+      fixture.detectChanges();
+      component['resetGeneStyle']('Mbp');
+      expect(controls.setViewState).toHaveBeenLastCalledWith({
+        observationGeneColors: {},
+        observationGeneGlyphs: {},
+      });
+    });
+
+    it('shows a gene in its own colour and icon, else the defaults', () => {
+      view$.next({ ...view$.value, observationGenes: ['Ttr', 'Mbp'], observationGeneColors: { Mbp: '#123456' } });
+      fixture.detectChanges();
+      expect(component['geneColorOf']('Mbp')).toBe('#123456');
+      expect(component['geneGlyphOf']('Ttr')).toBe('circle');
+    });
+
+    it('removes one gene, and switches the colouring by gene', () => {
+      view$.next({ ...view$.value, observationGenes: ['Ttr', 'Mbp'] });
+      fixture.detectChanges();
+      component['removeObservationGene']('Ttr');
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGenes: ['Mbp'] });
+      component['onObservationGenesColorBy'](false);
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGenesColorBy: false });
+    });
+
+    it("opening a gene's picker in the dropdown does not unpick it", () => {
+      const event = { stopPropagation: jest.fn() } as unknown as Event;
+      const panel = { toggle: jest.fn(), hide: jest.fn() };
+      component['openGeneStyle'](event, 'Ttr', panel);
+      expect(event.stopPropagation).toHaveBeenCalled();
+      expect(component['styleGene']).toBe('Ttr');
+    });
+
     it('says what the filter hides', () => {
       view$.next({ ...view$.value, observationGenes: ['Ttr'] });
       fixture.detectChanges();
@@ -116,6 +164,39 @@ describe('SpatialObservationsPanelComponent', () => {
       view$.next({ ...view$.value, observationGenes: ['Ttr', 'Mbp'], observationGenesMatch: 'all' });
       fixture.detectChanges();
       expect(component['geneFilterHint']).toContain('all of these genes');
+    });
+  });
+
+  describe('when the gene filter cannot be applied', () => {
+    it('says so, and asks again', async () => {
+      (controls as unknown as { getGeneFilterFailed$: () => unknown }).getGeneFilterFailed$ = () => of(true);
+      await build({
+        open: true,
+        genes: new GenePickerModel(
+          () => controls,
+          () => [],
+        ),
+      });
+      view$.next({ ...view$.value, observationGenes: ['Ttr'] });
+      fixture.detectChanges();
+      const el: HTMLElement = fixture.nativeElement;
+      expect(el.textContent).toContain('could not be read');
+      (controls.setViewState as jest.Mock).mockClear();
+      (el.querySelector('.sc-error a') as HTMLAnchorElement).click();
+      expect(controls.setViewState).toHaveBeenCalledWith({ observationGenes: ['Ttr'] });
+    });
+
+    it('says nothing while it applies', async () => {
+      await build({
+        open: true,
+        genes: new GenePickerModel(
+          () => controls,
+          () => [],
+        ),
+      });
+      view$.next({ ...view$.value, observationGenes: ['Ttr'] });
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).not.toContain('could not be read');
     });
   });
 

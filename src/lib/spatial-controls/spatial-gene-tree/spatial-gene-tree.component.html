@@ -138,68 +138,19 @@
   <!-- One picker for every gene row, filled for the gene that opened it. -->
   <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
-      <div class="sc-style-pop" *ngIf="styleGene as gene">
-        <div class="sc-style-title">Transcript Icon</div>
-        <div class="sc-style-icons" role="radiogroup" [attr.aria-label]="'Icon for ' + gene">
-          <button
-            type="button"
-            *ngFor="let opt of glyphOptions"
-            class="sc-style-icon"
-            role="radio"
-            [attr.aria-checked]="opt.value === styleGlyph"
-            [class.active]="opt.value === styleGlyph"
-            [title]="opt.label"
-            (click)="onGlyph(gene, opt.value)"
-          >
-            <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
-              <polygon [attr.points]="opt.points"></polygon>
-            </svg>
-          </button>
-        </div>
-        <small class="sc-hint" *ngIf="view.transcriptMode !== 'glyphs'">
-          Icons show when the transcript point style is Icons.
-        </small>
-        <div class="sc-style-title">Transcript Color</div>
-        <div class="sc-style-color">
-          <label class="sc-style-swatch" [style.background]="geneColorOf(gene)" title="Pick a colour">
-            <input
-              type="color"
-              [value]="geneColorOf(gene)"
-              (change)="onGeneColor(gene, $any($event.target).value)"
-            />
-          </label>
-          <input
-            pInputText
-            class="sc-style-hex"
-            [value]="geneColorOf(gene)"
-            maxlength="7"
-            [attr.aria-label]="'Hex colour for ' + gene"
-            (change)="onGeneHex(gene, $any($event.target).value)"
-            (keydown.enter)="onGeneHex(gene, $any($event.target).value)"
-          />
-        </div>
-        <div class="sc-style-title sc-style-sub">Presets</div>
-        <div class="sc-style-presets">
-          <button
-            type="button"
-            *ngFor="let c of colorPresets"
-            class="sc-style-preset"
-            [style.background]="c"
-            [class.active]="c === geneColorOf(gene).toLowerCase()"
-            [title]="c"
-            [attr.aria-label]="'Colour ' + c"
-            (click)="onGeneColor(gene, c)"
-          ></button>
-        </div>
-        <p-button
-          label="Reset to default"
-          icon="pi pi-refresh"
-          size="small"
-          [text]="true"
-          styleClass="sc-style-reset"
-          (onClick)="resetGeneStyle(gene)"
-        ></p-button>
-      </div>
+      <spatial-gene-style
+        *ngIf="styleGene as gene"
+        [gene]="gene"
+        what="Transcript"
+        [color]="geneColorOf(gene)"
+        [glyph]="styleGlyph ?? 'circle'"
+        [iconHint]="
+          view.transcriptMode !== 'glyphs' ? 'Icons show when the transcript point style is Icons.' : null
+        "
+        (colorChange)="onGeneColor(gene, $event)"
+        (glyphChange)="onGlyph(gene, $event)"
+        (resetStyle)="resetGeneStyle(gene)"
+      ></spatial-gene-style>
     </ng-template>
   </p-overlayPanel>
   <div class="sc-gene-footer">

@@ -245,6 +245,17 @@ export interface SpatialViewState {
   observationGenes: string[];
   /** Whether an observation must express any of {@link observationGenes}, or all of them. */
   observationGenesMatch: 'any' | 'all';
+  /**
+   * Colour (and mark) the filtered observations by their gene: each drawn observation in the
+   * colour and icon of the picked gene it expresses most (relative to that gene's highest
+   * value), in place of {@link colorBy}. Off, {@link colorBy} colours them as before.
+   */
+  observationGenesColorBy: boolean;
+  /** `#rrggbb` per gene of {@link observationGenes}; a gene left out takes the palette's colour
+   *  for its place in the list. */
+  observationGeneColors: Record<string, string>;
+  /** The icon per gene of {@link observationGenes} (2D); a gene left out is drawn as a circle. */
+  observationGeneGlyphs: Record<string, TranscriptGlyphName>;
   /** Draw the tissue image (the Images section's switch). */
   showImage: boolean;
   /** Draw the annotation regions (the Annotations section's switch). Selecting from them
@@ -368,6 +379,9 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   hiddenGroups: [],
   observationGenes: [],
   observationGenesMatch: 'any',
+  observationGenesColorBy: true,
+  observationGeneColors: {},
+  observationGeneGlyphs: {},
   showImage: true,
   showAnnotations: true,
 };

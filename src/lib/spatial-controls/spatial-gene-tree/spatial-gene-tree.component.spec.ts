@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BehaviorSubject } from 'rxjs';
 
+import { GLYPH_OPTIONS } from '../../spatial/spatial-panel-model';
 import { SpatialGeneTreeComponent } from './spatial-gene-tree.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
@@ -266,18 +267,9 @@ describe('SpatialGeneTreeComponent', () => {
     // Choosing an icon and a colour writes the view state; the picker follows it.
     component['onGlyph']('B', 'diamond');
     expect(component['styleGlyph']).toBe('diamond');
-    component['onGeneColor']('B', component['colorPresets'][3]);
-    expect(fake.view$.value.transcriptGeneColors).toEqual({ B: component['colorPresets'][3] });
+    component['onGeneColor']('B', '#abcdef');
+    expect(fake.view$.value.transcriptGeneColors).toEqual({ B: '#abcdef' });
     jest.useRealTimers();
-  });
-
-  it('accepts a typed hex colour with or without #, and ignores anything else', async () => {
-    await build();
-    component['onGeneHex']('A', ' 43BCE7 ');
-    expect(fake.view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
-    component['onGeneHex']('A', '#zzzzzz');
-    component['onGeneHex']('A', '#123');
-    expect(fake.view$.value.transcriptGeneColors).toEqual({ A: '#43bce7' });
   });
 
   it("resets a gene's icon and colour to its defaults, leaving the others", async () => {
@@ -308,8 +300,8 @@ describe('SpatialGeneTreeComponent', () => {
 
   it('draws each glyph for the picker and the gene rows', async () => {
     await build();
-    expect(component['glyphOptions']).toHaveLength(10);
-    for (const o of component['glyphOptions']) expect(component['glyphPoints'](o.value)).toBe(o.points);
+    expect(GLYPH_OPTIONS).toHaveLength(10);
+    for (const o of GLYPH_OPTIONS) expect(component['glyphPoints'](o.value)).toBe(o.points);
   });
 
   it("shows the renderer's per-gene counts in view, 0 for a gene with none", async () => {

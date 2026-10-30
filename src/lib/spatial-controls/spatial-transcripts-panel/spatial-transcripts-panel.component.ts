@@ -49,6 +49,7 @@ import type { GenePickerModel } from '../spatial-gene-picker';
 import { colormapNodeFor } from '../spatial-key/spatial-key.component';
 import { SpatialGeneTreeComponent } from '../spatial-gene-tree/spatial-gene-tree.component';
 import { SpatialMarkerGenesFormComponent } from '../spatial-marker-genes-form/spatial-marker-genes-form.component';
+import { hasGeneFilter } from '../../spatial/spatial-gene-filter';
 
 /** One item of the gene list's '⋮' menu. */
 export interface GeneMenuItem {
@@ -297,6 +298,11 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   protected get estimatePercent(): number {
     const e = this.estimate;
     return e && e.max > 0 ? Math.min(100, (100 * e.points) / e.max) : 0;
+  }
+
+  /** Whether the Observations gene filter is on, which limits the transcripts drawn. */
+  protected get observationsFiltered(): boolean {
+    return hasGeneFilter(this.view);
   }
 
   protected get estimateOverMax(): boolean {

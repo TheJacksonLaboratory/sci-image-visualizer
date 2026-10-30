@@ -122,6 +122,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   /** Transcripts of each selected gene in view (see NapariSpatialTileLayers.geneCountsIn). */
   readonly geneCountsInView$ = new BehaviorSubject<Record<string, number> | null>(null);
   readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
+  /** The observation gene filter could not be applied (an expression read failed). */
+  readonly geneFilterFailed$ = new BehaviorSubject<boolean>(false);
   /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
   private readonly badge = new LoadingBadgeState();
   /** The store's display state (colormap, reverse, invert) and the colormaps derived from it. */
@@ -210,6 +212,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       estimateChanged: (e) => this.inZone(() => this.transcriptEstimate$.next(e)),
       geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
       densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
+      geneFilterFailed: (failed) => this.inZone(() => this.geneFilterFailed$.next(failed)),
       loadingChanged: (layers) => this.badge.setTileLayers(layers),
     });
     this.tools = new NapariToolBridge(

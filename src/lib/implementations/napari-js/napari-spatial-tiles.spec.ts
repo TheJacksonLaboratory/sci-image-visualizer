@@ -1311,6 +1311,19 @@ describe('NapariSpatialTileLayers: the transcript density', () => {
     tiles.detach();
   });
 
+  it('draws no density while observations are filtered by gene, which it cannot follow', async () => {
+    // Review (PR #65): the raster sums every cell's transcripts, so it showed those of the cells
+    // the Observations gene filter hides.
+    const { tiles, plan, setView, getDensity, viewer } = setup({ observationGenes: ['G'] });
+    await plan();
+    expect(viewer.layers.items).toHaveLength(0);
+    expect(getDensity).not.toHaveBeenCalled();
+    setView({ observationGenes: [] });
+    await plan();
+    expect(viewer.layers.items).toHaveLength(1);
+    tiles.detach();
+  });
+
   it('drops the layer and its window when the view stops drawing density', async () => {
     const { tiles, plan, setView, viewer } = setup();
     await plan();
@@ -1684,6 +1697,72 @@ describe('NapariSpatialTileLayers: a transcript plan superseded at its last step
 
     expect(addPoints).toHaveBeenCalledTimes(2); // view B was drawn
     expect(drawnOf<{ genes: string[] }>(tiles).genes).toEqual(['A', 'B']);
+    tiles.detach();
+  });
+});
+
+/** Markers from the summed density grids (a selection zoomed out) carry no cells. */
+describe('NapariSpatialTileLayers: grouped transcripts and the observation gene filter', () => {
+  function setup(observationGenes: string[]) {
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: { count: 1, x: new Float32Array(1), y: new Float32Array(1) },
+    } as unknown as SpatialDataset;
+    const view = {
+      ...DEFAULT_SPATIAL_VIEW,
+      transcriptMode: 'circles' as const,
+      transcriptGenes: ['A'],
+      observationGenes,
+    };
+    const getFeatureVector = jest.fn(async () => Float32Array.of(1));
+    const tiles = new NapariSpatialTileLayers({ getFeatureVector } as unknown as SpatialDataPort, {
+      latest: () => [dataset, view, emptySelection(1)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    });
+    tiles.attach(viewerAt([5, 5], 4));
+    // One grouped marker, as clusterDensityJob returns it.
+    const merged: SpatialTranscriptTile = {
+      count: 1,
+      aggregated: true,
+      x: Float32Array.of(5),
+      y: Float32Array.of(5),
+      z: new Float32Array(1),
+      weight: Uint32Array.of(10),
+      observation: new Uint32Array(1),
+      gene: new Uint16Array(1),
+    };
+    (jobsOf(tiles) as unknown as { jobFor(): unknown }).jobFor = () => ({
+      kind: 'genes',
+      key: 'clusters',
+      load: async () => ({
+        merged,
+        px: Float32Array.of(8),
+        kind: 'genes',
+        clustered: { group: Int32Array.of(0), names: ['A'], genes: [['A']], bin: 4, origin: [0, 0] },
+      }),
+    });
+    return tiles;
+  }
+  const plan = (tiles: NapariSpatialTileLayers) => (tiles as unknown as { plan(): Promise<void> }).plan();
+  const drawnCount = (tiles: NapariSpatialTileLayers) =>
+    (tiles as unknown as { hover: { drawn: { merged: SpatialTranscriptTile } | null } }).hover.drawn?.merged
+      .count ?? 0;
+
+  it('draws them with no filter on', async () => {
+    const tiles = setup([]);
+    await plan(tiles);
+    expect(drawnCount(tiles)).toBe(1);
+    tiles.detach();
+  });
+
+  it('draws none while observations are filtered by gene, which they cannot follow', async () => {
+    const tiles = setup(['G']);
+    await plan(tiles);
+    expect(drawnCount(tiles)).toBe(0);
     tiles.detach();
   });
 });

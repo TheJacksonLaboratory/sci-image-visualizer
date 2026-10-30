@@ -86,6 +86,19 @@ describe('SpatialTranscriptsPanelComponent', () => {
     expect(fake.view$.value.transcriptGenes).toEqual(['EPCAM']);
   });
 
+  it('says what the Observations gene filter leaves of the transcripts, by mode', async () => {
+    await build();
+    fake.view$.next({ ...fake.view$.value, transcriptMode: 'density', transcriptGenes: ['A'] });
+    fixture.detectChanges();
+    expect(root.textContent).not.toContain('Observations are filtered by gene');
+    fake.view$.next({ ...fake.view$.value, observationGenes: ['G'] });
+    fixture.detectChanges();
+    expect(root.textContent).toContain('the density map sums every cell');
+    fake.view$.next({ ...fake.view$.value, transcriptMode: 'circles' });
+    fixture.detectChanges();
+    expect(root.textContent).toContain('only the transcripts of the observations shown are drawn');
+  });
+
   it('patches the transcript settings', async () => {
     await build();
     component['onTranscriptGenes'](['A']);

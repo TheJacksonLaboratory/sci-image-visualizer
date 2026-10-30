@@ -16,7 +16,12 @@ import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spat
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
-import { geneFilterKey, observationGeneMask } from '../../spatial/spatial-gene-filter';
+import {
+  geneFilterKey,
+  observationGeneMask,
+  observationGeneStyle,
+  observationGeneStyleKey,
+} from '../../spatial/spatial-gene-filter';
 import {
   ExpressionVolumeField,
   encodeExpressionVolume,
@@ -319,22 +324,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       const endLoading = this.ctx.badge.begin('Observations');
       const port = this.session.port;
       try {
-        [enc, geneShown] = await Promise.all([
-          this.scalarEncoding(view).catch((err) => {
-            console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
-            return null;
-          }),
-          port ? observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g)) : null,
-        ]);
-      } catch (err) {
-        // The gene filter's vectors failed: draw every observation rather than none.
-        console.warn('[napari-js] spatial 3D gene filter failed — drawing every observation', err);
-        geneShown = null;
+        // Which observations the gene filter keeps, settled apart from their colours: a colour
+        // can fall back to a flat one, the filter cannot. Drawn without it, every observation
+        // would show as if it expressed the picked genes. So a failed read keeps the cloud as it
+        // was drawn, and the panel says the filter could not be applied.
+        try {
+          geneShown = port
+            ? await observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g))
+            : null;
+        } catch (err) {
+          console.warn(
+            '[napari-js] spatial 3D gene filter could not be applied — keeping the cloud as drawn',
+            err,
+          );
+          if (task()) this.session.reportGeneFilter(true);
+          return;
+        }
+        enc = await this.scalarEncoding(view, dataset.observations.count).catch((err) => {
+          console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
+          return null;
+        });
       } finally {
         endLoading();
       }
     }
     if (!task()) return;
+    this.session.reportGeneFilter(false);
 
     const obs = dataset?.observations;
     // No z means nothing to draw in 3D. The plot type is gated on `requiresSpatial3d`
@@ -891,8 +906,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * uses. Categorical data is one RGBA per point from the column's palette, so any number of
    * categories keeps its own colour — see `encodeSpatial3dCategorical`.
    */
-  private async scalarEncoding(view: SpatialViewState): Promise<Spatial3dEncoding | null> {
+  private async scalarEncoding(view: SpatialViewState, count: number): Promise<Spatial3dEncoding | null> {
     const port = this.session.port;
+    // Coloured by the gene filter: each observation in its gene's colour.
+    // A colour like any other: a failed read falls back to the view's colour source.
+    const byGene =
+      port && count
+        ? await observationGeneStyle(view, count, (g) => port.getFeatureVector(g)).catch((err) => {
+            console.warn(
+              '[napari-js] spatial 3D colouring by gene failed — falling back to the colour source',
+              err,
+            );
+            return null;
+          })
+        : null;
+    if (byGene) return encodeSpatial3dCategorical(byGene.codes, byGene.colors);
     const colorBy = view.colorBy;
     if (!port || !colorBy) return null;
 
@@ -947,6 +975,7 @@ function cloudSubset(
   const scalarKey = [
     key,
     view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    observationGeneStyleKey(view),
     view.logScale ? 'log' : 'lin',
     clip.join(','),
   ].join('|');

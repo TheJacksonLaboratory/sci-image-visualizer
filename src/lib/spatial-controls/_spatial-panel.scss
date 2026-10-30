@@ -327,3 +327,23 @@
 :host ::ng-deep .sc-row-range p-inputnumber {
   flex: 0 0 auto;
 }
+
+// A gene's icon in its colour, the button that opens its icon and colour picker
+// (spatial-gene-style): the transcripts gene tree's rows and the picked observation genes.
+.sc-gene-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  &:hover,
+  &:focus-visible {
+    border-color: var(--surface-border, rgba(0, 0, 0, 0.2));
+  }
+}

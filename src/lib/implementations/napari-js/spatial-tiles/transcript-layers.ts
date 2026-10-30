@@ -20,7 +20,7 @@ import {
   hiddenGeneSlots,
   median,
 } from '../../../spatial/spatial-tile-merge';
-import { geneFilterKey } from '../../../spatial/spatial-gene-filter';
+import { geneFilterKey, hasGeneFilter } from '../../../spatial/spatial-gene-filter';
 import type { CategoricalLookup } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
@@ -180,6 +180,15 @@ export class TranscriptLayers {
     }
     const loaded = await ctx.track('Transcripts', job.load(ctx));
     if (ctx.stale()) return;
+    // Markers drawn from summed density grids (zoomed out) carry no cells, so they cannot follow
+    // the observation gene filter: drawn, they would show the transcripts of the cells it hides.
+    // None while it is on; zoomed in, the cell-assigned transcripts are filtered (below).
+    if (loaded.clustered && hasGeneFilter(view)) {
+      this.groups.drop('transcripts');
+      this.hover.clear();
+      this.countSource = null;
+      return;
+    }
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
     // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
