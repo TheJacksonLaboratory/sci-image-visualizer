@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-10-30
+
 ### Added
 
 - **"All genes" lists its genes in the Transcripts gene tree.** With "All genes" on, the "Genes"
@@ -63,7 +65,6 @@ file was added.
   drawn (and their tiles fetched) although only four were on, until a channel was clicked. The
   channel states now decide which layers draw (`Image2dScene.reapplyDisplayState`); an RGB image's
   composite layer likewise stays hidden under its band layers.
-
 - **The gene tree's root eye hides "All genes" instead of leaving it.** It used to switch "All
   genes" off, which fell back to the chosen genes. On a dataset with no marker genes that list was
   empty, so the eye seemed to turn every transcript off for good. It now hides or shows every
@@ -2443,7 +2444,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.11.0...v0.12.0
