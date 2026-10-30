@@ -192,6 +192,23 @@ export function isPerPoint(colors: PointColors): colors is Float32Array {
   return colors instanceof Float32Array;
 }
 
+/**
+ * `colors` with every observation `shown` leaves at 0 made transparent: the observations a gene
+ * filter leaves out. A broadcast colour becomes per-point, since the points now differ.
+ */
+export function hideUnshown(colors: PointColors, shown: Uint8Array): Float32Array {
+  const count = shown.length;
+  let out: Float32Array;
+  if (isPerPoint(colors)) {
+    out = colors.slice(); // the input may be held elsewhere
+  } else {
+    out = new Float32Array(count * 4);
+    for (let i = 0; i < count; i++) out.set(colors, i * 4);
+  }
+  for (let i = 0; i < count; i++) if (!shown[i]) out[4 * i + 3] = 0;
+  return out;
+}
+
 /** Per-point colours for the drawn subset. A broadcast tuple stays broadcast —
  *  it is one colour for every point either way. */
 export function gatherColors(colors: PointColors, indices?: Uint32Array): PointColors {

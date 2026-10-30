@@ -432,6 +432,9 @@ export interface ISpatialControls {
   getTranscriptEstimate$?(): Observable<{ points: number; max: number } | null>;
   /** The density map's colour window in use (auto-derived or set) and its densest bin. */
   getDensityStats$?(): Observable<{ lo: number; hi: number; max: number } | null>;
+  /** True while the observation gene filter could not be applied (an expression read failed):
+   *  the observations then still show the last filter that could be. */
+  getGeneFilterFailed$?(): Observable<boolean>;
   /**
    * The z positions of the sections the dataset was imaged at, ascending — or
    * null when its z is continuous rather than sectioned (so there are no sections

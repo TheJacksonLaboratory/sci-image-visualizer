@@ -11,6 +11,7 @@ import { densityAutoRange } from '../../../spatial/density-raster';
 import { allGenesHidden } from '../../../spatial/spatial-tile-merge';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
+import { hasGeneFilter } from '../../../spatial/spatial-gene-filter';
 
 /** The density window in use and the densest bin (transcripts per unit area). */
 export interface DensityStats {
@@ -58,7 +59,16 @@ export class DensityLayer {
         ? []
         : [ALL_GENES]
       : view.transcriptGenes.filter((g) => !hiddenGenes.has(g));
-    if (!dataset.density || !this.port.getDensity || view.transcriptMode !== 'density' || !genes.length) {
+    // The raster sums every cell's transcripts and carries no cells, so it cannot follow the
+    // observation gene filter: drawn, it would show the transcripts of the cells it hides. Not
+    // drawn while it is on (the Transcripts panel says so).
+    if (
+      !dataset.density ||
+      !this.port.getDensity ||
+      view.transcriptMode !== 'density' ||
+      !genes.length ||
+      hasGeneFilter(view)
+    ) {
       this.groups.drop('density');
       this.stats = null;
       this.raster = null;

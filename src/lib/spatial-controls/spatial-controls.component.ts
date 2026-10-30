@@ -119,6 +119,7 @@ export class SpatialControlsComponent implements OnInit {
     () => this.controls,
     () => [
       ...(this.view?.transcriptGenes ?? []),
+      ...(this.view?.observationGenes ?? []),
       ...(this.view?.colorBy?.kind === 'feature' ? [this.view.colorBy.name] : []),
     ],
     (fn) => this.runAndMark(fn),

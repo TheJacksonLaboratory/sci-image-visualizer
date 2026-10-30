@@ -8,23 +8,35 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Observable, of } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { CheckboxModule } from 'primeng/checkbox';
 import { DropdownModule } from 'primeng/dropdown';
+import { MultiSelectModule } from 'primeng/multiselect';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
 import { TooltipModule } from 'primeng/tooltip';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-import { ColormapNode, DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
+import {
+  ColormapNode,
+  DEFAULT_SPATIAL_VIEW,
+  SpatialViewState,
+  TranscriptGlyphName,
+} from '../../contracts/display-types';
+import { observationGeneColor, observationGeneGlyph } from '../../spatial/spatial-gene-filter';
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import {
   CLIP_OPTIONS,
   PanelOption,
   columnOptions,
+  glyphPoints,
   middleSection,
   sectionLabel,
 } from '../../spatial/spatial-panel-model';
+import { SpatialGeneStyleComponent } from '../spatial-gene-style/spatial-gene-style.component';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import type { SpatialLegendEntry } from '../spatial-key/spatial-key.model';
 import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
@@ -47,9 +59,13 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
     FormsModule,
     CheckboxModule,
     DropdownModule,
+    MultiSelectModule,
+    OverlayPanelModule,
+    SelectButtonModule,
     SliderModule,
     TooltipModule,
     SpatialKeyComponent,
+    SpatialGeneStyleComponent,
   ],
   templateUrl: './spatial-observations-panel.component.html',
   styleUrls: ['./spatial-observations-panel.component.scss'],
@@ -84,6 +100,11 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
   protected readonly clipOptions = CLIP_OPTIONS;
+  /** How several genes of the observation filter combine. */
+  protected readonly matchOptions: PanelOption<SpatialViewState['observationGenesMatch']>[] = [
+    { label: 'Any gene', value: 'any' },
+    { label: 'All genes', value: 'all' },
+  ];
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
   protected readonly geneVirtualScrollFrom = 200;
 
@@ -99,6 +120,9 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   protected sections: Float32Array | null = null;
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['controls']) {
+      this.geneFilterFailed$ = this.controls?.getGeneFilterFailed$?.() ?? of(false);
+    }
     if (changes['dataset'] || changes['controls']) {
       this.columnOptions = columnOptions(this.dataset);
       // A new dataset almost certainly has different columns; drop stale UI state.
@@ -133,6 +157,107 @@ export class SpatialObservationsPanelComponent implements OnChanges {
     }
     this.selectedColumn = null;
     this.controls?.colorByFeature(name);
+  }
+
+  // ── which observations are drawn ────────────────────────────────────────
+
+  /** Genes picked for the observation filter; none draws every observation. */
+  protected onObservationGenes(genes: string[] | null): void {
+    this.controls?.setViewState({ observationGenes: genes ?? [] });
+  }
+
+  protected onObservationGenesMatch(match: SpatialViewState['observationGenesMatch'] | null): void {
+    if (!match) return;
+    this.controls?.setViewState({ observationGenesMatch: match });
+  }
+
+  /** Whether the gene filter could not be applied (an expression read failed); one stream per
+   *  `controls`, so the template's async pipe keeps its subscription. */
+  protected geneFilterFailed$: Observable<boolean> = of(false);
+
+  /** Ask for the picked genes' expression again (a failed read is not cached). */
+  protected retryGeneFilter(): void {
+    this.controls?.setViewState({ observationGenes: [...this.view.observationGenes] });
+  }
+
+  protected onObservationGenesColorBy(on: boolean): void {
+    this.controls?.setViewState({ observationGenesColorBy: on });
+  }
+
+  protected removeObservationGene(gene: string): void {
+    this.onObservationGenes(this.view.observationGenes.filter((g) => g !== gene));
+  }
+
+  protected isObservationGene(gene: string): boolean {
+    return this.view.observationGenes.includes(gene);
+  }
+
+  protected trackByGene(_i: number, gene: string): string {
+    return gene;
+  }
+
+  // ── a picked gene's icon and colour ─────────────────────────────────────
+
+  /** The gene the icon and colour picker is open for. */
+  protected styleGene: string | null = null;
+
+  protected geneColorOf(gene: string): string {
+    return observationGeneColor(this.view, gene);
+  }
+
+  protected geneGlyphOf(gene: string): TranscriptGlyphName {
+    return observationGeneGlyph(this.view, gene);
+  }
+
+  protected glyphPointsOf(gene: string): string {
+    return glyphPoints(this.geneGlyphOf(gene));
+  }
+
+  /** Open the picker on the gene's swatch. Inside the genes dropdown the click must not also
+   *  reach the option, which would unpick the gene. */
+  protected openGeneStyle(event: Event, gene: string, panel: { toggle(e: Event): void; hide(): void }): void {
+    event.stopPropagation();
+    if (this.styleGene === gene) {
+      panel.toggle(event);
+      return;
+    }
+    this.styleGene = gene;
+    panel.hide();
+    // Re-open anchored on the swatch that was clicked, once the panel has closed.
+    setTimeout(() => panel.toggle(event));
+  }
+
+  protected onGeneColor(gene: string, hex: string): void {
+    this.controls?.setViewState({ observationGeneColors: { ...this.view.observationGeneColors, [gene]: hex } });
+  }
+
+  protected onGeneGlyph(gene: string, glyph: TranscriptGlyphName): void {
+    this.controls?.setViewState({ observationGeneGlyphs: { ...this.view.observationGeneGlyphs, [gene]: glyph } });
+  }
+
+  /** Back to the gene's default colour (its place in the list) and icon (a circle). */
+  protected resetGeneStyle(gene: string): void {
+    const colors = { ...this.view.observationGeneColors };
+    const glyphs = { ...this.view.observationGeneGlyphs };
+    delete colors[gene];
+    delete glyphs[gene];
+    this.controls?.setViewState({ observationGeneColors: colors, observationGeneGlyphs: glyphs });
+  }
+
+  /** What the filter hides, in words. */
+  protected get geneFilterHint(): string {
+    const genes = this.view.observationGenes;
+    const which =
+      genes.length === 1
+        ? genes[0]
+        : this.view.observationGenesMatch === 'all'
+          ? 'all of these genes'
+          : 'any of these genes';
+    return (
+      `Only observations expressing ${which} are drawn; the others are hidden, with their cell outlines and the ` +
+      'transcripts assigned to them. The transcript density map, and transcripts grouped by area when zoomed ' +
+      'out, are hidden while this is on: they carry no cells to filter by.'
+    );
   }
 
   /** Cell outlines on offer, which changes what the circles mean. */

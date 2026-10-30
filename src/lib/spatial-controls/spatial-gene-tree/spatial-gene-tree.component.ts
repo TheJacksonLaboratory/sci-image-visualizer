@@ -9,7 +9,6 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SharedModule } from 'primeng/api';
-import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { OverlayPanelModule } from 'primeng/overlaypanel';
 import { TooltipModule } from 'primeng/tooltip';
@@ -18,18 +17,12 @@ import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
-import { parseCssColor, rgbToHex } from '../../contracts/color';
 import { DEFAULT_CATEGORICAL_PALETTE } from '../../spatial/spatial-encoding';
 import { cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor } from '../../spatial/spatial-tiles';
-import {
-  GLYPH_OPTIONS,
-  GeneTreeNode,
-  buildGeneTree,
-  glyphPoints,
-  toggleHidden,
-} from '../../spatial/spatial-panel-model';
+import { GeneTreeNode, buildGeneTree, glyphPoints, toggleHidden } from '../../spatial/spatial-panel-model';
 import { allGeneShownBy, allGenesHidden, toggleAllGeneHidden } from '../../spatial/spatial-tile-merge';
 import { Supersede } from '../../util/supersede';
+import { SpatialGeneStyleComponent } from '../spatial-gene-style/spatial-gene-style.component';
 
 /** Rows of the all-genes list drawn at once; the filter narrows the rest. */
 const ALL_GENES_ROWS = 200;
@@ -66,7 +59,14 @@ interface AllGeneRowView {
 @Component({
   selector: 'spatial-gene-tree',
   standalone: true,
-  imports: [CommonModule, SharedModule, ButtonModule, InputTextModule, OverlayPanelModule, TooltipModule],
+  imports: [
+    CommonModule,
+    SharedModule,
+    InputTextModule,
+    OverlayPanelModule,
+    TooltipModule,
+    SpatialGeneStyleComponent,
+  ],
   templateUrl: './spatial-gene-tree.component.html',
   styleUrls: ['./spatial-gene-tree.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -83,9 +83,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
   /** Real genes in the panel — the tree's denominator. */
   @Input() geneTotal = 0;
 
-  protected readonly glyphOptions = GLYPH_OPTIONS;
   /** Swatches in the picker: the categorical palette genes are coloured from by default. */
-  protected readonly colorPresets = DEFAULT_CATEGORICAL_PALETTE.slice(0, 10).map((c) => c.toLowerCase());
 
   /** The tree, rebuilt when the view changes — never per change-detection pass. */
   protected geneTree: GeneTreeNode[] = [];
@@ -284,13 +282,6 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   protected onGlyph(gene: string, glyph: TranscriptGlyphName): void {
     this.controls?.setViewState({ transcriptGlyphs: { ...this.view.transcriptGlyphs, [gene]: glyph } });
-  }
-
-  /** A typed hex colour, accepted as `#rrggbb` or `rrggbb`; anything else is ignored. */
-  protected onGeneHex(gene: string, text: string): void {
-    const t = text.trim();
-    const rgb = /^#?[0-9a-f]{6}$/i.test(t) ? parseCssColor(t) : null;
-    if (rgb) this.onGeneColor(gene, rgbToHex(rgb));
   }
 
   /** Back to the gene's default icon and colour (by its position in the list). */

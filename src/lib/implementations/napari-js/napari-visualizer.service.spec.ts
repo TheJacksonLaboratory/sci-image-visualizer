@@ -2413,6 +2413,48 @@ describe('NapariVisualizerService', () => {
       });
     });
 
+    describe('the observation gene filter', () => {
+      /** Points in the cloud's newest layer (3 coordinates each). */
+      const drawnPoints = () => (addPoints3D.mock.calls.at(-1)?.[0] as Float32Array).length / 3;
+
+      it('keeps the cloud as drawn, and says so, when a filter gene cannot be read', async () => {
+        // Review (PR #65): a failed read drew every observation while the panel still
+        // claimed only the expressing ones were drawn.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([0, 1, 0]));
+        await mount3d();
+        store.setSpatialView({ observationGenes: ['G'], observationGenesColorBy: false });
+        await flush();
+        expect(drawnPoints()).toBe(1);
+        const layers = addPoints3D.mock.calls.length;
+
+        spatialPort.getFeatureVector.mockRejectedValue(new Error('503'));
+        store.setSpatialView({ observationGenes: ['H'] });
+        await flush();
+        expect(addPoints3D.mock.calls.length).toBe(layers); // no new, unfiltered cloud
+        expect(drawnPoints()).toBe(1);
+        expect(service.geneFilterFailed$.value).toBe(true);
+
+        // Readable again: the filter applies and the notice goes.
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 1, 0]));
+        store.setSpatialView({ observationGenes: ['H'] });
+        await flush();
+        expect(drawnPoints()).toBe(2);
+        expect(service.geneFilterFailed$.value).toBe(false);
+      });
+
+      it('keeps a valid filter when only the colouring by gene fails', async () => {
+        await mount3d();
+        // The filter's read succeeds; the colouring's read of the same gene fails.
+        spatialPort.getFeatureVector
+          .mockResolvedValueOnce(new Float32Array([0, 1, 0]))
+          .mockRejectedValueOnce(new Error('503'));
+        store.setSpatialView({ observationGenes: ['G2'], observationGenesColorBy: true });
+        await flush();
+        expect(drawnPoints()).toBe(1);
+        expect(service.geneFilterFailed$.value).toBe(false);
+      });
+    });
+
     describe('gene map in 3D', () => {
       /**
        * A volume-backed dataset whose sections have GAPS between them: the 400-unit
@@ -3603,6 +3645,38 @@ describe('NapariVisualizerService', () => {
         const requestRender = jest.spyOn(viewer, 'requestRender');
         hide(viewer, false);
         expect(requestRender).toHaveBeenCalled();
+      });
+    });
+
+    describe('the observation gene filter', () => {
+      /** The markers' alpha per observation. */
+      const alphas = (layer: { faceColor: Float32Array }) =>
+        Array.from({ length: layer.faceColor.length / 4 }, (_, i) => layer.faceColor[4 * i + 3] > 0);
+
+      it('keeps the markers as drawn, and says so, when a filter gene cannot be read', async () => {
+        spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([0, 1, 0]));
+        const layer = await mount();
+        store.setSpatialView({ observationGenes: ['G'], observationGenesColorBy: false });
+        await flush();
+        expect(alphas(layer)).toEqual([false, true, false]);
+
+        spatialPort.getFeatureVector.mockRejectedValue(new Error('503'));
+        store.setSpatialView({ observationGenes: ['H'] });
+        await flush();
+        // Not the flat, unfiltered fallback a colour gets: the filter is not dropped.
+        expect(alphas(layer)).toEqual([false, true, false]);
+        expect(service.geneFilterFailed$.value).toBe(true);
+      });
+
+      it('keeps a valid filter when only the colouring by gene fails', async () => {
+        const layer = await mount();
+        spatialPort.getFeatureVector
+          .mockResolvedValueOnce(new Float32Array([1, 0, 1]))
+          .mockRejectedValueOnce(new Error('503'));
+        store.setSpatialView({ observationGenes: ['G2'], observationGenesColorBy: true });
+        await flush();
+        expect(alphas(layer)).toEqual([true, false, true]);
+        expect(service.geneFilterFailed$.value).toBe(false);
       });
     });
 

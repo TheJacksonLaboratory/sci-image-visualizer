@@ -1,3 +1,4 @@
+import { pointSymbolCode } from 'napari-js';
 import type { ImageLayer, PointsLayer, Viewer } from 'napari-js';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
@@ -9,7 +10,7 @@ import {
   SpatialObservations,
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
-import { SpatialViewState } from '../../contracts/display-types';
+import { SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
 import { encodeCategorical, markerDiameters, resolveCategoryColors } from '../../spatial/spatial-encoding';
 import {
   SpatialSelectionMask,
@@ -21,11 +22,13 @@ import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+import { observationGeneMask, observationGeneStyle } from '../../spatial/spatial-gene-filter';
 import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 import { computeExpressionFieldAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import { isAbortError } from '../tile-server';
 import { NapariSpatialTileLayers } from './napari-spatial-tiles';
+import { GLYPH_SYMBOLS } from './spatial-tiles/transcript-layers';
 import { Image2dScene } from './napari-image-2d-scene';
 import {
   GENE_MAP_MAX_SIDE,
@@ -37,6 +40,7 @@ import {
   PointColors,
   encodeSpatialContinuous,
   gatherColors,
+  hideUnshown,
 } from './napari-spatial-encoding';
 import { SpatialSceneBase, SpatialSession, SpatialTileOwner } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -208,17 +212,38 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // Resolve colours BEFORE touching the scene: a gene fetch can fail or be
     // superseded, and dropping the existing layer first would blank the view.
     let faceColor: PointColors;
+    let symbols: Uint8Array | null = null;
+    let shown: Uint8Array | null = null;
     const endLoading = this.ctx.badge.begin('Observations');
     try {
-      faceColor = dataset ? await this.faceColors(dataset, view, selection) : SPATIAL_NEUTRAL_COLOR;
-    } catch (err) {
-      console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
-      faceColor = SPATIAL_NEUTRAL_COLOR;
+      // Which observations the gene filter keeps, settled apart from their colours: a colour can
+      // fall back to a flat one, the filter cannot. Drawn without it, every observation would
+      // show as if it expressed the picked genes. So a failed read keeps the markers as they
+      // were drawn, and the panel says the filter could not be applied.
+      try {
+        shown = dataset ? await this.filterMask(dataset, view) : null;
+      } catch (err) {
+        console.warn('[napari-js] gene filter could not be applied — keeping the observations as drawn', err);
+        if (task()) this.session.reportGeneFilter(true);
+        return;
+      }
+      try {
+        const style = dataset ? await this.markerStyle(dataset, view, selection) : null;
+        faceColor = style?.colors ?? SPATIAL_NEUTRAL_COLOR;
+        symbols = style?.symbols ?? null;
+      } catch (err) {
+        console.warn('[napari-js] spatial colouring failed — falling back to a flat colour', err);
+        faceColor = SPATIAL_NEUTRAL_COLOR;
+        symbols = null;
+      }
     } finally {
       endLoading();
     }
     // A newer rebuild (or a teardown) started while the vector was in flight.
     if (!task()) return;
+    this.session.reportGeneFilter(false);
+    // The filter applies to whichever colours won, the fallback's included.
+    if (shown && dataset) faceColor = hideUnshown(faceColor, shown);
 
     if (!dataset || dataset.observations.count === 0) {
       this.removeLayers(viewer);
@@ -234,7 +259,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // The gene map goes UNDER the cells, so it is settled before they are added.
     await this.ensureGeneMap(viewer, dataset, view, selection, slab);
     if (!task()) return;
-    this.drawMarkers(viewer, dataset, view, faceColor, slab);
+    this.drawMarkers(viewer, dataset, view, faceColor, slab, symbols);
   }
 
   /** Nothing to draw: drop the markers and the gene map. */
@@ -262,6 +287,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     view: SpatialViewState,
     faceColor: PointColors,
     slab: Slab | null,
+    symbols: Uint8Array | null = null,
   ): void {
     const obs = dataset.observations;
     const ref = slab?.ref ?? dataset.imageRef;
@@ -288,6 +314,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       this.points.size = size;
       this.points.visible = this.pointsVisible();
       this.points.faceColor = gatherColors(faceColor, slab?.indices);
+      this.points.symbols = gatherSymbols(symbols, slab?.indices);
       this.hideForeignImage(viewer, showImage);
       this.ctx.tools.regionOverlay?.setRegionsVisible(view.showAnnotations !== false);
       viewer.requestRender();
@@ -307,6 +334,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       name: 'observations',
       size,
       faceColor: gatherColors(faceColor, drawn),
+      // Each observation's gene's icon while they are coloured by gene; the layer's disc else.
+      symbols: gatherSymbols(symbols, drawn),
       // No border: at Visium spot density an outline per marker reads as noise,
       // and it costs a second colour array.
       borderWidth: 0,
@@ -583,7 +612,43 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    * selected to colour by. Categorical columns use the column's own palette; continuous columns
    * and gene vectors go through the active colormap with a percentile-clipped window.
    */
-  private async faceColors(
+  /** The observations the view's gene filter keeps (1 = drawn), or null when it has none.
+   *  Rejects when an expression read fails. */
+  private filterMask(dataset: SpatialDataset, view: SpatialViewState): Promise<Uint8Array | null> {
+    const port = this.session.port;
+    if (!port) return Promise.resolve(null);
+    return observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g));
+  }
+
+  /** The markers' colours (and icons, by gene) before the gene filter hides any of them. */
+  private async markerStyle(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<{ colors: PointColors; symbols: Uint8Array | null }> {
+    const port = this.session.port;
+    const count = dataset.observations.count;
+    // Coloured by gene: each observation in its gene's colour, drawn as its gene's icon. That is
+    // a colour, so a failed read falls back to the view's colour source, as any colour does.
+    const byGene = port
+      ? await observationGeneStyle(view, count, (g) => port.getFeatureVector(g)).catch((err) => {
+          console.warn('[napari-js] colouring by gene failed — falling back to the colour source', err);
+          return null;
+        })
+      : null;
+    const colors = byGene
+      ? encodeCategorical(byGene.codes, {
+          colors: byGene.colors,
+          opacity: view.opacity,
+          muted: mutedFromSelection(selection),
+        })
+      : await this.sourceColors(dataset, view, selection);
+    const symbols = byGene ? glyphSymbols(byGene.codes, byGene.glyphs) : null;
+    return { colors, symbols };
+  }
+
+  /** {@link faceColors} before the gene filter: what the colour source and the selection make of them. */
+  private async sourceColors(
     dataset: SpatialDataset,
     view: SpatialViewState,
     selection: SpatialSelectionMask,
@@ -691,4 +756,18 @@ function slabAt(dataset: SpatialDataset, slice: number): Slab | null {
     slice,
     minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
   };
+}
+
+/** Per-observation napari-js symbol codes: each observation's gene's icon (`codes` index
+ *  `glyphs`), a disc where it has none. */
+export function glyphSymbols(codes: Uint16Array, glyphs: readonly TranscriptGlyphName[]): Uint8Array {
+  const byGene = glyphs.map((g) => pointSymbolCode(GLYPH_SYMBOLS[g]));
+  const disc = pointSymbolCode('disc');
+  return Uint8Array.from(codes, (c) => (c === NO_CATEGORY ? disc : (byGene[c] ?? disc)));
+}
+
+/** The symbols of the drawn subset (all of them when `indices` is undefined). */
+export function gatherSymbols(symbols: Uint8Array | null, indices?: Uint32Array): Uint8Array | null {
+  if (!symbols || !indices) return symbols;
+  return Uint8Array.from(indices, (i) => symbols[i]);
 }

@@ -21,6 +21,24 @@ file was added.
   own, `SpatialViewState.transcriptAllGenesHidden`, apart from the selection's
   `transcriptHiddenGenes`. Led by `'*'`, it lists the genes still shown, so showing one gene of
   thousands stores one name.
+- **Observations can be shown by the genes they express, each gene in a colour and icon of its
+  own.** "Show observations expressing" in the spatial-omics Observations section picks one gene or
+  several, and only the observations with a value above 0 for them are drawn: for any of the genes,
+  or with "All genes" for every one. The rest are hidden: their markers in 2D and in the 3D cloud,
+  their cell outlines, and the transcripts assigned to them, as for a group switched off. Each
+  picked gene has a colour (the palette's by default) and, on the 2D markers, an icon (a circle by
+  default), edited from the gene's swatch in the dropdown or in the list of picked genes under it;
+  "Colour by these genes" (on by default) draws each observation in the colour and icon of the picked
+  gene it expresses most relative to that gene's highest value, and off, "Colour by column/gene"
+  applies. A failed expression read never drops the filter: the observations stay as last drawn and
+  the panel says so, with "Try again"; a failed colour falls back as any colour does. The transcript
+  density map, and transcripts grouped by area when zoomed out, carry no cells to filter by, so they
+  are hidden while the filter is on, and the Transcripts panel says why. `SpatialViewState` gains
+  `observationGenes`, `observationGenesMatch`, `observationGenesColorBy`, `observationGeneColors` and
+  `observationGeneGlyphs`; a new dataset clears the genes. `ISpatialControls.getGeneFilterFailed$`
+  reports a filter that could not be applied.
+- **One icon and colour picker for a gene, shared.** `spatial-gene-style` is the popover the
+  transcripts gene tree and the picked observation genes both open; the gene tree's own copy is gone.
 
 ### Changed
 

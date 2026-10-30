@@ -236,6 +236,26 @@ export interface SpatialViewState {
    * not drawn, nor the transcripts inside them. Cleared when the group column changes.
    */
   hiddenGroups: string[];
+  /**
+   * Genes whose observations are drawn: with any set, only the observations that express
+   * them (a value above 0) are drawn — the markers, the cell outlines and the transcripts
+   * inside them, in 2D and in the 3D cloud — and the rest are hidden. Empty draws every
+   * observation. Cleared when the dataset changes.
+   */
+  observationGenes: string[];
+  /** Whether an observation must express any of {@link observationGenes}, or all of them. */
+  observationGenesMatch: 'any' | 'all';
+  /**
+   * Colour (and mark) the filtered observations by their gene: each drawn observation in the
+   * colour and icon of the picked gene it expresses most (relative to that gene's highest
+   * value), in place of {@link colorBy}. Off, {@link colorBy} colours them as before.
+   */
+  observationGenesColorBy: boolean;
+  /** `#rrggbb` per gene of {@link observationGenes}; a gene left out takes the palette's colour
+   *  for its place in the list. */
+  observationGeneColors: Record<string, string>;
+  /** The icon per gene of {@link observationGenes} (2D); a gene left out is drawn as a circle. */
+  observationGeneGlyphs: Record<string, TranscriptGlyphName>;
   /** Draw the tissue image (the Images section's switch). */
   showImage: boolean;
   /** Draw the annotation regions (the Annotations section's switch). Selecting from them
@@ -357,6 +377,11 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   cellColorGene: null,
   cellSingleColor: '#4fc3f7',
   hiddenGroups: [],
+  observationGenes: [],
+  observationGenesMatch: 'any',
+  observationGenesColorBy: true,
+  observationGeneColors: {},
+  observationGeneGlyphs: {},
   showImage: true,
   showAnnotations: true,
 };

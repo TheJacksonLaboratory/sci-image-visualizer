@@ -1,4 +1,4 @@
-import { Observable, Subscription, firstValueFrom } from 'rxjs';
+import { firstValueFrom, Observable, of, Subscription } from 'rxjs';
 
 import { PlotType, isSpatialOmics3d } from '../contracts/plot-type';
 import { SpatialDataPort } from '../contracts/ports/spatial-data.port';
@@ -30,6 +30,7 @@ export interface SpatialRendererFeeds {
   readonly transcriptEstimate$: { asObservable(): Observable<{ points: number; max: number } | null> };
   readonly geneCountsInView$: { asObservable(): Observable<Record<string, number> | null> };
   readonly densityStats$: { asObservable(): Observable<{ lo: number; hi: number; max: number } | null> };
+  readonly geneFilterFailed$?: { asObservable(): Observable<boolean> };
   /** Observations projected to canvas pixels by the 3D camera, or null when the cloud is not mounted. */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null;
   /** The ids of the regions drawn over the 3D cloud in screen space (its lassos). */
@@ -85,8 +86,11 @@ export class SpatialControlsFacade {
       // A colour source the new dataset cannot satisfy would leave the map flat while
       // the panel and the charts kept naming the old column — so drop it, and only it:
       // point size, opacity and the rest are the user's preferences.
-      const by = ctx.store.currentSpatialView().colorBy;
+      const current = ctx.store.currentSpatialView();
+      const by = current.colorBy;
       if (by && !canColorBy(dataset, by)) ctx.store.setSpatialView({ colorBy: null });
+      // The gene filter names the old dataset's genes: kept, it could hide every observation.
+      if (current.observationGenes?.length) ctx.store.setSpatialView({ observationGenes: [] });
     });
     this.controls = this.build();
   }
@@ -165,6 +169,7 @@ export class SpatialControlsFacade {
       getTranscriptEstimate$: () => this.ctx.napari.transcriptEstimate$.asObservable(),
       getGeneCountsInView$: () => this.ctx.napari.geneCountsInView$.asObservable(),
       getDensityStats$: () => this.ctx.napari.densityStats$.asObservable(),
+      getGeneFilterFailed$: () => this.ctx.napari.geneFilterFailed$?.asObservable() ?? of(false),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);
         if (!isCategoricalColumn(column)) {

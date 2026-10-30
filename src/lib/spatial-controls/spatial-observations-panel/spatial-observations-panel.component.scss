@@ -3,3 +3,32 @@
 :host {
   display: contents;
 }
+
+// The picked genes, one row each, under the picker.
+.sc-obs-genes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.35rem;
+}
+
+.sc-obs-gene-row,
+.sc-obs-gene-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sc-obs-gene-option {
+  flex: 1 1 auto;
+  justify-content: space-between;
+}
+
+.sc-obs-gene-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

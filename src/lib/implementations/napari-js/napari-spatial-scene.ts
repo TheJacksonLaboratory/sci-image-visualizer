@@ -25,6 +25,8 @@ export interface SpatialTileSinks {
   geneCountsChanged(counts: Record<string, number> | null): void;
   densityChanged(stats: { lo: number; hi: number; max: number }): void;
   loadingChanged(layers: string[]): void;
+  /** Whether the observation gene filter could be applied; see {@link SpatialSession.reportGeneFilter}. */
+  geneFilterFailed?(failed: boolean): void;
 }
 
 /** The 2D scene the tile layers currently draw into. */
@@ -68,6 +70,11 @@ export class SpatialSession {
     readonly selection: SpatialSelectionStore | null,
     private readonly sinks: SpatialTileSinks,
   ) {}
+
+  /** Tell the panel whether the observation gene filter could be applied this rebuild. */
+  reportGeneFilter(failed: boolean): void {
+    this.sinks.geneFilterFailed?.(failed);
+  }
 
   /** The tile layers, if they were ever built. */
   get tiles(): NapariSpatialTileLayers | null {
