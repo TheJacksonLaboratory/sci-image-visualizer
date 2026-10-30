@@ -411,6 +411,17 @@ export class Image2dScene implements NapariScene {
     });
   }
 
+  /**
+   * Put the current channel states back on the rendered layers: each channel's visibility, window,
+   * gamma and tint, and which of an RGB image's layers draw it. For a caller that changed the
+   * layers' visibility wholesale (the spatial view showing its tissue again), so the channels
+   * the user or the defaults switched off stay off. Nothing to do before the image is drawn.
+   */
+  reapplyDisplayState(): void {
+    if (!this.channelView) return;
+    this.applyDisplayState(this.ctx.store.currentChannelStates());
+  }
+
   /** Apply the current channel states / colormap to the live layers (no re-fetch), delegating the
    *  per-channel layer mutations to the {@link MultiChannelImageView}. */
   private applyDisplayState(channels: IChannelState[]): void {
@@ -476,8 +487,10 @@ export class Image2dScene implements NapariScene {
         viewer.layers.move(layer, at + 1 + c);
         return layer;
       });
-      rgb.visible = false;
     }
+    // The bands draw the image now; hidden on every pass, not only when the bands are made, so
+    // a caller that showed every image layer (the spatial view) does not draw it twice.
+    rgb.visible = false;
     this.bandLayers.forEach((layer, c) => {
       const st = states.find((s) => s.index === c);
       layer.colormap = tintColormap(st?.color ?? tintFor(c));

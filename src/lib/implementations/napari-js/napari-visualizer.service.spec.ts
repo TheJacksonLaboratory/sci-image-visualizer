@@ -3544,6 +3544,21 @@ describe('NapariVisualizerService', () => {
         expect(layers.filter((l) => l.kind === 'image').map((l) => l.visible)).toEqual([true, true]);
       });
 
+      it("hands the shown tissue's layers back to its channel states", () => {
+        // Showing every image layer of a multichannel image also showed the channels switched
+        // off: a 22-channel plate opened with all 22 drawn (and fetched) although four were on.
+        const reapply = jest
+          .spyOn(Image2dScene.prototype, 'reapplyDisplayState')
+          .mockImplementation(() => undefined);
+        const { viewer } = scene();
+        hide(viewer, true);
+        expect(reapply).toHaveBeenCalledTimes(1);
+        reapply.mockClear();
+        hide(viewer, false);
+        expect(reapply).not.toHaveBeenCalled();
+        reapply.mockRestore();
+      });
+
       it('is actually invoked when the observations are drawn', async () => {
         // The tests above exercise the method directly, because this suite's image
         // fixture has no urls and so builds no image layer to assert over. That leaves
