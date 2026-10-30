@@ -195,3 +195,23 @@ describe('SpatialControlsFacade selectFromRegions', () => {
     });
   });
 });
+
+describe('SpatialControlsFacade on a new dataset', () => {
+  it('drops the gene filter, which names the old dataset genes', () => {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    const store = new VisualizerStore();
+    const ctx = {
+      store,
+      selectionStore: new SpatialSelectionStore(),
+    } as unknown as SpatialControlsContext;
+    const facade = new SpatialControlsFacade({ getDataset$: () => dataset$ } as unknown as SpatialDataPort, ctx);
+
+    store.setSpatialView({ observationGenes: ['Ttr'], observationGenesMatch: 'all' });
+    dataset$.next({ ...dataset, id: 'other' } as SpatialDataset);
+
+    expect(store.currentSpatialView().observationGenes).toEqual([]);
+    // How several genes combine is the user's preference, kept for the next filter.
+    expect(store.currentSpatialView().observationGenesMatch).toBe('all');
+    facade.dispose();
+  });
+});

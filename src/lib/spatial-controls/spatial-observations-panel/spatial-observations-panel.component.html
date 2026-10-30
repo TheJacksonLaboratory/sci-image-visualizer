@@ -63,6 +63,48 @@
           ></p-dropdown>
           <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
         </div>
+
+        <!-- Which observations are drawn at all, by what they express. Several genes at
+       once, unlike the colour, which reads one: picking genes here hides every
+       observation that expresses none of them (or not all of them). -->
+        <div class="sc-section" *ngIf="ds.features">
+          <label class="sc-lbl" for="sc-show-genes">Show observations expressing</label>
+          <p-multiSelect
+            inputId="sc-show-genes"
+            [options]="gene.options"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="view.observationGenes"
+            (onChange)="onObservationGenes($event.value)"
+            [filter]="true"
+            filterBy="label"
+            [resetFilterOnHide]="true"
+            (onFilter)="genes?.onFilter($event.filter)"
+            (onPanelShow)="genes?.ensureList()"
+            [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+            [virtualScrollItemSize]="30"
+            [showToggleAll]="false"
+            [showClear]="true"
+            [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
+            [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
+            appendTo="body"
+            placeholder="Any gene (every observation)"
+            [selectedItemsLabel]="'{0} genes'"
+            [maxSelectedLabels]="3"
+            styleClass="sc-full"
+          ></p-multiSelect>
+          <p-selectButton
+            *ngIf="view.observationGenes.length > 1"
+            [options]="matchOptions"
+            optionLabel="label"
+            optionValue="value"
+            [ngModel]="view.observationGenesMatch"
+            (ngModelChange)="onObservationGenesMatch($event)"
+            [allowEmpty]="false"
+            styleClass="sc-buttons"
+          ></p-selectButton>
+          <small class="sc-hint" *ngIf="view.observationGenes.length">{{ geneFilterHint }}</small>
+        </div>
       </ng-container>
 
       <spatial-key

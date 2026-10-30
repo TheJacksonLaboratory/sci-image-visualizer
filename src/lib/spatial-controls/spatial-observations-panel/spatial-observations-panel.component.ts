@@ -11,6 +11,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CheckboxModule } from 'primeng/checkbox';
 import { DropdownModule } from 'primeng/dropdown';
+import { MultiSelectModule } from 'primeng/multiselect';
+import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
 import { TooltipModule } from 'primeng/tooltip';
 
@@ -47,6 +49,8 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
     FormsModule,
     CheckboxModule,
     DropdownModule,
+    MultiSelectModule,
+    SelectButtonModule,
     SliderModule,
     TooltipModule,
     SpatialKeyComponent,
@@ -84,6 +88,11 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
   protected readonly clipOptions = CLIP_OPTIONS;
+  /** How several genes of the observation filter combine. */
+  protected readonly matchOptions: PanelOption<SpatialViewState['observationGenesMatch']>[] = [
+    { label: 'Any gene', value: 'any' },
+    { label: 'All genes', value: 'all' },
+  ];
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
   protected readonly geneVirtualScrollFrom = 200;
 
@@ -133,6 +142,30 @@ export class SpatialObservationsPanelComponent implements OnChanges {
     }
     this.selectedColumn = null;
     this.controls?.colorByFeature(name);
+  }
+
+  // ── which observations are drawn ────────────────────────────────────────
+
+  /** Genes picked for the observation filter; none draws every observation. */
+  protected onObservationGenes(genes: string[] | null): void {
+    this.controls?.setViewState({ observationGenes: genes ?? [] });
+  }
+
+  protected onObservationGenesMatch(match: SpatialViewState['observationGenesMatch'] | null): void {
+    if (!match) return;
+    this.controls?.setViewState({ observationGenesMatch: match });
+  }
+
+  /** What the filter hides, in words. */
+  protected get geneFilterHint(): string {
+    const genes = this.view.observationGenes;
+    const which =
+      genes.length === 1
+        ? genes[0]
+        : this.view.observationGenesMatch === 'all'
+          ? 'all of these genes'
+          : 'any of these genes';
+    return `Only observations expressing ${which} are drawn; the others are hidden, with their cell outlines and transcripts.`;
   }
 
   /** Cell outlines on offer, which changes what the circles mean. */

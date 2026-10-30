@@ -1538,6 +1538,17 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 
+  it('leaves the cells expressing none of the filter genes out of the geometry, and back in when cleared', async () => {
+    const { tiles, plan, layers, setView, setExpression } = setup({ observationGenes: ['G'] });
+    setExpression(Float32Array.of(0, 5)); // only the second cell expresses G
+    await plan();
+    expect(count(layers()[0])).toBe(1);
+    setView({ observationGenes: [] });
+    await plan();
+    expect(count(layers()[0])).toBe(2);
+    tiles.detach();
+  });
+
   it('restyles in place on a colour-only change, with no new layer or fetch', async () => {
     const { tiles, plan, setView, addShapes, layers, getPolygonTile } = setup();
     await plan();

@@ -21,6 +21,13 @@ file was added.
   own, `SpatialViewState.transcriptAllGenesHidden`, apart from the selection's
   `transcriptHiddenGenes`. Led by `'*'`, it lists the genes still shown, so showing one gene of
   thousands stores one name.
+- **Observations can be shown by the genes they express.** "Show observations expressing" in the
+  spatial-omics Observations section picks one gene or several, and only the observations with a
+  value above 0 for them are drawn: for any of the genes, or with "All genes" for every one. The
+  rest are hidden: their markers in 2D and in the 3D cloud, their cell outlines, and the
+  transcripts inside them, as for a group switched off. "Colour by gene" still colours by one gene,
+  independently. `SpatialViewState.observationGenes` and `observationGenesMatch` hold the filter;
+  a new dataset clears the genes.
 
 ### Fixed
 

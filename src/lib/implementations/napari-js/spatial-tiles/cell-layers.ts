@@ -31,6 +31,7 @@ import {
   typicalCellDiameter,
 } from '../../../spatial/lod';
 import { filterRings, mergePolygonTiles } from '../../../spatial/spatial-tile-merge';
+import { geneFilterKey } from '../../../spatial/spatial-gene-filter';
 import { ContrastWindowCache } from '../napari-spatial-encoding';
 import type { CategoricalLookup, HiddenCodes } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
@@ -293,7 +294,7 @@ export class CellLayers {
     ctx: PlanContext,
   ): Promise<{ rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null; geometryKey: string } | null> {
     const tiled = dataset.polygonTiles;
-    const hiddenKey = view.hiddenGroups.join('\u0001');
+    const hiddenKey = `${view.hiddenGroups.join('\u0001')}|${geneFilterKey(view)}`;
     let rings: SpatialPolygonTile;
     let nuclei: SpatialPolygonTile | null = null;
     let geometryKey: string;

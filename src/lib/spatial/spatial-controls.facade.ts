@@ -85,8 +85,11 @@ export class SpatialControlsFacade {
       // A colour source the new dataset cannot satisfy would leave the map flat while
       // the panel and the charts kept naming the old column — so drop it, and only it:
       // point size, opacity and the rest are the user's preferences.
-      const by = ctx.store.currentSpatialView().colorBy;
+      const current = ctx.store.currentSpatialView();
+      const by = current.colorBy;
       if (by && !canColorBy(dataset, by)) ctx.store.setSpatialView({ colorBy: null });
+      // The gene filter names the old dataset's genes: kept, it could hide every observation.
+      if (current.observationGenes?.length) ctx.store.setSpatialView({ observationGenes: [] });
     });
     this.controls = this.build();
   }

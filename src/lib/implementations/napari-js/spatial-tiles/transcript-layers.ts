@@ -20,6 +20,7 @@ import {
   hiddenGeneSlots,
   median,
 } from '../../../spatial/spatial-tile-merge';
+import { geneFilterKey } from '../../../spatial/spatial-gene-filter';
 import type { CategoricalLookup } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
@@ -78,6 +79,7 @@ function transcriptPlanKey(
     JSON.stringify(view.transcriptGlyphs),
     pxPerUnit.toPrecision(4),
     view.hiddenGroups.join('\u0001'),
+    geneFilterKey(view),
     view.transcriptHiddenGenes.join(','),
     view.transcriptAllGenesHidden.join(','),
     JSON.stringify(view.transcriptGeneColors),

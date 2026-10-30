@@ -21,6 +21,7 @@ import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+import { observationGeneMask } from '../../spatial/spatial-gene-filter';
 import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 import { computeExpressionFieldAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
@@ -37,6 +38,7 @@ import {
   PointColors,
   encodeSpatialContinuous,
   gatherColors,
+  hideUnshown,
 } from './napari-spatial-encoding';
 import { SpatialSceneBase, SpatialSession, SpatialTileOwner } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
@@ -581,6 +583,21 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    * and gene vectors go through the active colormap with a percentile-clipped window.
    */
   private async faceColors(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<PointColors> {
+    const port = this.session.port;
+    // Observations the gene filter leaves out are not drawn, whatever colours the rest.
+    const [colors, shown] = await Promise.all([
+      this.sourceColors(dataset, view, selection),
+      port ? observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g)) : null,
+    ]);
+    return shown ? hideUnshown(colors, shown) : colors;
+  }
+
+  /** {@link faceColors} before the gene filter: what the colour source and the selection make of them. */
+  private async sourceColors(
     dataset: SpatialDataset,
     view: SpatialViewState,
     selection: SpatialSelectionMask,

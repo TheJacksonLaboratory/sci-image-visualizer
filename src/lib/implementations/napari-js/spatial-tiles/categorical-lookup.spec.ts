@@ -31,4 +31,39 @@ describe('CategoricalLookup', () => {
     expect(await lookup.hiddenCodes(dataset, DEFAULT_SPATIAL_VIEW)).toBeNull();
     expect(getColumn).not.toHaveBeenCalled();
   });
+
+  describe('with a gene filter', () => {
+    // Observation 0 expresses G1 only, 1 both, 2 neither.
+    const vectors: Record<string, Float32Array> = {
+      G1: Float32Array.of(2, 1, 0),
+      G2: Float32Array.of(0, 4, 0),
+    };
+    const genePort = {
+      ...port,
+      getFeatureVector: jest.fn(async (g: string) => vectors[g]),
+    } as unknown as SpatialDataPort;
+    const withObs = { columns: [meta], observations: { count: 3 } } as unknown as SpatialDataset;
+    const hiddenOf = (h: { codes: Uint16Array; hidden: Uint8Array } | null) =>
+      Array.from(h!.codes, (c) => h!.hidden[c]);
+
+    it('hides the observations expressing none of the genes', async () => {
+      const view = { ...DEFAULT_SPATIAL_VIEW, observationGenes: ['G1', 'G2'] };
+      expect(hiddenOf(await new CategoricalLookup(genePort).hiddenCodes(withObs, view))).toEqual([0, 0, 1]);
+    });
+
+    it('hides those missing any of them when all must match', async () => {
+      const view = {
+        ...DEFAULT_SPATIAL_VIEW,
+        observationGenes: ['G1', 'G2'],
+        observationGenesMatch: 'all' as const,
+      };
+      expect(hiddenOf(await new CategoricalLookup(genePort).hiddenCodes(withObs, view))).toEqual([1, 0, 1]);
+    });
+
+    it('also hides the switched-off groups', async () => {
+      // Observation 0 is a T cell, 1 an NK cell; NK is switched off.
+      const view = { ...DEFAULT_SPATIAL_VIEW, observationGenes: ['G1'], hiddenGroups: ['NK'] };
+      expect(hiddenOf(await new CategoricalLookup(genePort).hiddenCodes(withObs, view))).toEqual([0, 1, 1]);
+    });
+  });
 });

@@ -16,6 +16,7 @@ import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spat
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
+import { geneFilterKey, observationGeneMask } from '../../spatial/spatial-gene-filter';
 import {
   ExpressionVolumeField,
   encodeExpressionVolume,
@@ -313,13 +314,22 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // the 2D path does: a gene fetch can fail or be superseded, and dropping the
     // layer first would blank the view.
     let enc: Spatial3dEncoding | null = null;
+    let geneShown: Uint8Array | null = null;
     if (dataset) {
       const endLoading = this.ctx.badge.begin('Observations');
+      const port = this.session.port;
       try {
-        enc = await this.scalarEncoding(view);
+        [enc, geneShown] = await Promise.all([
+          this.scalarEncoding(view).catch((err) => {
+            console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
+            return null;
+          }),
+          port ? observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g)) : null,
+        ]);
       } catch (err) {
-        console.warn('[napari-js] spatial 3D colouring failed — falling back to a flat colour', err);
-        enc = null;
+        // The gene filter's vectors failed: draw every observation rather than none.
+        console.warn('[napari-js] spatial 3D gene filter failed — drawing every observation', err);
+        geneShown = null;
       } finally {
         endLoading();
       }
@@ -361,7 +371,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.visible = view.showVolume;
       this.volume.opacity = view.volumeOpacity;
     }
-    this.drawCloud(viewer, dataset, view, selection, enc);
+    this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
   }
 
   /**
@@ -374,6 +384,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     view: SpatialViewState,
     selection: SpatialSelectionMask,
     enc: Spatial3dEncoding | null,
+    geneShown: Uint8Array | null = null,
   ): void {
     const obs = dataset.observations;
     const scale = view.pointScale > 0 ? view.pointScale : 1;
@@ -385,7 +396,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const scalars = scalar?.values ?? new Float32Array(obs.count);
     const colormap = scalar?.colormap ?? spatialFlatColormap();
     const contrastLimits: [number, number] = scalar?.contrastLimits ?? [0, 1];
-    const { shown, key, scalarKey } = cloudSubset(dataset, view);
+    const { shown, key, scalarKey } = cloudSubset(dataset, view, geneShown);
 
     if (key !== this.layerKey) {
       // New geometry: interleave x,y,z (the layer's documented layout, x-fastest)
@@ -919,6 +930,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 function cloudSubset(
   dataset: SpatialDataset,
   view: SpatialViewState,
+  geneShown: Uint8Array | null = null,
 ): { shown: Uint32Array | null; key: string; scalarKey: string } {
   const obs = dataset.observations;
   const sections = sectionsOf(obs);
@@ -926,8 +938,11 @@ function cloudSubset(
     view.pointSection != null && sections && sections.length > 0
       ? sections[Math.max(0, Math.min(sections.length - 1, view.pointSection))]
       : null;
-  const shown = section != null ? observationsInSection(obs, section) : null;
-  const key = `${dataset.id}:${obs.count}:${section ?? 'all'}`;
+  let shown = section != null ? observationsInSection(obs, section) : null;
+  // The gene filter leaves its unmatched observations out of the geometry, so they are neither
+  // drawn nor picked.
+  if (geneShown) shown = keepShown(shown, geneShown, obs.count);
+  const key = `${dataset.id}:${obs.count}:${section ?? 'all'}:${geneShown ? geneFilterKey(view) : ''}`;
   const clip = view.percentileClip ?? [0.01, 0.99];
   const scalarKey = [
     key,
@@ -936,4 +951,16 @@ function cloudSubset(
     clip.join(','),
   ].join('|');
   return { shown, key, scalarKey };
+}
+
+/** The observations of `indices` (every one when null) that `shown` keeps. */
+function keepShown(indices: Uint32Array | null, shown: Uint8Array, count: number): Uint32Array {
+  const out = new Uint32Array(indices ? indices.length : count);
+  let n = 0;
+  if (indices) {
+    for (const i of indices) if (shown[i]) out[n++] = i;
+  } else {
+    for (let i = 0; i < count; i++) if (shown[i]) out[n++] = i;
+  }
+  return out.subarray(0, n);
 }

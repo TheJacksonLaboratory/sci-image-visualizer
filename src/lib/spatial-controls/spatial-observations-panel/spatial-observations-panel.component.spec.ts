@@ -88,6 +88,37 @@ describe('SpatialObservationsPanelComponent', () => {
     });
   });
 
+  describe('observations by gene', () => {
+    beforeEach(async () => {
+      await build();
+      (controls.setViewState as jest.Mock).mockClear();
+    });
+
+    it('writes the picked genes, and none when cleared', () => {
+      component['onObservationGenes'](['Ttr', 'Mbp']);
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGenes: ['Ttr', 'Mbp'] });
+      component['onObservationGenes'](null);
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGenes: [] });
+    });
+
+    it('writes how several genes combine, ignoring an empty choice', () => {
+      component['onObservationGenesMatch']('all');
+      expect(controls.setViewState).toHaveBeenLastCalledWith({ observationGenesMatch: 'all' });
+      (controls.setViewState as jest.Mock).mockClear();
+      component['onObservationGenesMatch'](null);
+      expect(controls.setViewState).not.toHaveBeenCalled();
+    });
+
+    it('says what the filter hides', () => {
+      view$.next({ ...view$.value, observationGenes: ['Ttr'] });
+      fixture.detectChanges();
+      expect(component['geneFilterHint']).toContain('expressing Ttr');
+      view$.next({ ...view$.value, observationGenes: ['Ttr', 'Mbp'], observationGenesMatch: 'all' });
+      fixture.detectChanges();
+      expect(component['geneFilterHint']).toContain('all of these genes');
+    });
+  });
+
   describe('display, gene map and 3D scene', () => {
     beforeEach(async () => {
       await build();

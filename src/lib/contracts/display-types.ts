@@ -236,6 +236,15 @@ export interface SpatialViewState {
    * not drawn, nor the transcripts inside them. Cleared when the group column changes.
    */
   hiddenGroups: string[];
+  /**
+   * Genes whose observations are drawn: with any set, only the observations that express
+   * them (a value above 0) are drawn — the markers, the cell outlines and the transcripts
+   * inside them, in 2D and in the 3D cloud — and the rest are hidden. Empty draws every
+   * observation. Cleared when the dataset changes.
+   */
+  observationGenes: string[];
+  /** Whether an observation must express any of {@link observationGenes}, or all of them. */
+  observationGenesMatch: 'any' | 'all';
   /** Draw the tissue image (the Images section's switch). */
   showImage: boolean;
   /** Draw the annotation regions (the Annotations section's switch). Selecting from them
@@ -357,6 +366,8 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   cellColorGene: null,
   cellSingleColor: '#4fc3f7',
   hiddenGroups: [],
+  observationGenes: [],
+  observationGenesMatch: 'any',
   showImage: true,
   showAnnotations: true,
 };
