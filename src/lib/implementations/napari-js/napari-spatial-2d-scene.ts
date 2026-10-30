@@ -394,6 +394,9 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       // datasets does not leave the tissue permanently hidden.
       layer.visible = datasetHasPixels;
     }
+    // Showing the tissue must not show its channels the user or the defaults switched off (a
+    // 22-channel plate starts with four): the channel states decide which of its layers draw.
+    if (datasetHasPixels) this.image.reapplyDisplayState();
     viewer.requestRender();
   }
 

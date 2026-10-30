@@ -20,6 +20,25 @@ export interface IChannelState {
   visible: boolean;
 }
 
+/**
+ * How many channels of a multichannel image start visible. Each visible channel is drawn
+ * from tiles of its own, so a 22-channel plate showed every channel at once and asked the
+ * server for 22 tiles per position on every pan and zoom. Channels past these start hidden
+ * (one click shows them), and a hidden channel fetches no tiles.
+ */
+export const DEFAULT_VISIBLE_CHANNELS = 4;
+
+/**
+ * Whether channel `index` of `count` starts visible: as the image says when its
+ * `channelInfo` does, else every channel of an image with at most
+ * {@link DEFAULT_VISIBLE_CHANNELS}, and the first {@link DEFAULT_VISIBLE_CHANNELS} of one with more.
+ * Only a boolean says: a descriptor's `null` (a JSON field left empty) leaves the default.
+ */
+export function defaultChannelVisible(index: number, count: number, specified?: boolean | null): boolean {
+  if (typeof specified === 'boolean') return specified;
+  return count <= DEFAULT_VISIBLE_CHANNELS || index < DEFAULT_VISIBLE_CHANNELS;
+}
+
 /** The standard LUT pseudo-colours (mirrors Fiji's Merge Channels palette) for
  *  quick per-channel assignment. */
 export const LUT_COLORS: ReadonlyArray<{ name: string; color: string }> = [

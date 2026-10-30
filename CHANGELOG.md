@@ -22,6 +22,15 @@ file was added.
   `transcriptHiddenGenes`. Led by `'*'`, it lists the genes still shown, so showing one gene of
   thousands stores one name.
 
+### Changed
+
+- **An image with many channels starts with only its first four visible**
+  (`DEFAULT_VISIBLE_CHANNELS`). Each visible channel is drawn from tiles of its own, so a 22-channel
+  plate (Element's Cytos) showed every channel at once and asked the server for 22 tiles per position
+  on every pan and zoom. The other channels start hidden, fetch no tiles, and show with their eye
+  toggle. An image with four channels or fewer shows them all, as before. `IChannelInfo.visible`
+  lets a descriptor say which channels start visible; `defaultChannelVisible` is the rule.
+
 ### Fixed
 
 - **The gene tree's root eye hides "All genes" instead of leaving it.** It used to switch "All

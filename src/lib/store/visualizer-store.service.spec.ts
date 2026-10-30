@@ -1,7 +1,11 @@
 import { GIST_NCAR_LUT } from 'napari-js/colormaps';
 import { IImageMetadata } from '../contracts/image.contract';
 import { VisualizerStore } from './visualizer-store.service';
-import { IChannelState } from '../contracts/channel-histogram-api.contract';
+import {
+  DEFAULT_VISIBLE_CHANNELS,
+  defaultChannelVisible,
+  IChannelState,
+} from '../contracts/channel-histogram-api.contract';
 
 /**
  * Pins the "Reset" baseline behaviour of the Channels & Histogram pane: resetting
@@ -214,5 +218,111 @@ describe('VisualizerStore colormap options (NAPARI-BOUNDARY-23)', () => {
     expect(ncar).toHaveLength(256);
     expect(ncar[0]).toEqual([0, `rgb(${GIST_NCAR_LUT[0]}, ${GIST_NCAR_LUT[1]}, ${GIST_NCAR_LUT[2]})`]);
     expect(ncar[255]).toEqual([1, `rgb(${GIST_NCAR_LUT[765]}, ${GIST_NCAR_LUT[766]}, ${GIST_NCAR_LUT[767]})`]);
+  });
+});
+
+/**
+ * A multichannel image starts with only its first DEFAULT_VISIBLE_CHANNELS visible: each
+ * visible channel draws from tiles of its own, so a 22-channel plate asked for 22 tiles per
+ * position on every pan and zoom.
+ */
+describe('VisualizerStore default channel visibility', () => {
+  const plate = (count: number, info?: IImageMetadata['channelInfo']): IImageMetadata[] => [
+    { channelCount: count, rgbChannels: 1, x: 10, y: 10, z: 1, channelInfo: info } as IImageMetadata,
+  ];
+  const visible = (store: VisualizerStore) => store.currentChannelStates().map((c) => c.visible);
+
+  it('shows every channel of an image with at most DEFAULT_VISIBLE_CHANNELS', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(DEFAULT_VISIBLE_CHANNELS));
+    expect(visible(store)).toEqual(Array(DEFAULT_VISIBLE_CHANNELS).fill(true));
+  });
+
+  it('shows only the first DEFAULT_VISIBLE_CHANNELS of a 22-channel plate', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(22));
+    const v = visible(store);
+    expect(v.filter(Boolean)).toHaveLength(DEFAULT_VISIBLE_CHANNELS);
+    expect(v.slice(0, DEFAULT_VISIBLE_CHANNELS).every(Boolean)).toBe(true);
+  });
+
+  it('keeps a visibility the image specifies', () => {
+    const store = new VisualizerStore();
+    const info = Array.from({ length: 6 }, (_, i) => ({ name: `c${i}`, color: '', visible: i === 5 }));
+    store.setImageMeta(plate(6, info));
+    expect(visible(store)).toEqual([false, false, false, false, false, true]);
+  });
+
+  it('a hidden channel can be shown, and a re-plot of the same image keeps it shown', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(22), 'plate.ome.tif');
+    store.setChannelState(10, { visible: true });
+    store.setImageMeta(plate(22), 'plate.ome.tif');
+    expect(store.currentChannelStates()[10].visible).toBe(true);
+  });
+
+  it.each([2, 3, 4])('shows every channel of a %i-channel image, as before', (count) => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(count));
+    expect(visible(store)).toEqual(Array(count).fill(true));
+  });
+
+  it('shows the one channel of a grayscale image, and of one with no channel count', () => {
+    const one = new VisualizerStore();
+    one.setImageMeta(plate(1));
+    expect(visible(one)).toEqual([true]);
+    const unknown = new VisualizerStore();
+    unknown.setImageMeta([{ rgbChannels: 1, x: 10, y: 10, z: 1 } as IImageMetadata]);
+    expect(visible(unknown)).toEqual([true]);
+  });
+
+  it('hides from the fifth channel on, once there are more than DEFAULT_VISIBLE_CHANNELS', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(plate(DEFAULT_VISIBLE_CHANNELS + 1));
+    expect(visible(store)).toEqual([...Array(DEFAULT_VISIBLE_CHANNELS).fill(true), false]);
+  });
+
+  it('shows every channel of a few-channel image whose channelInfo is partial or says nothing', () => {
+    const store = new VisualizerStore();
+    // A descriptor that names one channel of three, and sends an empty visibility for it.
+    const info = [{ name: 'DAPI', color: '#0000ff', visible: null as unknown as boolean }];
+    store.setImageMeta(plate(3, info));
+    expect(visible(store)).toEqual([true, true, true]);
+  });
+
+  it('leaves RGB and RGBA channels visible', () => {
+    const rgba = new VisualizerStore();
+    rgba.setImageMeta([{ rgbChannels: 4, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata]);
+    expect(visible(rgba)).toEqual([true, true, true]);
+  });
+
+  it('leaves RGB channels visible', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta([{ rgbChannels: 3, channelCount: 1, x: 1, y: 1, z: 1 } as IImageMetadata]);
+    expect(visible(store)).toEqual([true, true, true]);
+  });
+});
+
+describe('defaultChannelVisible', () => {
+  it('shows the first DEFAULT_VISIBLE_CHANNELS of many, and every channel of few', () => {
+    expect(defaultChannelVisible(DEFAULT_VISIBLE_CHANNELS - 1, 22)).toBe(true);
+    expect(defaultChannelVisible(DEFAULT_VISIBLE_CHANNELS, 22)).toBe(false);
+    expect(defaultChannelVisible(DEFAULT_VISIBLE_CHANNELS - 1, DEFAULT_VISIBLE_CHANNELS)).toBe(true);
+  });
+
+  it('an image-specified visibility wins either way', () => {
+    expect(defaultChannelVisible(20, 22, true)).toBe(true);
+    expect(defaultChannelVisible(0, 2, false)).toBe(false);
+  });
+
+  it('shows every channel of up to DEFAULT_VISIBLE_CHANNELS', () => {
+    for (let count = 1; count <= DEFAULT_VISIBLE_CHANNELS; count++) {
+      for (let i = 0; i < count; i++) expect(defaultChannelVisible(i, count)).toBe(true);
+    }
+  });
+
+  it('treats an empty (null) visibility as unspecified', () => {
+    expect(defaultChannelVisible(1, 3, null)).toBe(true);
+    expect(defaultChannelVisible(10, 22, null)).toBe(false);
   });
 });

@@ -236,6 +236,22 @@ describe('Image2dScene channel display', () => {
       expect(tiles['fetchChannelData']).not.toHaveBeenCalled();
     });
 
+    it('puts back the channels switched off when every image layer was shown wholesale', async () => {
+      // The spatial view shows its tissue by setting every image layer visible; the channels the
+      // user (or the defaults: four of a 22-channel plate) switched off must go off again.
+      const { scene, imageLayers, store } = rig(serverlessMc());
+      await scene.mount();
+      store.setChannelState(2, { visible: false });
+      imageLayers().forEach((l) => (l.visible = true));
+      scene.reapplyDisplayState();
+      expect(imageLayers().map((l) => l.visible)).toEqual([true, true, false, true]);
+    });
+
+    it('reapplies nothing before the image is drawn', () => {
+      const { scene } = rig(serverlessMc());
+      expect(() => scene.reapplyDisplayState()).not.toThrow();
+    });
+
     it("bins each channel's histogram from its own plane", async () => {
       const { scene } = rig(serverlessMc());
       await scene.mount();
@@ -321,6 +337,17 @@ describe('Image2dScene channel display', () => {
       layers = imageLayers();
       expect(layers).toHaveLength(1);
       expect(layers[0].visible).toBe(true);
+    });
+
+    it('hides the RGB layer again under its bands when every image layer was shown wholesale', async () => {
+      const { scene, imageLayers, store } = rig(serverlessRgb());
+      await scene.mount();
+      store.setChannelState(0, { max: 100 });
+      imageLayers().forEach((l) => (l.visible = true));
+      scene.reapplyDisplayState();
+      const [rgb, r, g, b] = imageLayers();
+      expect(rgb.visible).toBe(false); // drawn by the bands, not twice
+      expect([r, g, b].every((l) => l.visible)).toBe(true);
     });
 
     it('keeps the band layers right above the RGB layer, under whatever is drawn over it', async () => {

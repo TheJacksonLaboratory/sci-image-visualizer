@@ -23,6 +23,8 @@ export interface IChannelInfo {
   minAllowed?: number;
   /** Pixel-type maximum (e.g. 65535 for unsigned 16-bit). Native-unit ceiling. */
   maxAllowed?: number;
+  /** Whether the channel starts visible; else the first `DEFAULT_VISIBLE_CHANNELS` do. */
+  visible?: boolean;
 }
 
 /** Per-series image metadata (physical size + dimensions). */

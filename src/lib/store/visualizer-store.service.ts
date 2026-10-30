@@ -7,7 +7,7 @@ import { findPreset, presetKey } from './class-color.util';
 import { PREFERENCES_PORT, PreferencesPort } from '../contracts/ports/preferences.port';
 
 import { IImageMetadata } from '../contracts/image.contract';
-import { IChannelState } from '../contracts/channel-histogram-api.contract';
+import { defaultChannelVisible, IChannelState } from '../contracts/channel-histogram-api.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 
@@ -226,6 +226,7 @@ export class VisualizerStore {
    *   - RGB (rgbChannels ≥ 3) → Red/Green/Blue;
    *   - multichannel fluorescence (channelCount > 1) → one channel per band,
    *     named/tinted from the server `channelInfo` when present, else a palette;
+   *     only the first `DEFAULT_VISIBLE_CHANNELS` start visible (see `defaultChannelVisible`);
    *   - otherwise a single grayscale "Intensity" channel. */
   private deriveChannels(meta: IImageMetadata[]): IChannelState[] {
     const base = { min: 0, max: 255, gamma: 1, visible: true };
@@ -247,6 +248,7 @@ export class VisualizerStore {
         name: info?.[i]?.name || `Channel ${i + 1}`,
         color: info?.[i]?.color || palette[i % palette.length],
         ...base,
+        visible: defaultChannelVisible(i, count, info?.[i]?.visible),
       }));
     }
     return [{ index: 0, name: 'Intensity', color: '#ffffff', ...base }];
