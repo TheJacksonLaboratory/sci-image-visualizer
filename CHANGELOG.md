@@ -9,6 +9,15 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **An image with many channels starts with only its first four visible**
+  (`DEFAULT_VISIBLE_CHANNELS`). Each visible channel is drawn from tiles of its own, so a 22-channel
+  plate (Element's Cytos) showed every channel at once and asked the server for 22 tiles per position
+  on every pan and zoom. The other channels start hidden, fetch no tiles, and show with their eye
+  toggle. An image with four channels or fewer shows them all, as before. `IChannelInfo.visible`
+  lets a descriptor say which channels start visible; `defaultChannelVisible` is the rule.
+
 ## [0.13.0] — 2026-10-22
 
 ### Added
