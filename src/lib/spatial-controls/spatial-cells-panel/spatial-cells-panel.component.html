@@ -10,7 +10,18 @@
     <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
   </div>
   <div class="sc-panel-body" *ngIf="open">
-    <ng-container *ngIf="cellSetOptions.length > 1">
+    <ng-container *ngIf="boundarySets.length && boundarySets.length <= 2">
+      <div class="sc-subhead">Boundaries</div>
+      <div class="sc-row" *ngFor="let set of boundarySets">
+        <span class="sc-lbl">{{ set.label }}</span>
+        <p-inputSwitch
+          [ngModel]="boundaryOn(set.name)"
+          (onChange)="onBoundary(set.name, $event.checked)"
+          [attr.aria-label]="set.label"
+        ></p-inputSwitch>
+      </div>
+    </ng-container>
+    <ng-container *ngIf="boundarySets.length > 2">
       <div class="sc-subhead">Boundaries</div>
       <p-selectButton
         [options]="cellSetOptions"

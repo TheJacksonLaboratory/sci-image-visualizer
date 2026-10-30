@@ -68,6 +68,65 @@ describe('ChannelHistogramComponent', () => {
     expect(component['selected']?.name).toBe('Intensity');
   });
 
+  it('lists grouped channels under their groups, folds a group, and shows or hides all of it', () => {
+    const grouped: IChannelState[] = [
+      {
+        index: 0,
+        name: 'Nucleus',
+        color: '#0000ff',
+        min: 0,
+        max: 255,
+        gamma: 1,
+        visible: true,
+        group: ['Cell Paint'],
+      },
+      {
+        index: 1,
+        name: 'Actin',
+        color: '#ff0000',
+        min: 0,
+        max: 255,
+        gamma: 1,
+        visible: false,
+        group: ['Cell Paint'],
+      },
+      {
+        index: 2,
+        name: 'GM130',
+        color: '#00ff00',
+        min: 0,
+        max: 255,
+        gamma: 1,
+        visible: false,
+        group: ['Protein IF'],
+      },
+    ];
+    api.getChannels$.mockReturnValue(of(grouped));
+    const fx = TestBed.createComponent(ChannelHistogramComponent);
+    const c = fx.componentInstance;
+    c.ngOnInit();
+    const rows = c['rows'];
+    expect(rows.map((r) => r.kind)).toEqual(['group', 'channel', 'channel', 'group', 'channel']);
+    const cellPaint = rows[0];
+    if (cellPaint.kind !== 'group') throw new Error('a group first');
+    expect(cellPaint).toMatchObject({ label: 'Cell Paint', channels: [0, 1], shown: 1 });
+
+    c['toggleGroup'](cellPaint);
+    expect(c['rows'].map((r) => r.kind)).toEqual(['group', 'group', 'channel']);
+    c['toggleGroup'](c['rows'][0] as typeof cellPaint);
+    expect(c['rows']).toHaveLength(5);
+
+    // Showing a group shows its hidden channels only; a group row is never selected.
+    c['onGroupVisibleToggle'](cellPaint, true);
+    expect(api.setChannelState).toHaveBeenCalledTimes(1);
+    expect(api.setChannelState).toHaveBeenCalledWith(1, { visible: true });
+    c['onRowSelect'](cellPaint);
+    expect(api.setSelectedChannel).not.toHaveBeenCalled();
+    c['onRowSelect'](c['rows'][4]);
+    expect(api.setSelectedChannel).toHaveBeenCalledWith(2);
+    expect(c['selectedRow']?.key).toBe(c['rows'][4].key);
+  });
+
   it('should route a min/max edit through the API (clamped, ordered)', () => {
     component['onMinChange'](300); // clamps to 255, then max stays ≥ min
     expect(api.setChannelState).toHaveBeenCalledWith(0, { min: 255, max: 255 });

@@ -10,6 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CheckboxModule } from 'primeng/checkbox';
+import { InputSwitchModule } from 'primeng/inputswitch';
 import { DropdownModule } from 'primeng/dropdown';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { SelectButtonModule } from 'primeng/selectbutton';
@@ -38,6 +39,7 @@ import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-gro
     FormsModule,
     CheckboxModule,
     DropdownModule,
+    InputSwitchModule,
     InputNumberModule,
     SelectButtonModule,
     SliderModule,
@@ -81,6 +83,12 @@ export class SpatialCellsPanelComponent implements OnChanges {
    * its buttons whenever the array identity changes — which made them impossible to click.
    */
   protected cellSetOptions: PanelOption<string>[] = [];
+  /**
+   * The boundary sets, the cells' first, each with a switch when there are at most two (as
+   * CytoCanvas's "Cell Boundaries" and "Nuclear Boundaries"): either, both or neither drawn.
+   * More sets keep the one-of choice.
+   */
+  protected boundarySets: { name: string; label: string }[] = [];
   /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
   protected cellColorOptions: PanelOption<SpatialViewState['cellColorMode']>[] = [];
   /** The density colour bar, rebuilt only when its colormap changes (a 256-entry LUT). */
@@ -91,6 +99,9 @@ export class SpatialCellsPanelComponent implements OnChanges {
     if (changes['dataset']) {
       const options = tileOptions(this.dataset);
       this.cellSetOptions = options.cellSetOptions;
+      this.boundarySets = [...(this.dataset?.polygonTiles?.sets ?? [])]
+        .sort((a, b) => (a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0))
+        .map((set) => ({ name: set.name, label: set.label }));
       this.cellColorOptions = options.cellColorOptions;
     }
     if (this.densityBarFor !== this.view.densityColormap || !this.densityColorBarCss) {
@@ -121,6 +132,29 @@ export class SpatialCellsPanelComponent implements OnChanges {
 
   protected onCellSet(set: string): void {
     this.controls?.setViewState({ cellSet: set });
+  }
+
+  /** Whether boundary set `name` is drawn: outlines on, and that set or both. */
+  protected boundaryOn(name: string): boolean {
+    if (!this.cellsOn) return false;
+    const active = this.activeCellSet;
+    return active === 'both' || active === name;
+  }
+
+  /**
+   * A set's switch: on draws it with the other when that one is drawn ("both"), else alone;
+   * off leaves the other drawn, or no outlines at all.
+   */
+  protected onBoundary(name: string, on: boolean): void {
+    const other = this.boundarySets.find((s) => s.name !== name)?.name;
+    const otherOn = !!other && this.boundaryOn(other);
+    if (on) {
+      this.controls?.setViewState({ showCells: true, cellSet: otherOn ? 'both' : name });
+    } else if (otherOn) {
+      this.controls?.setViewState({ cellSet: other });
+    } else {
+      this.controls?.setViewState({ showCells: false });
+    }
   }
 
   protected onCellDraw(draw: SpatialViewState['cellDraw']): void {

@@ -26,7 +26,7 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
   // eslint-disable-next-line @angular-eslint/directive-selector
   selector:
     'p-checkbox[ngModel],p-dropdown[ngModel],p-selectButton[ngModel],p-slider[ngModel],' +
-    'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel]',
+    'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel],p-inputSwitch[ngModel]',
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,

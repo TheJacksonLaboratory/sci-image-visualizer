@@ -27,6 +27,7 @@ import { TableModule } from 'primeng/table';
 import { TooltipModule } from 'primeng/tooltip';
 import { TreeSelectModule } from 'primeng/treeselect';
 import * as Plotly from 'plotly.js-dist-min';
+import { ChannelGroupRow, ChannelTreeRow, channelTreeRows } from './channel-tree';
 
 import {
   CHANNEL_HISTOGRAM_API,
@@ -100,7 +101,11 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   protected readonly lutColors = LUT_COLORS;
 
   protected channels: IChannelState[] = [];
+  /** The channels as the table lists them: in their groups when the image groups them, else flat. */
+  protected rows: ChannelTreeRow[] = [];
   protected selected: IChannelState | null = null;
+  /** The groups folded shut, by key; kept across emissions and images with the same groups. */
+  private readonly collapsed = new Set<string>();
   protected invert = false;
   protected logScale = false;
   /** Bounded retries while the (async) histogram sampling resolves. */
@@ -171,6 +176,7 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((channels) => {
         this.channels = channels ?? [];
+        this.rows = channelTreeRows(this.channels, this.collapsed);
         // Keep the selected row (by index) or default to the first channel.
         const keepIdx = this.selected?.index ?? 0;
         this.selected = this.channels.find((c) => c.index === keepIdx) ?? this.channels[0] ?? null;
@@ -282,6 +288,37 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
   }
   protected onVisibleToggle(ch: IChannelState, value: boolean): void {
     this.api.setChannelState(ch.index, { visible: value });
+  }
+
+  /** The table row of the selected channel, for its highlight. */
+  protected get selectedRow(): ChannelTreeRow | null {
+    const sel = this.selected;
+    return sel ? (this.rows.find((r) => r.kind === 'channel' && r.channel.index === sel.index) ?? null) : null;
+  }
+
+  /** A row was selected: a channel's selects the channel (a group's row cannot be). */
+  protected onRowSelect(row: ChannelTreeRow): void {
+    if (row?.kind === 'channel') this.selectChannel(row.channel);
+  }
+
+  /** Fold a group shut, or open it. */
+  protected toggleGroup(row: ChannelGroupRow): void {
+    if (this.collapsed.has(row.key)) this.collapsed.delete(row.key);
+    else this.collapsed.add(row.key);
+    this.rows = channelTreeRows(this.channels, this.collapsed);
+    this.changed();
+  }
+
+  /** Show or hide every channel of a group. */
+  protected onGroupVisibleToggle(row: ChannelGroupRow, value: boolean): void {
+    for (const index of row.channels) {
+      const ch = this.channels.find((c) => c.index === index);
+      if (ch && ch.visible !== value) this.api.setChannelState(index, { visible: value });
+    }
+  }
+
+  protected trackRow(_: number, row: ChannelTreeRow): string {
+    return row.key;
   }
   protected onColorChange(ch: IChannelState, color: string): void {
     this.api.setChannelState(ch.index, { color });

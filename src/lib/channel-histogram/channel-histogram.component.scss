@@ -132,3 +132,26 @@
 :host ::ng-deep .ch-row p-slider .p-slider {
   width: 100%;
 }
+
+// A group of channels: a header row that folds open or shut.
+.ch-group-row td {
+  background: var(--surface-ground, transparent);
+}
+.ch-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+}
+.ch-group-count {
+  font-weight: 400;
+  opacity: 0.75;
+}

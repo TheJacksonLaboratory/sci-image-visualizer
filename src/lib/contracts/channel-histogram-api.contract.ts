@@ -18,6 +18,8 @@ export interface IChannelState {
   max: number;
   gamma: number;
   visible: boolean;
+  /** The groups the channel is in, outermost first (`IChannelInfo.group`); absent when it is in none. */
+  group?: string[];
 }
 
 /**

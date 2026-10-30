@@ -370,6 +370,35 @@ describe('VisualizerStore.adoptChannelInfo', () => {
     expect(store.currentChannelStates().map((c) => c.visible)).toEqual(before);
   });
 
+  it('takes the groups the descriptor puts the channels in, even for a channel the pane edited', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(3), 'plate');
+    store.setChannelState(0, { color: '#ff8800' });
+    store.adoptChannelInfo([
+      { ...named[0], group: ['Cell Paint'] },
+      { ...named[1], group: ['Cell Paint'] },
+      { ...named[2], group: null },
+    ]);
+    const s = store.currentChannelStates();
+    expect(s.map((c) => c.group)).toEqual([['Cell Paint'], ['Cell Paint'], undefined]);
+    expect(s[0].color).toBe('#ff8800');
+  });
+
+  it("derives the groups from the host's own channel info", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(
+      meta(2, [
+        { name: 'A', color: '#ffffff', group: ['Protein IF', 'Cell Signaling'] },
+        { name: 'B', color: '#ffffff' },
+      ] as IImageMetadata['channelInfo']),
+      'img',
+    );
+    expect(store.currentChannelStates().map((c) => c.group)).toEqual([
+      ['Protein IF', 'Cell Signaling'],
+      undefined,
+    ]);
+  });
+
   it('ignores a descriptor of another channel count, and an RGB image', () => {
     const store = new VisualizerStore();
     store.setImageMeta(meta(2), 'two');

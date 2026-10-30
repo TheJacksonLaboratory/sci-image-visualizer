@@ -207,7 +207,9 @@ export class VisualizerStore {
    * channel still showing its derived default takes the descriptor's, so an edit made in the pane
    * stays. A no-op when the channel counts differ, or for RGB.
    */
-  adoptChannelInfo(info: ReadonlyArray<{ name?: string; color?: string }> | null | undefined): void {
+  adoptChannelInfo(
+    info: ReadonlyArray<{ name?: string; color?: string; group?: string[] | null }> | null | undefined,
+  ): void {
     const meta = this.imageMeta$.value;
     const m0 = meta?.[0];
     const current = this.channelStates$.value;
@@ -218,6 +220,7 @@ export class VisualizerStore {
       ...(host[i] ?? {}),
       name: host[i]?.name || d.name || '',
       color: host[i]?.color || d.color || '',
+      group: host[i]?.group?.length ? host[i].group : d.group,
     }));
     const before = this.defaultChannelStates;
     const nextMeta = meta.map((e, k) => (k === 0 ? { ...e, channelInfo: merged } : e));
@@ -232,6 +235,8 @@ export class VisualizerStore {
       const patch: Partial<IChannelState> = {};
       if (st.name === was.name && now.name !== was.name) patch.name = now.name;
       if (st.color === was.color && now.color !== was.color) patch.color = now.color;
+      // The groups are the image's, never edited in the pane.
+      if (!sameGroup(st.group, now.group)) patch.group = now.group;
       if (!Object.keys(patch).length) return st;
       changed = true;
       return { ...st, ...patch };
@@ -289,6 +294,7 @@ export class VisualizerStore {
         color: info?.[i]?.color || palette[i % palette.length],
         ...base,
         visible: defaultChannelVisible(i, count, info?.[i]?.visible),
+        ...(info?.[i]?.group?.length ? { group: [...(info[i].group as string[])] } : {}),
       }));
     }
     return [{ index: 0, name: 'Intensity', color: '#ffffff', ...base }];
@@ -444,4 +450,11 @@ export class VisualizerStore {
   setActiveTool(tool: string | null): void {
     this.activeTool$.next(tool);
   }
+}
+
+/** Whether two group paths are the same (absent and empty alike). */
+function sameGroup(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((v, i) => v === y[i]);
 }
