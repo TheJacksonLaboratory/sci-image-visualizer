@@ -125,6 +125,45 @@ describe('SpatialTranscriptsPanelComponent', () => {
     expect(component['canShowAllGenes']).toBe(false);
   });
 
+  it('offers "Cell type" colouring only for a dataset with cell types', async () => {
+    await build();
+    expect(component['transcriptColorOptions'].map((o) => o.label)).toEqual(['Cluster', 'Cell type', 'Gene']);
+    expect(component['transcriptColorOptions']).toBe(component['transcriptColorOptions']);
+    // A Vizgen table's only categorical is the one-category region its cells are linked by.
+    fake.dataset$.next({
+      ...TILED_DATASET,
+      columns: [{ kind: 'categorical', name: 'region', categories: ['cell_boundaries'] }],
+    });
+    expect(component['transcriptColorOptions'].map((o) => o.label)).toEqual(['Cluster', 'Gene']);
+    setView({ transcriptColorBy: 'cellType' });
+    expect(component['transcriptColorShown']).toBe('gene');
+  });
+
+  it('leaves "All genes" switched off whole behind when the ± leaves or re-enters it', async () => {
+    await build();
+    setView({ transcriptAllGenes: true, transcriptAllGenesHidden: ['*'] });
+    expect(component['allGenesSomeHidden']).toBe(false);
+    component.onTranscriptAllGenes(false);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual([]);
+  });
+
+  it("keeps each mode's hidden genes to itself across the ±", async () => {
+    await build();
+    // In "All genes", every gene but KRT5 hidden; in the selection, CD3E hidden.
+    setView({
+      transcriptGenes: ['CD3E', 'KRT5'],
+      transcriptHiddenGenes: ['CD3E'],
+      transcriptAllGenes: true,
+      transcriptAllGenesHidden: ['*', 'KRT5'],
+    });
+    expect(component['allGenesSomeHidden']).toBe(true);
+    component.onTranscriptAllGenes(false);
+    expect(fake.view$.value.transcriptHiddenGenes).toEqual(['CD3E']);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual(['*', 'KRT5']);
+    component.onTranscriptAllGenes(true);
+    expect(fake.view$.value.transcriptAllGenesHidden).toEqual(['*', 'KRT5']);
+  });
+
   it('says when "All genes" is still being prepared on the server', async () => {
     const { transcriptBins: _bins, ...rest } = TILED_DATASET;
     void _bins;

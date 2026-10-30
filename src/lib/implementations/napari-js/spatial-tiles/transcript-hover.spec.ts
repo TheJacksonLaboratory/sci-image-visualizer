@@ -55,6 +55,17 @@ describe('TranscriptHover: which marker is under the pointer', () => {
     expect(at(5, 5, 0.1)).toBe('G1');
   });
 
+  it("names an individual transcript's gene by its code, before any details arrive", () => {
+    const merged = tile([0, 10], [0, 0]);
+    const layer = new PointsLayer(new Float32Array([0, 0, 10, 0]), { size: new Float32Array(2).fill(2) });
+    const hover = new TranscriptHover({} as SpatialDataPort, () => true);
+    hover.setDrawn({ kind: 'individual', merged, layer, genes: ['ACTA2', 'KRT5'] }, null);
+    expect(hover.hoverAt(10, 0, 0.1, () => undefined)?.[0]).toBe('KRT5 transcript');
+    // Without the dataset's gene list it waits for the server's summary.
+    hover.setDrawn({ kind: 'individual', merged, layer, genes: [] }, null);
+    expect(hover.hoverAt(10, 0, 0.1, () => undefined)?.[0]).toBe('Transcript');
+  });
+
   it("reads the pointer through the layer's dataset affine", () => {
     // World = data × 2 + 100: the marker at data (10, 0) sits at world (120, 100).
     const at = hoverOver([0, 10], [0, 0], 1, { scale: [2, 2], translate: [100, 100] });

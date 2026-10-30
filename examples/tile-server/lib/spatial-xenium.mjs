@@ -649,6 +649,9 @@ export async function xeniumManifest(xeniumDir, id, { imageExists } = {}) {
       count: ds.experiment.num_transcripts_high_quality || undefined,
       // Real genes — Xenium Explorer's denominator; the rest are control codewords.
       geneCount: ds.geneIsReal.reduce((n, v) => n + v, 0),
+      // The all-gene tiles' codes are gene indices, control codewords left out: name each code,
+      // blank for a control no tile carries (as jit-service's manifest does).
+      genes: ds.geneNames.map((g, i) => (ds.geneIsReal[i] ? g : '')),
       hasZ: true,
       levels: ds.transcriptLevels.map((_, l) => ({ tileSize: levels0 * 2 ** l, aggregated: l > 0 })),
       // Levels at or below this one carry an exact per-transcript cell assignment; above

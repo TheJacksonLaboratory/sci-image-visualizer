@@ -14,7 +14,12 @@ import { DEFAULT_CATEGORICAL_PALETTE, parseHex, resolveCategoryColors } from '..
 import { DataRect, cellTypeColumnFor } from '../../../spatial/lod';
 import { clusterColorMap } from '../../../spatial/transcript-grouping';
 import { TranscriptGlyph, defaultGlyphFor } from '../../../spatial/glyphs';
-import { filterTranscripts, hiddenGeneSlots, median } from '../../../spatial/spatial-tile-merge';
+import {
+  filterTranscripts,
+  hiddenAllGeneCodes,
+  hiddenGeneSlots,
+  median,
+} from '../../../spatial/spatial-tile-merge';
 import type { CategoricalLookup } from './categorical-lookup';
 import type { OrderedLayerGroups, TileGroup } from './layer-groups';
 import type { PlanContext } from './plan-context';
@@ -74,18 +79,29 @@ function transcriptPlanKey(
     pxPerUnit.toPrecision(4),
     view.hiddenGroups.join('\u0001'),
     view.transcriptHiddenGenes.join(','),
+    view.transcriptAllGenesHidden.join(','),
     JSON.stringify(view.transcriptGeneColors),
     JSON.stringify(view.transcriptGeneGroups),
   ].join('|');
 }
 
 /** The view the markers are coloured by, for what was loaded. */
-function colorViewFor(view: SpatialViewState, kind: TranscriptKind, clustered: boolean): SpatialViewState {
+export function colorViewFor(
+  view: SpatialViewState,
+  kind: TranscriptKind,
+  clustered: boolean,
+  hasCellTypes: boolean,
+): SpatialViewState {
   // A bin of the all-gene pyramid mixes genes and carries none, so it cannot be coloured
-  // by gene: colour it by its dominant cell's type until individual transcripts show.
+  // by gene: colour it by its dominant cell's type until individual transcripts show (with
+  // no cell types, that leaves every bin unassigned: one colour).
   if (kind === 'bins' && view.transcriptColorBy !== 'cellType') return { ...view, transcriptColorBy: 'cellType' };
   // Density-grid markers have no cell to take a type from: they take their cluster's colour.
   if (clustered && view.transcriptColorBy === 'cellType') return { ...view, transcriptColorBy: 'cluster' };
+  // No cell types to colour by (the panel then does not offer it): by gene instead.
+  if (!hasCellTypes && kind !== 'bins' && view.transcriptColorBy === 'cellType') {
+    return { ...view, transcriptColorBy: 'gene' };
+  }
   return view;
 }
 
@@ -165,10 +181,15 @@ export class TranscriptLayers {
     // Per-gene counts in view come from what was loaded, before hidden genes are dropped:
     // a hidden gene still has transcripts there. Summed density grids (no per-gene levels,
     // zoomed out) hold clusters, not genes: no per-gene counts there, rather than a guess.
+    // Every gene's individual transcripts are counted by the dataset's gene list, when it has one.
+    const allGeneNames = dataset.transcriptTiles?.genes;
+    const kind = loaded.kind ?? job.kind;
     this.countSource =
-      (loaded.kind ?? job.kind) === 'genes' && !loaded.clustered
+      kind === 'genes' && !loaded.clustered
         ? { merged: loaded.merged, genes: [...view.transcriptGenes] }
-        : null;
+        : kind === 'individual' && allGeneNames
+          ? { merged: loaded.merged, genes: allGeneNames }
+          : null;
     const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
     // Density-grid markers carry no cells and were built from the visible genes only.
@@ -178,7 +199,11 @@ export class TranscriptLayers {
           loaded.merged,
           loaded.px,
           hidden,
-          (loaded.kind ?? job.kind) === 'genes' ? hiddenGeneSlots(view) : null,
+          kind === 'genes'
+            ? hiddenGeneSlots(view)
+            : kind === 'individual'
+              ? hiddenAllGeneCodes(view, allGeneNames)
+              : null,
         );
     let { merged, px } = filtered;
     let selectionBin: number | null = loaded.clustered?.bin ?? null;
@@ -188,8 +213,7 @@ export class TranscriptLayers {
       const g = groupSelection(merged, view, loaded.ladder, pxPerUnit);
       if (g) ({ merged, px, bin: selectionBin, group: entryGroup, names: groupNames } = g);
     }
-    const kind = loaded.kind ?? job.kind;
-    const colorView = colorViewFor(view, kind, !!loaded.clustered);
+    const colorView = colorViewFor(view, kind, !!loaded.clustered, cellTypeColumnFor(dataset, view) !== null);
     // Each entry's cluster: its marker's group, or the gene-tree group its gene is in.
     const geneCluster = view.transcriptGenes.map(
       (g) => view.transcriptGeneGroups.find((x) => x.genes.includes(g))?.name ?? g,
@@ -216,7 +240,7 @@ export class TranscriptLayers {
         : this.drawTranscriptGlyphs(merged, diam, rgba, view, place, pxPerUnit);
     this.hover.setDrawn(
       {
-        kind: loaded.kind ?? job.kind,
+        kind,
         bin: selectionBin
           ? { size: selectionBin, origin: loaded.clustered?.origin ?? [0, 0] }
           : loaded.kind
@@ -224,7 +248,7 @@ export class TranscriptLayers {
             : job.bin,
         merged,
         layer,
-        genes: [...view.transcriptGenes],
+        genes: kind === 'individual' ? (allGeneNames ?? []) : [...view.transcriptGenes],
         ...(entryGroup && groupNames ? { entryGroup, groupNames } : {}),
         ...(loaded.clustered ? { groupGenes: loaded.clustered.genes } : {}),
       },
@@ -347,15 +371,17 @@ export class TranscriptLayers {
       rgb = hex.map(parseHex);
       codeOf = (i) => code[i];
     } else if (view.transcriptColorBy === 'gene' || view.transcriptColorBy === 'cluster') {
-      // All genes: codes are the dataset's gene indices, folded onto the palette.
-      const n = view.transcriptAllGenes ? DEFAULT_CATEGORICAL_PALETTE.length : view.transcriptGenes.length;
+      // All genes: codes are the dataset's gene indices, coloured by name when the dataset
+      // lists them (so a gene's chosen colour applies), else folded onto the palette.
+      const names = view.transcriptAllGenes ? (dataset.transcriptTiles?.genes ?? null) : view.transcriptGenes;
+      const n = names ? names.length : DEFAULT_CATEGORICAL_PALETTE.length;
       rgb = Array.from({ length: n }, (_g, i) =>
         parseHex(
-          (!view.transcriptAllGenes && view.transcriptGeneColors[view.transcriptGenes[i]]) ||
+          (names && view.transcriptGeneColors[names[i]]) ||
             DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length],
         ),
       );
-      codeOf = view.transcriptAllGenes ? (i) => t.gene[i] % n : (i) => t.gene[i];
+      codeOf = names ? (i) => (t.gene[i] < n ? t.gene[i] : -1) : (i) => t.gene[i] % n;
     } else {
       const name = cellTypeColumnFor(dataset, view);
       const codes = name ? await this.lookup.codes(name) : null;

@@ -152,7 +152,7 @@ describe('cellTypeColumnFor', () => {
   const ds = (names: [string, 'categorical' | 'continuous'][]) =>
     ({
       columns: names.map(([name, kind]) =>
-        kind === 'categorical' ? { kind, name, categories: ['a'] } : { kind, name },
+        kind === 'categorical' ? { kind, name, categories: ['a', 'b'] } : { kind, name },
       ),
     }) as unknown as SpatialDataset;
 
@@ -187,6 +187,20 @@ describe('cellTypeColumnFor', () => {
       'curated_cell_type',
     );
     expect(cellTypeColumnFor(ds([['cell_area', 'continuous']]), { cellTypeColumn: null })).toBeNull();
+  });
+
+  it("passes over a column of one category, which names no type (a SpatialData table's region)", () => {
+    const d = {
+      columns: [
+        { kind: 'categorical', name: 'region', categories: ['cell_boundaries'] },
+        { kind: 'continuous', name: 'volume' },
+      ],
+    } as unknown as SpatialDataset;
+    expect(cellTypeColumnFor(d, { cellTypeColumn: null })).toBeNull();
+    // Still used when chosen.
+    expect(cellTypeColumnFor(d, { cellTypeColumn: 'region' })).toBe('region');
+    const withTypes = { columns: [...d.columns, { kind: 'categorical', name: 'leiden', categories: ['0', '1'] }] };
+    expect(cellTypeColumnFor(withTypes as unknown as SpatialDataset, { cellTypeColumn: null })).toBe('leiden');
   });
 });
 

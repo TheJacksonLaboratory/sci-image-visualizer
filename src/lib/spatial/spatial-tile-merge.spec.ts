@@ -6,10 +6,15 @@ import {
   SpatialPolygonTile,
   SpatialTranscriptTile,
 } from '../contracts/spatial-dataset.contract';
+import { ALL_GENES } from '../contracts/ports/spatial-data.port';
 import {
+  allGeneShownBy,
+  allGenesHidden,
   clusterMarkers,
   filterRings,
   filterTranscripts,
+  hiddenAllGeneCodes,
+  toggleAllGeneHidden,
   hiddenGeneSlots,
   median,
   mergePolygonTiles,
@@ -104,6 +109,56 @@ describe('filtering hidden groups and genes', () => {
     const view = { ...DEFAULT_SPATIAL_VIEW, transcriptGenes: ['A', 'B', 'C'], transcriptHiddenGenes: ['B'] };
     expect(Array.from(hiddenGeneSlots(view)!)).toEqual([0, 1, 0]);
     expect(hiddenGeneSlots({ ...view, transcriptHiddenGenes: [] })).toBeNull();
+  });
+});
+
+describe('hiding genes of "All genes"', () => {
+  const all = { ...DEFAULT_SPATIAL_VIEW, transcriptAllGenes: true };
+
+  it('is switched off whole only by the ALL_GENES entry, and only while every gene is drawn', () => {
+    expect(allGenesHidden(all)).toBe(false);
+    expect(allGenesHidden({ ...all, transcriptAllGenesHidden: [ALL_GENES] })).toBe(true);
+    expect(allGenesHidden({ ...all, transcriptAllGenesHidden: [ALL_GENES, 'KRT5'] })).toBe(false);
+    expect(allGenesHidden({ ...all, transcriptAllGenes: false, transcriptAllGenesHidden: [ALL_GENES] })).toBe(
+      false,
+    );
+    // The selection's hidden genes are its own: they never switch "All genes" off.
+    const selectionHidden = { ...all, transcriptHiddenGenes: [ALL_GENES, 'ACTA2'] };
+    expect(allGenesHidden(selectionHidden)).toBe(false);
+  });
+
+  it('reads a list led by ALL_GENES as the genes still shown', () => {
+    expect(['A', 'B'].map(allGeneShownBy(['B']))).toEqual([true, false]);
+    expect(['A', 'B'].map(allGeneShownBy([ALL_GENES]))).toEqual([false, false]);
+    expect(['A', 'B'].map(allGeneShownBy([ALL_GENES, 'B']))).toEqual([false, true]);
+  });
+
+  it('toggles a gene in whichever form the list is in', () => {
+    expect(toggleAllGeneHidden([], 'A', false)).toEqual(['A']);
+    expect(toggleAllGeneHidden(['A', 'B'], 'A', true)).toEqual(['B']);
+    // Showing one gene of a set switched off whole names that gene, not the thousands of others.
+    expect(toggleAllGeneHidden([ALL_GENES], 'A', true)).toEqual([ALL_GENES, 'A']);
+    expect(toggleAllGeneHidden([ALL_GENES, 'A', 'B'], 'A', false)).toEqual([ALL_GENES, 'B']);
+    expect(toggleAllGeneHidden([ALL_GENES, 'A'], 'A', false)).toEqual([ALL_GENES]);
+  });
+
+  it("maps hidden names onto the dataset's codes, null with none hidden or no gene list", () => {
+    const view = { ...all, transcriptAllGenesHidden: ['CD3E', 'NOT_A_GENE'] };
+    expect(hiddenAllGeneCodes(view, ['ACTA2', 'CD3E', 'KRT5'])).toEqual(Uint8Array.from([0, 1, 0]));
+    expect(hiddenAllGeneCodes(view, undefined)).toBeNull();
+    expect(hiddenAllGeneCodes(all, ['ACTA2'])).toBeNull();
+    expect(hiddenAllGeneCodes({ ...all, transcriptAllGenesHidden: ['NOT_A_GENE'] }, ['ACTA2'])).toBeNull();
+    expect(
+      hiddenAllGeneCodes({ ...all, transcriptAllGenesHidden: [ALL_GENES, 'CD3E'] }, ['ACTA2', 'CD3E']),
+    ).toEqual(Uint8Array.from([1, 0]));
+    // The selection's hidden genes do not reach "All genes".
+    const selectionHidden = { ...all, transcriptHiddenGenes: ['ACTA2'] };
+    expect(hiddenAllGeneCodes(selectionHidden, ['ACTA2'])).toBeNull();
+    // Codes drop entries by gene, as a selection's slots do.
+    const t = tile([1, 2, 3], [1, 2, 3]);
+    t.gene.set([0, 1, 2]);
+    const codes = hiddenAllGeneCodes(view, ['ACTA2', 'CD3E', 'KRT5']);
+    expect(Array.from(filterTranscripts(t, new Float32Array(3), null, codes).merged.gene)).toEqual([0, 2]);
   });
 });
 

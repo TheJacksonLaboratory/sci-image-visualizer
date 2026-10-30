@@ -4,13 +4,11 @@
     <button
       type="button"
       class="sc-eye"
-      (click)="view.transcriptAllGenes ? onToggleAllGenes() : onGenesShown(view.transcriptGenes, !rootShown)"
+      (click)="
+        view.transcriptAllGenes ? onAllGenesShown(!rootShown) : onGenesShown(view.transcriptGenes, !rootShown)
+      "
     >
-      <i
-        class="pi"
-        [class.pi-eye]="view.transcriptAllGenes || rootShown"
-        [class.pi-eye-slash]="!view.transcriptAllGenes && !rootShown"
-      ></i>
+      <i class="pi" [class.pi-eye]="rootShown" [class.pi-eye-slash]="!rootShown"></i>
     </button>
     <span class="sc-group-label">Genes</span>
     <span class="sc-count"
@@ -26,7 +24,55 @@
     >
       <i class="pi" [class.pi-chevron-down]="geneTreeOpen" [class.pi-chevron-right]="!geneTreeOpen"></i>
     </button>
+    <button
+      type="button"
+      class="sc-icon-btn"
+      (click)="toggleAllGenesOpen()"
+      *ngIf="view.transcriptAllGenes && allGeneList?.length"
+      [attr.aria-label]="allGenesOpen ? 'Hide the gene list' : 'Show every gene'"
+    >
+      <i class="pi" [class.pi-chevron-down]="allGenesOpen" [class.pi-chevron-right]="!allGenesOpen"></i>
+    </button>
   </div>
+  <!-- "All genes": every gene of the dataset, each with its eye when the dataset says which
+       transcripts are whose (its gene list in code order). -->
+  <ng-container *ngIf="allGenesOpen && view.transcriptAllGenes && allGeneList?.length">
+    <input
+      pInputText
+      class="sc-gene-filter"
+      placeholder="Filter genes…"
+      aria-label="Filter genes"
+      [value]="allGenesFilter"
+      (input)="onAllGenesFilter($any($event.target).value)"
+    />
+    <small class="sc-hint" *ngIf="!canHideAllGenes">
+      This dataset does not say which transcripts are whose, so its genes cannot be hidden one by one.
+    </small>
+    <small class="sc-hint" *ngIf="canHideAllGenes && view.transcriptMode === 'density'">
+      The density map draws every gene as one raster: genes are hidden one by one as circles or icons.
+    </small>
+    <div class="sc-gene-row sc-gene-leaf nested" *ngFor="let row of allRows; trackBy: trackByAllRow">
+      <button
+        type="button"
+        class="sc-eye"
+        [disabled]="!canHideAllGenes || view.transcriptMode === 'density'"
+        (click)="onAllGeneShown(row.gene, !row.shown)"
+      >
+        <i class="pi" [class.pi-eye]="row.shown" [class.pi-eye-slash]="!row.shown"></i>
+      </button>
+      <span class="sc-gene-icon" *ngIf="row.swatch" [style.color]="row.swatch" aria-hidden="true">
+        <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><circle r="0.75"></circle></svg>
+      </span>
+      <span class="sc-group-label" [title]="row.gene">{{ row.gene }}</span>
+      <span class="sc-gene-count" *ngIf="row.count !== null" title="Transcripts in view">{{
+        row.count | number
+      }}</span>
+    </div>
+    <small class="sc-hint" *ngIf="allGenesMatched > allRows.length">
+      Showing {{ allRows.length | number }} of {{ allGenesMatched | number }} genes: filter to find the others.
+    </small>
+    <small class="sc-hint" *ngIf="allGenesMatched === 0">No gene matches.</small>
+  </ng-container>
   <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
     <ng-container *ngFor="let node of geneTree; trackBy: trackByNode">
       <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
