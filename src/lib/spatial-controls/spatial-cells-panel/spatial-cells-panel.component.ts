@@ -19,7 +19,7 @@ import { SliderModule } from 'primeng/slider';
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
-import { cellsShown } from '../../spatial/spatial-tiles';
+import { cellsShown, drawnCellSets } from '../../spatial/lod';
 import { PanelOption, densityColorBarCss, tileOptions } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-groups-panel.component';
@@ -115,10 +115,11 @@ export class SpatialCellsPanelComponent implements OnChanges {
     return cellsShown(this.dataset, this.view);
   }
 
-  /** The boundary set drawn: the view's choice, else the dataset's default, else its first. */
+  /** The boundary set drawn, or "both", as the renderer resolves the view's choice: a set this
+   *  dataset has, else its default, else its first. */
   protected get activeCellSet(): string | null {
-    const tiles = this.dataset?.polygonTiles;
-    return this.view.cellSet ?? tiles?.defaultSet ?? tiles?.sets[0]?.name ?? null;
+    const drawn = drawnCellSets(this.dataset?.polygonTiles, this.view.cellSet);
+    return drawn?.nucleusSet ? 'both' : (drawn?.set ?? null);
   }
 
   /** Fill opacity as a 0–100 number, for the box beside the slider. */
@@ -137,8 +138,8 @@ export class SpatialCellsPanelComponent implements OnChanges {
   /** Whether boundary set `name` is drawn: outlines on, and that set or both. */
   protected boundaryOn(name: string): boolean {
     if (!this.cellsOn) return false;
-    const active = this.activeCellSet;
-    return active === 'both' || active === name;
+    const drawn = drawnCellSets(this.dataset?.polygonTiles, this.view.cellSet);
+    return drawn?.set === name || drawn?.nucleusSet === name;
   }
 
   /**
