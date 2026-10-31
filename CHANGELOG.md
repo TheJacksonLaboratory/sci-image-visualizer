@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-30
+
 ### Added
 
 - **The Channels pane lists an image's channels as a tree of the groups its metadata puts them in.**
@@ -2461,7 +2463,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.0...v0.12.1
