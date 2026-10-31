@@ -3,6 +3,7 @@ import {
   POLYGON_LEVEL_MIN_CELL_PX,
   cellTypeColumnFor,
   cellsShown,
+  drawnCellSets,
   pixelsPerDataUnit,
   polygonLevelFor,
   tileId,
@@ -222,5 +223,36 @@ describe('cellsShown', () => {
   it('is off for a dataset with nothing to outline, whatever the setting', () => {
     expect(cellsShown(none, { showCells: true })).toBe(false);
     expect(cellsShown(null, { showCells: null })).toBe(false);
+  });
+});
+
+describe('drawnCellSets', () => {
+  const tiles = {
+    sets: [
+      { name: 'nuclear', label: 'Nuclear boundaries' },
+      { name: 'cell', label: 'Cell boundaries' },
+    ],
+    defaultSet: 'cell',
+  };
+
+  it('draws the chosen set when the dataset has it', () => {
+    expect(drawnCellSets(tiles, 'nuclear')).toEqual({ set: 'nuclear' });
+  });
+
+  it('falls back to the default, then the first, for no choice or a set the dataset lacks', () => {
+    expect(drawnCellSets(tiles, null)).toEqual({ set: 'cell' });
+    // A choice kept from another dataset's sets.
+    expect(drawnCellSets(tiles, 'nucleus')).toEqual({ set: 'cell' });
+    expect(drawnCellSets({ sets: tiles.sets }, 'nucleus')).toEqual({ set: 'nuclear' });
+  });
+
+  it('draws the default beside the other set for both, and the one set when there is one', () => {
+    expect(drawnCellSets(tiles, 'both')).toEqual({ set: 'cell', nucleusSet: 'nuclear' });
+    expect(drawnCellSets({ sets: [tiles.sets[1]] }, 'both')).toEqual({ set: 'cell' });
+  });
+
+  it('is null with no sets to draw', () => {
+    expect(drawnCellSets(null, 'cell')).toBeNull();
+    expect(drawnCellSets({ sets: [] }, null)).toBeNull();
   });
 });

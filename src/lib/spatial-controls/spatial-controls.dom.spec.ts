@@ -253,10 +253,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
     it('writes the boundaries, the cell colour and its gene, and a single colour', async () => {
       await build();
       const panel = panelNamed(root, 'Cells');
-      const sets = one(panel, 'p-selectButton');
-      expect(accessorOf(fixture, sets)).toBeTruthy();
-      pick(sets, 'nucleus');
-      expect(lastWrite()).toEqual({ cellSet: 'nucleus' });
+      // A switch per boundary set: the nuclei's on draws them with the cells'.
+      const nuclei = one(rowLabelled(panel, 'Nuclei'), 'p-inputSwitch');
+      expect(accessorOf(fixture, nuclei)).toBeTruthy();
+      emit(nuclei, 'onChange', { checked: true });
+      expect(lastWrite()).toEqual({ showCells: true, cellSet: 'both' });
 
       pick(one(rowLabelled(panel, 'Cell Color'), 'p-dropdown'), 'gene');
       expect(lastWrite()).toEqual({ cellColorMode: 'gene' });

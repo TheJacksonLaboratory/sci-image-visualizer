@@ -370,6 +370,72 @@ describe('VisualizerStore.adoptChannelInfo', () => {
     expect(store.currentChannelStates().map((c) => c.visible)).toEqual(before);
   });
 
+  it('takes the groups the descriptor puts the channels in, even for a channel the pane edited', () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(3), 'plate');
+    store.setChannelState(0, { color: '#ff8800' });
+    store.adoptChannelInfo([
+      { ...named[0], group: ['Cell Paint'] },
+      { ...named[1], group: ['Cell Paint'] },
+      { ...named[2], group: null },
+    ]);
+    const s = store.currentChannelStates();
+    expect(s.map((c) => c.group)).toEqual([['Cell Paint'], ['Cell Paint'], undefined]);
+    expect(s[0].color).toBe('#ff8800');
+  });
+
+  it("replaces or clears an earlier descriptor's groups, names and tints with a later one's", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(meta(2), 'plate');
+    store.adoptChannelInfo([
+      { name: 'A', color: '#ff0000', group: ['Old panel'] },
+      { name: 'B', color: '#ff0000', group: ['Old panel'] },
+    ]);
+    store.adoptChannelInfo([
+      { name: 'A2', color: '#00ff00', group: ['New panel'] },
+      { name: 'B2', color: '#00ff00', group: null },
+    ]);
+    const s = store.currentChannelStates();
+    expect(s.map((c) => c.group)).toEqual([['New panel'], undefined]);
+    expect(s.map((c) => c.name)).toEqual(['A2', 'B2']);
+    expect(s.map((c) => c.color)).toEqual(['#00ff00', '#00ff00']);
+    let info: IImageMetadata['channelInfo'];
+    store.getImageMeta().subscribe((m) => (info = m[0].channelInfo));
+    expect(info?.map((c) => c.group)).toEqual([['New panel'], null]);
+  });
+
+  it("keeps the host's own group over every descriptor's", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(
+      meta(2, [{ name: 'A', color: '#ffffff', group: ['Host'] }] as IImageMetadata['channelInfo']),
+      'img',
+    );
+    store.adoptChannelInfo([
+      { name: 'A', group: ['Old panel'] },
+      { name: 'B', group: ['Old panel'] },
+    ]);
+    store.adoptChannelInfo([
+      { name: 'A', group: ['New panel'] },
+      { name: 'B', group: ['New panel'] },
+    ]);
+    expect(store.currentChannelStates().map((c) => c.group)).toEqual([['Host'], ['New panel']]);
+  });
+
+  it("derives the groups from the host's own channel info", () => {
+    const store = new VisualizerStore();
+    store.setImageMeta(
+      meta(2, [
+        { name: 'A', color: '#ffffff', group: ['Protein IF', 'Cell Signaling'] },
+        { name: 'B', color: '#ffffff' },
+      ] as IImageMetadata['channelInfo']),
+      'img',
+    );
+    expect(store.currentChannelStates().map((c) => c.group)).toEqual([
+      ['Protein IF', 'Cell Signaling'],
+      undefined,
+    ]);
+  });
+
   it('ignores a descriptor of another channel count, and an RGB image', () => {
     const store = new VisualizerStore();
     store.setImageMeta(meta(2), 'two');

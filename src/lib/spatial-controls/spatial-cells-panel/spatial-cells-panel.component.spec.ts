@@ -62,6 +62,88 @@ describe('SpatialCellsPanelComponent', () => {
     expect(component['cellSetOptions']).toBe(component['cellSetOptions']);
   });
 
+  it('switches each of two boundary sets on or off, both, either or neither', async () => {
+    await build({
+      ...TILED_DATASET,
+      polygonTiles: {
+        ...TILED_DATASET.polygonTiles!,
+        sets: [
+          { name: 'nuclear', label: 'Nuclear boundaries' },
+          { name: 'cell', label: 'Cell boundaries' },
+        ],
+        defaultSet: 'cell',
+      },
+    });
+    fixture.detectChanges();
+    expect(component['boundarySets'].map((s) => s.label)).toEqual(['Cell boundaries', 'Nuclear boundaries']);
+    expect(root.querySelectorAll('p-inputSwitch')).toHaveLength(2);
+    // Only the drawing's choice (fill, outline or both) is a select button.
+    expect(root.querySelectorAll('p-selectButton')).toHaveLength(1);
+    // The cells' outlines by default, alone.
+    expect(component['boundaryOn']('cell')).toBe(true);
+    expect(component['boundaryOn']('nuclear')).toBe(false);
+
+    component['onBoundary']('nuclear', true);
+    expect(fake.view$.value).toEqual(expect.objectContaining({ showCells: true, cellSet: 'both' }));
+    expect(component['boundaryOn']('cell')).toBe(true);
+    expect(component['boundaryOn']('nuclear')).toBe(true);
+
+    component['onBoundary']('cell', false);
+    expect(fake.view$.value.cellSet).toBe('nuclear');
+    expect(component['boundaryOn']('cell')).toBe(false);
+
+    component['onBoundary']('nuclear', false);
+    expect(fake.view$.value.showCells).toBe(false);
+    expect(component['boundaryOn']('nuclear')).toBe(false);
+
+    component['onBoundary']('cell', true);
+    expect(fake.view$.value).toEqual(expect.objectContaining({ showCells: true, cellSet: 'cell' }));
+  });
+
+  it("shows the set drawn when the view's set is another dataset's", async () => {
+    // Kept from a dataset whose sets were cell and nucleus; this one has nuclear instead.
+    fake.view$.next({ ...fake.view$.value, showCells: true, cellSet: 'nucleus' });
+    await build({
+      ...TILED_DATASET,
+      polygonTiles: {
+        ...TILED_DATASET.polygonTiles!,
+        sets: [
+          { name: 'cell', label: 'Cell boundaries' },
+          { name: 'nuclear', label: 'Nuclear boundaries' },
+        ],
+        defaultSet: 'cell',
+      },
+    });
+    // What the renderer draws: the dataset's default.
+    expect(component['activeCellSet']).toBe('cell');
+    expect(component['boundaryOn']('cell')).toBe(true);
+    expect(component['boundaryOn']('nuclear')).toBe(false);
+
+    component['onBoundary']('nuclear', true);
+    expect(fake.view$.value.cellSet).toBe('both');
+    component['onBoundary']('nuclear', false);
+    expect(fake.view$.value).toEqual(expect.objectContaining({ showCells: true, cellSet: 'cell' }));
+    component['onBoundary']('cell', false);
+    expect(fake.view$.value.showCells).toBe(false);
+  });
+
+  it('keeps the one-of choice for more than two boundary sets', async () => {
+    await build({
+      ...TILED_DATASET,
+      polygonTiles: {
+        ...TILED_DATASET.polygonTiles!,
+        sets: [
+          { name: 'cell', label: 'Cell boundaries' },
+          { name: 'nucleus', label: 'Nucleus boundaries' },
+          { name: 'membrane', label: 'Membrane boundaries' },
+        ],
+      },
+    });
+    fixture.detectChanges();
+    expect(root.querySelectorAll('p-inputSwitch')).toHaveLength(0);
+    expect(root.querySelectorAll('p-selectButton')).toHaveLength(2);
+  });
+
   it('patches the display settings', async () => {
     await build();
     component['onShowCells'](true);

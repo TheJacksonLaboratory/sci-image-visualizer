@@ -20,6 +20,7 @@ import type {
   SpatialBounds,
   SpatialDataset,
   SpatialImageRef,
+  SpatialPolygonTilesMeta,
   SpatialTileLevel,
 } from '../contracts/spatial-dataset.contract';
 import type { SpatialViewState } from '../contracts/display-types';
@@ -49,6 +50,27 @@ export function cellsShown(
 ): boolean {
   const available = !!(dataset?.polygonTiles || dataset?.polygons);
   return available && (view.showCells ?? true);
+}
+
+/**
+ * The boundary sets drawn for the view's `cellSet`: that set when the dataset has it, else the
+ * dataset's default, else its first; for "both", that one with the other set beside it. Null when
+ * the dataset has no set. The renderer and the Cells panel's switches both read it, so a set kept
+ * from another dataset shows as what is actually drawn.
+ */
+export function drawnCellSets(
+  tiled: Pick<SpatialPolygonTilesMeta, 'sets' | 'defaultSet'> | null | undefined,
+  cellSet: string | null | undefined,
+): { set: string; nucleusSet?: string } | null {
+  if (!tiled) return null;
+  const both = cellSet === 'both';
+  const set =
+    !both && cellSet && tiled.sets.some((s) => s.name === cellSet)
+      ? cellSet
+      : (tiled.defaultSet ?? tiled.sets[0]?.name);
+  if (!set) return null;
+  const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
+  return nucleusSet ? { set, nucleusSet } : { set };
 }
 
 /** A column holding a hand-curated cell-type annotation, by naming convention. */

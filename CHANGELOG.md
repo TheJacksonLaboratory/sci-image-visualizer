@@ -9,6 +9,23 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **The Channels pane lists an image's channels as a tree of the groups its metadata puts them in.**
+  A Cytos plate's 22 channels show under Cell Paint (with its backgrounds) and Protein IF, the
+  proteins by panel (Expanded Morphology, Alternative Morphology, Cell Signaling), as CytoCanvas
+  lists them. A group shows how many channels it holds, folds open or shut, and its checkbox shows
+  or hides all of them; a channel is selected and edited as before. `IChannelInfo.group` (and
+  `IChannelState.group`) is a channel's group path, outermost first, from the descriptor
+  (jit-service's `/tiles/info` reads it from the OME-TIFF's channel annotations); an image whose
+  channels have none is the flat list it was.
+
+### Changed
+
+- **Two boundary sets are two switches in the Cells section**, as CytoCanvas's "Cell Boundaries"
+  and "Nuclear Boundaries": either, both or neither drawn (`cellSet` and `showCells`, as the
+  one-of choice set them). A dataset of more than two sets keeps the one-of choice.
+
 ## [0.14.0] — 2026-10-30
 
 ### Added

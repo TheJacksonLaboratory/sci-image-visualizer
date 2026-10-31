@@ -53,6 +53,10 @@ export class VisualizerStore {
   private defaultChannelStates: IChannelState[] = [];
   /** The image the current channel states were derived for (see setImageMeta). */
   private channelImageKey: string | undefined;
+  /** The channel info the host gave with the image (see setImageMeta), apart from what a tile
+   *  descriptor added since: each adoption merges against this, so a later descriptor can change
+   *  or clear what an earlier one put in. */
+  private hostChannelInfo: IChannelInfo[] = [];
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -205,19 +209,23 @@ export class VisualizerStore {
    * "Actin" or "Cell-Membrane"), where a host's metadata (jit-ui's `/metadata`) carries none, so
    * the Channels pane showed "Channel 1", "Channel 2"… The host's own names and tints win; only a
    * channel still showing its derived default takes the descriptor's, so an edit made in the pane
-   * stays. A no-op when the channel counts differ, or for RGB.
+   * stays. A no-op when the channel counts differ, or for RGB. Each adoption replaces the last
+   * one's names, tints and groups: only the host's own count as overrides.
    */
-  adoptChannelInfo(info: ReadonlyArray<{ name?: string; color?: string }> | null | undefined): void {
+  adoptChannelInfo(
+    info: ReadonlyArray<{ name?: string; color?: string; group?: string[] | null }> | null | undefined,
+  ): void {
     const meta = this.imageMeta$.value;
     const m0 = meta?.[0];
     const current = this.channelStates$.value;
     if (!info?.length || !m0 || (m0.rgbChannels ?? 1) >= 3) return;
     if ((m0.channelCount ?? 1) !== info.length || current.length !== info.length) return;
-    const host = m0.channelInfo ?? [];
+    const host = this.hostChannelInfo;
     const merged: IChannelInfo[] = info.map((d, i) => ({
       ...(host[i] ?? {}),
       name: host[i]?.name || d.name || '',
       color: host[i]?.color || d.color || '',
+      group: host[i]?.group?.length ? host[i].group : d.group,
     }));
     const before = this.defaultChannelStates;
     const nextMeta = meta.map((e, k) => (k === 0 ? { ...e, channelInfo: merged } : e));
@@ -232,6 +240,8 @@ export class VisualizerStore {
       const patch: Partial<IChannelState> = {};
       if (st.name === was.name && now.name !== was.name) patch.name = now.name;
       if (st.color === was.color && now.color !== was.color) patch.color = now.color;
+      // The groups are the image's, never edited in the pane.
+      if (!sameGroup(st.group, now.group)) patch.group = now.group;
       if (!Object.keys(patch).length) return st;
       changed = true;
       return { ...st, ...patch };
@@ -249,6 +259,7 @@ export class VisualizerStore {
    * CD3/CD8/PanCK one. Without a key, only a change of channel count re-derives.
    */
   setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
+    this.hostChannelInfo = imageMeta?.[0]?.channelInfo ?? [];
     this.imageMeta$.next(imageMeta);
     const next = this.deriveChannels(imageMeta);
     // Always refresh the reset baseline to the current image's derived defaults
@@ -289,6 +300,7 @@ export class VisualizerStore {
         color: info?.[i]?.color || palette[i % palette.length],
         ...base,
         visible: defaultChannelVisible(i, count, info?.[i]?.visible),
+        ...(info?.[i]?.group?.length ? { group: [...(info[i].group as string[])] } : {}),
       }));
     }
     return [{ index: 0, name: 'Intensity', color: '#ffffff', ...base }];
@@ -444,4 +456,11 @@ export class VisualizerStore {
   setActiveTool(tool: string | null): void {
     this.activeTool$.next(tool);
   }
+}
+
+/** Whether two group paths are the same (absent and empty alike). */
+function sameGroup(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((v, i) => v === y[i]);
 }

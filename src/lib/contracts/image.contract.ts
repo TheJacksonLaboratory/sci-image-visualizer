@@ -25,6 +25,12 @@ export interface IChannelInfo {
   maxAllowed?: number;
   /** Whether the channel starts visible; else the first `DEFAULT_VISIBLE_CHANNELS` do. */
   visible?: boolean;
+  /**
+   * The groups the channel is in, outermost first, as the image's metadata describes them (an
+   * instrument panel's kind of target, then the panel: `['Protein IF', 'Cell Signaling']`); the
+   * Channels pane lists the channels as a tree of them. Absent or empty for a channel in none.
+   */
+  group?: string[] | null;
 }
 
 /** Per-series image metadata (physical size + dimensions). */

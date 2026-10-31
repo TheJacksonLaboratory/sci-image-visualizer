@@ -13,11 +13,12 @@
   <div class="ch-body">
     <!-- Channels -->
     <p-table
-      [value]="channels"
+      [value]="rows"
       selectionMode="single"
-      [(selection)]="selected"
-      dataKey="index"
-      (onRowSelect)="selectChannel($event.data)"
+      [selection]="selectedRow"
+      dataKey="key"
+      (onRowSelect)="onRowSelect($event.data)"
+      [rowTrackBy]="trackRow"
       styleClass="ch-table p-datatable-sm"
     >
       <ng-template pTemplate="header">
@@ -27,21 +28,46 @@
           <th style="width: 3.5rem; text-align: center">Show</th>
         </tr>
       </ng-template>
-      <ng-template pTemplate="body" let-ch>
-        <tr [pSelectableRow]="ch">
-          <td>
-            <hex-color-picker
-              *ngIf="multichannel"
-              [color]="ch.color"
-              (colorChange)="onColorChange(ch, $event)"
-            ></hex-color-picker>
+      <ng-template pTemplate="body" let-row>
+        <!-- A group: folds open or shut, and shows or hides all its channels. -->
+        <tr *ngIf="row.kind === 'group'" class="ch-group-row">
+          <td colspan="2">
+            <button
+              type="button"
+              class="ch-group-toggle"
+              [style.padding-left.rem]="row.depth"
+              [attr.aria-expanded]="row.expanded"
+              (click)="toggleGroup(row)"
+            >
+              <i class="pi" [ngClass]="row.expanded ? 'pi-chevron-down' : 'pi-chevron-right'"></i>
+              <span class="ch-group-label">{{ row.label }}</span>
+              <span class="ch-group-count">({{ row.channels.length }})</span>
+            </button>
           </td>
-          <td>{{ ch.name }}</td>
           <td style="text-align: center">
             <p-checkbox
               [binary]="true"
-              [ngModel]="ch.visible"
-              (onChange)="onVisibleToggle(ch, $event.checked)"
+              [ngModel]="row.shown === row.channels.length"
+              [pTooltip]="row.shown + ' of ' + row.channels.length + ' shown'"
+              tooltipPosition="left"
+              (onChange)="onGroupVisibleToggle(row, $event.checked)"
+            ></p-checkbox>
+          </td>
+        </tr>
+        <tr *ngIf="row.kind === 'channel'" [pSelectableRow]="row">
+          <td>
+            <hex-color-picker
+              *ngIf="multichannel"
+              [color]="row.channel.color"
+              (colorChange)="onColorChange(row.channel, $event)"
+            ></hex-color-picker>
+          </td>
+          <td [style.padding-left.rem]="0.5 + row.depth">{{ row.channel.name }}</td>
+          <td style="text-align: center">
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="row.channel.visible"
+              (onChange)="onVisibleToggle(row.channel, $event.checked)"
             ></p-checkbox>
           </td>
         </tr>

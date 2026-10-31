@@ -25,6 +25,7 @@ import {
   POLYGON_LEVEL_MIN_CELL_PX,
   cellTypeColumnFor,
   cellsShown,
+  drawnCellSets,
   polygonLevelFor,
   tileId,
   tilesInRect,
@@ -299,13 +300,9 @@ export class CellLayers {
     let nuclei: SpatialPolygonTile | null = null;
     let geometryKey: string;
     if (tiled) {
-      const both = view.cellSet === 'both';
-      const set =
-        !both && view.cellSet && tiled.sets.some((s) => s.name === view.cellSet)
-          ? view.cellSet
-          : (tiled.defaultSet ?? tiled.sets[0]?.name);
-      if (!set) return null;
-      const nucleusSet = both ? tiled.sets.find((s) => s.name !== set)?.name : undefined;
+      const drawn = drawnCellSets(tiled, view.cellSet);
+      if (!drawn) return null;
+      const { set, nucleusSet } = drawn;
       const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
       geometryKey = `${dataset.id}|${set}|${nucleusSet ?? ''}|${hiddenKey}|${keys.map(tileId).join(',')}`;
       if (geometryKey === this.cellGeometryKey && this.currentRings) {
