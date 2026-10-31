@@ -53,6 +53,10 @@ export class VisualizerStore {
   private defaultChannelStates: IChannelState[] = [];
   /** The image the current channel states were derived for (see setImageMeta). */
   private channelImageKey: string | undefined;
+  /** The channel info the host gave with the image (see setImageMeta), apart from what a tile
+   *  descriptor added since: each adoption merges against this, so a later descriptor can change
+   *  or clear what an earlier one put in. */
+  private hostChannelInfo: IChannelInfo[] = [];
   // Grayscale display (ignore the channel tints) and inverted background — both
   // global display flags, like the colormap.
   private readonly grayscale$ = new BehaviorSubject<boolean>(false);
@@ -205,7 +209,8 @@ export class VisualizerStore {
    * "Actin" or "Cell-Membrane"), where a host's metadata (jit-ui's `/metadata`) carries none, so
    * the Channels pane showed "Channel 1", "Channel 2"… The host's own names and tints win; only a
    * channel still showing its derived default takes the descriptor's, so an edit made in the pane
-   * stays. A no-op when the channel counts differ, or for RGB.
+   * stays. A no-op when the channel counts differ, or for RGB. Each adoption replaces the last
+   * one's names, tints and groups: only the host's own count as overrides.
    */
   adoptChannelInfo(
     info: ReadonlyArray<{ name?: string; color?: string; group?: string[] | null }> | null | undefined,
@@ -215,7 +220,7 @@ export class VisualizerStore {
     const current = this.channelStates$.value;
     if (!info?.length || !m0 || (m0.rgbChannels ?? 1) >= 3) return;
     if ((m0.channelCount ?? 1) !== info.length || current.length !== info.length) return;
-    const host = m0.channelInfo ?? [];
+    const host = this.hostChannelInfo;
     const merged: IChannelInfo[] = info.map((d, i) => ({
       ...(host[i] ?? {}),
       name: host[i]?.name || d.name || '',
@@ -254,6 +259,7 @@ export class VisualizerStore {
    * CD3/CD8/PanCK one. Without a key, only a change of channel count re-derives.
    */
   setImageMeta(imageMeta: IImageMetadata[], imageKey?: string): void {
+    this.hostChannelInfo = imageMeta?.[0]?.channelInfo ?? [];
     this.imageMeta$.next(imageMeta);
     const next = this.deriveChannels(imageMeta);
     // Always refresh the reset baseline to the current image's derived defaults
