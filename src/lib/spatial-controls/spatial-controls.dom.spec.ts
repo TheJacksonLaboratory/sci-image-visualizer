@@ -346,19 +346,19 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ transcriptGenes: ['Ttr', 'Mbp'] });
       await settle();
 
-      // The tree: one row per gene, each with its own eye.
+      // The tree: one row per gene, by name, each with its own eye.
       let tree = one(panelNamed(root, 'Transcripts'), '.sc-gene-tree');
       const leaves = tree.querySelectorAll('.sc-gene-leaf');
       expect(Array.from(leaves).map((l) => l.querySelector('.sc-group-label')?.textContent)).toEqual([
-        'Ttr',
         'Mbp',
+        'Ttr',
       ]);
       // The renderer's per-gene count in view, and 0 for a gene it reported none of.
       expect(Array.from(leaves).map((l) => l.querySelector('.sc-gene-count')?.textContent?.trim())).toEqual([
-        '12',
         '0',
+        '12',
       ]);
-      click(one(leaves[0] as HTMLElement, '.sc-eye'));
+      click(one(leaves[1] as HTMLElement, '.sc-eye'));
       expect(lastWrite()).toEqual({ transcriptHiddenGenes: ['Ttr'] });
       await settle();
       tree = one(panelNamed(root, 'Transcripts'), '.sc-gene-tree');

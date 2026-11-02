@@ -9,6 +9,16 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **The Transcripts panel's gene lists sort by name or by count.** A "Sort by Name | Count" switch
+  over the gene tree orders the selected genes (within each gene group) and the "All genes" list
+  by their transcripts in view, most first, ties by name; by name otherwise. The "All genes" list
+  is sorted before it is cut to its first 200 rows, so by count those are the most abundant genes
+  in view. The switch shows while the renderer reports counts (zoomed in to individual
+  transcripts); the counts, and the order, follow the view. The selected genes now list by name
+  rather than in the order they were picked; the selection itself keeps its order.
+
 ## [0.15.0] — 2026-10-30
 
 ### Added

@@ -1,4 +1,26 @@
 <div class="sc-subhead">Selected genes</div>
+<div class="sc-gene-sort" *ngIf="sortShown" role="group" aria-label="Sort genes">
+  <span class="sc-lbl">Sort by</span>
+  <button
+    type="button"
+    class="sc-sort-btn"
+    [class.active]="!byCount"
+    [attr.aria-pressed]="!byCount"
+    (click)="onGeneSort('name')"
+  >
+    Name
+  </button>
+  <button
+    type="button"
+    class="sc-sort-btn"
+    [class.active]="byCount"
+    [attr.aria-pressed]="byCount"
+    title="Transcripts in view, most first"
+    (click)="onGeneSort('count')"
+  >
+    Count
+  </button>
+</div>
 <div class="sc-gene-tree">
   <div class="sc-gene-row sc-gene-root">
     <button
@@ -74,7 +96,7 @@
     <small class="sc-hint" *ngIf="allGenesMatched === 0">No gene matches.</small>
   </ng-container>
   <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
-    <ng-container *ngFor="let node of geneTree; trackBy: trackByNode">
+    <ng-container *ngFor="let node of sortedTree; trackBy: trackByNode">
       <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
         <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !groupShown.get(node.name))">
           <i

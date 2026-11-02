@@ -304,6 +304,69 @@ describe('SpatialGeneTreeComponent', () => {
     for (const o of GLYPH_OPTIONS) expect(component['glyphPoints'](o.value)).toBe(o.points);
   });
 
+  it('orders the selected genes by name, or by their transcripts in view once there are counts', async () => {
+    await build();
+    fake.controls.setViewState({
+      transcriptGenes: ['MUC5AC', 'DMBT1', 'KRT5', 'CD3E'],
+      transcriptGeneGroups: [{ name: 'Endocervical', genes: ['DMBT1', 'MUC5AC'] }],
+    });
+    fixture.detectChanges();
+    const labels = () =>
+      Array.from(root.querySelectorAll('.sc-gene-leaf .sc-group-label')).map((l) => l.textContent!.trim());
+    // By name, within each group; no switch before the renderer reports counts.
+    expect(labels()).toEqual(['DMBT1', 'MUC5AC', 'CD3E', 'KRT5']);
+    expect(root.querySelector('.sc-gene-sort')).toBeNull();
+    // The selection itself keeps its order: only the rows are sorted.
+    expect(fake.view$.value.transcriptGenes).toEqual(['MUC5AC', 'DMBT1', 'KRT5', 'CD3E']);
+
+    fixture.componentRef.setInput('geneCounts', { MUC5AC: 40, DMBT1: 3, KRT5: 7 });
+    fixture.detectChanges();
+    const [byName, byCount] = Array.from(root.querySelectorAll('.sc-gene-sort .sc-sort-btn')) as HTMLElement[];
+    expect(byName.classList.contains('active')).toBe(true);
+    byCount.click();
+    fixture.detectChanges();
+    // Most first within each group; a gene with none last.
+    expect(labels()).toEqual(['MUC5AC', 'DMBT1', 'KRT5', 'CD3E']);
+    expect(byCount.getAttribute('aria-pressed')).toBe('true');
+    // The counts move with the view, and the order with them.
+    fixture.componentRef.setInput('geneCounts', { MUC5AC: 1, DMBT1: 3, CD3E: 9 });
+    fixture.detectChanges();
+    expect(labels()).toEqual(['DMBT1', 'MUC5AC', 'CD3E', 'KRT5']);
+    byName.click();
+    fixture.detectChanges();
+    expect(labels()).toEqual(['DMBT1', 'MUC5AC', 'CD3E', 'KRT5']);
+    expect(component['geneSort']).toBe('name');
+  });
+
+  it('orders every gene of "All genes" by count before showing its first rows', async () => {
+    const genes = Array.from({ length: 450 }, (_v, i) => `G${i}`);
+    fake.dataset$.next({
+      ...TILED_DATASET,
+      transcriptTiles: { ...TILED_DATASET.transcriptTiles!, genes },
+    } as SpatialDataset);
+    // The most transcripts in view are in the genes past the first 200 rows.
+    const counts: Record<string, number> = { G449: 500, G300: 80, G7: 80, G2: 1 };
+    await build({ geneCounts: counts });
+    setView({ transcriptAllGenes: true });
+    (root.querySelector('.sc-gene-root .sc-icon-btn') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(component['allRows'].slice(0, 3).map((r) => r.gene)).toEqual(['G0', 'G1', 'G2']);
+    component['onGeneSort']('count');
+    const rows = component['allRows'];
+    expect(rows.length).toBe(200);
+    expect(component['allGenesMatched']).toBe(450);
+    // Ties by name, then the genes with none by name.
+    expect(rows.slice(0, 5).map((r) => [r.gene, r.count])).toEqual([
+      ['G449', 500],
+      ['G7', 80],
+      ['G300', 80],
+      ['G2', 1],
+      ['G0', 0],
+    ]);
+    // A gene keeps its colour by code whatever its row.
+    expect(rows[0].swatch).toBe(DEFAULT_CATEGORICAL_PALETTE[449 % DEFAULT_CATEGORICAL_PALETTE.length]);
+  });
+
   it("shows the renderer's per-gene counts in view, 0 for a gene with none", async () => {
     const counts$ = new BehaviorSubject<Record<string, number> | null>(null);
     await build({ geneCounts: counts$ });
