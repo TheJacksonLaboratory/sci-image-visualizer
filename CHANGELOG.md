@@ -31,7 +31,7 @@ file was added.
 
 ### Requires
 
-- napari-js with `Points3DLayer.scale3d` (napari-js PR 15).
+- napari-js with `Points3DLayer.scale3d` (napari-js PR 16).
 
 ## [0.15.0] — 2026-10-30
 
