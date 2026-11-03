@@ -24,6 +24,7 @@ import {
   hiddenAllGeneCodes,
   hiddenGeneSlots,
   median,
+  transcriptsInBand,
 } from '../../../spatial/spatial-tile-merge';
 import { geneFilterKey, hasGeneFilter } from '../../../spatial/spatial-gene-filter';
 import type { CategoricalLookup } from './categorical-lookup';
@@ -72,9 +73,11 @@ function transcriptPlanKey(
   view: SpatialViewState,
   job: TranscriptJob,
   pxPerUnit: number,
+  zBand: readonly [number, number] | null,
 ): string {
   return [
     dataset.id,
+    zBand ? zBand.join(',') : '',
     view.transcriptMode,
     job.key,
     view.transcriptColorBy,
@@ -164,13 +167,18 @@ export class TranscriptLayers {
     this.countSource = null;
   }
 
-  /** Draw the view's transcript markers (or drop them); an unchanged plan key is a no-op. */
+  /**
+   * Draw the view's transcript markers (or drop them); an unchanged plan key is a no-op. With a
+   * `zBand`, the view shows one plane of a 3D assay: only the transcripts at that depth are drawn
+   * (summed density grids and aggregates, which mix depths, stay whole).
+   */
   async plan(
     dataset: SpatialDataset,
     view: SpatialViewState,
     rect: DataRect,
     pxPerUnit: number,
     ctx: PlanContext,
+    zBand: readonly [number, number] | null = null,
   ): Promise<void> {
     const mode = view.transcriptMode;
     const job = this.jobs.jobFor(dataset, view, rect, pxPerUnit);
@@ -180,7 +188,7 @@ export class TranscriptLayers {
       this.countSource = null;
       return;
     }
-    const planKey = transcriptPlanKey(dataset, view, job, pxPerUnit);
+    const planKey = transcriptPlanKey(dataset, view, job, pxPerUnit, zBand);
     if (planKey === this.groups.key('transcripts') && this.groups.shown('transcripts')) {
       return;
     }
@@ -222,7 +230,8 @@ export class TranscriptLayers {
               ? hiddenAllGeneCodes(view, allGeneNames)
               : null,
         );
-    let { merged, px } = filtered;
+    let { merged, px } =
+      loaded.clustered || !zBand ? filtered : transcriptsInBand(filtered.merged, filtered.px, zBand);
     let selectionBin: number | null = loaded.clustered?.bin ?? null;
     let entryGroup: Int32Array | null = loaded.clustered?.group ?? null;
     let groupNames: string[] | null = loaded.clustered?.names ?? null;

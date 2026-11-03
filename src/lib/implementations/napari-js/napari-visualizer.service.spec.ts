@@ -3877,6 +3877,27 @@ describe('NapariVisualizerService', () => {
         expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
         expect(layer.scale).toEqual([2, 2]);
       });
+
+      it("draws the region set's plane shown over a real imageRef, as the slider moves", async () => {
+        const ds = { ...sliced(), imageRef: { imageId: 'tissue', scale: [2, 2] } } as SpatialDataset;
+        // The planes are the region set's (its sliceZ); the image keeps its one slice.
+        service.setRegionPlanes([0, 450, 900]);
+        service.setRegionPlane(1);
+        let layer = await mountAt(ds, 0);
+        expect(Array.from(layer.positions)).toEqual([10, 20]);
+        expect(layer.scale).toEqual([2, 2]);
+
+        service.setRegionPlane(2);
+        await flush();
+        layer = addPoints.mock.results.at(-1)?.value;
+        expect(Array.from(layer.positions)).toEqual([20, 40]);
+
+        // No planes: every observation again.
+        service.setRegionPlanes(null);
+        await flush();
+        layer = addPoints.mock.results.at(-1)?.value;
+        expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
+      });
     });
 
     describe('gene map', () => {

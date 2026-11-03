@@ -16,6 +16,7 @@ import { VisualizerStore } from '../store/visualizer-store.service';
 import { categoryColorsFor } from './spatial-encoding';
 import { sectionsOf } from './spatial-sections';
 import { observationsInSlice, volumeImageRef } from './spatial-volume-image';
+import { observationsOnPlane } from './spatial-planes';
 import {
   emptySelection,
   selectByCategory,
@@ -50,6 +51,11 @@ export interface SpatialControlsContext {
   plotType(): PlotType;
   /** The displayed slice (a volume-backed dataset selects within one section). */
   zIndex(): number;
+  /**
+   * The dataset region set's planes while they slice an image of one plane (see the router's
+   * `getDatasetPlanes$`): the slice is then one of them, and a region selects within it. Optional.
+   */
+  planes?(): readonly number[] | null;
 }
 
 /**
@@ -270,12 +276,18 @@ export class SpatialControlsFacade {
         } else {
           // In the 2D view of a volume-backed dataset the shape was drawn over ONE
           // section, in the volume's pixel grid: it selects the cells of that
-          // section, not the whole depth of brain standing behind them.
+          // section, not the whole depth of brain standing behind them. Likewise over
+          // one of a region set's planes: the cells nearest it.
+          const planes = !volume ? this.ctx.planes?.() : null;
           selection = selectInRegions(
             dataset.observations,
             volume ? volumeImageRef(volume, dataset.micronsPerUnit) : dataset.imageRef,
             this.ctx.regionStore.getRegions(),
-            volume ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex()) : undefined,
+            volume
+              ? observationsInSlice(dataset.observations, volume, this.ctx.zIndex())
+              : planes
+                ? observationsOnPlane(dataset.observations, planes, this.ctx.zIndex())
+                : undefined,
           );
         }
         this.ctx.selectionStore.set(selection);

@@ -142,6 +142,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;
     shown3d: boolean;
   } | null = null;
+  /** The dataset region set's planes while they slice the plotted image (see getDatasetPlanes$). */
+  private readonly datasetPlanes$ = new BehaviorSubject<readonly number[] | null>(null);
   /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
   private shown3d: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }> = [];
   /**
@@ -323,6 +325,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // A stack can open away from slice 0 (`initialZIndex` — a volume opens
     // mid-specimen), and that arrives here rather than through setZIndex.
     this.currentZIndex = zIndex;
+    zIndex = this.imageSlice(zIndex, imageInfo);
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
@@ -385,6 +388,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (this.datasetRegionSet && this.datasetRegionSet.image !== this.importImageKey()) {
       this.datasetRegionSet = null;
       this.napari.setRegionPlanes(null);
+      this.datasetPlanes$.next(null);
       this.updateVolumeView(plotType);
     }
     this.plotDiv = plotDiv;
@@ -542,11 +546,31 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   setZIndex(zIndex: number): void {
     this.currentZIndex = zIndex;
-    this.renderer().setZIndex(zIndex);
+    const slice = this.imageSlice(zIndex);
+    this.renderer().setZIndex(slice);
+    if (this.datasetRegionSet?.planes) this.napari.setRegionPlane(zIndex);
     if (this.sliceMounted) {
-      this.osd.setZIndex(zIndex);
+      this.osd.setZIndex(slice);
       this.sections.schedule();
     }
+  }
+
+  /**
+   * The image's own slice for slider position `z`: 0 while the dataset region set's planes slice an
+   * image of one plane (the slider then picks the plane, see getDatasetPlanes$), else `z`.
+   */
+  private imageSlice(z: number, info: IImageInfo | null | undefined = this.plottedInfo): number {
+    return this.datasetRegionSet?.planes && !info?.isStack ? 0 : z;
+  }
+
+  /**
+   * The planes of the spatial dataset's region set (its `sliceZ`, in observation units) while they
+   * slice the plotted image, an image of one plane; null otherwise. The host's slice slider then
+   * runs over them: each position shows that plane's regions and, in the 2D spatial view, the
+   * observations and transcripts nearest it, over the same image.
+   */
+  getDatasetPlanes$(): Observable<readonly number[] | null> {
+    return this.datasetPlanes$.asObservable();
   }
   getTrueImageSize(): { width: number; height: number } | null {
     return this.renderer().getTrueImageSize();
@@ -901,10 +925,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       first = null;
       return source ? Promise.resolve(source) : open();
     };
-    this.regionStore.attachRegionSource(reuse, 'planes');
     const planes = info.sliceZ?.length && info.sliceZ.length === info.planes.length ? info.sliceZ : null;
+    // Sliced by its planes, the image's regions are held per plane, as a stack's per slice: the
+    // set's own (each plane's outlines) and those drawn, on the plane they were drawn on. The ones
+    // drawn before go to the plane shown.
+    if (planes && planes.length > 1 && !this.plottedInfo?.isStack && !this.regionStore.isStackMode()) {
+      const z = this.currentZIndex < planes.length ? this.currentZIndex : 0;
+      this.regionStore.enterStackMode(new Map([[z, this.regionStore.getRegions()]]), z, 'combined');
+    }
+    this.regionStore.attachRegionSource(reuse, 'planes');
     this.datasetRegionSet = { ...claim, planes, groups: regionSetGroups(info) };
     this.napari.setRegionPlanes(planes);
+    if (planes) this.napari.setRegionPlane(this.currentZIndex);
+    this.datasetPlanes$.next(planes && planes.length > 1 && !this.plottedInfo?.isStack ? planes : null);
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
     return true;
@@ -1426,6 +1459,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       napari: this.napari,
       plotType: () => this.currentPlotType,
       zIndex: () => this.currentZIndex,
+      planes: () => (this.plottedInfo?.isStack ? null : (this.datasetRegionSet?.planes ?? null)),
     });
     return this.spatialFacade.controls;
   }

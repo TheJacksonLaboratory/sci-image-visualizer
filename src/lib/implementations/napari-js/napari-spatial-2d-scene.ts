@@ -21,6 +21,7 @@ import {
 import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
+import { observationsOnPlane, planeBand } from '../../spatial/spatial-planes';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { observationGeneMask, observationGeneStyle } from '../../spatial/spatial-gene-filter';
 import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
@@ -46,12 +47,20 @@ import {
 import { SpatialSceneBase, SpatialSession, SpatialTileOwner } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
-/** The plane a volume-backed dataset is showing (see {@link Spatial2dScene.slab}). */
+/** The plane a volume-backed dataset is showing, or one of its region set's planes (see slabAt). */
 interface Slab {
   ref: SpatialImageRef;
   indices: Uint32Array;
   slice: number;
   minDiameter: number;
+  /** The pixel grid the plane is drawn in, when not the image's (the volume's). */
+  grid: { width: number; height: number } | null;
+}
+
+/** A region set's planes and the one shown (see {@link Spatial2dScene.setRegionPlane}). */
+interface PlaneView {
+  planes: readonly number[];
+  plane: number;
 }
 
 /**
@@ -83,6 +92,15 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
    *  SPATIAL-19): a new field key supersedes — and aborts — it; a rebuild that leaves the key
    *  alone lets it finish. */
   private readonly geneMapLoads = new Supersede();
+  /**
+   * The planes of the dataset's region set (its `sliceZ`), set while they slice an image of one
+   * plane, and which of them the slider shows: the observations and transcripts drawn are that
+   * plane's, as a stack's slice shows its own.
+   */
+  private planes: readonly number[] | null = null;
+  private plane = 0;
+  /** Mounted: its markers are in the scene and follow the plane (set before then, it is kept). */
+  private mounted = false;
 
   /** `noImage`: an image-less dataset opened before any image — the observations alone. */
   constructor(ctx: SceneContext, session: SpatialSession, noImage = false) {
@@ -112,12 +130,42 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     if (ctx.signal.aborted) return;
     this.hover.install(ctx.host);
     this.session.claimTiles(this)?.attach(ctx.viewer);
+    this.session.tiles?.setZBand(this.zBand());
     this.subscribeSpatial();
+    this.mounted = true;
     ctx.tools.scheduleReadback();
   }
 
   setZ(z: number): void {
     this.image.setZ(z);
+  }
+
+  setRegionPlanes(z: readonly number[] | null): void {
+    this.planes = z?.length ? z : null;
+    this.planeChanged();
+  }
+
+  setRegionPlane(k: number): void {
+    if (k === this.plane) return;
+    this.plane = k;
+    this.planeChanged();
+  }
+
+  /** The planes and the one shown, while planes slice the image. */
+  private planeView(): PlaneView | null {
+    return this.planes ? { planes: this.planes, plane: this.plane } : null;
+  }
+
+  /** The z band of the plane shown, or null (every depth). */
+  private zBand(): [number, number] | null {
+    return this.planes ? planeBand(this.planes, this.plane) : null;
+  }
+
+  /** Another plane (or none): its observations and transcripts are drawn. */
+  private planeChanged(): void {
+    if (!this.mounted || this.ctx.signal.aborted) return;
+    this.session.tiles?.setZBand(this.zBand());
+    this.redrawMarkers();
   }
 
   histogram(channel: number, bins: number): IHistogram | null {
@@ -133,8 +181,10 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   }
 
   dispose(): void {
+    this.mounted = false;
     this.disposeSpatial();
     this.geneMapLoads.cancel();
+    this.session.tiles?.setZBand(null);
     this.session.releaseTiles(this);
     this.image.dispose();
   }
@@ -256,7 +306,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // pixel grid. Without the filter the specimen's whole depth piles onto one
     // section and reads as a smear; without the affine the coordinates are read
     // as pixels and land off the slice entirely.
-    const slab = slabAt(dataset, this.ctx.z());
+    const slab = slabAt(dataset, this.ctx.z(), this.planeView());
     // The gene map goes UNDER the cells, so it is settled before they are added.
     await this.ensureGeneMap(viewer, dataset, view, selection, slab);
     if (!task()) return;
@@ -537,8 +587,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // size after the host clears it, which would size the map over the wrong extent.
     if (!slab && !dataset.imageRef) return;
     const size = this.ctx.imageSize();
-    const imageW = slab ? dataset.volume!.width : size.width;
-    const imageH = slab ? dataset.volume!.height : size.height;
+    const imageW = slab?.grid ? slab.grid.width : size.width;
+    const imageH = slab?.grid ? slab.grid.height : size.height;
     if (!imageW || !imageH) return;
     const step = Math.max(1, Math.ceil(Math.max(imageW, imageH) / GENE_MAP_MAX_SIDE));
 
@@ -744,20 +794,33 @@ function observationPositions(obs: SpatialObservations, drawn: Uint32Array | und
 
 /**
  * The plane `slice` of a volume-backed dataset: its pixel affine, the observations that fall in
- * it, and the marker floor that grid needs.
+ * it, and the marker floor that grid needs. Over a real `imageRef`, the region set's plane shown
+ * when `planes` slice the image (a 3D assay imaged on one plane): the observations nearest that
+ * plane, in the image's own pixels.
  *
- * Null for a dataset with a real `imageRef` (its coordinates are already the image's pixels and
- * every observation belongs to the one section) and for one with no volume at all — both of
- * which draw exactly as before.
+ * Null for any other dataset with a real `imageRef` (its coordinates are already the image's
+ * pixels and every observation belongs to the one section) and for one with no volume at all —
+ * both of which draw exactly as before.
  */
-function slabAt(dataset: SpatialDataset, slice: number): Slab | null {
+function slabAt(dataset: SpatialDataset, slice: number, planes: PlaneView | null): Slab | null {
   const volume = dataset.volume;
-  if (dataset.imageRef || !volume) return null;
+  if (dataset.imageRef) {
+    if (!planes) return null;
+    return {
+      ref: dataset.imageRef,
+      indices: observationsOnPlane(dataset.observations, planes.planes, planes.plane),
+      slice: planes.plane,
+      minDiameter: 0,
+      grid: null,
+    };
+  }
+  if (!volume) return null;
   return {
     ref: volumeImageRef(volume, dataset.micronsPerUnit),
     indices: observationsInSlice(dataset.observations, volume, slice),
     slice,
     minDiameter: SPATIAL_SLICE_MIN_DIAMETER_PX * volume.voxelSize[0],
+    grid: { width: volume.width, height: volume.height },
   };
 }
 

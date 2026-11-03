@@ -571,6 +571,13 @@ export interface IVisualizer
    * once per image and `key`. Resolves whether it is attached. Optional: the router's.
    */
   attachDatasetRegionSet?(open: () => Promise<RegionSource>, key: string): Promise<boolean>;
+  /**
+   * The planes of that region set (its `sliceZ`) while they slice the plotted image, an image of
+   * one plane; null otherwise. The host's slice slider runs over them: each position shows that
+   * plane's regions and, in the 2D spatial view, its observations and transcripts. Optional: the
+   * router's.
+   */
+  getDatasetPlanes$?(): Observable<readonly number[] | null>;
   /** Split a volume view: the displayed slice, with every region tool, in the div `div` beside
    *  the 3D view; null closes it. Resolves whether the slice shows. Optional: the router's. */
   setSliceEditor?(div: string | null): Promise<boolean>;

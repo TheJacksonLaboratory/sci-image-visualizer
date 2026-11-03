@@ -23,6 +23,13 @@ file was added.
   at those planes among the observations in spatial 3D, its pixels taken back through the dataset's
   `imageRef`, so they show over the dataset's own image of one plane, not only over the reference
   volume's stack (`VolumeFrame.planes`). They follow the Z handle as the cloud does.
+- **One plane at a time in the 2D spatial view of a 3D assay imaged on one plane.** When that
+  region set's planes slice the dataset's image (an image of one plane, as the ileum's projection),
+  the slice slider runs over the planes (`IVisualizer.getDatasetPlanes$`, the toolbar's `planeSlices`)
+  in the live 2D views, as over a stack: the region editor holds the regions per plane and shows the
+  plane's outlines, and the 2D spatial view draws the observations and transcripts nearest that plane
+  (each z on one plane, halfway between neighbours; zoomed-out aggregates stay whole). The image keeps
+  its one slice. A region drawn there selects within the plane.
 
 ### Changed
 

@@ -79,6 +79,7 @@ function mockBackend(): any {
     getPlotTypeDescriptors: jest.fn().mockReturnValue([]),
     setStackLoading: jest.fn(),
     setRegionPlanes: jest.fn(),
+    setRegionPlane: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
     getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
@@ -1248,6 +1249,31 @@ describe('RoutingVisualizerService (characterization)', () => {
 
       await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS_3D);
       expect(napari.setRegionPlanes).toHaveBeenLastCalledWith(null);
+    });
+
+    it('slices an image of one plane by its planes: the slider runs over them, the image stays', async () => {
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(regionStore.isStackMode()).toBe(false);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      expect(planes[planes.length - 1]).toEqual([0, 10, 20]);
+      // Held per plane, as a stack's regions per slice, on the plane shown.
+      expect(regionStore.isStackMode()).toBe(true);
+      expect(regionStore.getDisplaySlice()).toBe(0);
+      expect(napari.setRegionPlane).toHaveBeenLastCalledWith(0);
+
+      // The slider picks the plane; the image keeps its one slice.
+      router.setZIndex(2);
+      expect(napari.setRegionPlane).toHaveBeenLastCalledWith(2);
+      expect(napari.setZIndex).toHaveBeenLastCalledWith(0);
+      await router.load(PLATE, 2);
+      expect(napari.load).toHaveBeenLastCalledWith(PLATE, 0, undefined);
+
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS);
+      expect(planes[planes.length - 1]).toBeNull();
+      router.setZIndex(1);
+      expect(napari.setZIndex).toHaveBeenLastCalledWith(1);
     });
 
     it('drops a set that opened after another image was plotted, or failed to open', async () => {

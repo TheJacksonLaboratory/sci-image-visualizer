@@ -88,6 +88,8 @@ export class NapariSpatialTileLayers {
   /** Consecutive retries of an incomplete view. */
   private tileRetries = 0;
   private token = 0;
+  /** The z band of the plane shown, when the view shows one plane of a 3D assay (see setZBand). */
+  private zBand: readonly [number, number] | null = null;
   /** The overlays' layers, one per group, in their fixed order. */
   private readonly groups = new OrderedLayerGroups<TileGroup>(TILE_LAYER_ORDER);
 
@@ -177,6 +179,18 @@ export class NapariSpatialTileLayers {
     this.schedule(0);
   }
 
+  /**
+   * Show one plane of a 3D assay (its z band, `[lo, hi)` in observation units), or every depth
+   * (null): the transcripts drawn are those in the band. Re-plans when it changes.
+   */
+  setZBand(band: readonly [number, number] | null): void {
+    const same =
+      band === this.zBand || (!!band && !!this.zBand && band[0] === this.zBand[0] && band[1] === this.zBand[1]);
+    if (same) return;
+    this.zBand = band;
+    this.refresh();
+  }
+
   /** Called right after the service adds its marker layer: everything goes back on top. */
   afterObservations(): void {
     this.groups.restoreOrder(true);
@@ -224,7 +238,7 @@ export class NapariSpatialTileLayers {
     await Promise.all([
       settle('density', this.density.plan(dataset, view, ctx)),
       settle('cells', this.cells.plan(dataset, view, selection, rect, pxPerUnit, ctx)),
-      settle('transcripts', this.transcripts.plan(dataset, view, rect, pxPerUnit, ctx)),
+      settle('transcripts', this.transcripts.plan(dataset, view, rect, pxPerUnit, ctx, this.zBand)),
     ]);
     this.groups.restoreOrder(false);
     if (ctx.stale()) return;

@@ -257,6 +257,24 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     expect(drawn.genes).toEqual(['ACTA2', '', 'KRT5']);
     tiles.detach();
   });
+
+  it("draws one plane's transcripts when the view shows one plane, and every depth again after", async () => {
+    const { tiles, getTranscriptTile } = setup(4, 'gene');
+    getTranscriptTile.mockImplementation(() => {
+      const t = tile(4);
+      t.gene.set([0, 1, 2, 3]);
+      t.z.set([0, 9, 11, 30]);
+      return Promise.resolve(t);
+    });
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    tiles.setZBand([5, 20]);
+    await plan();
+    expect(Array.from(drawnOf<{ merged: SpatialTranscriptTile }>(tiles).merged.gene)).toEqual([1, 2]);
+    tiles.setZBand(null);
+    await plan();
+    expect(drawnOf<{ merged: SpatialTranscriptTile }>(tiles).merged.count).toBe(4);
+    tiles.detach();
+  });
 });
 
 describe('NapariSpatialTileLayers: per-gene counts in view', () => {

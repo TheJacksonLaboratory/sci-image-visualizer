@@ -246,6 +246,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private readonly consumedSliceHints = new WeakSet<IImageInfo>();
   protected zIndex = 0;
   protected maxIndex = 0;
+  /**
+   * Planes of the spatial dataset's region set slicing the image, an image of one plane (see
+   * `IVisualizer.getDatasetPlanes$`): the slider then runs over them. 0 without.
+   */
+  protected datasetPlanes = 0;
 
   @ViewChild('cm') contextMenu!: ContextMenu;
   protected contextMenuItems: MenuItem[] = [];
@@ -673,6 +678,31 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   private watchSpatialDataset(): void {
     this.spatial.bind(this.destroyed$);
     this.regionSetLink.bind(this.destroyed$);
+    const planes$ = this.plotService.getDatasetPlanes$?.();
+    if (planes$) {
+      this.mirror(planes$, (planes) => {
+        this.datasetPlanes = planes?.length ?? 0;
+        this.layOutPlanes();
+        this.changed();
+      });
+    }
+  }
+
+  /**
+   * The slider over the dataset's planes, on an image of one plane: its bounds are the planes'
+   * (none left: back to the image's one), the slice kept within them.
+   */
+  private layOutPlanes(): void {
+    if (this.imageInfo?.isStack) return;
+    const max = this.planeMaxIndex();
+    if (max === this.maxIndex) return;
+    this.maxIndex = max;
+    if (this.zIndex > max) this.onZSlide(max);
+  }
+
+  /** The last slice index the dataset's planes give an image of one plane (0 without). */
+  private planeMaxIndex(): number {
+    return this.datasetPlanes > 1 ? this.datasetPlanes - 1 : 0;
   }
 
   /** Recompute the selector's entries for the current image, dataset and test mode
@@ -883,7 +913,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    */
   private layOutSlices(info: IImageInfo): void {
     this.stackLoading.set(info.isStack && info.showStack);
-    this.maxIndex = info.urls.length > 1 ? info.urls.length - 1 : 0;
+    this.maxIndex = info.urls.length > 1 ? info.urls.length - 1 : info.isStack ? 0 : this.planeMaxIndex();
     if (info.initialZIndex !== undefined) {
       if (!this.consumedSliceHints.has(info)) {
         this.consumedSliceHints.add(info);

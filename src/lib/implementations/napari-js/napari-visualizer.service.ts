@@ -143,6 +143,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionMeshesImage: string | undefined;
   /** Where {@link regionMeshes}' slices are, when their region set says (see setRegionMeshes). */
   private regionPlanes: readonly number[] | null = null;
+  /** The plane of {@link regionPlanes} the 2D spatial view shows (see setRegionPlane). */
+  private regionPlane = 0;
   /** The keys of the reconstructions highlighted. */
   private regionHighlight: readonly string[] = [];
   /** The keys of the reconstructions hidden. */
@@ -366,6 +368,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       // Another image's surfaces would land in this volume's frame at the wrong size: drop them.
       if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
       this.scene.setRegionPlanes?.(this.regionPlanes);
+      this.scene.setRegionPlane?.(this.regionPlane);
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
@@ -455,6 +458,15 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   setRegionPlanes(planes: readonly number[] | null): void {
     this.regionPlanes = planes;
     this.scene?.setRegionPlanes?.(planes);
+  }
+
+  /**
+   * Which of the region set's planes (see {@link setRegionPlanes}) the 2D spatial view shows over
+   * an image of one plane, whose own slice stays 0: the slider picks the plane, not the image's.
+   */
+  setRegionPlane(k: number): void {
+    this.regionPlane = k;
+    this.scene?.setRegionPlane?.(k);
   }
 
   /** Highlight the reconstructions of these keys (none: all as usual). */
