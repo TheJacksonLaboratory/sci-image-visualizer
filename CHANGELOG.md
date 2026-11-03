@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-03
+
 ### Added
 
 - **Each group's colour in the Cells panel can be changed.** Clicking a group's swatch in the Groups
@@ -2540,7 +2542,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.13.0...v0.14.0
