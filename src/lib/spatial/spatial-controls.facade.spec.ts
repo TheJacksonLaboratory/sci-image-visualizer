@@ -197,6 +197,36 @@ describe('SpatialControlsFacade selectFromRegions', () => {
 });
 
 describe('SpatialControlsFacade on a new dataset', () => {
+  it("drops the group colours, chosen for the old dataset's groupings", () => {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    const store = new VisualizerStore();
+    const ctx = { store, selectionStore: new SpatialSelectionStore() } as unknown as SpatialControlsContext;
+    const facade = new SpatialControlsFacade({ getDataset$: () => dataset$ } as unknown as SpatialDataPort, ctx);
+    store.setSpatialView({ groupColors: { cluster: { A: '#ff0000' } } });
+    dataset$.next({ ...dataset, id: 'same' } as SpatialDataset);
+    dataset$.next(dataset);
+    expect(store.currentSpatialView().groupColors).toEqual({});
+    facade.dispose();
+  });
+
+  it("colours a grouping's legend and its categorical view with the user's colours over its own", async () => {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    const store = new VisualizerStore();
+    const ctx = { store, selectionStore: new SpatialSelectionStore() } as unknown as SpatialControlsContext;
+    const column = {
+      kind: 'categorical',
+      name: 'cluster',
+      meta: { kind: 'categorical', name: 'cluster', categories: ['A', 'B'], colors: ['#111111', '#222222'] },
+      codes: Uint16Array.of(0, 1),
+    };
+    const port = { getDataset$: () => dataset$, getColumn: async () => column } as unknown as SpatialDataPort;
+    const facade = new SpatialControlsFacade(port, ctx);
+    store.setSpatialView({ groupColors: { cluster: { B: '#abcdef' }, other: { A: '#000000' } } });
+    expect(await facade.controls.categoryColors('cluster')).toEqual(['#111111', '#abcdef']);
+    expect((await facade.controls.categoricalView('cluster')).colors).toEqual(['#111111', '#abcdef']);
+    facade.dispose();
+  });
+
   it('drops the gene filter, which names the old dataset genes', () => {
     const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
     const store = new VisualizerStore();

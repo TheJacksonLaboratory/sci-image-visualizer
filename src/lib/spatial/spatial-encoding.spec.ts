@@ -10,6 +10,8 @@ import {
   lutFor,
   markerDiameters,
   resolveCategoryColors,
+  categoryColorsFor,
+  groupColorsKey,
 } from './spatial-encoding';
 import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
 
@@ -280,5 +282,30 @@ describe('spatial-encoding', () => {
         ]),
       ).toBe(false);
     });
+  });
+});
+
+describe('categoryColorsFor', () => {
+  const meta = { kind: 'categorical' as const, name: 'k', categories: ['A', 'B', 'C'], colors: ['#111111'] };
+
+  it("lays the user's colours for the column over its own and the palette's, by category name", () => {
+    const base = resolveCategoryColors(meta);
+    expect(categoryColorsFor('k', meta)).toEqual(base);
+    expect(categoryColorsFor('k', meta, { k: { C: '#abcdef', Z: '#000000' } })).toEqual([
+      base[0],
+      base[1],
+      '#abcdef',
+    ]);
+    // Another column's choices do not apply.
+    expect(categoryColorsFor('k', meta, { other: { A: '#abcdef' } })).toEqual(base);
+  });
+
+  it("keys a cache on the column's own choices only", () => {
+    expect(groupColorsKey('k', {})).toBe('');
+    expect(groupColorsKey(null, { k: { A: '#000000' } })).toBe('');
+    expect(groupColorsKey('k', { k: { A: '#000000' } })).not.toBe(groupColorsKey('k', { k: { A: '#000001' } }));
+    expect(groupColorsKey('k', { k: { A: '#000000' }, j: { B: '#1' } })).toBe(
+      groupColorsKey('k', { k: { A: '#000000' } }),
+    );
   });
 });

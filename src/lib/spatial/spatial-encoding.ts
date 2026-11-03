@@ -117,6 +117,31 @@ export function resolveCategoryColors(
   });
 }
 
+/** The user's group colours: by column name, then category (see `SpatialViewState.groupColors`). */
+export type GroupColorOverrides = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
+/**
+ * Categorical column `column`'s colours ({@link resolveCategoryColors}) with the user's choices
+ * for its groups over them. Every place a grouping is coloured goes through this, so a group
+ * recoloured in the list is that colour on the cells, the markers, the legend and the charts.
+ */
+export function categoryColorsFor(
+  column: string,
+  meta: CategoricalColumnMeta,
+  overrides?: GroupColorOverrides | null,
+): string[] {
+  const base = resolveCategoryColors(meta);
+  const own = overrides?.[column];
+  if (!own) return base;
+  return meta.categories.map((name, i) => own[name] || base[i]);
+}
+
+/** What a cache keyed on a grouping's colours must include of the user's choices for it. */
+export function groupColorsKey(column: string | null, overrides?: GroupColorOverrides | null): string {
+  const own = column ? overrides?.[column] : undefined;
+  return own ? JSON.stringify(own) : '';
+}
+
 /** Categorical column → flat per-point RGBA (length `4 * codes.length`). */
 export function encodeCategorical(codes: Uint16Array, opts: CategoricalEncodingOptions): Float32Array {
   const n = codes.length;

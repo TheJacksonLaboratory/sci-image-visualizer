@@ -9,6 +9,30 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Each group's colour in the Cells panel can be changed.** Clicking a group's swatch in the Groups
+  list opens the colour picker (hex, presets, reset), as a gene's swatch does. The choice is kept in
+  `SpatialViewState.groupColors` (by column, then group) and applies wherever that grouping colours
+  anything: cell fills and outlines, observation markers in 2D and 3D, the 3D density volumes,
+  transcripts coloured by cell type or by cluster, the legend and the charts
+  (`categoryColorsFor`). The colours are cleared when the dataset changes.
+- **With "All genes" selected, each gene's colour can be changed.** Each row of the all-genes list
+  now has a swatch button that opens the colour picker, showing the gene's colour among every gene
+  (its chosen one, else the palette's by its code). Before, only selected genes and marker genes
+  could be recoloured. Every gene shares one icon in this mode, so the picker offers colours only.
+
+### Changed
+
+- **Observation markers are drawn at every zoom.** In 2D, a marker's size is the cell's, so zoomed
+  out over a whole Cytos plate or Xenium section every marker fell below a pixel and the
+  observations vanished. They are now never drawn smaller than 2 screen pixels
+  (`SPATIAL_MARKER_MIN_SCREEN_PX`, applied by napari-js's `PointsLayer.minScreenSize` on the GPU,
+  so zooming rebuilds nothing). Markers also stay drawn once cells are big enough to outline: the
+  outlines, still at the level of detail the zoom calls for, are drawn over them. Before, the
+  markers were hidden whenever outlines were shown. The Observations switch still hides them.
+  Requires napari-js 0.20.0.
+
 ## [0.16.0] — 2026-11-02
 
 ### Added

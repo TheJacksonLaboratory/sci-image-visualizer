@@ -12,11 +12,14 @@ import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { CheckboxModule } from 'primeng/checkbox';
 import { DropdownModule } from 'primeng/dropdown';
+import { OverlayPanelModule } from 'primeng/overlaypanel';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+import { groupColorsKey } from '../../spatial/spatial-encoding';
+import { SpatialGeneStyleComponent } from '../spatial-gene-style/spatial-gene-style.component';
 import {
   FAMILY_PREFIX,
   GroupOptionSection,
@@ -34,15 +37,23 @@ import { Supersede } from '../../util/supersede';
 /**
  * The cells' grouping, as Xenium Explorer's Groups section: the group picker (columns under
  * their section heading, a k-means family once, with its k beside it), CSV import of a new
- * grouping, and the grouping's categories with their colours, cell counts and show/hide
- * switches.
+ * grouping, and the grouping's categories with their colours (each one's swatch opens a colour
+ * picker), cell counts and show/hide switches.
  *
- * Writes only through `controls.setViewState` (`cellTypeColumn`, `hiddenGroups`).
+ * Writes only through `controls.setViewState` (`cellTypeColumn`, `hiddenGroups`, `groupColors`).
  */
 @Component({
   selector: 'spatial-groups-panel',
   standalone: true,
-  imports: [CommonModule, FormsModule, SharedModule, CheckboxModule, DropdownModule],
+  imports: [
+    CommonModule,
+    FormsModule,
+    SharedModule,
+    CheckboxModule,
+    DropdownModule,
+    OverlayPanelModule,
+    SpatialGeneStyleComponent,
+  ],
   templateUrl: './spatial-groups-panel.component.html',
   styleUrls: ['./spatial-groups-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -77,6 +88,8 @@ export class SpatialGroupsPanelComponent implements OnChanges {
   private readonly groupRowsLoad = new Supersede();
   protected groupImportError: string | null = null;
   protected groupImporting = false;
+  /** The group the open colour picker edits. */
+  protected styleGroup: string | null = null;
 
   constructor(
     private readonly zone: NgZone,
@@ -143,6 +156,44 @@ export class SpatialGroupsPanelComponent implements OnChanges {
     this.controls?.setViewState({ hiddenGroups: on ? [] : this.groupRows.map((r) => r.label) });
   }
 
+  // ── per-group colour picker ──────────────────────────────────────────────
+
+  protected openGroupStyle(event: Event, label: string, panel: { toggle(e: Event): void; hide(): void }): void {
+    if (this.styleGroup === label) {
+      panel.toggle(event);
+      return;
+    }
+    this.styleGroup = label;
+    panel.hide();
+    // Re-open anchored on the row that was clicked, once the panel has closed.
+    setTimeout(() => panel.toggle(event));
+  }
+
+  /** The colour group `label` is drawn in now (the user's, else the column's or the palette's). */
+  protected groupColorOf(label: string): string {
+    return this.groupRows.find((r) => r.label === label)?.color ?? '#999999';
+  }
+
+  protected onGroupColor(label: string, hex: string): void {
+    const column = this.activeCellTypeColumn;
+    if (!column) return;
+    const all = this.view.groupColors ?? {};
+    this.controls?.setViewState({ groupColors: { ...all, [column]: { ...all[column], [label]: hex } } });
+  }
+
+  /** Back to the group's own colour (the column's, else the palette's). */
+  protected resetGroupColor(label: string): void {
+    const column = this.activeCellTypeColumn;
+    const own = column ? this.view.groupColors?.[column] : undefined;
+    if (!column || !own || !(label in own)) return;
+    const rest = { ...own };
+    delete rest[label];
+    const all = { ...this.view.groupColors };
+    if (Object.keys(rest).length) all[column] = rest;
+    else delete all[column];
+    this.controls?.setViewState({ groupColors: all });
+  }
+
   protected get canImportGroups(): boolean {
     return !!this.controls?.importGroups;
   }
@@ -186,8 +237,10 @@ export class SpatialGroupsPanelComponent implements OnChanges {
       this.groupRowsFor = null;
       return;
     }
-    if (name === this.groupRowsFor) return;
-    this.groupRowsFor = name;
+    // The user's colours for the grouping are part of what the rows show.
+    const key = `${name}\u0001${groupColorsKey(name, this.view.groupColors)}`;
+    if (key === this.groupRowsFor) return;
+    this.groupRowsFor = key;
     const task = this.groupRowsLoad.next();
     try {
       const v = await this.controls.categoricalView(name);

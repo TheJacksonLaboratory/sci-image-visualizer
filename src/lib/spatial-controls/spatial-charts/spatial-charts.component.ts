@@ -320,6 +320,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       .subscribe(([view, selection]) => {
         const sourceChanged =
           view.colorBy?.kind !== this.view.colorBy?.kind || view.colorBy?.name !== this.view.colorBy?.name;
+        // A group recoloured in the Cells panel: the categories are fetched again in their new colours.
+        const groupColorsChanged =
+          this.primed && JSON.stringify(view.groupColors) !== JSON.stringify(this.view.groupColors);
         this.view = view;
         this.colorBy = view.colorBy;
         this.selection = selection;
@@ -328,9 +331,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // needs its vector fetched first. The FIRST emission always reloads:
         // otherwise `null -> null` reads as "unchanged" and the component sits
         // with no data and no explanation until something else moves.
-        if (!this.primed || sourceChanged) {
+        if (!this.primed || sourceChanged || groupColorsChanged) {
           this.primed = true;
           void this.reload();
+          if (groupColorsChanged && this.groupBy) void this.onGroupBy(this.groupBy);
         } else {
           // A selection or log-scale change needs only a redraw of the same vector.
           void this.render();

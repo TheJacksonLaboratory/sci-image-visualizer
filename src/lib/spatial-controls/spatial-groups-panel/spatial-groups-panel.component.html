@@ -66,10 +66,32 @@
           [ngModel]="isGroupShown(row.label)"
           (onChange)="onGroupShown(row.label, $event.checked)"
         ></p-checkbox>
-        <span class="sc-dot" [style.background]="row.color"></span>
+        <!-- The group's colour; clicking it opens the colour picker. -->
+        <button
+          type="button"
+          class="sc-dot sc-dot-btn"
+          [style.background]="row.color"
+          [attr.aria-label]="'Colour for ' + row.label"
+          title="Colour"
+          (click)="openGroupStyle($event, row.label, groupPop)"
+        ></button>
         <span class="sc-group-label" [title]="row.label">{{ row.label }}</span>
         <span class="sc-count">({{ row.count | number }})</span>
       </div>
     </ng-container>
   </div>
+  <!-- One picker for every group row, filled for the group that opened it. -->
+  <p-overlayPanel #groupPop styleClass="sc-gene-style" appendTo="body">
+    <ng-template pTemplate="content">
+      <spatial-gene-style
+        *ngIf="styleGroup as group"
+        [gene]="group"
+        what="Group"
+        [color]="groupColorOf(group)"
+        [showIcons]="false"
+        (colorChange)="onGroupColor(group, $event)"
+        (resetStyle)="resetGroupColor(group)"
+      ></spatial-gene-style>
+    </ng-template>
+  </p-overlayPanel>
 </ng-container>

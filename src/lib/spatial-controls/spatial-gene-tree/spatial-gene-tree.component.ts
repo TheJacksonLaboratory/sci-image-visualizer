@@ -17,7 +17,7 @@ import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import { ALL_GENES } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
-import { DEFAULT_CATEGORICAL_PALETTE } from '../../spatial/spatial-encoding';
+import { DEFAULT_CATEGORICAL_PALETTE, groupColorsKey } from '../../spatial/spatial-encoding';
 import { cellTypeColumnFor, clusterColorMap, clusterOfGene, defaultGlyphFor } from '../../spatial/spatial-tiles';
 import { GeneTreeNode, buildGeneTree, glyphPoints, toggleHidden } from '../../spatial/spatial-panel-model';
 import { allGeneShownBy, allGenesHidden, toggleAllGeneHidden } from '../../spatial/spatial-tile-merge';
@@ -50,6 +50,8 @@ interface AllGeneRowView {
   shown: boolean;
   /** Its colour when coloured by gene, or null when the dataset's code order is unknown. */
   swatch: string | null;
+  /** Its code in the dataset's gene list (what its palette colour is picked by). */
+  code: number;
   count: number | null;
 }
 
@@ -223,6 +225,7 @@ export class SpatialGeneTreeComponent implements OnChanges {
         gene,
         shown: shown(gene),
         swatch: this.canHideAllGenes ? this.allGeneColorOf(gene, codes.get(gene)!) : null,
+        code: codes.get(gene)!,
         count: this.geneCountOf(gene),
       }));
     this.allGenesMatched = codes.size;
@@ -348,6 +351,18 @@ export class SpatialGeneTreeComponent implements OnChanges {
     return this.geneColor(Math.max(0, this.view.transcriptGenes.indexOf(gene)));
   }
 
+  /**
+   * The colour the open picker shows: with "All genes", the gene's colour among every gene (its
+   * chosen one, else the palette's by its code), as its row and its markers have it.
+   */
+  protected styleColorOf(gene: string): string {
+    if (this.view.transcriptAllGenes) {
+      const row = this.allRows.find((r) => r.gene === gene);
+      if (row) return this.allGeneColorOf(gene, row.code);
+    }
+    return this.geneColorOf(gene);
+  }
+
   /** In Cluster colouring, a gene's swatch is its cluster's colour, as its markers are. */
   protected geneSwatchOf(gene: string): string {
     if (this.view.transcriptColorBy !== 'cluster') return this.geneColorOf(gene);
@@ -385,8 +400,10 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   private async refreshCellGroupColors(): Promise<void> {
     const column = this.dataset ? cellTypeColumnFor(this.dataset, this.view) : null;
-    if (column === this.cellGroupColorsFor) return;
-    this.cellGroupColorsFor = column;
+    // The user's colours for the grouping are part of what the cluster swatches show.
+    const key = column === null ? null : `${column}\u0001${groupColorsKey(column, this.view.groupColors)}`;
+    if (key === this.cellGroupColorsFor) return;
+    this.cellGroupColorsFor = key;
     const task = this.cellGroupColorsLoad.next();
     const map = new Map<string, string>();
     const meta = column ? this.dataset?.columns.find((c) => c.name === column) : null;

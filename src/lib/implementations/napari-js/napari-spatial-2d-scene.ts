@@ -11,7 +11,7 @@ import {
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
-import { encodeCategorical, markerDiameters, resolveCategoryColors } from '../../spatial/spatial-encoding';
+import { categoryColorsFor, encodeCategorical, markerDiameters } from '../../spatial/spatial-encoding';
 import {
   SpatialSelectionMask,
   emptySelection,
@@ -34,6 +34,7 @@ import {
   GENE_MAP_MAX_SIDE,
   GENE_MAP_SIGMA,
   SPATIAL_FALLBACK_RADIUS,
+  SPATIAL_MARKER_MIN_SCREEN_PX,
   SPATIAL_NEUTRAL_COLOR,
   SPATIAL_NEUTRAL_HEX,
   SPATIAL_SLICE_MIN_DIAMETER_PX,
@@ -178,13 +179,13 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   }
 
   /**
-   * Whether the markers are drawn: when the user wants them, and not while cell outlines are on
-   * screen — then a cell IS its outline, and a circle on top of it is noise. Zoomed out past the
-   * outline threshold, the circles stand in for the cells.
+   * Whether the markers are drawn: whenever the user wants them, at every zoom. Cell outlines come
+   * and go with the zoom (their level of detail follows it) and are drawn over the markers; the
+   * observations themselves never disappear with them.
    */
   private pointsVisible(): boolean {
     const view = this.session.latest?.[1];
-    return (view?.showPoints ?? true) && !this.session.tiles?.outlinesShown;
+    return view?.showPoints ?? true;
   }
 
   /**
@@ -347,6 +348,8 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       scale: ref?.scale ?? [1, 1],
       translate: ref?.translate ?? [0, 0],
       visible: this.pointsVisible(),
+      // Never under a couple of screen pixels, so the observations stay visible zoomed out.
+      minScreenSize: SPATIAL_MARKER_MIN_SCREEN_PX,
     });
     // Outlines, density and transcripts go back over the markers just added.
     this.session.tiles?.afterObservations();
@@ -678,7 +681,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
       const column: SpatialColumn = await port.getColumn(colorBy.name);
       if (isCategoricalColumn(column)) {
         const rgba = encodeCategorical(column.codes, {
-          colors: resolveCategoryColors(column.meta),
+          colors: categoryColorsFor(colorBy.name, column.meta, view.groupColors),
           opacity: view.opacity,
           muted,
         });

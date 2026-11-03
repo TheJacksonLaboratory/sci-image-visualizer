@@ -221,4 +221,50 @@ describe('SpatialGroupsPanelComponent', () => {
     fire(one(rows[0] as HTMLElement, 'p-checkbox'), 'onChange', { checked: false });
     expect(fake.view$.value.hiddenGroups).toEqual(['A']);
   });
+
+  it("recolours a group from its swatch, keeps the others' choices, and resets it", async () => {
+    await build();
+    const column = component['activeCellTypeColumn']!;
+    expect(column).toBeTruthy();
+    const panel = { toggle: jest.fn(), hide: jest.fn() };
+    jest.useFakeTimers();
+    component['openGroupStyle'](new MouseEvent('click'), 'B', panel);
+    jest.runAllTimers();
+    jest.useRealTimers();
+    expect(component['styleGroup']).toBe('B');
+    expect(panel.toggle).toHaveBeenCalledTimes(1);
+
+    fake.view$.next({ ...fake.view$.value, groupColors: { other: { X: '#010101' } } });
+    component['onGroupColor']('B', '#abcdef');
+    component['onGroupColor']('A', '#123456');
+    expect(fake.view$.value.groupColors).toEqual({
+      other: { X: '#010101' },
+      [column]: { A: '#123456', B: '#abcdef' },
+    });
+    component['resetGroupColor']('B');
+    expect(fake.view$.value.groupColors).toEqual({ other: { X: '#010101' }, [column]: { A: '#123456' } });
+    component['resetGroupColor']('A');
+    expect(fake.view$.value.groupColors).toEqual({ other: { X: '#010101' } });
+  });
+
+  it("reloads the rows (and their colours) when the grouping's colours change", async () => {
+    await build();
+    const calls = categoricalView.mock.calls.length;
+    const column = component['activeCellTypeColumn']!;
+    fake.view$.next({ ...fake.view$.value, groupColors: { [column]: { A: '#ff0000' } } });
+    await flush();
+    expect(categoricalView.mock.calls.length).toBe(calls + 1);
+    // Another grouping's colours do not reload this one's rows.
+    fake.view$.next({ ...fake.view$.value, groupColors: { [column]: { A: '#ff0000' }, other: { X: '#0' } } });
+    await flush();
+    expect(categoricalView.mock.calls.length).toBe(calls + 1);
+  });
+
+  it('opens the colour picker from a rendered group swatch', async () => {
+    await build();
+    const root = fixture.nativeElement as HTMLElement;
+    const open = jest.spyOn(component as unknown as { openGroupStyle: () => void }, 'openGroupStyle');
+    (root.querySelector('.sc-group-row:not(.sc-group-all) .sc-dot-btn') as HTMLElement).click();
+    expect(open).toHaveBeenCalledWith(expect.anything(), 'A', expect.anything());
+  });
 });

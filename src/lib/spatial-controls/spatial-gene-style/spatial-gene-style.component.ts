@@ -32,6 +32,8 @@ export class SpatialGeneStyleComponent {
   @Input() glyph: TranscriptGlyphName = 'circle';
   /** A note under the icons, e.g. where they show; none when null. */
   @Input() iconHint: string | null = null;
+  /** False for a colour alone (a cell group, or every gene drawn with one icon): no icon grid. */
+  @Input() showIcons = true;
   @Output() readonly colorChange = new EventEmitter<string>();
   @Output() readonly glyphChange = new EventEmitter<TranscriptGlyphName>();
   /** Back to the gene's default icon and colour. */

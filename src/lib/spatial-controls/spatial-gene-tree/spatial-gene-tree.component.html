@@ -82,9 +82,19 @@
       >
         <i class="pi" [class.pi-eye]="row.shown" [class.pi-eye-slash]="!row.shown"></i>
       </button>
-      <span class="sc-gene-icon" *ngIf="row.swatch" [style.color]="row.swatch" aria-hidden="true">
+      <!-- The gene's colour among every gene; clicking it opens the colour picker. -->
+      <button
+        type="button"
+        class="sc-gene-icon"
+        *ngIf="row.swatch"
+        [style.color]="row.swatch"
+        [attr.aria-label]="'Colour for ' + row.gene"
+        pTooltip="Colour"
+        tooltipPosition="top"
+        (click)="openGeneStyle($event, row.gene, genePop)"
+      >
         <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><circle r="0.75"></circle></svg>
-      </span>
+      </button>
       <span class="sc-group-label" [title]="row.gene">{{ row.gene }}</span>
       <span class="sc-gene-count" *ngIf="row.count !== null" title="Transcripts in view">{{
         row.count | number
@@ -164,8 +174,9 @@
         *ngIf="styleGene as gene"
         [gene]="gene"
         what="Transcript"
-        [color]="geneColorOf(gene)"
+        [color]="styleColorOf(gene)"
         [glyph]="styleGlyph ?? 'circle'"
+        [showIcons]="!view.transcriptAllGenes"
         [iconHint]="
           view.transcriptMode !== 'glyphs' ? 'Icons show when the transcript point style is Icons.' : null
         "

@@ -70,11 +70,10 @@ const MAX_TILE_RETRIES = 3;
  * -----------
  * Cell fill, cell outline, nucleus outline, the transcript density, then transcripts on top
  * ({@link TILE_LAYER_ORDER}); a plan restores the order once, after all its groups are in
- * place. The service's observation markers sit under all of them; while outlines are drawn the
- * markers are hidden (a cell is its outline then, not a dot), so the cells never have to
- * be ordered against them. The density goes OVER the markers on purpose: under 10^5
- * dots it would only show in the gaps between cells. {@link afterObservations} restores
- * the order after the service re-adds its markers.
+ * place. The service's observation markers sit under all of them, drawn at every zoom: once
+ * cells are big enough to outline, their outlines go over their markers. The density goes
+ * OVER the markers on purpose: under 10^5 dots it would only show in the gaps between cells.
+ * {@link afterObservations} restores the order after the service re-adds its markers.
  *
  * ONE LAYER PER GROUP
  * -------------------
@@ -163,7 +162,7 @@ export class NapariSpatialTileLayers {
     return this.groups.owns(layer);
   }
 
-  /** True while outlines are on screen — the service hides its dots then. */
+  /** True while outlines are on screen. */
   get outlinesShown(): boolean {
     return this.cells.outlinesShown;
   }

@@ -15,9 +15,10 @@ import {
 import {
   DEFAULT_CATEGORICAL_PALETTE,
   MISSING_COLOR,
+  GroupColorOverrides,
+  categoryColorsFor,
   contrastWindow,
   parseHex,
-  resolveCategoryColors,
 } from '../../../spatial/spatial-encoding';
 import { SpatialSelectionMask } from '../../../spatial/spatial-selection';
 import {
@@ -87,7 +88,7 @@ export class CellLayers {
     private readonly host: CellLayersHost,
   ) {}
 
-  /** True while outlines are on screen — the service hides its dots then. */
+  /** True while outlines are on screen. */
   get outlinesShown(): boolean {
     return this.polygonsShown;
   }
@@ -146,6 +147,8 @@ export class CellLayers {
       JSON.stringify(view.continuousColormap),
       view.cellDraw,
       view.cellOpacity,
+      // Any grouping's: the cells may be coloured by segmentation method rather than the cell type.
+      JSON.stringify(view.groupColors),
     ].join('|');
     const present = (['cellFill', 'cellOutline', 'nucleusOutline'] as const).some((g) => this.groups.shown(g));
     if (!geometryChanged && styleKey === this.cellStyleKey && present) {
@@ -268,7 +271,7 @@ export class CellLayers {
         ? 'segmentation_method'
         : cellTypeColumnFor(dataset, view);
     const codes = name ? await this.lookup.codes(name) : null;
-    const palette = categoryRgba(codes?.meta ?? null);
+    const palette = categoryRgba(name, codes?.meta ?? null, view.groupColors);
     const missing = rgba01(MISSING_COLOR);
     // One RGBA per shape (napari Shapes' `face_color`): any number of categories keeps its own
     // colour, where a colormap band per category ran out of LUT entries past ~127.
@@ -361,7 +364,14 @@ function rgba01([r, g, b]: readonly [number, number, number]): RGBA {
 }
 
 /** A grouping's category colours, as 0..1 RGBA by category code (one default without a grouping). */
-function categoryRgba(meta: SpatialColumn['meta'] | null): RGBA[] {
-  const hex = meta && meta.kind === 'categorical' ? resolveCategoryColors(meta) : [DEFAULT_CATEGORICAL_PALETTE[0]];
+function categoryRgba(
+  name: string | null,
+  meta: SpatialColumn['meta'] | null,
+  overrides: GroupColorOverrides | undefined,
+): RGBA[] {
+  const hex =
+    name && meta && meta.kind === 'categorical'
+      ? categoryColorsFor(name, meta, overrides)
+      : [DEFAULT_CATEGORICAL_PALETTE[0]];
   return hex.map((h) => rgba01(parseHex(h)));
 }

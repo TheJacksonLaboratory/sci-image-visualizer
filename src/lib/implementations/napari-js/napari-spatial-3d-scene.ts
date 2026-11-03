@@ -14,7 +14,7 @@ import {
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
-import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spatial-encoding';
+import { DEFAULT_MUTED_OPACITY, categoryColorsFor, groupColorsKey } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
@@ -838,7 +838,13 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // holding the same number of cells would otherwise look like the same key and
     // leave the previous ROI's fields on screen.
     const key = on
-      ? [dataset.id, column ?? 'all', smoothing, this.session.selectionRev(selection)].join('|')
+      ? [
+          dataset.id,
+          column ?? 'all',
+          smoothing,
+          this.session.selectionRev(selection),
+          groupColorsKey(column, view.groupColors),
+        ].join('|')
       : null;
     if (key === this.densityKey) return;
 
@@ -854,7 +860,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
     let groups: DensityGroup[];
     try {
-      groups = await this.densityGroups(dataset, column, selection);
+      groups = await this.densityGroups(dataset, column, selection, view);
     } catch (err) {
       console.warn('[napari-js] density volumes: column unavailable', err);
       this.densityKey = null;
@@ -924,13 +930,14 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     dataset: SpatialDataset,
     column: string | null,
     selection: SpatialSelectionMask,
+    view: SpatialViewState,
   ): Promise<DensityGroup[]> {
     const port = this.session.port;
     const meta = column ? findColumnMeta(dataset, column) : undefined;
     if (!port || !column || !meta || meta.kind !== 'categorical') return [totalDensityGroup(selection)];
     const loaded = await port.getColumn(column);
     if (!isCategoricalColumn(loaded)) return [];
-    return rankDensityGroups(column, loaded, dataset.observations.count, selection);
+    return rankDensityGroups(column, loaded, dataset.observations.count, selection, view.groupColors);
   }
 
   /**
@@ -1119,7 +1126,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     if (colorBy.kind === 'column') {
       const column: SpatialColumn = await port.getColumn(colorBy.name);
       if (isCategoricalColumn(column)) {
-        return encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
+        return encodeSpatial3dCategorical(
+          column.codes,
+          categoryColorsFor(colorBy.name, column.meta, view.groupColors),
+        );
       }
       return this.encodeContinuous(column.values, view);
     }
@@ -1167,6 +1177,7 @@ function cloudSubset(
   const scalarKey = [
     key,
     view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    groupColorsKey(view.colorBy?.kind === 'column' ? view.colorBy.name : null, view.groupColors),
     observationGeneStyleKey(view),
     view.logScale ? 'log' : 'lin',
     clip.join(','),
