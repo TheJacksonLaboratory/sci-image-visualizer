@@ -20,6 +20,7 @@ import {
 function dataset(over: Partial<NonNullable<SpatialDataset['transcriptTiles']>> = {}): SpatialDataset {
   return {
     id: 'ileum',
+    columns: [],
     transcriptTiles: {
       bounds: [0, 0, 150, 50],
       count: 3,
@@ -38,7 +39,7 @@ const view = (over: Partial<SpatialViewState> = {}): SpatialViewState => ({
   ...over,
 });
 
-function tile(xs: number[], genes: number[]): SpatialTranscriptTile {
+function tile(xs: number[], genes: number[], cells: number[] = xs.map(() => 0)): SpatialTranscriptTile {
   const n = xs.length;
   return {
     count: n,
@@ -47,7 +48,7 @@ function tile(xs: number[], genes: number[]): SpatialTranscriptTile {
     y: Float32Array.from(xs, () => 5),
     z: Float32Array.from(xs, (_x, i) => 10 * (i + 1)),
     weight: new Uint32Array(n).fill(1),
-    observation: new Uint32Array(n),
+    observation: Uint32Array.from(cells),
     gene: Uint16Array.from(genes),
   };
 }
@@ -62,6 +63,11 @@ function setup() {
       return gx === 0 ? tile([10, 20], [0, 1]) : tile([120], [2]);
     }),
   } as unknown as SpatialDataPort;
+  (port as unknown as { getColumn: jest.Mock }).getColumn = jest.fn(async () => ({
+    kind: 'categorical',
+    meta: { kind: 'categorical', name: 'cell_type', categories: ['Goblet', 'Paneth'] },
+    codes: Uint16Array.of(0, 1),
+  }));
   const ends: string[] = [];
   const t = new Spatial3dTranscripts(viewer, (label) => () => ends.push(label));
   const layers = () => v.layers.items.filter((l) => l.name === 'transcripts') as Points3DLayer[];
@@ -154,5 +160,80 @@ describe('Spatial3dTranscripts', () => {
     await t.sync(dataset({ count: TRANSCRIPTS_3D_MAX + 1 }), view({ transcriptAllGenes: true }), port, frame);
     expect(calls).toHaveLength(0);
     expect(layers()).toHaveLength(0);
+  });
+
+  describe('Colour by', () => {
+    const typed = () =>
+      ({
+        ...dataset(),
+        columns: [{ kind: 'categorical', name: 'cell_type', categories: ['Goblet', 'Paneth'] }],
+      }) as unknown as SpatialDataset;
+    /** Each drawn transcript's RGBA, in draw order. */
+    const rgbaOf = (layer: Points3DLayer) => {
+      const c = (layer as unknown as { colors: Float32Array }).colors;
+      return Array.from({ length: c.length / 4 }, (_v, i) => Array.from(c.subarray(i * 4, i * 4 + 4)));
+    };
+
+    it("colours each transcript by its cell's type, with the user's group colours, unassigned outside a cell", async () => {
+      const { t, port, layers } = setup();
+      (port.getTranscriptTile as jest.Mock).mockImplementation(async (_l: number, gx: number) =>
+        gx === 0 ? tile([10, 20], [0, 1], [0, 0xffffffff]) : tile([120], [2], [1]),
+      );
+      await t.sync(
+        typed(),
+        view({ transcriptGenes: ['Acta2', 'Cd3e', 'Krt5'], groupColors: { cell_type: { Paneth: '#ff0000' } } }),
+        port,
+        frame,
+      );
+      const rgba = rgbaOf(layers()[0]);
+      const [r, g, b] = parseHex(DEFAULT_CATEGORICAL_PALETTE[0]);
+      expect(rgba[0][0]).toBeCloseTo(r / 255, 5); // in a Goblet cell
+      expect(rgba[0][1]).toBeCloseTo(g / 255, 5);
+      expect(rgba[0][2]).toBeCloseTo(b / 255, 5);
+      expect(rgba[1][3]).toBeCloseTo(0.55, 5); // in no cell: unassigned
+      expect(rgba[2]).toEqual([1, 0, 0, 1]); // in a Paneth cell, in the user's colour
+    });
+
+    it("colours by a gene's cluster, a cluster named like a cell group in that group's colour", async () => {
+      const { t, port, layers } = setup();
+      await t.sync(
+        typed(),
+        view({
+          transcriptColorBy: 'cluster',
+          transcriptGenes: ['Acta2', 'Cd3e', 'Krt5'],
+          transcriptGeneGroups: [{ name: 'Paneth', genes: ['Acta2', 'Krt5'] }],
+          groupColors: { cell_type: { Paneth: '#00ff00' } },
+        }),
+        port,
+        frame,
+      );
+      const rgba = rgbaOf(layers()[0]);
+      // Acta2 (x 10) and Krt5 (x 120) are the Paneth cluster: the Paneth cells' colour.
+      expect(rgba[0]).toEqual([0, 1, 0, 1]);
+      expect(rgba[2]).toEqual([0, 1, 0, 1]);
+      expect(rgba[1]).not.toEqual([0, 1, 0, 1]);
+    });
+
+    it('colours by gene when the dataset has no cell types to colour by', async () => {
+      const { t, port, layers } = setup();
+      await t.sync(
+        dataset(),
+        view({ transcriptGenes: ['Acta2'], transcriptGeneColors: { Acta2: '#0000ff' } }),
+        port,
+        frame,
+      );
+      expect(rgbaOf(layers()[0])[0]).toEqual([0, 0, 1, 1]);
+    });
+  });
+
+  it('takes the drawn transcripts down when the genes asked for next cannot be read', async () => {
+    const { t, port, layers } = setup();
+    await t.sync(dataset(), view({ transcriptGenes: ['Acta2'] }), port, frame);
+    expect(layers()).toHaveLength(1);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    (port.getTranscriptTile as jest.Mock).mockRejectedValue(new Error('503'));
+    await t.sync(dataset(), view({ transcriptGenes: ['Cd3e'] }), port, frame);
+    expect(layers()).toHaveLength(0);
+    warn.mockRestore();
   });
 });

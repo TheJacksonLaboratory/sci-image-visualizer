@@ -24,7 +24,7 @@ file was added.
 
 - **Transcripts in the 3D spatial view.** A dataset whose transcripts carry z (a MERFISH volume) now
   offers the Transcripts panel in 3D, and the cloud draws every molecule of the genes it selects
-  (or of "All genes", hidden genes left out) at its own x, y and z, coloured by gene as in 2D,
+  (or of "All genes", hidden genes left out) at its own x, y and z, coloured as the panel's Colour by says (cell type, cluster or gene), as in 2D,
   sized and faded by the panel's Size and Opacity, and stretched with the Z handle
   (`Spatial3dTranscripts`). Level 0 is read once per gene selection (at most 4,096 tiles); past
   2,000,000 molecules every k-th is drawn, and "All genes" over that many is not drawn in 3D.

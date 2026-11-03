@@ -2,9 +2,17 @@ import type { Points3DLayer, Viewer } from 'napari-js';
 
 import { ALL_GENES, type SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import type { SpatialViewState } from '../../contracts/display-types';
-import type { SpatialDataset, SpatialTranscriptTile } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_CATEGORICAL_PALETTE, parseHex } from '../../spatial/spatial-encoding';
+import {
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  isCategoricalColumn,
+  type SpatialDataset,
+  type SpatialTranscriptTile,
+} from '../../contracts/spatial-dataset.contract';
+import { DEFAULT_CATEGORICAL_PALETTE, categoryColorsFor, parseHex } from '../../spatial/spatial-encoding';
 import { allGeneShownBy, allGenesHidden } from '../../spatial/spatial-tile-merge';
+import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+import { clusterColorMap, clusterOfGene } from '../../spatial/transcript-grouping';
 import { tilesInRect } from '../../spatial/lod';
 import { Supersede } from '../../util/supersede';
 
@@ -16,6 +24,8 @@ export const TRANSCRIPTS_3D_MAX_TILES = 4096;
 const CONCURRENCY = 8;
 /** A transcript's marker in the 3D view, in screen pixels at a transcript scale of 1. */
 export const TRANSCRIPT_3D_BASE_SIZE = 2;
+/** A transcript with no colour by cell type (in no cell, or a cell in no group), as the 2D markers. */
+const UNASSIGNED_RGBA = [0.62, 0.62, 0.62, 0.55] as const;
 
 /** What the 3D transcripts need of the scene: where the cloud sits and how Z is stretched. */
 export interface Transcripts3dFrame {
@@ -42,7 +52,7 @@ export function transcripts3dGenes(
 /**
  * Each loaded transcript's colour, packed RGBA, as the 2D markers colour them by gene: a gene's
  * chosen colour, else the palette's by its slot (the selection's order, or with "All genes" the
- * dataset's gene code); hidden genes of "All genes" get alpha 0 and are left out by the caller.
+ * dataset's gene code).
  */
 export function transcripts3dColors(
   view: SpatialViewState,
@@ -51,18 +61,56 @@ export function transcripts3dColors(
   count: number,
 ): Float32Array {
   const n = names ? names.length : DEFAULT_CATEGORICAL_PALETTE.length;
-  const table = Array.from({ length: n }, (_g, i) => {
-    const [r, g, b] = parseHex(
+  const table = Array.from({ length: n }, (_g, i) =>
+    rgba01(
       (names && view.transcriptGeneColors[names[i]]) ||
         DEFAULT_CATEGORICAL_PALETTE[i % DEFAULT_CATEGORICAL_PALETTE.length],
-    );
-    return [r / 255, g / 255, b / 255, 1] as const;
-  });
+    ),
+  );
+  return packed(count, (i) => table[names ? gene[i] : gene[i] % n]);
+}
+
+/**
+ * How the panel's "Colour by" applies in 3D, as it does to the 2D markers (`colorViewFor`): by
+ * cell type when the dataset has one (else by gene), by cluster for the selected genes (with "All
+ * genes" a cluster is its gene), by gene otherwise.
+ */
+export function transcripts3dColorBy(
+  dataset: SpatialDataset,
+  view: SpatialViewState,
+  allGenes: boolean,
+): 'cellType' | 'cluster' | 'gene' {
+  const by = view.transcriptColorBy;
+  if (by === 'cellType') return cellTypeColumnFor(dataset, view) ? 'cellType' : 'gene';
+  if (by === 'cluster' && !allGenes) return 'cluster';
+  return 'gene';
+}
+
+/** The colours the cells' grouping gives its groups, by name (none without a grouping). */
+async function cellGroupColors(
+  dataset: SpatialDataset,
+  view: SpatialViewState,
+  port: SpatialDataPort,
+): Promise<{ codes: Uint16Array; colors: (readonly number[])[]; byName: Map<string, string> } | null> {
+  const name = cellTypeColumnFor(dataset, view);
+  if (!name) return null;
+  const column = await port.getColumn(name);
+  if (!isCategoricalColumn(column)) return null;
+  const hex = categoryColorsFor(name, column.meta, view.groupColors);
+  const byName = new Map(column.meta.categories.map((c, k) => [c, hex[k]] as const));
+  return { codes: column.codes, colors: hex.map(rgba01), byName };
+}
+
+/** `#rrggbb` as an opaque 0..1 RGBA. */
+function rgba01(hex: string): readonly number[] {
+  const [r, g, b] = parseHex(hex);
+  return [r / 255, g / 255, b / 255, 1];
+}
+
+/** `count` colours packed RGBA, unassigned where `at` has none. */
+function packed(count: number, at: (i: number) => readonly number[] | undefined): Float32Array {
   const out = new Float32Array(count * 4);
-  for (let i = 0; i < count; i++) {
-    const c = table[names ? gene[i] : gene[i] % n];
-    if (c) out.set(c, i * 4);
-  }
+  for (let i = 0; i < count; i++) out.set(at(i) ?? UNASSIGNED_RGBA, i * 4);
   return out;
 }
 
@@ -129,6 +177,10 @@ export class Spatial3dTranscripts {
         );
       } catch (err) {
         console.warn('[napari-js] transcripts for the 3D view could not be read', err);
+        // The panel asked for other transcripts than those drawn: take them down rather than leave
+        // the old selection up as if it were the new one; the next change reads again. Only the
+        // current load may: a superseded one must not tear down what a newer one drew.
+        if (task()) this.clearLayer();
         return;
       } finally {
         end();
@@ -138,7 +190,7 @@ export class Spatial3dTranscripts {
       this.styleKey = null;
       this.loaded = { tiles, names: genes.allGenes ? (meta.genes ?? null) : genes.query };
     }
-    this.draw(view, frame, genes.allGenes);
+    await this.draw(dataset, view, port, frame, genes.allGenes);
   }
 
   /** Follow the scene's Z stretch (nothing is re-uploaded). */
@@ -149,6 +201,10 @@ export class Spatial3dTranscripts {
   /** Take the layer down and forget what it showed. */
   remove(): void {
     this.loads.cancel();
+    this.clearLayer();
+  }
+
+  private clearLayer(): void {
     if (this.layer) this.viewer.layers.remove(this.layer);
     this.layer = null;
     this.loadKey = null;
@@ -156,12 +212,22 @@ export class Spatial3dTranscripts {
     this.loaded = null;
   }
 
-  private draw(view: SpatialViewState, frame: Transcripts3dFrame, allGenes: boolean): void {
+  private async draw(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    port: SpatialDataPort,
+    frame: Transcripts3dFrame,
+    allGenes: boolean,
+  ): Promise<void> {
     const loaded = this.loaded;
     if (!loaded) return;
+    const by = transcripts3dColorBy(dataset, view, allGenes);
     const styleKey = [
       frame.origin.join(','),
-      JSON.stringify(view.transcriptGeneColors),
+      by,
+      by === 'gene' ? JSON.stringify(view.transcriptGeneColors) : '',
+      by !== 'gene' ? `${cellTypeColumnFor(dataset, view)}|${JSON.stringify(view.groupColors)}` : '',
+      by === 'cluster' ? JSON.stringify(view.transcriptGeneGroups) : '',
       allGenes ? view.transcriptAllGenesHidden.join(',') : '',
     ].join('|');
     const size = TRANSCRIPT_3D_BASE_SIZE * (view.transcriptScale > 0 ? view.transcriptScale : 1);
@@ -181,25 +247,58 @@ export class Spatial3dTranscripts {
     const [ox, oy, oz] = frame.origin;
     const positions: number[] = [];
     const genes: number[] = [];
+    const cells: number[] = [];
     let seen = 0;
     for (const t of loaded.tiles) {
       for (let i = 0; i < t.count; i++) {
         if (!keep(t.gene[i]) || seen++ % stride) continue;
         positions.push(t.x[i] + ox, t.y[i] + oy, t.z[i] + oz);
         genes.push(t.gene[i]);
+        cells.push(t.observation[i]);
+      }
+    }
+    const count = genes.length;
+    let colors: Float32Array;
+    if (by === 'gene') {
+      colors = transcripts3dColors(view, names, Uint16Array.from(genes), count);
+    } else {
+      const groups = await cellGroupColors(dataset, view, port).catch((err) => {
+        console.warn('[napari-js] the cells grouping for the 3D transcripts could not be read', err);
+        return null;
+      });
+      // A newer draw (another style, or the layer taken down) won while the column loaded.
+      if (this.loaded !== loaded) return;
+      if (by === 'cellType') {
+        colors = packed(count, (i) => {
+          const o = cells[i];
+          const code = !groups || o === NO_OBSERVATION ? NO_CATEGORY : groups.codes[o];
+          return code === NO_CATEGORY ? undefined : groups!.colors[code];
+        });
+      } else {
+        // A cluster named like a group of the cells' grouping takes that group's colour, as in 2D.
+        const byCluster = clusterColorMap(
+          view.transcriptGenes,
+          view.transcriptGeneGroups,
+          groups?.byName ?? new Map(),
+          DEFAULT_CATEGORICAL_PALETTE,
+        );
+        const table = (names ?? []).map((gene) => {
+          const hex = byCluster.get(clusterOfGene(gene, view.transcriptGeneGroups));
+          return hex ? rgba01(hex) : undefined;
+        });
+        colors = packed(count, (i) => table[genes[i]]);
       }
     }
     if (this.layer) this.viewer.layers.remove(this.layer);
     this.layer = null;
     this.styleKey = styleKey;
-    if (!genes.length) return;
-    const count = genes.length;
+    if (!count) return;
     this.layer = this.viewer.addPoints3D(Float32Array.from(positions), new Float32Array(count), {
       name: 'transcripts',
       size,
       opacity: view.transcriptOpacity,
       scale3d: [1, 1, frame.zScale],
-      colors: transcripts3dColors(view, names, Uint16Array.from(genes), count),
+      colors,
     });
   }
 }
