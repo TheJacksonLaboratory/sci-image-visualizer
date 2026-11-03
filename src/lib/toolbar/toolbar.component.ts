@@ -14,6 +14,7 @@ import {
   isNapariIsosurface,
   isNapariSurface,
   isNapariScatter,
+  isNapariVolume,
   NAPARI_DEFAULT_DECIMATE,
   isSpatialOmics,
   isSpatialOmics3d,
@@ -294,6 +295,16 @@ export class ToolbarComponent {
   /** ISOSURFACE (Plotly or napari-js WebGPU, either resolution) shows the isovalue range slider. */
   protected get isIsosurfaceMode(): boolean {
     return this.effectivePlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.effectivePlotType);
+  }
+
+  /**
+   * The views that draw the 3D axes gizmo (an `Axes3dGizmo`): napari-js's volume, isosurface and
+   * surface, and the 3D spatial cloud. Not every napari-js view: its 2D image and scatter and its
+   * 3D scatter draw none, and a toggle there would do nothing.
+   */
+  protected get showsAxesToggle(): boolean {
+    const type = this.effectivePlotType;
+    return isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type) || isSpatialOmics3d(type);
   }
 
   /** The napari-js WebGPU surface — shows the wireframe toggle. */

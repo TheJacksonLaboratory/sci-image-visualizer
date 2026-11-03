@@ -27,6 +27,13 @@ import { SpatialGeneStyleComponent } from '../spatial-gene-style/spatial-gene-st
 /** Rows of the all-genes list drawn at once; the filter narrows the rest. */
 const ALL_GENES_ROWS = 200;
 
+/** How the gene rows are ordered: by name, or by their transcripts in view, most first. */
+export type GeneSort = 'name' | 'count';
+
+/** Names in reading order: case aside, and `G9` before `G10`. */
+const byName = (a: string, b: string): number =>
+  a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
 /** One gene row as the template draws it, derived once per input change. */
 interface GeneRowView {
   shown: boolean;
@@ -53,6 +60,11 @@ interface AllGeneRowView {
  * view. With "All genes" on, the root eye hides or shows every transcript and the root
  * expands to every gene of the dataset, each with its eye when the dataset lists its genes
  * in code order (`transcriptTiles.genes`), filtered by name past a few hundred.
+ *
+ * Both lists are ordered by name, or by their transcripts in view, most first (the
+ * sort switch, offered once the renderer reports counts). The all-genes list is sorted
+ * before it is cut to its first rows, so by count those are the genes with the most
+ * transcripts in view.
  *
  * Writes only through `controls.setViewState`.
  */
@@ -87,6 +99,10 @@ export class SpatialGeneTreeComponent implements OnChanges {
 
   /** The tree, rebuilt when the view changes — never per change-detection pass. */
   protected geneTree: GeneTreeNode[] = [];
+  /** {@link geneTree} with each node's genes in {@link geneSort} order: what the template draws. */
+  protected sortedTree: GeneTreeNode[] = [];
+  /** The rows' order. By count only while the renderer reports counts (see {@link sortShown}). */
+  protected geneSort: GeneSort = 'name';
   /** Per gene: its eye, swatch, glyph and count — rebuilt with the inputs (and when the
    *  cells' group colours arrive), so the template does no per-row lookups per check. */
   protected rows = new Map<string, GeneRowView>();
@@ -154,7 +170,31 @@ export class SpatialGeneTreeComponent implements OnChanges {
         .map((node) => [node.name as string, this.areGenesShown(node.genes)]),
     );
     this.rootShown = this.view.transcriptAllGenes ? this.anyOfAllGenesShown() : this.areGenesShown(genes);
+    this.sortedTree = this.geneTree.map((node) => ({ ...node, genes: this.sorted(node.genes) }));
     this.rebuildAllRows();
+  }
+
+  /** Whether the rows are ordered by count: chosen, and counts to order by. */
+  protected get byCount(): boolean {
+    return this.geneSort === 'count' && !!this.geneCounts;
+  }
+
+  /** The sort switch is offered once there are counts to sort by. */
+  protected get sortShown(): boolean {
+    return !!this.geneCounts;
+  }
+
+  protected onGeneSort(sort: GeneSort): void {
+    if (sort === this.geneSort) return;
+    this.geneSort = sort;
+    this.rebuildRows();
+  }
+
+  /** `genes` in the rows' order: by count, most first (ties by name), else by name. */
+  private sorted(genes: readonly string[]): string[] {
+    if (!this.byCount) return [...genes].sort(byName);
+    const counts = this.geneCounts ?? {};
+    return [...genes].sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0) || byName(a, b));
   }
 
   /**
@@ -170,22 +210,22 @@ export class SpatialGeneTreeComponent implements OnChanges {
     }
     const needle = this.allGenesFilter.trim().toLowerCase();
     const shown = allGeneShownBy(this.view.transcriptAllGenesHidden);
-    const rows: AllGeneRowView[] = [];
-    let matched = 0;
+    // Every match, ordered, and only then cut: by count the first rows are the most abundant.
+    const codes = new Map<string, number>();
     list.forEach((gene, code) => {
       // An empty name is a code no transcript carries (a control probe).
       if (!gene || (needle && !gene.toLowerCase().includes(needle))) return;
-      matched++;
-      if (rows.length >= ALL_GENES_ROWS) return;
-      rows.push({
+      if (!codes.has(gene)) codes.set(gene, code);
+    });
+    this.allRows = this.sorted([...codes.keys()])
+      .slice(0, ALL_GENES_ROWS)
+      .map((gene) => ({
         gene,
         shown: shown(gene),
-        swatch: this.canHideAllGenes ? this.allGeneColorOf(gene, code) : null,
+        swatch: this.canHideAllGenes ? this.allGeneColorOf(gene, codes.get(gene)!) : null,
         count: this.geneCountOf(gene),
-      });
-    });
-    this.allRows = rows;
-    this.allGenesMatched = matched;
+      }));
+    this.allGenesMatched = codes.size;
   }
 
   /** Whether "All genes" draws anything: not switched off whole, nor every listed gene hidden. */

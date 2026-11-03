@@ -1,9 +1,11 @@
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
 import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
-import { ScaleBarOverlay } from 'napari-js/overlays';
+import { ScaleBarOverlay, formatLength } from 'napari-js/overlays';
+import type { AxisLabelSpec } from 'napari-js/overlays';
 
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
+import { ISurface3dControls } from '../../contracts/visualizer.contract';
 import {
   SpatialColumn,
   SpatialDataset,
@@ -48,13 +50,64 @@ import {
   totalDensityGroup,
 } from './napari-spatial-encoding';
 import { HOVER_RADIUS_PX } from './napari-spatial-hover';
+import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
+import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
+
+/** The least Z stretch: a tenth of the true depth. */
+export const SPATIAL_Z_SCALE_MIN = 0.1;
+/** The most Z stretch a cloud allows, at least: the Volume view's. */
+const SPATIAL_Z_SCALE_MAX = 10;
+/** Nor more than this, however thin the cloud is. */
+const SPATIAL_Z_SCALE_CEILING = 1000;
+
+/**
+ * The most a box's Z may be stretched: until it is twice as deep as it is wide, so even a section
+ * microns thick and millimetres wide can be stood up into a block — but never less than the
+ * Volume view's 10x, nor more than {@link SPATIAL_Z_SCALE_CEILING}.
+ */
+export function spatialZScaleMax(box: Box3): number {
+  const flat = (2 * Math.max(box.width, box.height)) / Math.max(box.depth, 1e-9);
+  return Math.min(SPATIAL_Z_SCALE_CEILING, Math.max(SPATIAL_Z_SCALE_MAX, flat));
+}
+
+/**
+ * The Z handle's drag (px) per doubling: the Volume view's 180 px, less when the range is wider,
+ * so going from the true depth to the most stretch is about the same drag (~540 px) either way.
+ */
+export function spatialZPixelsPerDouble(maxScale: number): number {
+  return Math.max(60, Math.min(180, 540 / Math.log2(Math.max(2, maxScale))));
+}
+
+/**
+ * The X/Y/Z axis-end labels for a box (as drawn: Z stretched by `zScale`), its true lengths in µm
+ * when the dataset declares `micronsPerUnit`, else in its own units. A stretched Z says by how much,
+ * so its length is never read off the drawing.
+ */
+export function spatialAxesLabels(drawn: Box3, zScale: number, micronsPerUnit?: number): AxisLabelSpec[] {
+  const hx = drawn.width / 2;
+  const hy = drawn.height / 2;
+  const hz = drawn.depth / 2;
+  const mpu = micronsPerUnit && micronsPerUnit > 0 ? micronsPerUnit : 0;
+  const len = (n: number): string => (mpu ? formatLength(n * mpu, 'µm') : `${+n.toPrecision(3)} units`);
+  const stretch = Math.abs(zScale - 1) > 1e-3 ? ` (×${+zScale.toPrecision(3)})` : '';
+  return [
+    { anchor: [hx, -hy, -hz], text: `X · ${len(drawn.width)}`, color: '#ed4545' },
+    { anchor: [-hx, hy, -hz], text: `Y · ${len(drawn.height)}`, color: '#4dd959' },
+    { anchor: [-hx, -hy, hz], text: `Z · ${len(drawn.depth / zScale)}${stretch}`, color: '#668cff' },
+  ];
+}
 
 /**
  * SPATIAL_OMICS_3D (review Appendix B, cluster K): observations as a 3D point cloud under the
  * orbit camera, with the dataset's reference volume around it, per-cluster density volumes and the
  * 3D gene map.
+ *
+ * Everything sits in one box centred on the world origin (see {@link ensureFrame}): the reference
+ * volume's, else the density grid's. The Volume view's axes gizmo and Z-height handle are drawn on
+ * it, and the handle stretches Z: the cloud through its `scale3d`, every volume through its voxel
+ * size, so nothing is re-uploaded while dragging (see {@link setZScale}).
  *
  * Thinner than the 2D scene: there is no tissue image to render (a registered volume like the
  * Allen CCF has no single reference plane), so no readback and no navigator; the 3D scale bar
@@ -89,6 +142,14 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private geneMapKey: string | null = null;
   /** Offset applied to observation coordinates to sit them in the volume's box. */
   private origin: [number, number, number] = [0, 0, 0];
+  /** The box everything sits in, before the Z stretch, centred on the origin (see ensureFrame). */
+  private box: Box3 | null = null;
+  private boxKey: string | null = null;
+  /** The axes gizmo on {@link box} and the handle that stretches its Z (see setZScale). */
+  private gizmo: Axes3dGizmo | null = null;
+  private zHandle: NapariVolumeZHandle | null = null;
+  /** Each volume layer's own voxel size, before the Z stretch. */
+  private readonly baseVoxels = new WeakMap<VolumeLayer, [number, number, number]>();
   /**
    * napari-js's depth-aware pick over the cloud, and the projection the ROI selection reads. It
    * owns the caching policy: re-project lazily, on the first pick after the camera, the canvas or
@@ -167,7 +228,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const [vx, vy, vz] = meta.voxelSize;
     this.regionMeshes.setFrame({
       size: [meta.width, meta.height, meta.depth],
-      world: [meta.width * vx, meta.height * vy, meta.depth * vz],
+      world: [meta.width * vx, meta.height * vy, meta.depth * vz * this.zScale()],
     });
   }
 
@@ -210,6 +271,73 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     return null;
   }
 
+  /** The toolbar's 3D controls, as the Volume view's: drag mode, re-framing and the axes. */
+  surface3dControls(): ISurface3dControls | null {
+    return surface3dControls(this.ctx, () => this.gizmo);
+  }
+
+  /**
+   * Stretch Z by `factor` (1 = the data's true proportions), as the Z handle drags it: the cloud
+   * through its `scale3d`, each volume through its voxel size, the axes and the region surfaces
+   * with them — all about the world origin, which the box is centred on, so they stay aligned.
+   * Nothing is re-uploaded. Kept in the settings, so a re-plot keeps it.
+   */
+  setZScale(factor: number): void {
+    const max = this.box ? spatialZScaleMax(this.box) : SPATIAL_Z_SCALE_MAX;
+    this.ctx.settings.spatialZScale = Math.min(max, Math.max(SPATIAL_Z_SCALE_MIN, factor));
+    this.applyZScale();
+  }
+
+  /** The Z stretch in effect: the setting, within what this box allows. */
+  zScale(): number {
+    const max = this.box ? spatialZScaleMax(this.box) : SPATIAL_Z_SCALE_MAX;
+    const s = this.ctx.settings.spatialZScale;
+    return Math.min(max, Math.max(SPATIAL_Z_SCALE_MIN, s > 0 ? s : 1));
+  }
+
+  private applyZScale(): void {
+    const s = this.zScale();
+    if (this.points) this.points.scale3d = [1, 1, s];
+    for (const layer of [this.volume, this.geneMapLayer, ...this.densityLayers]) {
+      const base = layer && this.baseVoxels.get(layer);
+      if (layer && base) layer.voxelSize = [base[0], base[1], base[2] * s];
+    }
+    const dataset = this.session.latest?.[0];
+    if (this.gizmo && this.box) {
+      const drawn = this.drawnBox(this.box);
+      this.gizmo.setDepth(drawn.depth, spatialAxesLabels(drawn, s, dataset?.micronsPerUnit));
+    }
+    this.zHandle?.reposition();
+    if (dataset) this.placeRegionMeshes(dataset);
+    this.ctx.viewer.requestRender();
+  }
+
+  /** `box` with its Z stretched as drawn. */
+  private drawnBox(box: Box3): Box3 {
+    return { width: box.width, height: box.height, depth: box.depth * this.zScale() };
+  }
+
+  /**
+   * Add a volume layer with its Z stretched as the rest of the scene is, remembering its own
+   * voxel size so a later stretch can be applied to it.
+   */
+  private addVolume(
+    viewer: Viewer,
+    data: Uint8Array,
+    width: number,
+    height: number,
+    depth: number,
+    opts: Parameters<Viewer['addVolume']>[4] & { voxelSize: [number, number, number] },
+  ): VolumeLayer {
+    const [vx, vy, vz] = opts.voxelSize;
+    const layer = viewer.addVolume(data, width, height, depth, {
+      ...opts,
+      voxelSize: [vx, vy, vz * this.zScale()],
+    });
+    this.baseVoxels.set(layer, [vx, vy, vz]);
+    return layer;
+  }
+
   /**
    * Every observation's position on the canvas under the current 3D camera (for the ROI
    * selection), indexed by observation with NaN for anything not drawn. Null before the cloud
@@ -246,6 +374,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.geneMapLoads.cancel();
     this.scaleBar?.dispose();
     this.scaleBar = null;
+    this.removeAxes();
     // Drop the cached interleaved coordinates too: holding 3.7M x 3 floats after
     // a teardown is ~45MB of retained heap for a scene that no longer exists.
     this.positions = null;
@@ -364,8 +493,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // stray segmentation. Every later add keeps the pose instead (napari-js `fit3d: 'once'`).
     await this.ensureVolume(viewer, dataset, view);
     if (!task()) return;
-    // Then the cluster density volumes, which can set the centring offset when
-    // there is no reference volume — so before any position is computed from it.
+    // The box everything sits in, before any position is computed from its centring offset.
+    this.ensureFrame(dataset);
+    // Then the cluster density volumes.
     await this.ensureDensityVolumes(viewer, dataset, view, selection);
     if (!task()) return;
     // Then the gene map, which shares the reference volume's lattice — so it goes
@@ -433,6 +563,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.scalarKey = scalarKey;
       this.points = viewer.addPoints3D(this.positions!, valuesFor(), {
         name: 'observations',
+        scale3d: [1, 1, this.zScale()],
         colormap,
         contrastLimits,
         size,
@@ -656,7 +787,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const lo = 0;
     const data = encodeExpressionVolume(field, [lo, hi], { log: view.logScale });
     const lut = this.ctx.display.spatialLut(view);
-    this.geneMapLayer = viewer.addVolume(data, field.width, field.height, field.depth, {
+    this.geneMapLayer = this.addVolume(viewer, data, field.width, field.height, field.depth, {
       name: `gene map · ${gene}${interpolate ? ' · volume' : ''}`,
       colormap: colormapFromLut(`gene-map-${gene}`, lut),
       // The encoding already applied the window, so the layer must not apply a
@@ -717,20 +848,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const load = this.densityLoads.next();
     if (!key) return;
 
+    // The density box is the scene's box (ensureFrame), so the cloud already sits in it.
     const grid = densityGrid(dataset);
     if (!grid) return;
-    // With no reference volume there is no offset yet, and a VolumeLayer has no
-    // translate — napari centres its box on the world origin. So the POINTS move by
-    // half the density box, exactly as they do for a reference volume, and the
-    // cached geometry is invalidated because that offset just changed.
-    if (!this.volume) {
-      this.origin = [
-        -(grid.width * grid.voxelSize[0]) / 2,
-        -(grid.height * grid.voxelSize[1]) / 2,
-        -(grid.depth * grid.voxelSize[2]) / 2,
-      ];
-      this.layerKey = null;
-    }
 
     let groups: DensityGroup[];
     try {
@@ -775,7 +895,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       // A cluster with nothing on the grid draws no layer, rather than an empty box.
       if (!data) return;
       this.densityLayers.push(
-        viewer.addVolume(data, grid.width, grid.height, grid.depth, {
+        this.addVolume(viewer, data, grid.width, grid.height, grid.depth, {
           name: `density · ${group.name}`,
           colormap: this.ctx.display.channelTintColormap(group.color),
           invert: this.ctx.display.invert,
@@ -814,16 +934,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   /**
-   * Add (or keep) the dataset's reference volume, and derive the offset that sits the
-   * observations inside it.
+   * Add (or keep) the dataset's reference volume. The offset that sits the observations inside
+   * it is {@link ensureFrame}'s.
    *
-   * `VolumeLayer` has no translate: napari-js maps the volume's unit cube to a world box
-   * **centred on the origin**, sized `dims x voxelSize`. The observations, by contract, are in
-   * the volume's own frame with its near corner at the coordinate origin. So the two only line
-   * up if the POINTS move — by half the box — which is what {@link origin} is.
-   *
-   * A failed or absent volume is not fatal: the cloud renders on its own, at its own
-   * coordinates, and the camera frames the points instead.
+   * A failed or absent volume is not fatal: the cloud renders on its own, in the same box, and
+   * the camera frames the points instead.
    */
   private async ensureVolume(viewer: Viewer, dataset: SpatialDataset, view: SpatialViewState): Promise<void> {
     const meta = dataset.volume;
@@ -838,7 +953,6 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     }
     // The surfaces sat in the volume just removed (or there was none): down until one is placed.
     this.regionMeshes.clearFrame();
-    this.origin = [0, 0, 0];
     if (!meta || !port?.getVolume) return;
 
     let voxels: Uint8Array;
@@ -852,7 +966,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
     const [vx, vy, vz] = meta.voxelSize;
     this.volumeKey = key;
-    this.volume = viewer.addVolume(voxels, meta.width, meta.height, meta.depth, {
+    this.volume = this.addVolume(viewer, voxels, meta.width, meta.height, meta.depth, {
       name: 'reference volume',
       colormap: 'gray',
       // MIP would draw the brightest voxel along each ray, which for an averaged
@@ -864,12 +978,87 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       voxelSize: [vx, vy, vz],
     });
     if (this.regionsThrough) this.volume.blending = 'translucent_no_depth';
-    // Half the box, negated: the observations' origin is the box's near corner,
-    // and the box is centred on the world origin.
-    this.origin = [-(meta.width * vx) / 2, -(meta.height * vy) / 2, -(meta.depth * vz) / 2];
     this.placeRegionMeshes(dataset);
+  }
+
+  /**
+   * The box everything sits in, centred on the world origin, and the offset that sits the
+   * observations in it; with the axes gizmo and the Z handle on it.
+   *
+   * `VolumeLayer` has no translate: napari-js maps a volume's unit cube to a world box centred on
+   * the origin, sized `dims x voxelSize`. The observations, by contract, are in the reference
+   * volume's frame with its near corner at the coordinate origin, and the density grid is measured
+   * from the coordinate origin the same way (`densityGrid`), so its box is the reference volume's
+   * when there is one. So the POINTS move by half that box — {@link origin} — and every volume, the
+   * reference, the densities and the gene map, lines up with them and with each other. Without a
+   * reference volume this centres the cloud too, which the axes and the Z stretch need: both work
+   * about the origin.
+   */
+  private ensureFrame(dataset: SpatialDataset): void {
+    const meta = dataset.volume;
+    const key = `${dataset.id}:${dataset.observations.count}:${meta ? `${meta.width}x${meta.height}x${meta.depth}` : '-'}`;
+    if (key === this.boxKey) return;
+    this.boxKey = key;
+    const grid = densityGrid(dataset);
+    this.box = grid
+      ? {
+          width: grid.width * grid.voxelSize[0],
+          height: grid.height * grid.voxelSize[1],
+          depth: grid.depth * grid.voxelSize[2],
+        }
+      : null;
+    const box = this.box;
+    this.origin = box ? [-box.width / 2, -box.height / 2, -box.depth / 2] : [0, 0, 0];
     // Force a geometry rebuild: the offset changed, so cached positions are stale.
     this.layerKey = null;
+    this.installAxes(dataset);
+    // A stretch chosen for another box may be past what this one allows: draw what is in effect.
+    this.applyZScale();
+  }
+
+  /**
+   * The Volume view's axes gizmo and Z-height handle, on {@link box}. The handle floats past the
+   * top of the Z axis (the box's min-XY corner, where the blue axis and its label are), by a share
+   * of the box's largest side rather than of its depth, so it clears the label even while a thin
+   * section is drawn flat.
+   */
+  private installAxes(dataset: SpatialDataset): void {
+    this.removeAxes();
+    const box = this.box;
+    if (!box) return;
+    const { viewer, host, settings } = this.ctx;
+    const drawn = this.drawnBox(box);
+    this.gizmo = new Axes3dGizmo(
+      viewer,
+      host,
+      drawn,
+      spatialAxesLabels(drawn, this.zScale(), dataset.micronsPerUnit),
+      {
+        visible: settings.axesVisible,
+      },
+    );
+    const maxScale = spatialZScaleMax(box);
+    this.zHandle = new NapariVolumeZHandle(host, viewer.camera3d, {
+      topAnchor: () => {
+        const d = this.drawnBox(box);
+        return [-d.width / 2, -d.height / 2, d.depth / 2 + 0.08 * Math.max(d.width, d.height, d.depth)];
+      },
+      getScale: () => this.zScale(),
+      setScale: (s) => this.setZScale(s),
+      minScale: SPATIAL_Z_SCALE_MIN,
+      maxScale,
+      pixelsPerDouble: spatialZPixelsPerDouble(maxScale),
+    });
+  }
+
+  private removeAxes(): void {
+    if (this.gizmo) {
+      this.ctx.viewer.layers.remove(this.gizmo.layer);
+      this.gizmo.destroy();
+      this.gizmo = null;
+    }
+    this.zHandle?.destroy();
+    this.zHandle = null;
   }
 
   /** Drop every layer of the cloud (the dataset went away, or has no z). */
@@ -891,6 +1080,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.volume = null;
     this.volumeKey = null;
     this.origin = [0, 0, 0];
+    this.box = null;
+    this.boxKey = null;
+    this.removeAxes();
     this.points = null;
     this.setPicker(null);
     this.layerKey = null;

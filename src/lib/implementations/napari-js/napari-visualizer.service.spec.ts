@@ -38,6 +38,7 @@ import {
   SpatialDataset,
 } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_MUTED_OPACITY } from '../../spatial/spatial-encoding';
+import { densityGrid } from '../../spatial/spatial-density';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
 import { SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
@@ -76,6 +77,22 @@ const spatialDataset3d = (count = 3): SpatialDataset => {
       z: Float32Array.from({ length: count }, (_, i) => i * 30),
     },
   };
+};
+
+/**
+ * Where the 3D scene draws a dataset's observations: shifted by half its box (the reference
+ * volume's, else the density grid's, both measured from the coordinate origin), so the box is
+ * centred on the world origin. Interleaved x, y, z of `indices` (every observation by default).
+ */
+const centredPositions = (dataset: SpatialDataset, indices?: number[]): number[] => {
+  const g = densityGrid(dataset)!;
+  const half = [0, 1, 2].map((a) => ([g.width, g.height, g.depth][a] * g.voxelSize[a]) / 2);
+  const o = dataset.observations;
+  return (indices ?? Array.from({ length: o.count }, (_, i) => i)).flatMap((i) => [
+    o.x[i] - half[0],
+    o.y[i] - half[1],
+    o.z![i] - half[2],
+  ]);
 };
 
 /** The 3D dataset plus a reference volume, for the anatomy-backdrop path. */
@@ -2079,11 +2096,12 @@ describe('NapariVisualizerService', () => {
           },
         };
         await mount3d(stacked);
-        // A projection with depth: w = z + 1, so both markers land on the canvas centre and
-        // observation 0 (z = 5) is in front of observation 1 (z = 50).
+        // A projection with depth: w = z + 100, so both markers land on the canvas centre and
+        // observation 0 (z = 5, drawn at -20 in its centred box) is in front of observation 1
+        // (z = 50, drawn at 25).
         (
           service as unknown as { viewer: { camera3d: { viewProjection: () => number[] } } }
-        ).viewer.camera3d.viewProjection = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1];
+        ).viewer.camera3d.viewProjection = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 100, 100];
         store.setSpatialView({ colorBy: { kind: 'column', name: 'region' } });
         await flush();
 
@@ -2369,8 +2387,9 @@ describe('NapariVisualizerService', () => {
         store.setSpatialView({ pointSection: 1 });
         await flush();
         const one = cloud(addPoints3D.mock.results.map((r) => r.value));
-        // The middle section's single cell: x=10, y=20, z=30.
-        expect(Array.from(one.positions)).toEqual([10, 20, 30]);
+        // The middle section's single cell: x=10, y=20, z=30 (centred in the box).
+        const expected = centredPositions(spatialDataset3d(), [1]);
+        Array.from(one.positions).forEach((v, i) => expect(v).toBeCloseTo(expected[i], 4));
         // …and ITS scalar, not the first observation's — a per-observation vector
         // against one section's positions would colour each cell by a stranger.
         expect(one.values).toHaveLength(1);
@@ -2388,7 +2407,9 @@ describe('NapariVisualizerService', () => {
         await flush();
         const layer = cloud(addPoints3D.mock.results.map((r) => r.value));
         // The last section, drawn — not an empty layer.
-        expect(Array.from(layer.positions)).toEqual([20, 40, 60]);
+        const expected = centredPositions(spatialDataset3d(), [2]);
+        expect(layer.positions).toHaveLength(3);
+        Array.from(layer.positions).forEach((v, i) => expect(v).toBeCloseTo(expected[i], 4));
       });
 
       it('restricts the selection highlight to the section on screen', async () => {
@@ -2917,8 +2938,11 @@ describe('NapariVisualizerService', () => {
     it('draws the cloud with x, y and z interleaved', async () => {
       const layers = await mount3d();
       expect(addPoints3D).toHaveBeenCalled();
-      // x = i*10, y = i*20, z = i*30, laid out x-fastest.
-      expect(Array.from(named(layers, 'observations').positions)).toEqual([0, 0, 0, 10, 20, 30, 20, 40, 60]);
+      // x = i*10, y = i*20, z = i*30, laid out x-fastest, centred in their box.
+      const positions = Array.from(named(layers, 'observations').positions);
+      const expected = centredPositions(spatialDataset3d());
+      expect(positions).toHaveLength(9);
+      positions.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 4));
     });
 
     it('draws nothing when the observations have no z', async () => {
@@ -3189,11 +3213,14 @@ describe('NapariVisualizerService', () => {
         }
       });
 
-      it('leaves the cloud at its own coordinates when there is no volume', async () => {
+      it('centres the cloud in its density box when there is no volume', async () => {
+        // The box the axes are drawn on, and the Z stretch works about: measured from the
+        // coordinate origin, as a volume's is, so a density volume lines up with it too.
         const layers = await mount3d(spatialDataset3d());
-        const obs = spatialDataset3d().observations;
+        const expected = centredPositions(spatialDataset3d());
         const positions = named(layers, 'observations').positions;
-        expect(positions[3]).toBeCloseTo(obs.x[1], 3);
+        expect(positions[3]).toBeCloseTo(expected[3], 3);
+        expect(positions[3]).not.toBeCloseTo(spatialDataset3d().observations.x[1], 1);
       });
 
       it('draws the cloud anyway when the volume fails to load', async () => {
@@ -3204,8 +3231,11 @@ describe('NapariVisualizerService', () => {
         const layers = await mount3d(spatialDatasetVolume());
 
         expect(named(layers, 'observations')).toBeDefined();
-        // ...and unoffset, since there is no box to sit inside.
-        expect(named(layers, 'observations').positions[3]).toBeCloseTo(spatialDataset3d().observations.x[1], 3);
+        // ...in the volume's box all the same: it is the dataset's frame, loaded or not.
+        expect(named(layers, 'observations').positions[3]).toBeCloseTo(
+          spatialDataset3d().observations.x[1] - 200,
+          3,
+        );
         expect(warn).toHaveBeenCalled();
         warn.mockRestore();
       });
@@ -4893,7 +4923,13 @@ describe('NapariVisualizerService', () => {
             ['addPoints', 'observations'],
           ],
         ],
-        [PlotType.SPATIAL_OMICS_3D, [['addPoints3D', 'observations']]],
+        [
+          PlotType.SPATIAL_OMICS_3D,
+          [
+            ['addAxes', null],
+            ['addPoints3D', 'observations'],
+          ],
+        ],
       ])('%s', async (type, expected) => {
         jest
           .spyOn(regionStore, 'getRegions')

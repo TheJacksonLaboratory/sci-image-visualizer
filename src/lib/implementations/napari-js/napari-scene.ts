@@ -74,6 +74,8 @@ export interface NapariSettings {
   surfaceWireframe: boolean;
   /** The volume's user Z-height factor (1 = the volume's natural proportions). */
   volumeZScale: number;
+  /** The 3D spatial view's Z stretch (1 = the data's true proportions). */
+  spatialZScale: number;
 }
 
 /** The stack-loading flag and progress the host shows while frames load. */

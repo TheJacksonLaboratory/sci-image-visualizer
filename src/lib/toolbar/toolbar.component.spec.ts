@@ -189,6 +189,30 @@ describe('ToolbarComponent', () => {
       expect(component['isSpatialMode']).toBe(true);
     });
 
+    it('shows the 3D axes toggle only in the views that draw the axes', () => {
+      for (const t of [
+        PlotType.SPATIAL_OMICS_3D,
+        PlotType.NAPARI_VOLUME,
+        PlotType.NAPARI_ISOSURFACE,
+        PlotType.NAPARI_SURFACE,
+      ]) {
+        component.selectedPlotType = t;
+        expect(component['showsAxesToggle']).toBe(true);
+      }
+      // napari-js views without an axes gizmo (its 2D image and scatter, its 3D scatter), and 2D.
+      for (const t of [
+        PlotType.NAPARI_IMAGE,
+        PlotType.NAPARI_SCATTER,
+        PlotType.NAPARI_SCATTER3D,
+        PlotType.SPATIAL_OMICS,
+        PlotType.IMAGE,
+        PlotType.HEATMAP,
+      ]) {
+        component.selectedPlotType = t;
+        expect(component['showsAxesToggle']).toBe(false);
+      }
+    });
+
     it('hides it for every non-spatial mode', () => {
       for (const t of [PlotType.IMAGE, PlotType.NAPARI_VOLUME, PlotType.SCATTER]) {
         component.selectedPlotType = t;

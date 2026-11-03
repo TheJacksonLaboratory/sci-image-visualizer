@@ -161,6 +161,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     axesVisible: true,
     surfaceWireframe: false,
     volumeZScale: 1,
+    spatialZScale: 1,
   };
   /**
    * Frame loading (volume assembly, surface preload): aborted by {@link reset} AND by

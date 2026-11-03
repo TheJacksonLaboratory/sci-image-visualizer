@@ -25,7 +25,7 @@ function scene(info: any) {
   const volume: any = { blending: 'translucent' };
   const s = Object.assign(Object.create(Spatial3dScene.prototype), {
     info,
-    ctx: { viewer },
+    ctx: { viewer, settings: { spatialZScale: 1 } },
     regionMeshes: new VolumeRegionMeshes(viewer),
     regionsThrough: false,
     volume,

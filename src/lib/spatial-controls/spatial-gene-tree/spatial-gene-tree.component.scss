@@ -30,6 +30,31 @@
   }
 }
 
+// Name | Count: how the gene rows are ordered.
+.sc-gene-sort {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  .sc-lbl {
+    margin-right: auto;
+  }
+}
+.sc-sort-btn {
+  border: 1px solid var(--surface-border, #ced4da);
+  background: var(--surface-0, #fff);
+  color: var(--text-color, #333);
+  border-radius: 4px;
+  padding: 0.1rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+  &.active {
+    border-color: var(--primary-color, #2196f3);
+    color: var(--primary-color, #2196f3);
+    font-weight: 600;
+  }
+}
+
 // The all-genes list's name filter, indented with its rows.
 .sc-gene-filter {
   width: calc(100% - 1rem);
