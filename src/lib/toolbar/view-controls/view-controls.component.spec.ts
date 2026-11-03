@@ -41,7 +41,7 @@ describe('ViewControlsComponent', () => {
 
   it('3D: camera modes, and the napari axes / wireframe toggles', () => {
     fixture.componentRef.setInput('isHeatmap', false);
-    fixture.componentRef.setInput('isNapariMode', true);
+    fixture.componentRef.setInput('axesToggle', true);
     fixture.componentRef.setInput('isNapariSurfaceMode', true);
     fixture.detectChanges();
     expect(labels()).toEqual([
