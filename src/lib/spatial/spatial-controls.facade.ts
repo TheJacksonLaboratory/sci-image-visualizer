@@ -13,7 +13,7 @@ import { ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.cont
 import { RegionStore } from '../store/region-store.service';
 import { SpatialSelectionStore } from '../store/spatial-selection.service';
 import { VisualizerStore } from '../store/visualizer-store.service';
-import { resolveCategoryColors } from './spatial-encoding';
+import { categoryColorsFor } from './spatial-encoding';
 import { sectionsOf } from './spatial-sections';
 import { observationsInSlice, volumeImageRef } from './spatial-volume-image';
 import {
@@ -91,6 +91,8 @@ export class SpatialControlsFacade {
       if (by && !canColorBy(dataset, by)) ctx.store.setSpatialView({ colorBy: null });
       // The gene filter names the old dataset's genes: kept, it could hide every observation.
       if (current.observationGenes?.length) ctx.store.setSpatialView({ observationGenes: [] });
+      // Group colours are chosen for this dataset's groupings; another's same-named column is not them.
+      if (Object.keys(current.groupColors ?? {}).length) ctx.store.setSpatialView({ groupColors: {} });
     });
     this.controls = this.build();
   }
@@ -177,7 +179,7 @@ export class SpatialControlsFacade {
         }
         // Resolved by the SAME function the renderer uses, so a legend swatch
         // can never disagree with the colour on screen.
-        return resolveCategoryColors(column.meta);
+        return categoryColorsFor(name, column.meta, this.ctx.store.currentSpatialView().groupColors);
       },
 
       continuousValues: async (source) => {
@@ -197,7 +199,7 @@ export class SpatialControlsFacade {
         return {
           name,
           categories: column.meta.categories,
-          colors: resolveCategoryColors(column.meta),
+          colors: categoryColorsFor(name, column.meta, this.ctx.store.currentSpatialView().groupColors),
           codes: column.codes,
         };
       },

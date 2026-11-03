@@ -15,6 +15,7 @@ import { Image2dScene } from './napari-image-2d-scene';
 import { NapariToolBridge } from './napari-tool-bridge';
 import type { SceneContext } from './napari-scene';
 import {
+  SPATIAL_MARKER_MIN_SCREEN_PX,
   ContrastWindowCache,
   encodeSpatial3dContinuous,
   encodeSpatialContinuous,
@@ -3541,6 +3542,26 @@ describe('NapariVisualizerService', () => {
       await flush();
       return addPoints.mock.results.at(-1)?.value;
     }
+
+    it('draws the markers at every zoom: never under the screen floor, and still shown under cell outlines', async () => {
+      const layer = await mount();
+      expect(layer.minScreenSize).toBe(SPATIAL_MARKER_MIN_SCREEN_PX);
+      expect(layer.visible).toBe(true);
+      // Outlines coming on screen (zoomed in past the outline threshold) leave the markers drawn.
+      const scene = (
+        service as unknown as { scene: { session: { tiles: unknown }; polygonsShownChanged(): void } }
+      ).scene;
+      const tiles = scene.session.tiles as { cells: { polygonsShown: boolean } } | null;
+      expect(tiles).not.toBeNull();
+      tiles!.cells.polygonsShown = true;
+      expect((tiles as unknown as { outlinesShown: boolean }).outlinesShown).toBe(true);
+      scene.polygonsShownChanged();
+      expect(layer.visible).toBe(true);
+      // The Observations switch still hides them.
+      store.setSpatialView({ showPoints: false });
+      await flush();
+      expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(false);
+    });
 
     describe('a dataset that brings no image', () => {
       /**

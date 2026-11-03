@@ -1,7 +1,7 @@
 import { NapariLoadingBadge } from './napari-loading-badge';
 
 /** What the service itself counts on the badge; the spatial tile layers report their own names. */
-export type LoadingSource = 'Image' | 'Observations';
+export type LoadingSource = 'Image' | 'Observations' | 'Transcripts';
 
 /**
  * "x reloading…" at the bottom of the canvas, aggregated over everything that loads into one

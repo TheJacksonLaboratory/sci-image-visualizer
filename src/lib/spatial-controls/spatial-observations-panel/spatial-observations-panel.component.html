@@ -14,8 +14,8 @@
     </div>
     <div class="sc-panel-body" *ngIf="open">
       <small class="sc-hint" *ngIf="hasCells && !is3d">
-        One circle per cell. With cell outlines on, circles are only drawn where cells are too small on screen to
-        outline.
+        One circle per cell, at every zoom. Cell outlines are drawn over the circles once cells are big enough on
+        screen to outline.
       </small>
       <!-- Colour source. Column and gene are mutually exclusive: picking one
      clears the other, so what drives the colours is never ambiguous. -->

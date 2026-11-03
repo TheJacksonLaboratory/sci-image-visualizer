@@ -14,7 +14,7 @@ import {
   isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
-import { DEFAULT_MUTED_OPACITY, resolveCategoryColors } from '../../spatial/spatial-encoding';
+import { DEFAULT_MUTED_OPACITY, categoryColorsFor, groupColorsKey } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { defaultSigma, densityGrid } from '../../spatial/spatial-density';
 import { observationsInSection, sectionsOf } from '../../spatial/spatial-sections';
@@ -52,6 +52,7 @@ import {
 import { HOVER_RADIUS_PX } from './napari-spatial-hover';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
+import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -172,6 +173,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * regions were drawn on is that volume's stack (see {@link placeRegionMeshes}).
    */
   private readonly regionMeshes: VolumeRegionMeshes;
+  /** The transcripts of the genes the Transcripts panel draws, at their own z (see Spatial3dTranscripts). */
+  private readonly transcripts3d: Spatial3dTranscripts;
   /** Whether the reference volume lets every region surface through (see setRegionsThroughVolume). */
   private regionsThrough = false;
   /** The store's invert setting, which the density volumes follow (no other subscription of
@@ -189,6 +192,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   ) {
     super(ctx, session, true);
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
   }
 
   /** Show these region reconstructions with the cloud (replacing the ones shown). */
@@ -229,6 +233,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.regionMeshes.setFrame({
       size: [meta.width, meta.height, meta.depth],
       world: [meta.width * vx, meta.height * vy, meta.depth * vz * this.zScale()],
+      zScale: this.zScale(),
     });
   }
 
@@ -298,6 +303,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private applyZScale(): void {
     const s = this.zScale();
     if (this.points) this.points.scale3d = [1, 1, s];
+    this.transcripts3d.setZScale(s);
     for (const layer of [this.volume, this.geneMapLayer, ...this.densityLayers]) {
       const base = layer && this.baseVoxels.get(layer);
       if (layer && base) layer.voxelSize = [base[0], base[1], base[2] * s];
@@ -367,6 +373,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   dispose(): void {
     this.regionMeshes.clear();
+    this.transcripts3d.remove();
     this.disposeSpatial();
     this.invertSub?.unsubscribe();
     this.invertSub = null;
@@ -517,6 +524,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.opacity = view.volumeOpacity;
     }
     this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
+    // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
+    await this.transcripts3d.sync(dataset, view, this.session.port, {
+      origin: this.origin,
+      zScale: this.zScale(),
+    });
   }
 
   /**
@@ -838,7 +850,13 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     // holding the same number of cells would otherwise look like the same key and
     // leave the previous ROI's fields on screen.
     const key = on
-      ? [dataset.id, column ?? 'all', smoothing, this.session.selectionRev(selection)].join('|')
+      ? [
+          dataset.id,
+          column ?? 'all',
+          smoothing,
+          this.session.selectionRev(selection),
+          groupColorsKey(column, view.groupColors),
+        ].join('|')
       : null;
     if (key === this.densityKey) return;
 
@@ -854,7 +872,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
     let groups: DensityGroup[];
     try {
-      groups = await this.densityGroups(dataset, column, selection);
+      groups = await this.densityGroups(dataset, column, selection, view);
     } catch (err) {
       console.warn('[napari-js] density volumes: column unavailable', err);
       this.densityKey = null;
@@ -924,13 +942,14 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     dataset: SpatialDataset,
     column: string | null,
     selection: SpatialSelectionMask,
+    view: SpatialViewState,
   ): Promise<DensityGroup[]> {
     const port = this.session.port;
     const meta = column ? findColumnMeta(dataset, column) : undefined;
     if (!port || !column || !meta || meta.kind !== 'categorical') return [totalDensityGroup(selection)];
     const loaded = await port.getColumn(column);
     if (!isCategoricalColumn(loaded)) return [];
-    return rankDensityGroups(column, loaded, dataset.observations.count, selection);
+    return rankDensityGroups(column, loaded, dataset.observations.count, selection, view.groupColors);
   }
 
   /**
@@ -1064,6 +1083,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   /** Drop every layer of the cloud (the dataset went away, or has no z). */
   private removeLayers(viewer: Viewer): void {
     this.regionMeshes.clearFrame();
+    this.transcripts3d.remove();
     for (const layer of [this.points, this.volume, this.geneMapLayer, ...this.densityLayers]) {
       if (layer) viewer.layers.remove(layer);
     }
@@ -1119,7 +1139,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     if (colorBy.kind === 'column') {
       const column: SpatialColumn = await port.getColumn(colorBy.name);
       if (isCategoricalColumn(column)) {
-        return encodeSpatial3dCategorical(column.codes, resolveCategoryColors(column.meta));
+        return encodeSpatial3dCategorical(
+          column.codes,
+          categoryColorsFor(colorBy.name, column.meta, view.groupColors),
+        );
       }
       return this.encodeContinuous(column.values, view);
     }
@@ -1167,6 +1190,7 @@ function cloudSubset(
   const scalarKey = [
     key,
     view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    groupColorsKey(view.colorBy?.kind === 'column' ? view.colorBy.name : null, view.groupColors),
     observationGeneStyleKey(view),
     view.logScale ? 'log' : 'lin',
     clip.join(','),

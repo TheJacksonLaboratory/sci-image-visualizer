@@ -10,7 +10,12 @@ import {
   SpatialDataset,
   SpatialTranscriptTile,
 } from '../../../contracts/spatial-dataset.contract';
-import { DEFAULT_CATEGORICAL_PALETTE, parseHex, resolveCategoryColors } from '../../../spatial/spatial-encoding';
+import {
+  DEFAULT_CATEGORICAL_PALETTE,
+  categoryColorsFor,
+  groupColorsKey,
+  parseHex,
+} from '../../../spatial/spatial-encoding';
 import { DataRect, cellTypeColumnFor } from '../../../spatial/lod';
 import { clusterColorMap } from '../../../spatial/transcript-grouping';
 import { TranscriptGlyph, defaultGlyphFor } from '../../../spatial/glyphs';
@@ -84,6 +89,7 @@ function transcriptPlanKey(
     view.transcriptAllGenesHidden.join(','),
     JSON.stringify(view.transcriptGeneColors),
     JSON.stringify(view.transcriptGeneGroups),
+    groupColorsKey(cellTypeColumnFor(dataset, view), view.groupColors),
   ].join('|');
 }
 
@@ -353,8 +359,8 @@ export class TranscriptLayers {
       const name = cellTypeColumnFor(dataset, view);
       const codes = name ? await this.lookup.codes(name).catch(() => null) : null;
       const cellColor = new Map<string, string>();
-      if (codes?.meta.kind === 'categorical') {
-        const colors = resolveCategoryColors(codes.meta);
+      if (name && codes?.meta.kind === 'categorical') {
+        const colors = categoryColorsFor(name, codes.meta, view.groupColors);
         codes.meta.categories.forEach((c, k) => cellColor.set(c, colors[k]));
       }
       const colors = clusterColorMap(
@@ -396,7 +402,10 @@ export class TranscriptLayers {
     } else {
       const name = cellTypeColumnFor(dataset, view);
       const codes = name ? await this.lookup.codes(name) : null;
-      rgb = codes?.meta.kind === 'categorical' ? resolveCategoryColors(codes.meta).map(parseHex) : [];
+      rgb =
+        name && codes?.meta.kind === 'categorical'
+          ? categoryColorsFor(name, codes.meta, view.groupColors).map(parseHex)
+          : [];
       codeOf = (i) => {
         const o = t.observation[i];
         if (!codes || o === NO_OBSERVATION) return -1;

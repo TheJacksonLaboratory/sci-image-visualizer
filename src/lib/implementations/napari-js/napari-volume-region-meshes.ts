@@ -18,6 +18,12 @@ export interface VolumeFrame {
   size: [number, number, number];
   /** The world box (centred on the origin), Z as currently stretched. */
   world: [number, number, number];
+  /**
+   * How much of {@link world}'s depth is the view's Z stretch (default 1). The region surfaces keep
+   * their geometry in the unstretched box and take the stretch as a GPU scale (`scale3d`), so
+   * dragging the Z handle re-uploads no mesh.
+   */
+  zScale?: number;
 }
 
 /** Opacity of a region's surface in the volume. */
@@ -30,8 +36,10 @@ export const REGION_MESH_DIMMED_OPACITY = 0.12;
 /**
  * The region reconstructions shown in a volume view: one translucent surface per region, in its
  * colour, placed in the volume's world box (pixel x, y and slice z mapped onto it the way the
- * volume maps its voxels) and re-placed when the volume's Z is stretched. A surface is updated in
- * place (`setData`, `color`) rather than added again, and picked by napari-js (`pickSurface`).
+ * volume maps its voxels). The box's Z stretch is the surfaces' `scale3d` (a uniform), so a stretch
+ * alone changes no geometry; a new box re-places them. A surface is updated in place (`setData`,
+ * `color`, `scale3d`) rather than added again, and picked by napari-js (`pickSurface`), which
+ * picks it where it is drawn.
  *
  * Highlighting is focus + context: the highlighted surfaces turn near opaque and the others fade
  * to a ghost, so the selection stands out while staying in place among its neighbours.
@@ -52,11 +60,30 @@ export class VolumeRegionMeshes {
     this.sync();
   }
 
-  /** Follow the volume's frame (it opened, or its Z was stretched): re-place every surface. */
+  /**
+   * Follow the volume's frame. A new box (it opened, another volume) re-places every surface; a Z
+   * stretch of the same box only sets their `scale3d`, so nothing is re-uploaded while dragging.
+   */
   setFrame(frame: VolumeFrame): void {
+    const placed = this.frame ? baseFrame(this.frame) : null;
+    const next = baseFrame(frame);
+    const sameBox =
+      !!placed &&
+      placed.size.every((v, i) => v === next.size[i]) &&
+      placed.world.every((v, i) => Math.abs(v - next.world[i]) <= 1e-9 * Math.max(1, Math.abs(v)));
     this.frame = frame;
-    for (const e of this.layers.values()) e.layer.setData(toWorld(e.mesh.vertices, frame), e.mesh.faces);
+    const scale = this.scale3d();
+    for (const e of this.layers.values()) {
+      if (!sameBox) e.layer.setData(toWorld(e.mesh.vertices, next), e.mesh.faces);
+      e.layer.scale3d = scale;
+    }
     this.sync();
+  }
+
+  /** The surfaces' GPU scale: the frame's Z stretch. */
+  private scale3d(): [number, number, number] {
+    const s = this.frame?.zScale;
+    return [1, 1, s && s > 0 ? s : 1];
   }
 
   /** Highlight the surfaces of these keys (none: every surface as usual). */
@@ -111,7 +138,7 @@ export class VolumeRegionMeshes {
       }
       // Rebuilt or recoloured: the same surface, updated in place.
       if (want.vertices !== e.mesh.vertices && this.frame) {
-        e.layer.setData(toWorld(want.vertices, this.frame), want.faces);
+        e.layer.setData(toWorld(want.vertices, baseFrame(this.frame)), want.faces);
       }
       if (want.color !== e.mesh.color) e.layer.color = want.color;
       e.mesh = want;
@@ -124,8 +151,9 @@ export class VolumeRegionMeshes {
 
   private add(mesh: RegionMesh3D): void {
     const frame = this.frame as VolumeFrame;
-    const layer = this.viewer.addSurface(toWorld(mesh.vertices, frame), mesh.faces, undefined, {
+    const layer = this.viewer.addSurface(toWorld(mesh.vertices, baseFrame(frame)), mesh.faces, undefined, {
       name: `region ${mesh.key}`,
+      scale3d: this.scale3d(),
       color: mesh.color,
       opacity: this.opacityOf(mesh.key),
       blending: 'translucent',
@@ -144,6 +172,12 @@ export class VolumeRegionMeshes {
     this.viewer.layers.remove(layer);
     this.layers.delete(key);
   }
+}
+
+/** `frame` without its Z stretch: the box the surfaces' geometry is placed in. */
+function baseFrame(frame: VolumeFrame): VolumeFrame {
+  const s = frame.zScale && frame.zScale > 0 ? frame.zScale : 1;
+  return s === 1 ? frame : { size: frame.size, world: [frame.world[0], frame.world[1], frame.world[2] / s] };
 }
 
 /**

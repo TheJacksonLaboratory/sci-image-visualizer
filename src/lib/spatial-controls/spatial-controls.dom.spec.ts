@@ -233,10 +233,25 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
     });
 
     it('is not offered in 3D', async () => {
+      dataset$.next({
+        ...dataset,
+        transcriptTiles: { ...dataset.transcriptTiles!, hasZ: false },
+      } as SpatialDataset);
       await build({ is3d: true });
       expect(() => panelNamed(root, 'Images')).toThrow();
       expect(() => panelNamed(root, 'Cells')).toThrow();
+      // Transcripts without z have no place in the cloud.
       expect(() => panelNamed(root, 'Transcripts')).toThrow();
+    });
+
+    it('offers the Transcripts in 3D when they carry z', async () => {
+      dataset$.next({
+        ...dataset,
+        transcriptTiles: { ...dataset.transcriptTiles!, hasZ: true },
+      } as SpatialDataset);
+      await build({ is3d: true });
+      expect(panelNamed(root, 'Transcripts')).toBeTruthy();
+      expect(() => panelNamed(root, 'Cells')).toThrow();
     });
   });
 

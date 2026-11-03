@@ -9,6 +9,7 @@ import {
   spatialZScaleMax,
 } from './napari-spatial-3d-scene';
 import { VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
 
 /** A thin section: 1000 x 500 units wide, 20 deep, 0.5 µm per unit; no reference volume. */
 function section(): any {
@@ -28,6 +29,7 @@ function scene(dataset: any, spatialZScale = 1) {
     ctx: { viewer, host, settings },
     session: { latest: [dataset, {}, {}], geneMapVolume: { field: null, key: null } },
     regionMeshes: new VolumeRegionMeshes(viewer),
+    transcripts3d: new Spatial3dTranscripts(viewer, () => () => undefined),
     baseVoxels: new WeakMap(),
     densityLayers: [],
     origin: [0, 0, 0],

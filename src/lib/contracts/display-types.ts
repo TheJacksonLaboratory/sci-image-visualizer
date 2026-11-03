@@ -141,8 +141,8 @@ export interface SpatialViewState {
    * setting for a backdrop and a useless one for the measurement.
    */
   volumeOpacity: number;
-  /** Draw the observation markers — the 3D cloud, or the 2D circles. In 2D they also
-   *  stand in for cells too small on screen to outline. */
+  /** Draw the observation markers — the 3D cloud, or the 2D circles. In 2D they are drawn at
+   *  every zoom, never under a couple of screen pixels, with any cell outlines over them. */
   showPoints: boolean;
   /**
    * Restrict the cloud to ONE imaged section, by index into the dataset's sampled
@@ -278,6 +278,13 @@ export interface SpatialViewState {
   transcriptHiddenGenes: string[];
   /** Per-gene marker colour (`#rrggbb`); genes not listed take the palette by position. */
   transcriptGeneColors: Record<string, string>;
+  /**
+   * Colours the user chose for groups of a categorical column (`#rrggbb`), by column name and
+   * then category: they override the column's own and the palette's, wherever that grouping
+   * colours anything (cells, markers, transcripts by cell type, legends, charts). Groups not
+   * listed keep their colour. Cleared when the dataset changes.
+   */
+  groupColors: Record<string, Record<string, string>>;
   /** Named gene groups (e.g. marker genes per cell type) for the selected-genes tree. */
   transcriptGeneGroups: { name: string; genes: string[] }[];
   /**
@@ -359,6 +366,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   transcriptGenes: [],
   transcriptHiddenGenes: [],
   transcriptGeneColors: {},
+  groupColors: {},
   transcriptGeneGroups: [],
   transcriptAllGenes: false,
   transcriptAllGenesHidden: [],

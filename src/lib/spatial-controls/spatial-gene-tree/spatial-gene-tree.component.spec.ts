@@ -174,6 +174,29 @@ describe('SpatialGeneTreeComponent', () => {
       ]);
     });
 
+    it("opens the colour picker from a gene's swatch, showing and setting its colour among every gene", async () => {
+      fake.dataset$.next(CODED as SpatialDataset);
+      await build();
+      setView({ transcriptAllGenes: true, transcriptGeneColors: { KRT5: '#123456' } });
+      expand();
+      fixture.detectChanges();
+      const open = jest.spyOn(component as unknown as { openGeneStyle: () => void }, 'openGeneStyle');
+      const swatches = root.querySelectorAll('.sc-gene-leaf button.sc-gene-icon');
+      expect(swatches.length).toBe(3);
+      (swatches[1] as HTMLElement).click();
+      expect(open).toHaveBeenCalledWith(expect.anything(), 'CD3E', expect.anything());
+      // Its colour by its code, not by a place in the (empty) selection.
+      expect(component['styleColorOf']('CD3E')).toBe(DEFAULT_CATEGORICAL_PALETTE[1]);
+      expect(component['styleColorOf']('KRT5')).toBe('#123456');
+      component['onGeneColor']('CD3E', '#abcdef');
+      expect(fake.view$.value.transcriptGeneColors).toEqual({ KRT5: '#123456', CD3E: '#abcdef' });
+      expect(component['allRows'].map((r) => r.swatch)).toEqual([
+        DEFAULT_CATEGORICAL_PALETTE[0],
+        '#abcdef',
+        '#123456',
+      ]);
+    });
+
     it('filters a long list by name and draws only the first rows', async () => {
       const genes = Array.from({ length: 450 }, (_v, i) => `G${i}`);
       fake.dataset$.next({ ...CODED, transcriptTiles: { ...CODED.transcriptTiles, genes } } as SpatialDataset);
@@ -374,6 +397,17 @@ describe('SpatialGeneTreeComponent', () => {
     counts$.next({ CD163: 17 });
     expect(component['geneCountOf']('CD163')).toBe(17);
     expect(component['geneCountOf']('CD163L1')).toBe(0);
+  });
+
+  it("reloads the cluster colours when the cells' grouping is recoloured", async () => {
+    const categoryColors = jest.fn(async () => ['#ff0000', '#0000ff']);
+    (fake.controls as unknown as { categoryColors: unknown }).categoryColors = categoryColors;
+    await build();
+    const calls = categoryColors.mock.calls.length;
+    const column = TILED_DATASET.columns.find((c) => c.kind === 'categorical')!.name;
+    setView({ groupColors: { [column]: { A: '#00ff00' } } });
+    await flush();
+    expect(categoryColors.mock.calls.length).toBe(calls + 1);
   });
 
   it("reloads the group colours for a new dataset's same-named grouping", async () => {

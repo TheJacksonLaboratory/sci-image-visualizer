@@ -8,7 +8,8 @@ import {
   contrastWindow,
   encodeCategorical,
   encodeContinuous,
-  resolveCategoryColors,
+  GroupColorOverrides,
+  categoryColorsFor,
   type RGBA,
 } from '../../spatial/spatial-encoding';
 import { SpatialSelectionMask, maskToIndices } from '../../spatial/spatial-selection';
@@ -26,6 +27,13 @@ export const SPATIAL_FALLBACK_RADIUS = 4;
  *  40 µm/px template, so drawing them to scale would put every cell a fifth of a pixel wide
  *  and the section would come up empty. The point-size control scales up from this floor. */
 export const SPATIAL_SLICE_MIN_DIAMETER_PX = 1.5;
+/**
+ * Smallest drawn marker diameter in the 2D view, in SCREEN pixels, at any zoom. A marker's size is
+ * the cell's own (data units), so zoomed out over a whole Cytos plate or Xenium section every cell
+ * fell below a pixel and the observations vanished; with the floor they stay a dense field of
+ * dots, coloured as they are, at every zoom (the GPU applies it per frame: no rebuild on zoom).
+ */
+export const SPATIAL_MARKER_MIN_SCREEN_PX = 2;
 /** Longest side of the gene-map raster, in field pixels. A gene map is a smooth
  *  field read as territory, so it gains nothing from matching a 2 Gpx slide's
  *  resolution — and the estimate costs one pass over this many pixels. */
@@ -253,9 +261,10 @@ export function rankDensityGroups(
   column: CategoricalColumn,
   count: number,
   selection: SpatialSelectionMask,
+  groupColors?: GroupColorOverrides | null,
 ): DensityGroup[] {
   const inSelection = selection.count > 0 ? selection.mask : null;
-  const colors = resolveCategoryColors(column.meta);
+  const colors = categoryColorsFor(columnName, column.meta, groupColors);
   const counts = new Uint32Array(column.meta.categories.length);
   for (let i = 0; i < count; i++) {
     if (inSelection && !inSelection[i]) continue;

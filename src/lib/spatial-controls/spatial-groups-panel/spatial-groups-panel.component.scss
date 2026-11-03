@@ -11,3 +11,14 @@
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, 0.2);
 }
+
+// The swatch as the button that opens the group's colour picker.
+.sc-dot-btn {
+  padding: 0;
+  cursor: pointer;
+  &:hover,
+  &:focus-visible {
+    outline: 2px solid var(--surface-border, rgba(0, 0, 0, 0.35));
+    outline-offset: 1px;
+  }
+}
