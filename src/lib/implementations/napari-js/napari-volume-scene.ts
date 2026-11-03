@@ -180,7 +180,11 @@ export class VolumeScene implements NapariScene {
     const base = this.worldBase;
     if (!base || !this.fullSize) return;
     const depth = base.depth * this.ctx.settings.volumeZScale;
-    const frame: VolumeFrame = { size: this.fullSize, world: [base.width, base.height, depth] };
+    const frame: VolumeFrame = {
+      size: this.fullSize,
+      world: [base.width, base.height, depth],
+      zScale: this.ctx.settings.volumeZScale,
+    };
     this.regionMeshes.setFrame(frame);
     this.slicePlanes.setFrame(frame);
   }

@@ -233,6 +233,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.regionMeshes.setFrame({
       size: [meta.width, meta.height, meta.depth],
       world: [meta.width * vx, meta.height * vy, meta.depth * vz * this.zScale()],
+      zScale: this.zScale(),
     });
   }
 

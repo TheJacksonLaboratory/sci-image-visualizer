@@ -75,6 +75,40 @@ describe('VolumeRegionMeshes', () => {
     expect(surfaces()).toHaveLength(0);
   });
 
+  it('takes a Z stretch as a GPU scale: placed where it was, its geometry neither rewritten nor re-uploaded', () => {
+    const { viewer, surfaces } = makeViewer();
+    const meshes = new VolumeRegionMeshes(viewer);
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
+    const ctx = mesh('CTX');
+    meshes.set([ctx]);
+    const [surface] = surfaces();
+    const vertices = surface.vertices;
+    const version = surface.dataVersion;
+    const unstretched = surface.bounds();
+
+    // The Z handle dragged: the same box, its depth stretched 4x.
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 40], zScale: 4 });
+    expect(surface.dataVersion).toBe(version);
+    expect(surface.vertices).toBe(vertices);
+    expect(surface.scale3d).toEqual([1, 1, 4]);
+    // Drawn (and bounded, so framed and picked) where the stretched box puts it.
+    const stretched = surface.bounds();
+    expect(stretched.min[2]).toBeCloseTo(unstretched.min[2] * 4, 6);
+    expect(stretched.max[2]).toBeCloseTo(unstretched.max[2] * 4, 6);
+    expect(Array.from(surface.vertices.subarray(0, 3))).toEqual(
+      Array.from(toWorld(Float32Array.of(0, 0, 0), { size: [100, 50, 10], world: [100, 50, 10] })),
+    );
+
+    // A surface added while stretched takes the stretch too.
+    meshes.set([ctx, mesh('MB')]);
+    expect(surfaces()[1].scale3d).toEqual([1, 1, 4]);
+
+    // Another box (another volume) re-places the geometry.
+    meshes.setFrame({ size: [200, 50, 10], world: [200, 50, 10] });
+    expect(surface.dataVersion).toBe(version + 1);
+    expect(surface.scale3d).toEqual([1, 1, 1]);
+  });
+
   it('highlights some surfaces near opaque and fades the others; none restores them', () => {
     const { viewer, surfaces } = makeViewer();
     const meshes = new VolumeRegionMeshes(viewer);

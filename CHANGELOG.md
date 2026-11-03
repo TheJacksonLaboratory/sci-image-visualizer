@@ -31,6 +31,12 @@ file was added.
 
 ### Changed
 
+- **Dragging the Z handle no longer re-uploads the region surfaces.** In the Volume view and the 3D
+  spatial view, every Z-handle move rewrote and re-uploaded each shown region surface's vertices
+  (review of #72). The surfaces now keep their geometry in the unstretched box and take the stretch
+  as napari-js's `SurfaceLayer.scale3d` (a GPU uniform, picked where drawn); a new box still
+  re-places them (`VolumeFrame.zScale`). Requires napari-js 0.20.0.
+
 - **Observation markers are drawn at every zoom.** In 2D, a marker's size is the cell's, so zoomed
   out over a whole Cytos plate or Xenium section every marker fell below a pixel and the
   observations vanished. They are now never drawn smaller than 2 screen pixels
