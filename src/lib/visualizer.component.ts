@@ -95,6 +95,7 @@ import { IntensityInsetComponent } from './intensity-inset/intensity-inset.compo
 import { SectionPaneComponent } from './section-pane/section-pane.component';
 import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
 import { SpatialDatasetBinder } from './visualizer/spatial-dataset-binder';
+import { SpatialRegionSetLink } from './visualizer/spatial-region-set';
 import { ToolbarComponent } from './toolbar/toolbar.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { ChannelHistogramComponent } from './channel-histogram/channel-histogram.component';
@@ -370,6 +371,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       // The host's HttpClient carries a server-side region source's requests: its interceptors (auth) apply.
       const http = this.injector?.get(HttpClient, null) ?? undefined;
       applyImageRois(info, this.plotService, this.zIndex, this.vizConfig?.regionSourceMinChars, http);
+      // After the image's own regions: a spatial dataset's region set joins them (its cells in 3D).
+      this.regionSetLink.imageLanded(info);
       this.contributions.activate();
     },
     setImageLoading: (loading) => this.state.setImageLoading(loading),
@@ -575,6 +578,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
 
   /** The spatial-omics dataset on offer and the gates it puts on the selector. */
   protected readonly spatial: SpatialDatasetBinder;
+  /** Attaches a spatial dataset's region set (a 3D segmentation's cells) to its image's regions. */
+  private readonly regionSetLink: SpatialRegionSetLink;
   /** Whether a spatial-omics dataset is published on `SPATIAL_DATA_PORT` — gates the
    *  spatial plot types; the toolbar offers the plot modes for an image-less one too. */
   protected get hasSpatialDataset(): boolean {
@@ -644,6 +649,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       notify: (m) => this.messageService.add({ key: this.resultToastKey, ...m }),
       detectChanges: () => this.cdr.detectChanges(),
     });
+    this.regionSetLink = new SpatialRegionSetLink(this.spatialData, this.plotService);
     this.spatial = new SpatialDatasetBinder(this.spatialData, {
       gatesChanged: () => this.computePlotTypeOptions(),
       selectedId: () => this.selectedPlotTypeId,
@@ -666,6 +672,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
    *  re-gates the selector exactly as the image stream and the test-mode toggle do. */
   private watchSpatialDataset(): void {
     this.spatial.bind(this.destroyed$);
+    this.regionSetLink.bind(this.destroyed$);
   }
 
   /** Recompute the selector's entries for the current image, dataset and test mode

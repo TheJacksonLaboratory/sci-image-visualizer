@@ -9,6 +9,21 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **A 3D segmentation's cells as 3D regions in the spatial 3D view.** A dataset whose boundary set
+  names its outlines as a region set (`SpatialPolygonTilesMeta.sets[i].regionSource`: every cell
+  outlined on every plane it spans, as the MERFISH ileum's) now has that set attached to its image in
+  the region editor, over every plane, once the dataset and its image are both on screen
+  (`SpatialDataPort.openRegionSet`; `SpatialDataHttpService` opens it at `{base}/regions/{id}/`). In
+  spatial 3D the editor offers its classes in 3D, and each cell type is shown as a surface once by
+  itself; hiding them, or the editor's own choice, then stands.
+- **Region surfaces placed by their planes' z.** A region set that says where its planes are
+  (`RegionSourceInfo.sliceZ`, in its coordinates' units, with `micronsPerUnit`) has its surfaces placed
+  at those planes among the observations in spatial 3D, its pixels taken back through the dataset's
+  `imageRef`, so they show over the dataset's own image of one plane, not only over the reference
+  volume's stack (`VolumeFrame.planes`). They follow the Z handle as the cloud does.
+
 ## [0.17.0] — 2026-11-03
 
 ### Added

@@ -34,6 +34,8 @@ import {
   decodeRadius,
   decodeTranscriptTile,
 } from './spatial-wire';
+import { openHttpRegionSource } from '../../region-source/http-region-source';
+import type { RegionSource } from '../../region-source/region-source';
 import { searchGeneNames } from '../../spatial/gene-search';
 import { Supersede } from '../../util/supersede';
 
@@ -510,6 +512,15 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.tileCache.delete(key);
     this.tileBytesTotal -= this.tileBytes.get(key) ?? 0;
     this.tileBytes.delete(key);
+  }
+
+  /**
+   * The region set a boundary set names (`polygonTiles.sets[i].regionSource`), served beside the
+   * datasets as an HTTP region source (`{base}/regions/{id}/…`, see `openHttpRegionSource`), its
+   * requests through the host's `HttpClient` as every other request here.
+   */
+  openRegionSet(id: string): Promise<RegionSource> {
+    return openHttpRegionSource(`${this.baseUrl}regions/${encodeURIComponent(id)}/`, { http: this.http });
   }
 
   /**

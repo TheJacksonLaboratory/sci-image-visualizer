@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject, firstValueFrom, of } from 'rxjs';
 
-import { RoutingVisualizerService } from './routing-visualizer.service';
+import { RoutingVisualizerService, regionSetGroups } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
@@ -78,6 +78,7 @@ function mockBackend(): any {
     resetSurfaceCamera: jest.fn(),
     getPlotTypeDescriptors: jest.fn().mockReturnValue([]),
     setStackLoading: jest.fn(),
+    setRegionPlanes: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
     getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
@@ -1161,6 +1162,133 @@ describe('RoutingVisualizerService (characterization)', () => {
     const chans = await firstValueFrom(router.getChannels$());
     expect(chans).toHaveLength(1);
     expect(chans[0].name).toBe('Intensity');
+  });
+
+  // ── a spatial dataset's region set (a 3D segmentation's cells) ───────
+  describe("a spatial dataset's region set", () => {
+    const PLATE: any = { ...IMAGE_INFO, fileName: 'plate.ome.tif' };
+    /** A served 3D segmentation: three planes 10 apart, two cell types. */
+    const SOURCE: any = {
+      info: {
+        featureCount: 2,
+        bounds: [0, 0, 10, 10],
+        tileSize: 256,
+        levels: 1,
+        planes: [0, 1, 2],
+        classColors: { B: '#0000ff' },
+        hierarchy: [
+          { name: 'T', color: '#ff0000', order: 1 },
+          { name: 'B', color: '#00ff00', order: 0 },
+        ],
+        sliceZ: [0, 10, 20],
+      },
+      dispose: jest.fn(),
+    };
+
+    function stubBuilds(): jest.SpyInstance {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(5);
+      napari.setRegionMeshes = jest.fn();
+      napari.setRegionHighlight = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      return jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+    }
+
+    it('attaches it over every plane, places its planes, offers its classes in 3D and shows each once', async () => {
+      const build = stubBuilds();
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const views: boolean[] = [];
+      router.getVolumeView$().subscribe((v) => views.push(v));
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      expect(views[views.length - 1]).toBe(false);
+
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(attach).toHaveBeenCalledWith(expect.any(Function), 'planes');
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+      expect(views[views.length - 1]).toBe(true);
+      await new Promise((r) => setTimeout(r));
+      // Each cell type, in the hierarchy's order and colours.
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+      expect(build).toHaveBeenCalledWith(
+        [expect.objectContaining({ classes: ['B'] }), expect.objectContaining({ classes: ['T'] })],
+        5,
+      );
+      expect(napari.setRegionMeshes).toHaveBeenLastCalledWith(
+        [
+          expect.objectContaining({ key: 'B', color: '#00ff00' }),
+          expect.objectContaining({ key: 'T', color: '#ff0000' }),
+        ],
+        'plate.ome.tif',
+      );
+
+      // Asked again (the dataset re-emitted, the image re-plotted): nothing opens, nothing shows again.
+      router.showRegionClasses3d([]);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await new Promise((r) => setTimeout(r));
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(shown[shown.length - 1]).toEqual([]);
+    });
+
+    it('waits for spatial 3D to show its classes, and forgets its planes on another image', async () => {
+      stubBuilds();
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      expect(shown[shown.length - 1]).toEqual([]);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await new Promise((r) => setTimeout(r));
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS_3D);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith(null);
+    });
+
+    it('drops a set that opened after another image was plotted, or failed to open', async () => {
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      let resolve: (s: unknown) => void = () => undefined;
+      const late = router.attachDatasetRegionSet(() => new Promise((r) => (resolve = r)) as never, 'set-1');
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS_3D);
+      const source = { ...SOURCE, dispose: jest.fn() };
+      resolve(source);
+      await expect(late).resolves.toBe(false);
+      expect(source.dispose).toHaveBeenCalled();
+      expect(attach).not.toHaveBeenCalled();
+
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await expect(
+        router.attachDatasetRegionSet(jest.fn().mockRejectedValue(new Error('404')), 'set-2'),
+      ).resolves.toBe(false);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe('regionSetGroups', () => {
+    it('makes one group per root of the hierarchy, with the classes under it', () => {
+      const info: any = {
+        classColors: { CA1: '#111111' },
+        hierarchy: [
+          { name: 'HPF', color: '#7ed04b', order: 0 },
+          { name: 'CA1', parent: 'HPF', order: 0 },
+          { name: 'CB', color: '#f0f080', order: 1 },
+        ],
+      };
+      expect(regionSetGroups(info)).toEqual([
+        { key: 'HPF', classes: ['HPF', 'CA1'], color: '#7ed04b' },
+        { key: 'CB', classes: ['CB'], color: '#f0f080' },
+      ]);
+      expect(regionSetGroups({ classColors: { A: '#123456' } } as any)).toEqual([
+        { key: 'A', classes: ['A'], color: '#123456' },
+      ]);
+    });
   });
 });
 

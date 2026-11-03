@@ -8,6 +8,7 @@ import { Polygon, Region } from '../models/region';
 import { PlotType, PlotTypeDescriptor } from './plot-type';
 import { ViewerCapabilities } from './capabilities.contract';
 import { IRegionOverlay } from './region-overlay.contract';
+import type { RegionSource } from '../region-source/region-source';
 import { IHistogram } from './channel-histogram-api.contract';
 import {
   CanvasToolOptions,
@@ -564,6 +565,12 @@ export interface IVisualizer
   /** This backend's region renderer. May be null until a plot is mounted
    *  (OpenSeadragon). Drives region draw/select modes uniformly. */
   getRegionOverlay(): IRegionOverlay | null;
+  /**
+   * Attach a spatial dataset's region set (a 3D segmentation's cells, see
+   * `SpatialDataPort.openRegionSet`) to its image, the one plotted, beside the image's own regions;
+   * once per image and `key`. Resolves whether it is attached. Optional: the router's.
+   */
+  attachDatasetRegionSet?(open: () => Promise<RegionSource>, key: string): Promise<boolean>;
   /** Split a volume view: the displayed slice, with every region tool, in the div `div` beside
    *  the 3D view; null closes it. Resolves whether the slice shows. Optional: the router's. */
   setSliceEditor?(div: string | null): Promise<boolean>;

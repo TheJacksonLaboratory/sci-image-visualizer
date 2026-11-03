@@ -281,8 +281,13 @@ export type SpatialBounds = [number, number, number, number];
 /** Tiled cell/nucleus boundaries. Level 0 is the finest (every vertex). */
 export interface SpatialPolygonTilesMeta {
   bounds: SpatialBounds;
-  /** Boundary sets on offer — typically `cell` and `nucleus`. */
-  sets: { name: string; label: string }[];
+  /**
+   * Boundary sets on offer — typically `cell` and `nucleus`. A 3D segmentation's set (its cells
+   * outlined on every plane they span) also names its outlines as a region set by `regionSource`,
+   * an id the port opens (`SpatialDataPort.openRegionSet`): the visualizer attaches it to the
+   * dataset's image in the region editor, which reconstructs the cells in 3D.
+   */
+  sets: { name: string; label: string; regionSource?: string }[];
   /** The set to draw when the user has not chosen. */
   defaultSet?: string;
   levels: SpatialTileLevel[];

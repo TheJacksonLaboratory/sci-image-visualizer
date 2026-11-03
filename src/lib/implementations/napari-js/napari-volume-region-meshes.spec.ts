@@ -7,6 +7,7 @@ import {
   REGION_MESH_OPACITY,
   RegionMesh3D,
   VolumeRegionMeshes,
+  sliceZ,
   toWorld,
 } from './napari-volume-region-meshes';
 
@@ -36,6 +37,60 @@ describe('toWorld', () => {
   it('maps image px and slices onto the centred world box', () => {
     const out = toWorld(Float32Array.of(0, 0, 0, 100, 50, 9), { size: [100, 50, 10], world: [200, 100, 40] });
     expect(Array.from(out)).toEqual([-100, -50, -18, 100, 50, 18]);
+  });
+
+  it("places slices at their planes' z instead, and pixels by scale and offset", () => {
+    const planes = {
+      z: [0, 10, 30],
+      scale: [0.5, 2] as [number, number],
+      offset: [1, 2, -15] as [number, number, number],
+    };
+    // Slices 0, 1.5 (half way to 2), 2.5 (half a slice past the last: its cap), -0.5 (before the first).
+    const out = toWorld(Float32Array.of(0, 0, 0, 4, 4, 1.5, 0, 0, 2.5, 0, 0, -0.5), {
+      size: [1, 1, 3],
+      world: [1, 1, 1],
+      planes,
+    });
+    expect(Array.from(out)).toEqual([1, 2, -15, 3, 10, 5, 1, 2, 25, 1, 2, -20]);
+  });
+});
+
+describe('sliceZ', () => {
+  it('interpolates between planes and extrapolates past the ends', () => {
+    expect(sliceZ([0, 10, 30], 1)).toBe(10);
+    expect(sliceZ([0, 10, 30], 0.5)).toBe(5);
+    expect(sliceZ([0, 10, 30], 3)).toBe(50);
+    expect(sliceZ([0, 10, 30], -1)).toBe(-10);
+    // One plane: a unit apart; none: the slice itself.
+    expect(sliceZ([7], 0.5)).toBe(7.5);
+    expect(sliceZ([], 2)).toBe(2);
+  });
+});
+
+describe('VolumeRegionMeshes on planes', () => {
+  it('re-places the surfaces when the planes move, and only scales them for a Z stretch', () => {
+    const { viewer, surfaces } = makeViewer();
+    const meshes = new VolumeRegionMeshes(viewer);
+    meshes.set([square('C')]);
+    const planes = {
+      z: [0, 1, 2, 3, 4, 5],
+      scale: [1, 1] as [number, number],
+      offset: [0, 0, 0] as [number, number, number],
+    };
+    meshes.setFrame({ size: [1, 1, 6], world: [1, 1, 1], planes });
+    expect(surfaces()[0].vertices[2]).toBe(5);
+    const setData = jest.spyOn(surfaces()[0], 'setData');
+    meshes.setFrame({ size: [1, 1, 6], world: [1, 1, 1], zScale: 3, planes });
+    expect(setData).not.toHaveBeenCalled();
+    expect(surfaces()[0].scale3d).toEqual([1, 1, 3]);
+    meshes.setFrame({
+      size: [1, 1, 6],
+      world: [1, 1, 1],
+      zScale: 3,
+      planes: { ...planes, z: planes.z.map((z) => z * 2) },
+    });
+    expect(setData).toHaveBeenCalledTimes(1);
+    expect(surfaces()[0].vertices[2]).toBe(10);
   });
 });
 

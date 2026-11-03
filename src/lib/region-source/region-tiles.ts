@@ -77,6 +77,14 @@ export interface RegionSourceInfo {
   hierarchy?: RegionClassNode[];
   /** How the set wants to be drawn, when it says. */
   style?: RegionSourceStyle;
+  /**
+   * Where each plane is, when the set says: `sliceZ[i]` the z of plane `planes[i]`, in the units of
+   * the coordinates its outlines are in (a 3D segmentation's planes, in its observations' units).
+   * Planes stay ordinals for addressing; these place them (see the spatial 3D view).
+   */
+  sliceZ?: number[];
+  /** Microns per unit of the set's coordinates, when it says. */
+  micronsPerUnit?: number;
 }
 
 /** One feature as a tile carries it: identity, class and outline at the tile's level. */

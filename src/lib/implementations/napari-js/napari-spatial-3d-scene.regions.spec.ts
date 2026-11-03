@@ -19,7 +19,7 @@ const square = () => ({
 });
 
 /** The scene with what its region surfaces use (its constructor needs a whole session and viewer). */
-function scene(info: any) {
+function scene(info: any, dataset: any = DATASET, frame: any = {}) {
   const v = new HeadlessViewer({ canvasRect: { width: 200, height: 200 } });
   const viewer = v as unknown as Viewer;
   const volume: any = { blending: 'translucent' };
@@ -29,7 +29,11 @@ function scene(info: any) {
     regionMeshes: new VolumeRegionMeshes(viewer),
     regionsThrough: false,
     volume,
-    session: { latest: [DATASET, {}, {}] },
+    session: { latest: [dataset, {}, {}] },
+    regionPlanes: null,
+    origin: [0, 0, 0],
+    box: null,
+    ...frame,
   }) as Spatial3dScene;
   const surfaces = () => v.layers.items as SurfaceLayer[];
   return { s, surfaces, volume };
@@ -80,5 +84,53 @@ describe('Spatial3dScene region surfaces', () => {
     expect(volume.blending).toBe('translucent_no_depth');
     s.setRegionsThroughVolume(false);
     expect(volume.blending).toBe('translucent');
+  });
+
+  describe("a region set's planes over the dataset's own image", () => {
+    /** A MERFISH section's tissue image (one plane), its observations in its pixels, three planes 300 deep. */
+    const TISSUE: any = { isStack: false, trueImageSize: [4096, 200], urls: ['plate'] };
+    const SECTION: any = { id: 'ileum', volume: VOLUME, imageRef: { imageId: 'b.omics/image/plate.ome.tif' } };
+    /** The box the cloud is offset into (100 x 50 x 600, centred). */
+    const BOX = { box: { width: 100, height: 50, depth: 600 }, origin: [-50, -25, -300] };
+
+    it("places slice k at its plane's z, among the observations, and steps by the image's width", () => {
+      const { s, surfaces } = scene(TISSUE, SECTION, BOX);
+      s.setRegionMeshes([square()]);
+      expect(surfaces()).toHaveLength(0);
+      s.setRegionPlanes([0, 300, 600]);
+      expect(surfaces()).toHaveLength(1);
+      // x, y the observations' (the image's pixels), moved as the cloud is; slice 1 at z 300 -> 0.
+      expect(Array.from(surfaces()[0].vertices.slice(0, 6))).toEqual([-50, -25, 0, -46, -25, 0]);
+      expect(s.voxelStep()).toBe(4);
+      // Not known any more: no place for them.
+      s.setRegionPlanes(null);
+      expect(surfaces()).toHaveLength(0);
+      expect(s.voxelStep()).toBeNull();
+    });
+
+    it("takes image pixels back to the observations' units through imageRef", () => {
+      const dataset = { ...SECTION, imageRef: { ...SECTION.imageRef, scale: [2, 2], translate: [10, 4] } };
+      const { s, surfaces } = scene(TISSUE, dataset, BOX);
+      s.setRegionMeshes([square()]);
+      s.setRegionPlanes([0, 300, 600]);
+      // Pixel (0, 0) is observation (-5, -2); pixel (4, 0) is (-3, -2).
+      expect(Array.from(surfaces()[0].vertices.slice(0, 6))).toEqual([-55, -27, 0, -53, -27, 0]);
+    });
+
+    it('needs the dataset to have an image of its own', () => {
+      const { s, surfaces } = scene(TISSUE, { ...SECTION, imageRef: undefined }, BOX);
+      s.setRegionMeshes([square()]);
+      s.setRegionPlanes([0, 300, 600]);
+      expect(surfaces()).toHaveLength(0);
+    });
+
+    it('leaves the volume stack placing its own slices', () => {
+      const { s, surfaces } = scene(STACK, { ...DATASET, imageRef: SECTION.imageRef }, BOX);
+      s.setRegionMeshes([square()]);
+      s.setRegionPlanes([0, 300, 600]);
+      // As the stack places slice 1: its voxel plane's centre.
+      expect(Array.from(surfaces()[0].vertices.slice(0, 3))).toEqual([-50, -25, 0]);
+      expect(s.voxelStep()).toBe(1);
+    });
   });
 });

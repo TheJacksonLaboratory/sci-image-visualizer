@@ -141,6 +141,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionMeshes: readonly RegionMesh3D[] = [];
   /** The image (file name) {@link regionMeshes} were built from. */
   private regionMeshesImage: string | undefined;
+  /** Where {@link regionMeshes}' slices are, when their region set says (see setRegionMeshes). */
+  private regionPlanes: readonly number[] | null = null;
   /** The keys of the reconstructions highlighted. */
   private regionHighlight: readonly string[] = [];
   /** The keys of the reconstructions hidden. */
@@ -363,6 +365,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       this.scene = this.createScene(plotType, this.sceneContext(viewer, host, canvas), info, imageLoaded == null);
       // Another image's surfaces would land in this volume's frame at the wrong size: drop them.
       if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
+      this.scene.setRegionPlanes?.(this.regionPlanes);
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
@@ -441,6 +444,17 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     this.regionMeshes = meshes;
     this.regionMeshesImage = image;
     this.scene?.setRegionMeshes?.(meshes);
+  }
+
+  /**
+   * Where the region reconstructions' slices are, in the observations' units, when their region set
+   * says (a 3D segmentation's planes, placed among the observations in spatial 3D); null: they are
+   * the plotted stack's. Kept for the next plot of the same image, as the meshes are; the spatial 3D
+   * view's voxel step follows it (see regionVoxelStep).
+   */
+  setRegionPlanes(planes: readonly number[] | null): void {
+    this.regionPlanes = planes;
+    this.scene?.setRegionPlanes?.(planes);
   }
 
   /** Highlight the reconstructions of these keys (none: all as usual). */

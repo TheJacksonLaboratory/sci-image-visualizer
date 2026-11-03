@@ -32,7 +32,7 @@ import {
 import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import type { IImageInfo } from '../../contracts/image.contract';
-import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { PlanePlacement, RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
 import { isAbortError } from '../tile-server';
 import {
   DensityGroup,
@@ -62,6 +62,11 @@ export const SPATIAL_Z_SCALE_MIN = 0.1;
 const SPATIAL_Z_SCALE_MAX = 10;
 /** Nor more than this, however thin the cloud is. */
 const SPATIAL_Z_SCALE_CEILING = 1000;
+/**
+ * In-plane voxels across the image when a region set's planes are reconstructed over the dataset's
+ * own image (see voxelStep): a step of about 5 px on a 5,700 px wide MERFISH section (0.6 µm).
+ */
+export const REGION_PLANES_VOXELS = 1024;
 
 /**
  * The most a box's Z may be stretched: until it is twice as deep as it is wide, so even a section
@@ -177,6 +182,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private readonly transcripts3d: Spatial3dTranscripts;
   /** Whether the reference volume lets every region surface through (see setRegionsThroughVolume). */
   private regionsThrough = false;
+  /**
+   * Each slice's z, in the observations' units, of the region set the surfaces are built from when
+   * it says where its slices are (a 3D segmentation's planes, see setRegionPlanes); else null.
+   */
+  private regionPlanes: readonly number[] | null = null;
   /** The store's invert setting, which the density volumes follow (no other subscription of
    *  this scene carries it). */
   private invertSub: Subscription | null = null;
@@ -208,6 +218,24 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     this.regionMeshes.setHidden(keys);
   }
 
+  /**
+   * Where the region set's slices are, in the observations' units (null: they are the plotted
+   * stack's slices): its surfaces then sit at their planes among the observations (see
+   * placeRegionMeshes), on an image of one plane too.
+   */
+  setRegionPlanes(z: readonly number[] | null): void {
+    const same =
+      z === this.regionPlanes ||
+      (!!z &&
+        !!this.regionPlanes &&
+        z.length === this.regionPlanes.length &&
+        z.every((v, i) => v === this.regionPlanes?.[i]));
+    if (same) return;
+    this.regionPlanes = z?.length ? [...z] : null;
+    const dataset = this.session.latest?.[0];
+    if (dataset) this.placeRegionMeshes(dataset);
+  }
+
   /** As the Volume view: the reference volume hides the surfaces behind what it shows, or none. */
   setRegionsThroughVolume(through: boolean): void {
     this.regionsThrough = through;
@@ -222,11 +250,26 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * is offset to sit in it). Only when the plotted image IS that volume's stack: regions drawn on
    * another image (a tissue image) have no place in it, and are not shown - nor are surfaces
    * placed in a volume this one replaced.
+   *
+   * Unless the region set says where its slices are ({@link setRegionPlanes}: a 3D segmentation's
+   * planes) and the plotted image is the dataset's own (`imageRef`): image pixels are then taken
+   * back to the observations' units through `imageRef`, slice k to its plane's z, and both moved
+   * by the offset the cloud is, so each cell's surface sits around its observation.
    */
   private placeRegionMeshes(dataset: SpatialDataset): void {
     const meta = dataset.volume;
     if (!meta || !this.isVolumeStack(meta)) {
-      this.regionMeshes.clearFrame();
+      const planes = this.planePlacement(dataset);
+      if (planes) {
+        this.regionMeshes.setFrame({
+          size: [1, 1, planes.z.length],
+          world: [1, 1, 1],
+          zScale: this.zScale(),
+          planes,
+        });
+      } else {
+        this.regionMeshes.clearFrame();
+      }
       return;
     }
     const [vx, vy, vz] = meta.voxelSize;
@@ -243,8 +286,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * share its cached surface). Null while there is no volume stack to place them in.
    */
   voxelStep(): number | null {
-    const meta = this.session.latest?.[0]?.volume;
-    return this.volume && meta && this.isVolumeStack(meta) ? 1 : null;
+    const dataset = this.session.latest?.[0];
+    const meta = dataset?.volume;
+    if (this.volume && meta && this.isVolumeStack(meta)) return 1;
+    // A region set's planes over the dataset's image: cells a few microns across, so a step that
+    // keeps every cell several voxels wide while a class's mask over the tissue stays small.
+    if (dataset && this.planePlacement(dataset)) {
+      const width = this.info?.trueImageSize?.[0] ?? 0;
+      return Math.max(1, width / REGION_PLANES_VOXELS);
+    }
+    return null;
+  }
+
+  /**
+   * Where the region set's slices go (see placeRegionMeshes): only with their planes known, on the
+   * dataset's own image (one with an `imageRef`, not the reference volume's stack), once the box
+   * the cloud is offset into is there.
+   */
+  private planePlacement(dataset: SpatialDataset): PlanePlacement | null {
+    const z = this.regionPlanes;
+    const ref = dataset.imageRef;
+    if (!z?.length || !ref || !this.info || !this.box) return null;
+    const [sx, sy] = ref.scale ?? [1, 1];
+    const [tx, ty] = ref.translate ?? [0, 0];
+    if (!sx || !sy) return null;
+    const [ox, oy, oz] = this.origin;
+    return { z, scale: [1 / sx, 1 / sy], offset: [ox - tx / sx, oy - ty / sy, oz] };
   }
 
   /** Whether the plotted image is the reference volume's stack: its size and slice count. */

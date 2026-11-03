@@ -39,7 +39,7 @@ import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
 import { RegionScopeCache } from './store/region-scope-cache';
 import { REGION_SOURCE_MIN_CHARS, RegionSource, RegionSourceView } from './region-source/region-source';
-import type { RegionIndexPage, RegionIndexQuery } from './region-source/region-tiles';
+import type { RegionIndexPage, RegionIndexQuery, RegionSourceInfo } from './region-source/region-tiles';
 import type { RegionStyle } from './region-overlay/region-style';
 import type { Mesh } from 'napari-js/geometry';
 import { openGeoJsonRegionSource } from './region-source/worker-region-source';
@@ -129,6 +129,19 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     [],
   );
   private classes3dImage: string | undefined;
+  /**
+   * The spatial dataset's region set attached to its image (see attachDatasetRegionSet): the image
+   * (its region scope key), the set's key, and where its slices are when it says (its `sliceZ`),
+   * which places its surfaces in spatial 3D on an image of one plane. `shown3d` once its classes
+   * were shown in 3D by themselves, which happens once per image.
+   */
+  private datasetRegionSet: {
+    image: string;
+    key: string;
+    planes: readonly number[] | null;
+    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;
+    shown3d: boolean;
+  } | null = null;
   /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
   private shown3d: ReadonlyArray<{ key: string; classes: readonly string[]; color: string; label?: string }> = [];
   /**
@@ -368,6 +381,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (!this.imageVolumeView) this.unmountSlice();
     // Region surfaces belong to the image they were built from: another image drops them.
     if (this.classes3d$.value.length && this.plottedFileName !== this.classes3dImage) this.clearRegionClasses3d();
+    // So does a dataset's region set: where its planes are is no other image's.
+    if (this.datasetRegionSet && this.datasetRegionSet.image !== this.importImageKey()) {
+      this.datasetRegionSet = null;
+      this.napari.setRegionPlanes(null);
+      this.updateVolumeView(plotType);
+    }
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
@@ -383,7 +402,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       else this.lastRendered.reset();
     }
     this.lastRendered = next;
-    const plotted = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
+    const drawn = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
+    // A dataset's region set is shown in 3D once the cloud's scene is up: its voxel step is the scene's.
+    const plotted = this.datasetRegionSet?.planes
+      ? drawn.then((ok) => {
+          if (ok) this.showDatasetRegionSet3d();
+          return ok;
+        })
+      : drawn;
     if (!this.sliceDiv || !this.imageVolumeView) return plotted;
     // The split volume view: the slice pane follows the image (a new one, or its sharper pass).
     return plotted.then((ok) => {
@@ -835,6 +861,70 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return true;
   }
 
+  /**
+   * Attach a spatial dataset's region set (a 3D segmentation's cells, outlined on every plane they
+   * span) to its image, the image plotted now, as the image's own regions are: over every slice
+   * from the set's planes (`'planes'`), not marked imported (it is the dataset's, nothing to save),
+   * leaving the image's drawn regions as they are. Once per image and set: called again (the
+   * dataset re-emitted, the image re-plotted) it changes nothing. Where the set's slices are (its
+   * `sliceZ`) places its surfaces among the observations in spatial 3D, where the region editor then
+   * offers its classes in 3D; there, every class is shown once by itself (see showDatasetRegionSet3d).
+   * Resolves false, changing nothing (the source disposed), when another image was plotted or
+   * another set attached while it opened, or it could not be opened.
+   */
+  async attachDatasetRegionSet(open: RegionSourceOpener, key: string): Promise<boolean> {
+    const image = this.importImageKey();
+    if (!image) return false;
+    const current = this.datasetRegionSet;
+    if (current?.image === image && current.key === key) {
+      this.showDatasetRegionSet3d();
+      return true;
+    }
+    // Claimed before the source opens: a second call meanwhile changes nothing.
+    const claim = { image, key, planes: null, groups: [], shown3d: false };
+    this.datasetRegionSet = claim;
+    let first: RegionSource | null;
+    try {
+      first = await open();
+    } catch (err) {
+      if (this.datasetRegionSet === claim) this.datasetRegionSet = null;
+      console.warn("[visualizer] the dataset's region set could not be opened", err);
+      return false;
+    }
+    if (this.datasetRegionSet !== claim || this.importImageKey() !== image) {
+      first.dispose();
+      return false;
+    }
+    const info = first.info;
+    const reuse: RegionSourceOpener = () => {
+      const source = first;
+      first = null;
+      return source ? Promise.resolve(source) : open();
+    };
+    this.regionStore.attachRegionSource(reuse, 'planes');
+    const planes = info.sliceZ?.length && info.sliceZ.length === info.planes.length ? info.sliceZ : null;
+    this.datasetRegionSet = { ...claim, planes, groups: regionSetGroups(info) };
+    this.napari.setRegionPlanes(planes);
+    this.updateVolumeView(this.currentPlotType);
+    this.showDatasetRegionSet3d();
+    return true;
+  }
+
+  /**
+   * In spatial 3D, with the dataset's region set placed there: show each of its classes in 3D, in
+   * its colour, once per image, unless classes are shown already (the region editor's choice
+   * stands, and hiding them all stays hidden).
+   */
+  private showDatasetRegionSet3d(): void {
+    const set = this.datasetRegionSet;
+    if (!set?.planes || set.shown3d || !set.groups.length) return;
+    if (!isSpatialOmics3d(this.currentPlotType) || this.classes3d$.value.length) return;
+    set.shown3d = true;
+    this.showRegionClasses3d(set.groups).catch((err) =>
+      console.warn('[visualizer] the cells could not be shown in 3D', err),
+    );
+  }
+
   /** Empty every slice of a stack (its regions and undo history) for regions imported over it. */
   private enterImportedStack(info: IImageInfo): void {
     const layout = this.regionStore.isStackMode()
@@ -867,7 +957,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Recompute which 3D view is on screen for `plotType` (see {@link volumeView$}). */
   private updateVolumeView(plotType: PlotType): void {
     this.imageVolumeView = isNapariVolume(plotType) || isNapariIsosurface(plotType);
-    const regions3d = this.imageVolumeView || (isSpatialOmics3d(plotType) && !!this.plottedInfo?.isStack);
+    // The spatial cloud places the surfaces of a stack's slices, or of a region set's planes.
+    const placed = !!this.plottedInfo?.isStack || !!this.datasetRegionSet?.planes;
+    const regions3d = this.imageVolumeView || (isSpatialOmics3d(plotType) && placed);
     // Every plot, as before: the Region Editor drops its per-class volumes on each (a new image).
     this.volumeView$.next(regions3d);
   }
@@ -1420,4 +1512,29 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   unsubscribe(): void {
     this.detach();
   }
+}
+
+/**
+ * A region set's classes as 3D groups, as the region editor's class tree shows them: one per root of
+ * its hierarchy with every class under it (one per class of a flat one), in the hierarchy's order;
+ * without a hierarchy, one per class its features have. Each in the colour the set gives it (its
+ * hierarchy's, else its features').
+ */
+export function regionSetGroups(info: RegionSourceInfo): Array<{ key: string; classes: string[]; color: string }> {
+  const colors = new Map(Object.entries(info.classColors ?? {}));
+  const nodes = [...(info.hierarchy ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (!nodes.length) {
+    return [...colors.entries()].map(([name, color]) => ({ key: name, classes: [name], color }));
+  }
+  for (const n of nodes) if (n.color) colors.set(n.name, n.color);
+  const names = new Set(nodes.map((n) => n.name));
+  const children = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (!n.parent || !names.has(n.parent)) continue;
+    children.set(n.parent, [...(children.get(n.parent) ?? []), n.name]);
+  }
+  const subtree = (name: string): string[] => [name, ...(children.get(name) ?? []).flatMap(subtree)];
+  return nodes
+    .filter((n) => !n.parent || !names.has(n.parent))
+    .map((n) => ({ key: n.name, classes: subtree(n.name), color: colors.get(n.name) ?? '#cccccc' }));
 }
