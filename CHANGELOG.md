@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-02
+
 ### Added
 
 - **The Transcripts panel's gene lists sort by name or by count.** A "Sort by Name | Count" switch
@@ -40,6 +42,12 @@ file was added.
 - **napari-js `^0.19.0`** (from `^0.18.0`): `Points3DLayer.scale3d`, which the 3D Z stretch uses, and
   exact fills for shapes that are not star-convex (a Cytos well's cell and nucleus outlines no longer
   streak across their neighbours).
+
+### Fixed
+
+- **The 3D axes toggle shows only in the views that draw axes**: napari-js's volume, isosurface and
+  surface, and the 3D spatial cloud. It also showed in napari-js's 2D image, 2D scatter and 3D
+  scatter, which have no axes, and did nothing there.
 
 ## [0.15.0] — 2026-10-30
 
@@ -2495,7 +2503,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.12.1...v0.13.0
