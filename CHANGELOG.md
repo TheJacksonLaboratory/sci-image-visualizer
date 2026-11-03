@@ -24,6 +24,13 @@ file was added.
   `imageRef`, so they show over the dataset's own image of one plane, not only over the reference
   volume's stack (`VolumeFrame.planes`). They follow the Z handle as the cloud does.
 
+### Changed
+
+- **Up to 22 groups without colours of their own get a colour each.** `DEFAULT_CATEGORICAL_PALETTE`
+  keeps its ten colours and gains twelve more after them, so a grouping of 11 to 22 groups (the
+  MERFISH ileum's 20 cell types) no longer repeats colours by name hash; past 22 the hash still
+  applies. Groupings of ten or fewer, and genes in the first ten slots, keep their colours.
+
 ## [0.17.0] — 2026-11-03
 
 ### Added
