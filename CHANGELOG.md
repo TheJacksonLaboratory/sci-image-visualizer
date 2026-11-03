@@ -37,6 +37,10 @@ file was added.
   and the Z stretch works about. It used to sit at its own coordinates until a density volume was
   shown. A reference volume that fails to load still gives the cloud its box.
 
+- **napari-js `^0.19.0`** (from `^0.18.0`): `Points3DLayer.scale3d`, which the 3D Z stretch uses, and
+  exact fills for shapes that are not star-convex (a Cytos well's cell and nucleus outlines no longer
+  streak across their neighbours).
+
 ## [0.15.0] — 2026-10-30
 
 ### Added
