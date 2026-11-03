@@ -14,6 +14,7 @@ exports[`ToolbarComponent (DOM characterization) 3D spatial cloud with screen-sp
   "button:pi pi-globe "Orbital rotation"",
   "button:pi pi-sync on "Turntable rotation"",
   "button:pi pi-home "Reset camera to default"",
+  "button:3d-coordinates.svg on "Toggle 3D axes / scale"",
   "|",
   "button:region-editor.svg "Open the Region Editor"",
   "button:pi pi-arrow-up-right "Selection mode (<kbd>s</kbd>)"",

@@ -116,12 +116,13 @@
     (onClick)="resetSurfaceCamera.emit()"
   >
   </p-button>
-  <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface only).
+  <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface, and the 3D
+       spatial cloud).
        `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
        (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
   <p-button
     size="small"
-    *ngIf="isNapariMode"
+    *ngIf="axesToggle"
     styleClass="p-button-icon-only"
     [text]="!axesVisible"
     ariaLabel="Toggle 3D axes"

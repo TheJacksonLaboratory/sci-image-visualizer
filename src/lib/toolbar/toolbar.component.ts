@@ -296,6 +296,11 @@ export class ToolbarComponent {
     return this.effectivePlotType === PlotType.ISOSURFACE || isNapariIsosurface(this.effectivePlotType);
   }
 
+  /** The views that draw the 3D axes gizmo: napari-js's, and the 3D spatial cloud. */
+  protected get showsAxesToggle(): boolean {
+    return this.isNapariMode || isSpatialOmics3d(this.effectivePlotType);
+  }
+
   /** The napari-js WebGPU surface — shows the wireframe toggle. */
   protected get isNapariSurfaceMode(): boolean {
     return isNapariSurface(this.effectivePlotType);

@@ -189,6 +189,17 @@ describe('ToolbarComponent', () => {
       expect(component['isSpatialMode']).toBe(true);
     });
 
+    it('shows the 3D axes toggle in the 3D cloud and the napari 3D views, not in 2D', () => {
+      for (const t of [PlotType.SPATIAL_OMICS_3D, PlotType.NAPARI_VOLUME, PlotType.NAPARI_SURFACE]) {
+        component.selectedPlotType = t;
+        expect(component['showsAxesToggle']).toBe(true);
+      }
+      for (const t of [PlotType.SPATIAL_OMICS, PlotType.IMAGE, PlotType.HEATMAP]) {
+        component.selectedPlotType = t;
+        expect(component['showsAxesToggle']).toBe(false);
+      }
+    });
+
     it('hides it for every non-spatial mode', () => {
       for (const t of [PlotType.IMAGE, PlotType.NAPARI_VOLUME, PlotType.SCATTER]) {
         component.selectedPlotType = t;

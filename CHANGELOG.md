@@ -19,6 +19,24 @@ file was added.
   transcripts); the counts, and the order, follow the view. The selected genes now list by name
   rather than in the order they were picked; the selection itself keeps its order.
 
+- **Axes and a Z stretch in the 3D spatial view.** The 3D cloud gets the Volume view's coordinate
+  axes (X/Y/Z with their lengths, in µm when the dataset declares `micronsPerUnit`) and its in-view
+  Z-height handle: drag it up to stretch Z, down to flatten, double-click for the true proportions.
+  A tissue section microns thick and millimetres wide is a flat sheet at its true proportions; the
+  handle can stand it up to twice its width (at least 10x, at most 1000x). The cloud, the reference
+  volume, the density volumes, the gene map and the region surfaces stretch together and nothing is
+  re-uploaded while dragging (the cloud through napari-js's `Points3DLayer.scale3d`). The Z label
+  keeps the true depth and says how much it is stretched. The stretch is kept across re-plots
+  (`NapariSettings.spatialZScale`). The toolbar's axes toggle, drag modes and Reset camera now work
+  in this view too.
+
+### Changed
+
+- **The 3D cloud is centred in its box even without a reference volume.** Its box is then the
+  density grid's (measured from the coordinate origin, as a volume's is), which the axes are drawn on
+  and the Z stretch works about. It used to sit at its own coordinates until a density volume was
+  shown. A reference volume that fails to load still gives the cloud its box.
+
 ## [0.15.0] — 2026-10-30
 
 ### Added

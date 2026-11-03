@@ -31,12 +31,12 @@ export class ViewControlsComponent {
   @Input() activeDragMode: string | null = null;
   /** The 3D camera mode (`turntable` / `orbit` / …). */
   @Input() activeSurface3dMode = 'turntable';
-  /** A napari-js WebGPU view (axes toggle, napari camera). */
-  @Input() isNapariMode = false;
   /** The napari-js surface (shows the wireframe toggle). */
   @Input() isNapariSurfaceMode = false;
   /** A napari-js 3D view (shows the Resolution dropdown). */
   @Input() isNapari3dMode = false;
+  /** Whether the view draws the 3D axes gizmo (shows its toggle). */
+  @Input() axesToggle = false;
   /** The napari 3D axes gizmo is shown. */
   @Input() axesVisible = true;
   /** The napari surface wireframe is on. */
