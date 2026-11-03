@@ -59,7 +59,7 @@
 
     <!-- Transcripts -->
     <spatial-transcripts-panel
-      *ngIf="hasTranscripts && !is3d"
+      *ngIf="hasTranscripts && (!is3d || hasTranscripts3d)"
       [controls]="controls"
       [dataset]="ds"
       [view]="view"

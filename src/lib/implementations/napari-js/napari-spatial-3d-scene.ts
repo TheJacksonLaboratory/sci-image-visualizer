@@ -52,6 +52,7 @@ import {
 import { HOVER_RADIUS_PX } from './napari-spatial-hover';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
+import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -172,6 +173,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * regions were drawn on is that volume's stack (see {@link placeRegionMeshes}).
    */
   private readonly regionMeshes: VolumeRegionMeshes;
+  /** The transcripts of the genes the Transcripts panel draws, at their own z (see Spatial3dTranscripts). */
+  private readonly transcripts3d: Spatial3dTranscripts;
   /** Whether the reference volume lets every region surface through (see setRegionsThroughVolume). */
   private regionsThrough = false;
   /** The store's invert setting, which the density volumes follow (no other subscription of
@@ -189,6 +192,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   ) {
     super(ctx, session, true);
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
   }
 
   /** Show these region reconstructions with the cloud (replacing the ones shown). */
@@ -298,6 +302,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private applyZScale(): void {
     const s = this.zScale();
     if (this.points) this.points.scale3d = [1, 1, s];
+    this.transcripts3d.setZScale(s);
     for (const layer of [this.volume, this.geneMapLayer, ...this.densityLayers]) {
       const base = layer && this.baseVoxels.get(layer);
       if (layer && base) layer.voxelSize = [base[0], base[1], base[2] * s];
@@ -367,6 +372,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   dispose(): void {
     this.regionMeshes.clear();
+    this.transcripts3d.remove();
     this.disposeSpatial();
     this.invertSub?.unsubscribe();
     this.invertSub = null;
@@ -517,6 +523,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.opacity = view.volumeOpacity;
     }
     this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
+    // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
+    await this.transcripts3d.sync(dataset, view, this.session.port, {
+      origin: this.origin,
+      zScale: this.zScale(),
+    });
   }
 
   /**
@@ -1071,6 +1082,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   /** Drop every layer of the cloud (the dataset went away, or has no z). */
   private removeLayers(viewer: Viewer): void {
     this.regionMeshes.clearFrame();
+    this.transcripts3d.remove();
     for (const layer of [this.points, this.volume, this.geneMapLayer, ...this.densityLayers]) {
       if (layer) viewer.layers.remove(layer);
     }

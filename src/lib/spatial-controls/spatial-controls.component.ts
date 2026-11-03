@@ -390,6 +390,11 @@ export class SpatialControlsComponent implements OnInit {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
   }
 
+  /** Whether the 3D cloud can draw the transcripts too: they carry z (a MERFISH volume's do). */
+  protected get hasTranscripts3d(): boolean {
+    return !!this.dataset?.transcriptTiles?.hasZ;
+  }
+
   protected onShowImage(on: boolean): void {
     this.controls?.setViewState({ showImage: on });
   }

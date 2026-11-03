@@ -22,6 +22,13 @@ file was added.
   (its chosen one, else the palette's by its code). Before, only selected genes and marker genes
   could be recoloured. Every gene shares one icon in this mode, so the picker offers colours only.
 
+- **Transcripts in the 3D spatial view.** A dataset whose transcripts carry z (a MERFISH volume) now
+  offers the Transcripts panel in 3D, and the cloud draws every molecule of the genes it selects
+  (or of "All genes", hidden genes left out) at its own x, y and z, coloured by gene as in 2D,
+  sized and faded by the panel's Size and Opacity, and stretched with the Z handle
+  (`Spatial3dTranscripts`). Level 0 is read once per gene selection (at most 4,096 tiles); past
+  2,000,000 molecules every k-th is drawn, and "All genes" over that many is not drawn in 3D.
+
 ### Changed
 
 - **Observation markers are drawn at every zoom.** In 2D, a marker's size is the cell's, so zoomed
