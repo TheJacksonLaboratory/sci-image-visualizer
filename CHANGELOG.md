@@ -122,7 +122,7 @@ file was added.
 ### Changed
 
 - **Annotations is now Regions, off by default.** The spatial-omics dialog's Annotations section is
-  renamed Regions, and its switch (`SpatialViewState.showAnnotations`, now `false` in
+  renamed Regions and moved under the Observations section, and its switch (`SpatialViewState.showAnnotations`, now `false` in
   `DEFAULT_SPATIAL_VIEW`) starts off. The drawn regions are hidden in the spatial views until it is
   switched on. Selecting from them still works while they are hidden. It no longer hides the dataset's
   own region set (its cell segmentation, by cell type), which the Cell segmentations sub-section

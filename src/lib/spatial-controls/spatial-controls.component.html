@@ -93,8 +93,41 @@
     >
     </spatial-transcripts-panel>
 
-    <!-- Regions: the drawn regions (and a dataset's region set), and selecting what they enclose.
-         Off by default. -->
+    <!-- Observations, then what else draws them: the gene map, the 3D scene, and the
+         continuous-only knobs. -->
+    <spatial-observations-panel
+      [controls]="controls"
+      [dataset]="ds"
+      [view]="view"
+      [genes]="genes"
+      [legend]="legend"
+      [colorBarCss]="colorBarCss"
+      [selection]="selection"
+      [selectedCategory]="selectedCategory"
+      [colormapOptions]="colormapOptions"
+      [is3d]="is3d"
+      [open]="open.observations"
+      (openChange)="setOpen('observations', $event)"
+      (categoryClicked)="selectCategory($event)"
+    >
+      <!-- Cell segmentations: with a cell segmentation, a sub-section of the Observations, below
+           Markers and above "Observations in selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
+      <spatial-cells-panel
+        *ngIf="hasCells && (!is3d || hasCells3d)"
+        [controls]="controls"
+        [dataset]="ds"
+        [view]="view"
+        [is3d]="is3d"
+        [cells3dStatus]="cells3dStatus"
+        [genes]="genes"
+        [colorBarCss]="colorBarCss"
+        [open]="open.cells"
+        (openChange)="setOpen('cells', $event)"
+      ></spatial-cells-panel>
+    </spatial-observations-panel>
+
+    <!-- Regions, under the Observations: the drawn regions, and selecting what they enclose. Off by
+         default; the dataset's own region set is the Cell segmentations'. -->
     <div class="sc-panel" [class.open]="open.annotations">
       <div class="sc-panel-head" (click)="toggleSection('annotations')">
         <p-checkbox
@@ -156,39 +189,6 @@
         </small>
       </div>
     </div>
-
-    <!-- Observations, then what else draws them: the gene map, the 3D scene, and the
-         continuous-only knobs. -->
-    <spatial-observations-panel
-      [controls]="controls"
-      [dataset]="ds"
-      [view]="view"
-      [genes]="genes"
-      [legend]="legend"
-      [colorBarCss]="colorBarCss"
-      [selection]="selection"
-      [selectedCategory]="selectedCategory"
-      [colormapOptions]="colormapOptions"
-      [is3d]="is3d"
-      [open]="open.observations"
-      (openChange)="setOpen('observations', $event)"
-      (categoryClicked)="selectCategory($event)"
-    >
-      <!-- Cell segmentations: with a cell segmentation, a sub-section of the Observations, below
-           Markers and above "Observations in selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
-      <spatial-cells-panel
-        *ngIf="hasCells && (!is3d || hasCells3d)"
-        [controls]="controls"
-        [dataset]="ds"
-        [view]="view"
-        [is3d]="is3d"
-        [cells3dStatus]="cells3dStatus"
-        [genes]="genes"
-        [colorBarCss]="colorBarCss"
-        [open]="open.cells"
-        (openChange)="setOpen('cells', $event)"
-      ></spatial-cells-panel>
-    </spatial-observations-panel>
 
     <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
          the colour controls on purpose: changing the gene and watching the

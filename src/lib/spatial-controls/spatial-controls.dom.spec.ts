@@ -569,6 +569,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
   describe('Regions', () => {
     it('writes the region switch, selects from the ROIs and clears', async () => {
       await build();
+      // Under the Observations.
+      const regions = panelNamed(root, 'Regions');
+      expect(
+        panelNamed(root, 'Observations').compareDocumentPosition(regions) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
       // Off by default: the regions are shown only when asked for.
       const regionSwitch = one(panelNamed(root, 'Regions'), '.sc-panel-head p-checkbox');
       expect(accessorOf(fixture, regionSwitch).value).toBe(false);
