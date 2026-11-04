@@ -131,6 +131,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     this.hover.install(ctx.host);
     this.session.claimTiles(this)?.attach(ctx.viewer);
     this.session.tiles?.setZBand(this.zBand());
+    this.session.tiles?.setPlane(this.planes ? this.plane : null);
     this.subscribeSpatial();
     this.mounted = true;
     ctx.tools.scheduleReadback();
@@ -165,6 +166,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   private planeChanged(): void {
     if (!this.mounted || this.ctx.signal.aborted) return;
     this.session.tiles?.setZBand(this.zBand());
+    this.session.tiles?.setPlane(this.planes ? this.plane : null);
     this.redrawMarkers();
   }
 
@@ -185,6 +187,7 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     this.disposeSpatial();
     this.geneMapLoads.cancel();
     this.session.tiles?.setZBand(null);
+    this.session.tiles?.setPlane(null);
     this.session.releaseTiles(this);
     this.image.dispose();
   }

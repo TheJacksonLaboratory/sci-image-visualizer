@@ -33,6 +33,9 @@ import {
   typicalCellDiameter,
 } from '../../../spatial/lod';
 import { filterRings, mergePolygonTiles } from '../../../spatial/spatial-tile-merge';
+import { observationIndex, planeCellRings } from '../../../spatial/plane-cells';
+import type { RegionSource } from '../../../region-source/region-source';
+import { regionLevelFor, regionTileId, regionTilesInRect } from '../../../region-source/region-tiles';
 import { geneFilterKey } from '../../../spatial/spatial-gene-filter';
 import { ContrastWindowCache } from '../napari-spatial-encoding';
 import type { CategoricalLookup, HiddenCodes } from './categorical-lookup';
@@ -80,6 +83,13 @@ export class CellLayers {
   /** Continuous colourings' windows, per (vector, clip, log): `contrastWindow` sorts every
    *  value, and a selection or opacity change recolours with the vector unchanged (SPATIAL-12). */
   private readonly contrastWindows = new ContrastWindowCache();
+  /**
+   * The plane of a 3D segmentation the view shows (see {@link setPlane}), or null: every set draws
+   * its own tiles.
+   */
+  private plane: number | null = null;
+  /** The region set opened for a boundary set's per-plane outlines: its id and the source. */
+  private planeSource: { id: string; source: Promise<RegionSource> } | null = null;
 
   constructor(
     private readonly port: SpatialDataPort,
@@ -91,6 +101,26 @@ export class CellLayers {
   /** True while outlines are on screen. */
   get outlinesShown(): boolean {
     return this.polygonsShown;
+  }
+
+  /**
+   * Show plane `plane` (an index into the region set's planes) of a 3D segmentation, or none: a
+   * boundary set that names its region set (`regionSource`, a cell outlined on every plane it spans)
+   * then draws that plane's outlines, rather than one outline per cell, so the cells follow the
+   * slice. Its cells keep the view's colouring, groups and selection.
+   */
+  setPlane(plane: number | null): void {
+    this.plane = plane;
+  }
+
+  /** Close the region set opened for the per-plane outlines. */
+  dispose(): void {
+    const opened = this.planeSource;
+    this.planeSource = null;
+    void opened?.source.then(
+      (s) => s.dispose(),
+      () => undefined,
+    );
   }
 
   /** The viewer went away (its layers with it): the outlines are no longer shown. */
@@ -130,7 +160,7 @@ export class CellLayers {
     const hidden = await this.lookup.hiddenCodes(dataset, view);
     if (ctx.stale()) return;
     const label = view.cellSet === 'both' ? 'Cells and nuclei' : view.cellSet === 'nucleus' ? 'Nuclei' : 'Cells';
-    const geometry = await ctx.track(label, this.cellGeometry(dataset, view, rect, level, hidden, ctx));
+    const geometry = await ctx.track(label, this.cellGeometry(dataset, view, rect, level, hidden, ctx, pxPerUnit));
     if (!geometry) return;
     const { rings, nuclei, geometryKey } = geometry;
 
@@ -296,6 +326,7 @@ export class CellLayers {
     level: number,
     hidden: HiddenCodes | null,
     ctx: PlanContext,
+    pxPerUnit = 1,
   ): Promise<{ rings: SpatialPolygonTile; nuclei: SpatialPolygonTile | null; geometryKey: string } | null> {
     const tiled = dataset.polygonTiles;
     const hiddenKey = `${view.hiddenGroups.join('\u0001')}|${geneFilterKey(view)}`;
@@ -306,6 +337,20 @@ export class CellLayers {
       const drawn = drawnCellSets(tiled, view.cellSet);
       if (!drawn) return null;
       const { set, nucleusSet } = drawn;
+      const regionSource = tiled.sets.find((s) => s.name === set)?.regionSource;
+      if (!nucleusSet && regionSource && this.plane !== null) {
+        const onPlane = await this.planeGeometry(
+          dataset,
+          set,
+          regionSource,
+          rect,
+          pxPerUnit,
+          hidden,
+          hiddenKey,
+          ctx,
+        );
+        if (onPlane !== undefined) return onPlane;
+      }
       const keys = tilesInRect(rect, level, tiled.levels, tiled.bounds, MAX_CELL_TILES);
       geometryKey = `${dataset.id}|${set}|${nucleusSet ?? ''}|${hiddenKey}|${keys.map(tileId).join(',')}`;
       if (geometryKey === this.cellGeometryKey && this.currentRings) {
@@ -337,6 +382,73 @@ export class CellLayers {
       }
     }
     return { rings, nuclei, geometryKey };
+  }
+
+  /**
+   * The cells of boundary set `set` on the plane shown, from its region set (`regionSource`): the
+   * plane's tiles meeting `rect`, at the detail the zoom calls for, each outline owned by its cell
+   * (by its id among the observations'), minus the hidden groups. Undefined when it cannot be drawn
+   * so (no observation ids to tell its cells by, no port to open the set, or a plane it has not), so
+   * the set's own tiles are drawn; null when the view went stale.
+   */
+  private async planeGeometry(
+    dataset: SpatialDataset,
+    set: string,
+    regionSource: string,
+    rect: DataRect,
+    pxPerUnit: number,
+    hidden: HiddenCodes | null,
+    hiddenKey: string,
+    ctx: PlanContext,
+  ): Promise<{ rings: SpatialPolygonTile; nuclei: null; geometryKey: string } | null | undefined> {
+    const index = observationIndex(dataset.observations);
+    const plane = this.plane;
+    if (!index || plane === null || !this.port.openRegionSet) return undefined;
+    let source: RegionSource;
+    try {
+      source = await this.openPlaneSource(regionSource);
+    } catch (err) {
+      console.warn("[napari-js] the cells' per-plane outlines could not be opened: drawn as one per cell", err);
+      return undefined;
+    }
+    if (ctx.stale()) return null;
+    const info = source.info;
+    const z = info.planes[plane];
+    if (z === undefined) return undefined;
+    // The region set's coordinates are the image's pixels: the view's rectangle and zoom in them.
+    const ref = dataset.imageRef;
+    const [sx, sy] = ref?.scale ?? [1, 1];
+    const [tx, ty] = ref?.translate ?? [0, 0];
+    const box: [number, number, number, number] = [
+      rect.x0 * sx + tx,
+      rect.y0 * sy + ty,
+      rect.x1 * sx + tx,
+      rect.y1 * sy + ty,
+    ];
+    const level = regionLevelFor(pxPerUnit / Math.abs(sx || 1), info.levels);
+    const keys = regionTilesInRect(box, level, info.tileSize, info.bounds, MAX_CELL_TILES);
+    const geometryKey = `${dataset.id}|${set}|plane ${plane}|${hiddenKey}|${keys.map(regionTileId).join(',')}`;
+    if (geometryKey === this.cellGeometryKey && this.currentRings) {
+      return { rings: this.currentRings, nuclei: null, geometryKey };
+    }
+    const tiles = await ctx.fetchAll(keys, (k) => source.getTile(z, k));
+    if (ctx.stale()) return null;
+    const rings = filterRings(planeCellRings(tiles, index, ref), hidden);
+    return { rings, nuclei: null, geometryKey };
+  }
+
+  /** The region set `id`, opened once (another id closes the one before). */
+  private openPlaneSource(id: string): Promise<RegionSource> {
+    if (this.planeSource?.id !== id) {
+      this.dispose();
+      const source = this.port.openRegionSet!(id);
+      this.planeSource = { id, source };
+      // A set that failed to open is asked for again next time.
+      source.catch(() => {
+        if (this.planeSource?.source === source) this.planeSource = null;
+      });
+    }
+    return this.planeSource!.source;
   }
 
   /** Remove the cell layers and forget what they showed. */

@@ -90,6 +90,8 @@ export class NapariSpatialTileLayers {
   private token = 0;
   /** The z band of the plane shown, when the view shows one plane of a 3D assay (see setZBand). */
   private zBand: readonly [number, number] | null = null;
+  /** The plane of a 3D segmentation shown (see setPlane), or null. */
+  private plane: number | null = null;
   /** The overlays' layers, one per group, in their fixed order. */
   private readonly groups = new OrderedLayerGroups<TileGroup>(TILE_LAYER_ORDER);
 
@@ -140,6 +142,7 @@ export class NapariSpatialTileLayers {
     this.loads.clear();
     this.groups.detach();
     this.cells.detached();
+    this.cells.dispose();
     this.viewer = null;
   }
 
@@ -188,6 +191,18 @@ export class NapariSpatialTileLayers {
       band === this.zBand || (!!band && !!this.zBand && band[0] === this.zBand[0] && band[1] === this.zBand[1]);
     if (same) return;
     this.zBand = band;
+    this.refresh();
+  }
+
+  /**
+   * Show plane `plane` of a 3D segmentation (an index into its region set's planes), or none: a
+   * boundary set naming its region set draws that plane's cells (see `CellLayers.setPlane`).
+   * Re-plans when it changes.
+   */
+  setPlane(plane: number | null): void {
+    if (plane === this.plane) return;
+    this.plane = plane;
+    this.cells.setPlane(plane);
     this.refresh();
   }
 
