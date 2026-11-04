@@ -10,7 +10,12 @@ import { reconstructCellsInWorker } from '../../region-source/worker-region-sour
 import { cellOutlinesFromTiles, observationIndex } from '../../spatial/plane-cells';
 import { typicalCellDiameter } from '../../spatial/lod';
 import { datasetRegionSet } from '../../visualizer/spatial-region-set';
-import { PlanePlacement, toWorld } from './napari-volume-region-meshes';
+import {
+  PlanePlacement,
+  REGION_MESH_DIMMED_OPACITY,
+  REGION_MESH_HIGHLIGHT_OPACITY,
+  toWorld,
+} from './napari-volume-region-meshes';
 
 /**
  * A 3D segmentation's cells in the spatial 3D view, each reconstructed by itself (see
@@ -84,6 +89,8 @@ export class Spatial3dCells {
   private hidden: ReadonlySet<string> = new Set();
   private colors: Float32Array | null = null;
   private visible: Uint8Array | null = null;
+  /** The selection (null: none): the cells it leaves out fade, keeping their colours. */
+  private selected: Uint8Array | null = null;
   private opacity = 1;
   private placement: PlanePlacement | null = null;
   private zScale = 1;
@@ -138,10 +145,16 @@ export class Spatial3dCells {
    * Each observation's colour (RGBA 0..1) and whether it is shown (null: all), and the surfaces'
    * opacity: the panel's Cell Color, groups and selection. Changes no geometry.
    */
-  setStyle(colors: Float32Array | null, visible: Uint8Array | null, opacity: number): void {
+  setStyle(
+    colors: Float32Array | null,
+    visible: Uint8Array | null,
+    opacity: number,
+    selected: Uint8Array | null = null,
+  ): void {
     this.colors = colors;
     this.visible = visible;
     this.opacity = opacity;
+    this.selected = selected;
     this.redraw();
   }
 
@@ -470,10 +483,18 @@ export class Spatial3dCells {
     return n === faces.length ? faces : out.slice(0, n);
   }
 
-  /** Each vertex its cell's colour (white without colours). */
+  /**
+   * Each vertex its cell's colour (white without colours). With a selection, a cell it leaves out
+   * keeps its colour and fades, as a picked region fades the others: its alpha brought down to the
+   * dimmed regions' opacity, the selected cells drawn near opaque.
+   */
   private vertexColors(mesh: CellsMesh): Float32Array {
     const out = new Float32Array(mesh.vertexCell.length * 4);
     const colors = this.colors;
+    const selected = this.selected;
+    const o = this.opacity > 0 ? this.opacity : 1;
+    const dim = Math.min(1, REGION_MESH_DIMMED_OPACITY / o);
+    const lit = Math.min(1, REGION_MESH_HIGHLIGHT_OPACITY / o);
     for (let v = 0; v < mesh.vertexCell.length; v++) {
       const o = mesh.vertexCell[v] * 4;
       if (colors && o + 3 < colors.length) {
@@ -484,6 +505,7 @@ export class Spatial3dCells {
       } else {
         out.fill(1, v * 4, v * 4 + 4);
       }
+      if (selected) out[v * 4 + 3] *= selected[mesh.vertexCell[v]] ? lit : dim;
     }
     return out;
   }

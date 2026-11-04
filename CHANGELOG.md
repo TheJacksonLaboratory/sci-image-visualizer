@@ -54,11 +54,12 @@ file was added.
   as the camera comes close, within a triangle budget; at most 20,000 cells, the nearest the centre
   of the view, the panel saying when some are left out; colour and visibility change no geometry.
   The canvas shows "Cells" loading while they build, the panel how many are shown.
-- **3D cells and cell types tell what they are, and a selection greys the other types.** Hovering a cell (drawn by itself,
+- **3D cells and cell types tell what they are, and a selection fades what it leaves out.** Hovering a cell (drawn by itself,
   or its marker) names its type and id, the colouring's value and a few of its measurements;
   hovering a cell type's surface names the type and how many cells it has. With a selection (a
-  cell clicked, a type picked), the cell types' surfaces none of it is in turn grey, as the cells
-  it leaves out do. A whole type is selected as before, with the selection tool.
+  cell clicked, a type picked), what it leaves out fades as a picked region fades the others: the
+  cell types' surfaces none of it is in, and the individual cells it leaves out, each keeping its
+  colour, while the rest come forward. A whole type is selected as before, with the selection tool.
 
 ### Fixed
 

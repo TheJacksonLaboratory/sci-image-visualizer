@@ -290,7 +290,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
           },
           dataset,
           view,
-          selection,
+          // Colours as they are: a selection fades what it leaves out (see Spatial3dCells), not grey.
+          emptySelection(count),
           owners,
         ),
         this.cellLookup.hiddenCodes(dataset, view),
@@ -306,7 +307,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
           visible[i] = c !== NO_CATEGORY && hidden.hidden[c] ? 0 : 1;
         }
       }
-      this.cells3d.setStyle(cellColorsRgba(colors, count), visible, view.cellOpacity ?? 1);
+      this.cells3d.setStyle(
+        cellColorsRgba(colors, count),
+        visible,
+        view.cellOpacity ?? 1,
+        selection.count ? selection.mask : null,
+      );
     } catch (err) {
       if (request === this.cellStyleRequest) this.cellStyleKey = null;
       console.warn('[napari-js] the 3D cells could not be coloured', err);

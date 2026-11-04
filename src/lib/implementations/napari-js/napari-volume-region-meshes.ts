@@ -44,10 +44,6 @@ export interface PlanePlacement {
   offset: [number, number, number];
 }
 
-/** A surface none of the selection is in: grey, and faint, as the observations it leaves out. */
-export const REGION_MESH_MUTED_COLOR = '#8c8c8c';
-export const REGION_MESH_MUTED_OPACITY = 0.18;
-
 /** Opacity of a region's surface in the volume. */
 export const REGION_MESH_OPACITY = 0.55;
 /** While some surfaces are highlighted: theirs (near opaque, so their shape reads) … */
@@ -70,7 +66,7 @@ export class VolumeRegionMeshes {
   private readonly layers = new Map<string, { mesh: RegionMesh3D; layer: SurfaceLayer }>();
   private highlighted: ReadonlySet<string> = new Set();
   private hidden: ReadonlySet<string> = new Set();
-  /** Surfaces greyed out: none of what is selected is in them. */
+  /** Surfaces faded: none of what is selected is in them. */
   private muted: ReadonlySet<string> = new Set();
   /** The meshes to show (kept while the volume has no frame yet). */
   private wanted: readonly RegionMesh3D[] = [];
@@ -115,22 +111,16 @@ export class VolumeRegionMeshes {
   }
 
   /**
-   * Grey out the surfaces of these keys (none: each in its colour): with a selection, the regions
-   * none of it is in, as the observations it leaves out are muted.
+   * Fade the surfaces of these keys, as a picked region fades the others (none: each as usual):
+   * with a selection, the regions none of it is in fade and those it is in come forward, each
+   * keeping its colour.
    */
   setMuted(keys: Iterable<string>): void {
     const next = new Set(keys);
     if (next.size === this.muted.size && [...next].every((k) => this.muted.has(k))) return;
     this.muted = next;
-    for (const [key, e] of this.layers) {
-      e.layer.color = this.colorOf(key, e.mesh);
-      e.layer.opacity = this.opacityOf(key);
-    }
+    for (const [key, e] of this.layers) e.layer.opacity = this.opacityOf(key);
     this.viewer.requestRender();
-  }
-
-  private colorOf(key: string, mesh: RegionMesh3D): string {
-    return this.muted.has(key) ? REGION_MESH_MUTED_COLOR : mesh.color;
   }
 
   /** Hide the surfaces of these keys (they are kept, so showing them again is instant). */
@@ -180,7 +170,7 @@ export class VolumeRegionMeshes {
       if (want.vertices !== e.mesh.vertices && this.frame) {
         e.layer.setData(toWorld(want.vertices, baseFrame(this.frame)), want.faces);
       }
-      if (want.color !== e.mesh.color) e.layer.color = this.colorOf(key, want);
+      if (want.color !== e.mesh.color) e.layer.color = want.color;
       e.mesh = want;
     }
     if (this.frame) {
@@ -194,7 +184,7 @@ export class VolumeRegionMeshes {
     const layer = this.viewer.addSurface(toWorld(mesh.vertices, baseFrame(frame)), mesh.faces, undefined, {
       name: `region ${mesh.key}`,
       scale3d: this.scale3d(),
-      color: this.colorOf(mesh.key, mesh),
+      color: mesh.color,
       opacity: this.opacityOf(mesh.key),
       blending: 'translucent',
       fit: 'never',
@@ -204,7 +194,7 @@ export class VolumeRegionMeshes {
   }
 
   private opacityOf(key: string): number {
-    if (this.muted.has(key)) return REGION_MESH_MUTED_OPACITY;
+    if (this.muted.size) return this.muted.has(key) ? REGION_MESH_DIMMED_OPACITY : REGION_MESH_HIGHLIGHT_OPACITY;
     if (!this.highlighted.size) return REGION_MESH_OPACITY;
     return this.highlighted.has(key) ? REGION_MESH_HIGHLIGHT_OPACITY : REGION_MESH_DIMMED_OPACITY;
   }

@@ -4,7 +4,6 @@ import type { SurfaceLayer, Viewer } from 'napari-js';
 import {
   REGION_MESH_DIMMED_OPACITY,
   REGION_MESH_HIGHLIGHT_OPACITY,
-  REGION_MESH_MUTED_OPACITY,
   REGION_MESH_OPACITY,
   RegionMesh3D,
   VolumeRegionMeshes,
@@ -218,19 +217,17 @@ describe('VolumeRegionMeshes', () => {
     expect(meshes.pickAt(100, 100)?.key).toBe('A');
   });
 
-  it('greys out the surfaces none of a selection is in, and gives them their colours back', () => {
+  it('fades the surfaces none of a selection is in, as a picked region does, keeping their colours', () => {
     const { viewer, surfaces } = makeViewer();
     const meshes = new VolumeRegionMeshes(viewer);
     meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]);
     meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
     meshes.setMuted(['MB']);
-    expect(surfaces()[0].color).toEqual([1, 0, 0, 1]);
-    const grey = surfaces()[1].color!;
-    expect(grey[0]).toBeCloseTo(grey[1]);
-    expect(grey[1]).toBeCloseTo(grey[2]);
-    expect(surfaces()[1].opacity).toBe(REGION_MESH_MUTED_OPACITY);
-    meshes.setMuted([]);
     expect(surfaces()[1].color).toEqual([0, 1, 0, 1]);
+    expect(surfaces()[1].opacity).toBe(REGION_MESH_DIMMED_OPACITY);
+    expect(surfaces()[0].opacity).toBe(REGION_MESH_HIGHLIGHT_OPACITY);
+    meshes.setMuted([]);
     expect(surfaces()[1].opacity).toBe(REGION_MESH_OPACITY);
+    expect(surfaces()[0].opacity).toBe(REGION_MESH_OPACITY);
   });
 });

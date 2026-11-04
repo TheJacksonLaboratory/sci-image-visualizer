@@ -102,6 +102,15 @@ describe('Spatial3dCells', () => {
     const colors = layers.flatMap((l) => Array.from(l.vertexColors ?? []));
     expect(colors.length).toBeGreaterThan(0);
     expect(layers.every((l) => l.opacity === 0.7)).toBe(true);
+    // A selection (c3): the others keep their colours and fade; c3 stays near opaque.
+    cells.setStyle(Float32Array.of(1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1), null, 0.7, Uint8Array.of(0, 0, 1));
+    const rgba = layers.flatMap((l) => Array.from(l.vertexColors ?? []));
+    const alphas = new Set(rgba.filter((_v, i) => i % 4 === 3).map((a) => Math.round(a * 100) / 100));
+    expect(alphas.size).toBe(2);
+    expect(Math.max(...alphas)).toBe(1);
+    expect(Math.min(...alphas)).toBeLessThan(0.3);
+    // Colours kept: no grey.
+    expect(rgba.some((v, i) => i % 4 === 0 && v === 1)).toBe(true);
     cells.dispose();
   });
 
