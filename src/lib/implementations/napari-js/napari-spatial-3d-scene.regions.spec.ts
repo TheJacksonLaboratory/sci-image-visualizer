@@ -27,6 +27,13 @@ function scene(info: any, dataset: any = DATASET, frame: any = {}) {
     info,
     ctx: { viewer, settings: { spatialZScale: 1 } },
     regionMeshes: new VolumeRegionMeshes(viewer),
+    cells3d: {
+      setPlacement: jest.fn(),
+      setHiddenClasses: jest.fn(),
+      setDataset: jest.fn(),
+      pick: () => -1,
+      dispose: jest.fn(),
+    },
     regionsThrough: false,
     volume,
     session: { latest: [dataset, {}, {}] },

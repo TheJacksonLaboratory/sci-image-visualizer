@@ -29,6 +29,13 @@ function scene(dataset: any, spatialZScale = 1) {
     ctx: { viewer, host, settings },
     session: { latest: [dataset, {}, {}], geneMapVolume: { field: null, key: null } },
     regionMeshes: new VolumeRegionMeshes(viewer),
+    cells3d: {
+      setPlacement: jest.fn(),
+      setHiddenClasses: jest.fn(),
+      setDataset: jest.fn(),
+      pick: () => -1,
+      dispose: jest.fn(),
+    },
     transcripts3d: new Spatial3dTranscripts(viewer, () => () => undefined),
     baseVoxels: new WeakMap(),
     densityLayers: [],

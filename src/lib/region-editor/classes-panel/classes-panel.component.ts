@@ -67,6 +67,13 @@ export class ClassesPanelComponent implements OnChanges {
   @Input() volume = false;
   /** The classes shown in 3D. */
   @Input() shown3d: ReadonlySet<string> = new Set();
+  /** Classes that can be drawn as individual cells here (a 3D segmentation's, in spatial 3D). */
+  @Input() cellable: ReadonlySet<string> = new Set();
+  /** Those drawn as individual cells now. */
+  @Input() individual: ReadonlySet<string> = new Set();
+  /** Draw a class (its subclasses with it) as individual cells, or merged again. */
+  @Output() toggleCells = new EventEmitter<{ classes: string[]; individual: boolean }>();
+
   /** The classes hidden from view. */
   @Input() hidden: ReadonlySet<string> = new Set();
   /** A class's eye (its name): hide it, or show it again. */

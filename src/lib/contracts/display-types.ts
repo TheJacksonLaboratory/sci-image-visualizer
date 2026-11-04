@@ -86,6 +86,17 @@ export interface SpatialColorBy {
 /** Display state for the spatial-omics plot mode. Lives in `VisualizerStore`
  *  alongside the colormap/channel state so the renderer reacts to edits the
  *  same way it does for an image. */
+/**
+ * How the spatial 3D view's individual cells stand (a 3D segmentation's cells, each its own
+ * surface): how many are shown, whether some are left out (the cap, or not built yet), whether
+ * they are being built.
+ */
+export interface Cells3dStatus {
+  shown: number;
+  capped: boolean;
+  building: boolean;
+}
+
 export interface SpatialViewState {
   /** Colour source; `null` renders every observation in one neutral colour
    *  (useful on its own — it shows where the tissue actually is). */
@@ -219,6 +230,12 @@ export interface SpatialViewState {
    * user's explicit choice.
    */
   showCells: boolean | null;
+  /**
+   * How the spatial 3D view draws a 3D segmentation's cells (the dataset's region set): one
+   * merged surface per cell type (`types`), or every cell its own surface in the Cell Color
+   * (`cells`). A class can be set the other way in the Region Editor.
+   */
+  cells3d: 'types' | 'cells';
   /** Which boundary set (`cell`, `nucleus`, or `both` — cells as set by
    *  {@link cellDraw}, nuclei outlined over them); null takes the dataset's default. */
   cellSet: string | null;
@@ -359,6 +376,7 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   geneMapSmoothing: 1,
   geneMapOpacity: 0.85,
   showCells: null,
+  cells3d: 'types',
   cellSet: null,
   cellDraw: 'fill',
   cellOpacity: 0.55,

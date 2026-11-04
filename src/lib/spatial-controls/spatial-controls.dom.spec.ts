@@ -248,6 +248,28 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(() => panelNamed(root, 'Transcripts')).toThrow();
     });
 
+    it("offers the Cells in 3D for a 3D segmentation's cells: by type or each cell, without the 2D boundaries", async () => {
+      dataset$.next({
+        ...dataset,
+        polygonTiles: {
+          bounds: [0, 0, 1, 1],
+          levels: [],
+          defaultSet: 'cell',
+          sets: [
+            { name: 'cell', label: 'Cells' },
+            { name: '3d', label: '3D', regionSource: 'rs-3d' },
+          ],
+        },
+      } as SpatialDataset);
+      await build({ is3d: true });
+      const panel = await openSection('Cells');
+      expect(panel.textContent).toContain('In 3D');
+      expect(panel.textContent).not.toContain('Boundaries');
+      expect(panel.textContent).not.toContain('View cells as');
+      pick(one(panel, 'p-selectbutton'), 'cells');
+      expect(lastWrite()).toEqual({ cells3d: 'cells' });
+    });
+
     it('offers the Transcripts in 3D when they carry z', async () => {
       dataset$.next({
         ...dataset,

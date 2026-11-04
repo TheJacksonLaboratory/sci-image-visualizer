@@ -6,7 +6,7 @@ import { Viewer } from 'napari-js';
 
 import { IImageInfo } from '../../contracts/image.contract';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
-import { CanvasToolId } from '../../contracts/display-types';
+import { CanvasToolId, Cells3dStatus } from '../../contracts/display-types';
 import { IRegionOverlay } from '../../contracts/region-overlay.contract';
 import { SpatialObservations } from '../../contracts/spatial-dataset.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from '../../contracts/ports/spatial-data.port';
@@ -124,6 +124,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   readonly densityStats$ = new BehaviorSubject<{ lo: number; hi: number; max: number } | null>(null);
   /** The observation gene filter could not be applied (an expression read failed). */
   readonly geneFilterFailed$ = new BehaviorSubject<boolean>(false);
+  /** The 3D view's individual cells as they stand (see Spatial3dCells), for the panel. */
+  readonly cells3dStatus$ = new BehaviorSubject<Cells3dStatus | null>(null);
   /** "x reloading…" at the bottom of the canvas: the tile layers' loads and the observations'. */
   private readonly badge = new LoadingBadgeState();
   /** The store's display state (colormap, reverse, invert) and the colormaps derived from it. */
@@ -145,6 +147,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   private regionPlanes: readonly number[] | null = null;
   /** The plane of {@link regionPlanes} the 2D spatial view shows (see setRegionPlane). */
   private regionPlane = 0;
+  /** The classes the spatial 3D view draws as individual cells (see setRegionCells). */
+  private regionCells: readonly string[] | null = null;
   /** The keys of the reconstructions highlighted. */
   private regionHighlight: readonly string[] = [];
   /** The keys of the reconstructions hidden. */
@@ -218,6 +222,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       geneCountsChanged: (c) => this.inZone(() => this.geneCountsInView$.next(c)),
       densityChanged: (d) => this.inZone(() => this.densityStats$.next(d)),
       geneFilterFailed: (failed) => this.inZone(() => this.geneFilterFailed$.next(failed)),
+      cells3dStatus: (status) => this.inZone(() => this.cells3dStatus$.next(status)),
       loadingChanged: (layers) => this.badge.setTileLayers(layers),
     });
     this.tools = new NapariToolBridge(
@@ -369,6 +374,7 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
       if (info?.fileName !== this.regionMeshesImage) this.regionMeshes = [];
       this.scene.setRegionPlanes?.(this.regionPlanes);
       this.scene.setRegionPlane?.(this.regionPlane);
+      this.scene.setRegionCells?.(this.regionCells);
       this.scene.setRegionMeshes?.(this.regionMeshes);
       this.scene.setRegionHighlight?.(this.regionHighlight);
       this.scene.setRegionHidden?.(this.regionHidden);
@@ -455,6 +461,16 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
    * the plotted stack's. Kept for the next plot of the same image, as the meshes are; the spatial 3D
    * view's voxel step follows it (see regionVoxelStep).
    */
+  /**
+   * Draw these classes of the dataset's region set as individual cells in the spatial 3D view, each
+   * its own surface in the panel's Cell Color, rather than as their merged class surfaces (none:
+   * no cells). Kept for the next scene.
+   */
+  setRegionCells(classes: readonly string[] | null): void {
+    this.regionCells = classes?.length ? [...classes] : null;
+    this.scene?.setRegionCells?.(this.regionCells);
+  }
+
   setRegionPlanes(planes: readonly number[] | null): void {
     this.regionPlanes = planes;
     this.scene?.setRegionPlanes?.(planes);

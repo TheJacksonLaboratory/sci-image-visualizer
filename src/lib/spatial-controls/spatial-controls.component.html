@@ -77,11 +77,14 @@
     </div>
 
     <!-- Cells -->
+    <!-- In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
     <spatial-cells-panel
-      *ngIf="hasCells && !is3d"
+      *ngIf="hasCells && (!is3d || hasCells3d)"
       [controls]="controls"
       [dataset]="ds"
       [view]="view"
+      [is3d]="is3d"
+      [cells3dStatus]="cells3dStatus"
       [genes]="genes"
       [colorBarCss]="colorBarCss"
       [open]="open.cells"

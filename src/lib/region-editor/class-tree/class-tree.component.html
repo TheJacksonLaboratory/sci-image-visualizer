@@ -77,6 +77,17 @@
         tooltipPosition="left"
         (click)="flip3d(row.name, $event)"
       ></i>
+      <i
+        *ngIf="volume && anyCellable(row.name)"
+        class="pi pi-th-large tree-3d tree-cells"
+        [class.on]="allIndividual(row.name)"
+        role="button"
+        [attr.aria-pressed]="allIndividual(row.name)"
+        [attr.aria-label]="'Show ' + row.name + ' as individual cells'"
+        [pTooltip]="allIndividual(row.name) ? 'Show as one surface' : 'Show each cell by itself'"
+        tooltipPosition="left"
+        (click)="flipCells(row.name, $event)"
+      ></i>
     </div>
     <div *ngIf="!rows.length" class="tree-empty">No class matches.</div>
   </div>

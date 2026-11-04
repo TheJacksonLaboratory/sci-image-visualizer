@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { RegionSourceMessage, RegionSourceReply, RegionSourceTables } from './region-source-ops';
+import { CellsMesh, cellsMeshBuffers } from '../geometry/cell-meshes';
 
 /**
  * Region-source Web Worker: parses large GeoJSON region sets and serves their level-of-detail
@@ -15,10 +16,14 @@ const tables = new RegionSourceTables();
 self.onmessage = (event: MessageEvent<RegionSourceMessage>) => {
   const { id } = event.data;
   let reply: RegionSourceReply;
+  // Cells' meshes are large: their buffers are handed over, not copied.
+  let transfer: ArrayBuffer[] = [];
   try {
-    reply = { id, ok: true, result: tables.run(event.data) };
+    const result = tables.run(event.data);
+    if (event.data.op === 'cells') transfer = cellsMeshBuffers(result as CellsMesh);
+    reply = { id, ok: true, result };
   } catch (err) {
     reply = { id, ok: false, error: (err as Error)?.message ?? String(err) };
   }
-  (self as unknown as Worker).postMessage(reply);
+  (self as unknown as Worker).postMessage(reply, transfer);
 };

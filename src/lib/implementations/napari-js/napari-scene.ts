@@ -51,6 +51,8 @@ export interface NapariScene {
    * one plane: its observations and transcripts are the ones drawn (spatial 2D only).
    */
   setRegionPlane?(k: number): void;
+  /** Draw these classes of the dataset's region set as individual cells (spatial 3D only). */
+  setRegionCells?(classes: readonly string[] | null): void;
   /** Highlight the reconstructions of these keys (none: all as usual). */
   setRegionHighlight?(keys: readonly string[]): void;
   /** Hide the reconstructions of these keys. */

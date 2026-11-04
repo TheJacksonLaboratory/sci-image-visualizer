@@ -10,7 +10,24 @@
     <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
   </div>
   <div class="sc-panel-body" *ngIf="open">
-    <ng-container *ngIf="boundarySets.length && boundarySets.length <= 2">
+    <!-- 3D: the cells as one surface per cell type, or each its own surface in the Cell Color. -->
+    <ng-container *ngIf="is3d">
+      <div class="sc-subhead">In 3D</div>
+      <p-selectButton
+        [options]="cells3dOptions"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="view.cells3d"
+        (ngModelChange)="onCells3d($event)"
+        [allowEmpty]="false"
+        styleClass="sc-buttons"
+      ></p-selectButton>
+      <small class="sc-hint" *ngIf="view.cells3d === 'types'">
+        Each cell type is one surface. A type can be shown as its cells in the Region Editor.
+      </small>
+      <small class="sc-hint" *ngIf="cells3dHint">{{ cells3dHint }}</small>
+    </ng-container>
+    <ng-container *ngIf="!is3d && boundarySets.length && boundarySets.length <= 2">
       <div class="sc-subhead">Boundaries</div>
       <div class="sc-row" *ngFor="let set of boundarySets">
         <span class="sc-lbl">{{ set.label }}</span>
@@ -21,7 +38,7 @@
         ></p-inputSwitch>
       </div>
     </ng-container>
-    <ng-container *ngIf="boundarySets.length > 2">
+    <ng-container *ngIf="!is3d && boundarySets.length > 2">
       <div class="sc-subhead">Boundaries</div>
       <p-selectButton
         [options]="cellSetOptions"
@@ -86,8 +103,9 @@
     <spatial-groups-panel [controls]="controls" [dataset]="dataset" [view]="view"></spatial-groups-panel>
 
     <div class="sc-subhead">Visibility</div>
-    <span class="sc-lbl">View cells as</span>
+    <span class="sc-lbl" *ngIf="!is3d">View cells as</span>
     <p-selectButton
+      *ngIf="!is3d"
       [options]="cellDrawOptions"
       optionLabel="label"
       optionValue="value"
@@ -96,8 +114,8 @@
       [allowEmpty]="false"
       styleClass="sc-buttons"
     ></p-selectButton>
-    <ng-container *ngIf="view.cellDraw !== 'outline'">
-      <span class="sc-lbl">Cell fill opacity</span>
+    <ng-container *ngIf="is3d || view.cellDraw !== 'outline'">
+      <span class="sc-lbl">{{ is3d ? 'Cell opacity' : 'Cell fill opacity' }}</span>
       <div class="sc-row sc-row-number">
         <p-slider
           [ngModel]="view.cellOpacity"

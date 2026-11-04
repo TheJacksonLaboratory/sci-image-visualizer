@@ -17,6 +17,7 @@ import {
   IBrushOptions,
   SpatialViewState,
   SpatialColorBy,
+  Cells3dStatus,
 } from './display-types';
 import {
   CategoricalColumnMeta,
@@ -436,6 +437,8 @@ export interface ISpatialControls {
   /** True while the observation gene filter could not be applied (an expression read failed):
    *  the observations then still show the last filter that could be. */
   getGeneFilterFailed$?(): Observable<boolean>;
+  /** The 3D view's individual cells as they stand (null: none are drawn). Optional. */
+  getCells3dStatus$?(): Observable<Cells3dStatus | null>;
   /**
    * The z positions of the sections the dataset was imaged at, ascending — or
    * null when its z is continuous rather than sectioned (so there are no sections

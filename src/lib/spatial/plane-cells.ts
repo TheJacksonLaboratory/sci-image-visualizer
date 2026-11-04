@@ -80,3 +80,61 @@ export function planeCellRings(
   offsets[rings.length] = v;
   return { count: rings.length, coords, offsets, observation: Uint32Array.from(owners) };
 }
+
+/** One plane's tiles of a region set: the plane's slice index (its place among the set's planes). */
+export interface PlaneTiles {
+  slice: number;
+  tiles: readonly { features: readonly TileFeature[] }[];
+}
+
+/**
+ * Each cell's outlines on every plane it spans, from the planes' tiles (a feature once, though in
+ * every tile it meets), for the 3D reconstruction of each cell by itself (`CellOutlines`, slice k
+ * at z = k). Only cells of `classes` (all when null), whose outlines' centre over all planes is in
+ * `within` (`[x0, y0, x1, y1]`, image px; anywhere when absent): the tiles fetched for an area hold
+ * the cells crossing its edge too, which belong to the area their centre is in.
+ */
+export function cellOutlinesFromTiles(
+  planes: readonly PlaneTiles[],
+  index: ReadonlyMap<string, number>,
+  classes: ReadonlySet<string> | null,
+  within?: readonly [number, number, number, number],
+): { cell: number; label: string | null; slices: { z: number; rings: Float32Array[] }[] }[] {
+  const byCell = new Map<
+    number,
+    { label: string | null; slices: { z: number; rings: Float32Array[] }[]; box: [number, number, number, number] }
+  >();
+  for (const plane of planes) {
+    const seen = new Set<string>();
+    for (const tile of plane.tiles) {
+      for (const f of tile.features) {
+        if (f.open || seen.has(f.id) || !f.rings.length) continue;
+        seen.add(f.id);
+        if (classes && !classes.has(f.label ?? '')) continue;
+        const cell = index.get(cellIdOf(f.id));
+        if (cell === undefined) continue;
+        let entry = byCell.get(cell);
+        if (!entry) {
+          entry = { label: f.label, slices: [], box: [Infinity, Infinity, -Infinity, -Infinity] };
+          byCell.set(cell, entry);
+        }
+        entry.slices.push({ z: plane.slice, rings: f.rings });
+        const b = entry.box;
+        b[0] = Math.min(b[0], f.bbox[0]);
+        b[1] = Math.min(b[1], f.bbox[1]);
+        b[2] = Math.max(b[2], f.bbox[2]);
+        b[3] = Math.max(b[3], f.bbox[3]);
+      }
+    }
+  }
+  const out: { cell: number; label: string | null; slices: { z: number; rings: Float32Array[] }[] }[] = [];
+  for (const [cell, e] of byCell) {
+    if (within) {
+      const cx = (e.box[0] + e.box[2]) / 2;
+      const cy = (e.box[1] + e.box[3]) / 2;
+      if (cx < within[0] || cx >= within[2] || cy < within[1] || cy >= within[3]) continue;
+    }
+    out.push({ cell, label: e.label, slices: e.slices });
+  }
+  return out;
+}

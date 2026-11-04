@@ -23,6 +23,7 @@ import type {
   RegionTileKey,
 } from './region-tiles';
 import type { ReconstructOptions, SliceOutlines } from '../geometry/reconstruct';
+import type { CellOutlines, CellsMesh } from '../geometry/cell-meshes';
 import type { Mesh } from 'napari-js/geometry';
 
 /** Makes the worker; may be async, as the default one is (it imports the factory on demand). */
@@ -179,6 +180,28 @@ export async function openGeoJsonRegionSource(
     .catch((err) => (err instanceof WorkerLostError ? client.run({ op: 'open', text }) : Promise.reject(err)));
   const { handle, info } = opened.result;
   return new WorkerRegionSource(client, text, handle, opened.generation, info);
+}
+
+let cellsClient: RegionSourceWorkerClient | null = null;
+
+/**
+ * The worker client cells are meshed on: a worker of its own, so a few thousand cells meshing does
+ * not hold up the region tiles the 2D views read from the shared one.
+ */
+export function cellsWorkerClient(): RegionSourceWorkerClient {
+  return (cellsClient ??= new RegionSourceWorkerClient());
+}
+
+/**
+ * A 3D segmentation's cells, each meshed by itself (see `geometry/cell-meshes`), in the cells'
+ * worker (on the main thread where there is none). Batch them: one call meshes its cells in one go.
+ */
+export function reconstructCellsInWorker(
+  cells: readonly CellOutlines[],
+  options?: ReconstructOptions,
+  client: RegionSourceWorkerClient = cellsWorkerClient(),
+): Promise<CellsMesh> {
+  return client.call({ op: 'cells', cells, options });
 }
 
 /**

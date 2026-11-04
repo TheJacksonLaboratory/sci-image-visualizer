@@ -1,4 +1,4 @@
-import { colormapFromLut } from 'napari-js';
+import { colormapFromLut, mapScalarRGBA } from 'napari-js';
 import type { Colormap, RGBA } from 'napari-js';
 
 import type { Rgb } from '../../../contracts/colormap-lut';
@@ -46,7 +46,7 @@ const MAX_CELL_TILES = 48;
 
 /** The cells' colours as a shapes layer takes them: per-shape RGBA, values over a colormap, or
  *  one colour. */
-interface CellColors {
+export interface CellColors {
   values?: Float32Array;
   colormap?: Colormap;
   contrastLimits?: [number, number];
@@ -263,55 +263,18 @@ export class CellLayers {
     selection: SpatialSelectionMask,
     owners: Uint32Array,
   ): Promise<CellColors> {
-    const muted = selection.count > 0 ? selection.mask : null;
-    const mode = view.cellColorMode;
-
-    if (mode === 'single') {
-      const [r, g, b] = parseHex(view.cellSingleColor);
-      return { color: [r / 255, g / 255, b / 255, 1] };
-    }
-
-    const continuous = async (raw: Float32Array, log: boolean) => {
-      const values = new Float32Array(owners.length);
-      for (let i = 0; i < owners.length; i++) {
-        const v = raw[owners[i]] ?? NaN;
-        values[i] = log ? Math.log1p(Math.max(0, v)) : v;
-      }
-      const [clipLo, clipHi] = view.percentileClip;
-      // Keyed by the SOURCE vector (the log copy would be new on every call), as the 3D cloud's.
-      const [lo, hi] = this.contrastWindows.get(raw, clipLo, clipHi, log, () =>
-        contrastWindow(log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw, clipLo, clipHi),
-      );
-      return {
-        values,
-        colormap: colormapFromLut('spatial-continuous', this.host.continuousLut(view)),
-        contrastLimits: [lo, hi] as [number, number],
-      };
-    };
-    if (mode === 'gene' && view.cellColorGene) {
-      return continuous(await this.port.getFeatureVector(view.cellColorGene), true);
-    }
-    if (mode === 'transcriptDensity' && dataset.columns.some((c) => c.name === 'transcript_density')) {
-      const column = await this.port.getColumn('transcript_density');
-      if (!isCategoricalColumn(column)) return continuous(column.values, false);
-    }
-
-    const name =
-      mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
-        ? 'segmentation_method'
-        : cellTypeColumnFor(dataset, view);
-    const codes = name ? await this.lookup.codes(name) : null;
-    const palette = categoryRgba(name, codes?.meta ?? null, view.groupColors);
-    const missing = rgba01(MISSING_COLOR);
-    // One RGBA per shape (napari Shapes' `face_color`): any number of categories keeps its own
-    // colour, where a colormap band per category ran out of LUT entries past ~127.
-    const faceColor = new Float32Array(owners.length * 4);
-    for (let i = 0; i < owners.length; i++) {
-      const o = owners[i];
-      const code = !codes || (muted && !muted[o]) ? NO_CATEGORY : codes.codes[o];
-      faceColor.set(palette[code] ?? missing, i * 4);
-    }
-    return { faceColor };
+    return cellColorsFor(
+      {
+        port: this.port,
+        lookup: this.lookup,
+        contrastWindows: this.contrastWindows,
+        continuousLut: (v) => this.host.continuousLut(v),
+      },
+      dataset,
+      view,
+      selection,
+      owners,
+    );
   }
 
   /**
@@ -468,6 +431,96 @@ export class CellLayers {
     this.polygonsShown = shown;
     this.host.polygonsShownChanged(shown);
   }
+}
+
+/** What {@link cellColorsFor} reads with: the port, the categorical columns, the windows cache, the LUT. */
+export interface CellColorDeps {
+  port: SpatialDataPort;
+  lookup: CategoricalLookup;
+  contrastWindows: ContrastWindowCache;
+  continuousLut(view: SpatialViewState): Rgb[];
+}
+
+/**
+ * The cells' colours by their owners (`owners[i]` the observation of shape i), by the view's
+ * cell-colour mode (Xenium Explorer's "Cell Color"): one RGBA per shape for a grouping, values +
+ * colormap for a measurement, one colour for "single". A selection mutes what it leaves out. The 2D
+ * cell outlines and the 3D cells both colour by it.
+ */
+export async function cellColorsFor(
+  deps: CellColorDeps,
+  dataset: SpatialDataset,
+  view: SpatialViewState,
+  selection: SpatialSelectionMask,
+  owners: Uint32Array,
+): Promise<CellColors> {
+  const muted = selection.count > 0 ? selection.mask : null;
+  const mode = view.cellColorMode;
+
+  if (mode === 'single') {
+    const [r, g, b] = parseHex(view.cellSingleColor);
+    return { color: [r / 255, g / 255, b / 255, 1] };
+  }
+
+  const continuous = async (raw: Float32Array, log: boolean) => {
+    const values = new Float32Array(owners.length);
+    for (let i = 0; i < owners.length; i++) {
+      const v = raw[owners[i]] ?? NaN;
+      values[i] = log ? Math.log1p(Math.max(0, v)) : v;
+    }
+    const [clipLo, clipHi] = view.percentileClip;
+    // Keyed by the SOURCE vector (the log copy would be new on every call), as the 3D cloud's.
+    const [lo, hi] = deps.contrastWindows.get(raw, clipLo, clipHi, log, () =>
+      contrastWindow(log ? raw.map((v) => Math.log1p(Math.max(0, v))) : raw, clipLo, clipHi),
+    );
+    return {
+      values,
+      colormap: colormapFromLut('spatial-continuous', deps.continuousLut(view)),
+      contrastLimits: [lo, hi] as [number, number],
+    };
+  };
+  if (mode === 'gene' && view.cellColorGene) {
+    return continuous(await deps.port.getFeatureVector(view.cellColorGene), true);
+  }
+  if (mode === 'transcriptDensity' && dataset.columns.some((c) => c.name === 'transcript_density')) {
+    const column = await deps.port.getColumn('transcript_density');
+    if (!isCategoricalColumn(column)) return continuous(column.values, false);
+  }
+
+  const name =
+    mode === 'segmentation' && dataset.columns.some((c) => c.name === 'segmentation_method')
+      ? 'segmentation_method'
+      : cellTypeColumnFor(dataset, view);
+  const codes = name ? await deps.lookup.codes(name) : null;
+  const palette = categoryRgba(name, codes?.meta ?? null, view.groupColors);
+  const missing = rgba01(MISSING_COLOR);
+  // One RGBA per shape (napari Shapes' `face_color`): any number of categories keeps its own
+  // colour, where a colormap band per category ran out of LUT entries past ~127.
+  const faceColor = new Float32Array(owners.length * 4);
+  for (let i = 0; i < owners.length; i++) {
+    const o = owners[i];
+    const code = !codes || (muted && !muted[o]) ? NO_CATEGORY : codes.codes[o];
+    faceColor.set(palette[code] ?? missing, i * 4);
+  }
+  return { faceColor };
+}
+
+/** {@link cellColorsFor}'s colours as one RGBA (0..1) per shape, `n` shapes. */
+export function cellColorsRgba(colors: CellColors, n: number): Float32Array {
+  if (colors.faceColor) return colors.faceColor;
+  const out = new Float32Array(n * 4);
+  if (colors.values && colors.colormap && colors.contrastLimits) {
+    const [climLo, climHi] = colors.contrastLimits;
+    const opts = { climLo, climHi, gamma: 1, invert: false, colormap: colors.colormap };
+    for (let i = 0; i < n; i++) {
+      const v = colors.values[i];
+      out.set(Number.isFinite(v) ? mapScalarRGBA(v, opts) : [0.5, 0.5, 0.5, 1], i * 4);
+    }
+    return out;
+  }
+  const c = colors.color ?? [1, 1, 1, 1];
+  for (let i = 0; i < n; i++) out.set(c, i * 4);
+  return out;
 }
 
 /** An 8-bit RGB as an opaque 0..1 RGBA. */

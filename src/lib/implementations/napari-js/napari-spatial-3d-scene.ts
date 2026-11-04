@@ -53,6 +53,11 @@ import { HOVER_RADIUS_PX } from './napari-spatial-hover';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
+import { Spatial3dCells } from './napari-spatial-3d-cells';
+import { cellColorsFor, cellColorsRgba } from './spatial-tiles/cell-layers';
+import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
+import { ContrastWindowCache } from './napari-spatial-encoding';
+import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -209,6 +214,112 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     super(ctx, session, true);
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
     this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
+    this.cells3d = new Spatial3dCells({
+      viewer: ctx.viewer,
+      port: session.port,
+      beginTask: (label) => ctx.badge.begin(label),
+      status: (status) => session.reportCells3d(status),
+    });
+    this.cellLookup = session.port ? new CategoricalLookup(session.port) : null;
+  }
+
+  /** The region set's classes drawn as individual cells (none: the class surfaces only). */
+  private readonly cells3d: Spatial3dCells;
+  private readonly cellLookup: CategoricalLookup | null;
+  private readonly cellWindows = new ContrastWindowCache();
+  private cellClasses: readonly string[] | null = null;
+  /** What the cells were last coloured for, so a rebuild that changed none of it recolours nothing. */
+  private cellStyleKey: string | null = null;
+  private cellStyleRequest = 0;
+
+  /**
+   * Draw these classes of the dataset's region set as individual cells, each its own surface in
+   * the panel's Cell Color (see Spatial3dCells); none: no cells.
+   */
+  setRegionCells(classes: readonly string[] | null): void {
+    this.cellClasses = classes?.length ? classes : null;
+    this.cells3d.setClasses(this.cellClasses ? new Set(this.cellClasses) : null);
+    this.cellStyleKey = null;
+    const latest = this.session.latest;
+    if (latest?.[0]) void this.styleCells(latest[0], latest[1], latest[2]);
+  }
+
+  /**
+   * The cells' colours (the panel's Cell Color, its selection muting), which are shown (its groups
+   * switched off and gene filter hide theirs; the Cells switch all), and their opacity.
+   */
+  private async styleCells(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    this.cells3d.setDataset(dataset);
+    const port = this.session.port;
+    if (!this.cellClasses || !port || !this.cellLookup) return;
+    const key =
+      JSON.stringify([
+        dataset.id,
+        view.cellColorMode,
+        view.cellColorGene,
+        view.cellSingleColor,
+        view.cellTypeColumn,
+        view.logScale,
+        view.percentileClip,
+        view.continuousColormap,
+        view.groupColors,
+        view.hiddenGroups,
+        view.showCells,
+        view.cellOpacity,
+        geneFilterKey(view),
+        this.ctx.display.continuousColormapKey(view),
+      ]) + `|${selection.count}|${this.cellSelectionRev(selection)}`;
+    if (key === this.cellStyleKey) return;
+    this.cellStyleKey = key;
+    const request = ++this.cellStyleRequest;
+    const count = dataset.observations.count;
+    try {
+      const owners = Uint32Array.from({ length: count }, (_, i) => i);
+      const [colors, hidden] = await Promise.all([
+        cellColorsFor(
+          {
+            port,
+            lookup: this.cellLookup,
+            contrastWindows: this.cellWindows,
+            continuousLut: (v) => this.ctx.display.spatialLut(v),
+          },
+          dataset,
+          view,
+          selection,
+          owners,
+        ),
+        this.cellLookup.hiddenCodes(dataset, view),
+      ]);
+      if (request !== this.cellStyleRequest) return;
+      let visible: Uint8Array | null = null;
+      if (view.showCells === false) {
+        visible = new Uint8Array(count);
+      } else if (hidden) {
+        visible = new Uint8Array(count);
+        for (let i = 0; i < count; i++) {
+          const c = hidden.codes[i];
+          visible[i] = c !== NO_CATEGORY && hidden.hidden[c] ? 0 : 1;
+        }
+      }
+      this.cells3d.setStyle(cellColorsRgba(colors, count), visible, view.cellOpacity ?? 1);
+    } catch (err) {
+      if (request === this.cellStyleRequest) this.cellStyleKey = null;
+      console.warn('[napari-js] the 3D cells could not be coloured', err);
+    }
+  }
+
+  private lastCellSelection: SpatialSelectionMask | null = null;
+  private cellSelectionCount = 0;
+  private cellSelectionRev(selection: SpatialSelectionMask): number {
+    if (selection !== this.lastCellSelection) {
+      this.lastCellSelection = selection;
+      this.cellSelectionCount++;
+    }
+    return this.cellSelectionCount;
   }
 
   /** Show these region reconstructions with the cloud (replacing the ones shown). */
@@ -222,6 +333,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   setRegionHidden(keys: readonly string[]): void {
     this.regionMeshes.setHidden(keys);
+    // A surface's key is its class's name: a hidden class's cells are hidden too.
+    this.cells3d.setHiddenClasses(keys);
   }
 
   /**
@@ -263,6 +376,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * by the offset the cloud is, so each cell's surface sits around its observation.
    */
   private placeRegionMeshes(dataset: SpatialDataset): void {
+    // The individual cells sit where the region set's planes are, as its class surfaces do.
+    this.cells3d.setPlacement(this.planePlacement(dataset), this.zScale());
     const meta = dataset.volume;
     if (!meta || !this.isVolumeStack(meta)) {
       const planes = this.planePlacement(dataset);
@@ -444,7 +559,14 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     return out;
   }
 
+  /** The observation of the individual cell drawn under a client position, or -1. */
+  override pickCell(clientX: number, clientY: number): number {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    return this.cells3d.pick(clientX - rect.left, clientY - rect.top);
+  }
+
   dispose(): void {
+    this.cells3d.dispose();
     this.regionMeshes.clear();
     this.transcripts3d.remove();
     this.disposeSpatial();
@@ -470,9 +592,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * per-point `sizes`, so a selected marker, drawn larger, is as large to the pointer.
    */
   protected pickObservation(clientX: number, clientY: number, slackPx: number): number {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    // A cell drawn by itself is what is under the pointer before any marker inside it.
+    const cell = this.cells3d.pick(clientX - rect.left, clientY - rect.top);
+    if (cell >= 0) return cell;
     const picker = this.picker;
     if (!picker) return -1;
-    const rect = this.ctx.canvas.getBoundingClientRect();
     const k = picker.pick(clientX - rect.left, clientY - rect.top, slackPx);
     if (k < 0) return -1;
     return this.drawn ? this.drawn[k] : k;
@@ -597,6 +722,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.opacity = view.volumeOpacity;
     }
     this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
+    void this.styleCells(dataset, view, selection);
     // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
     await this.transcripts3d.sync(dataset, view, this.session.port, {
       origin: this.origin,

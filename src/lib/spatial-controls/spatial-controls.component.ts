@@ -25,7 +25,8 @@ import { combineLatest } from 'rxjs';
 import { VISUALIZER, IVisualizer, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import { Cells3dStatus, ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import { datasetRegionSet } from '../visualizer/spatial-region-set';
 import { PanelOption, parseGeneGroups } from '../spatial/spatial-panel-model';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import { GenePickerModel } from './spatial-gene-picker';
@@ -222,6 +223,14 @@ export class SpatialControlsComponent implements OnInit {
 
     // The renderer's own streams may emit outside the zone: re-entered here, once, for
     // every panel they feed.
+    this.controls
+      .getCells3dStatus$?.()
+      ?.pipe(untilDestroyed())
+      .subscribe((s) =>
+        this.runAndMark(() => {
+          this.cells3dStatus = s;
+        }),
+      );
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     estimate$?.pipe(untilDestroyed()).subscribe((e) =>
       this.runAndMark(() => {
@@ -385,6 +394,14 @@ export class SpatialControlsComponent implements OnInit {
   /** Boundaries on offer: tiled (level-of-detail) or whole-dataset rings. */
   protected get hasCells(): boolean {
     return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
+  }
+
+  /** The 3D view's individual cells as they stand (null: none drawn). */
+  protected cells3dStatus: Cells3dStatus | null = null;
+
+  /** The dataset's cells can be drawn in 3D: its boundaries name a 3D segmentation's region set. */
+  protected get hasCells3d(): boolean {
+    return !!datasetRegionSet(this.dataset);
   }
 
   /** Transcripts on offer: tiles to draw, or a density map. */

@@ -77,6 +77,24 @@ describe('ClassesPanelComponent', () => {
     expect(el().querySelectorAll('.class-row')[1].classList).toContain('hidden-class');
   });
 
+  it('offers a class that can be drawn as cells, in 3D, its toggle asking for its cells or its surface', () => {
+    const asked: { classes: string[]; individual: boolean }[] = [];
+    panel.toggleCells.subscribe((e) => asked.push(e));
+    const cells = () => Array.from(el().querySelectorAll('.class-row .row-cells')) as HTMLElement[];
+    expect(cells()).toHaveLength(0); // not in a volume view
+    fixture.componentRef.setInput('volume', true);
+    fixture.componentRef.setInput('cellable', new Set(['Tumor']));
+    fixture.detectChanges();
+    expect(cells()).toHaveLength(1); // only the class a 3D segmentation has
+    cells()[0].click();
+    expect(asked.at(-1)).toEqual({ classes: ['Tumor'], individual: true });
+    fixture.componentRef.setInput('individual', new Set(['Tumor']));
+    fixture.detectChanges();
+    expect(cells()[0].classList).toContain('on');
+    cells()[0].click();
+    expect(asked.at(-1)).toEqual({ classes: ['Tumor'], individual: false });
+  });
+
   it('a row click picks the class; the trash removes without picking', () => {
     const pick = jest.fn(),
       remove = jest.fn();

@@ -151,6 +151,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * a change of it, not every view emission, hides or shows them.
    */
   private annotationsHidden = false;
+  /** The 3D view's global cells switch as last applied (see updateCells3d). */
+  private cells3dMode: 'types' | 'cells' = 'types';
+  /** Classes set the other way than the global switch in the Region Editor. */
+  private readonly cells3dOverrides = new Map<string, boolean>();
+  /** The classes drawn as individual cells in spatial 3D, as last applied. */
+  private readonly individual3d$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
+  /** The classes that can be drawn as individual cells now (see getCellableClasses3d$). */
+  private readonly cellable3d$ = new BehaviorSubject<ReadonlySet<string>>(new Set());
   /** Follows the dataset and the spatial view for {@link updatePlaneCells}. */
   private readonly planeCellsSub: Subscription | null;
   /** The dataset region set's planes while they slice the plotted image (see getDatasetPlanes$). */
@@ -208,6 +216,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
           this.spatialDataset = dataset ?? null;
           this.updatePlaneCells();
           this.syncAnnotations();
+          this.updateCells3d();
         })
       : null;
     this.sections = new VolumeSections({
@@ -409,9 +418,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.napari.setRegionPlanes(null);
       this.datasetPlanes$.next(null);
       this.updateVolumeView(plotType);
+      this.updateCells3d();
     }
     this.updatePlaneCells();
     this.syncAnnotations();
+    this.updateCells3d();
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
@@ -617,6 +628,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.updateVolumeView(plotType);
     this.updatePlaneCells();
     this.syncAnnotations();
+    this.updateCells3d();
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
@@ -1017,6 +1029,64 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
     this.updatePlaneCells();
+    this.updateCells3d();
+  }
+
+  /** The dataset region set's classes while in spatial 3D: those that can be drawn as cells. */
+  getCellableClasses3d$(): Observable<ReadonlySet<string>> {
+    return this.cellable3d$.asObservable();
+  }
+
+  /** The classes the spatial 3D view draws as individual cells (see updateCells3d). */
+  getIndividualClasses3d$(): Observable<ReadonlySet<string>> {
+    return this.individual3d$.asObservable();
+  }
+
+  /** Draw these classes as individual cells in spatial 3D, or merged again (the global switch aside). */
+  setClassesIndividual3d(classes: readonly string[], individual: boolean): void {
+    const global = this.cells3dMode === 'cells';
+    for (const c of classes) {
+      if (individual === global) this.cells3dOverrides.delete(c);
+      else this.cells3dOverrides.set(c, individual);
+    }
+    this.updateCells3d(true);
+  }
+
+  /**
+   * Which of the dataset region set's classes the spatial 3D view draws as individual cells: every
+   * one with the panel's global switch on "cells", none on "types", each class the Region Editor
+   * set the other way excepted. Turning the global switch resets those. The individual classes'
+   * merged surfaces are left out (see showRegionClasses3d); their cells are drawn instead.
+   */
+  private updateCells3d(force = false): void {
+    const mode = this.store.currentSpatialView().cells3d ?? 'types';
+    if (mode !== this.cells3dMode) {
+      this.cells3dMode = mode;
+      this.cells3dOverrides.clear();
+      force = true;
+    }
+    const classes = new Set<string>();
+    for (const g of this.datasetRegionSet?.planes ? this.datasetRegionSet.groups : []) {
+      for (const c of g.classes) {
+        if (this.cells3dOverrides.get(c) ?? mode === 'cells') classes.add(c);
+      }
+    }
+    const cellable = new Set<string>(
+      isSpatialOmics3d(this.currentPlotType) && this.datasetRegionSet?.planes
+        ? this.datasetRegionSet.groups.flatMap((g) => g.classes)
+        : [],
+    );
+    const had = this.cellable3d$.value;
+    if (had.size !== cellable.size || [...cellable].some((c) => !had.has(c))) this.cellable3d$.next(cellable);
+    const before = this.individual3d$.value;
+    const same = before.size === classes.size && [...classes].every((c) => before.has(c));
+    if (same && !force) return;
+    if (!same) this.individual3d$.next(classes);
+    this.napari.setRegionCells(classes.size ? [...classes] : null);
+    // The merged surfaces follow: an individual class's leaves them, a merged one's comes back.
+    if (!same && this.shown3d.length && this.classes3dImage === this.plottedFileName) {
+      void this.showRegionClasses3d(this.shown3d);
+    }
   }
 
   /**
@@ -1208,7 +1278,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     const step = this.napari.regionVoxelStep() ?? Math.max(1, width / 256);
     const image = this.plottedFileName ?? '';
     const cacheKey = (g: { classes: readonly string[] }) => `${image}|${step.toFixed(3)}|${g.classes.join(',')}`;
-    const missing = groups.filter((g) => !this.meshCache.has(cacheKey(g)));
+    // A group of classes drawn as individual cells has no merged surface (its cells are drawn).
+    const individual = this.individual3d$.value;
+    const merged = groups.filter((g) => !g.classes.length || !g.classes.every((c) => individual.has(c)));
+    const missing = merged.filter((g) => !this.meshCache.has(cacheKey(g)));
     if (missing.length) {
       const names = missing.map((g) => g.key);
       const what = names.length > 3 ? `${names.length} regions` : names.join(', ');
@@ -1226,7 +1299,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     }
     if (request !== this.meshRequest) return;
     this.napari.setRegionMeshes(
-      groups.map((g) => {
+      merged.map((g) => {
         const mesh = this.meshCache.get(cacheKey(g))!.mesh;
         return { key: g.key, color: g.color, label: g.label, vertices: mesh.vertices, faces: mesh.faces };
       }),

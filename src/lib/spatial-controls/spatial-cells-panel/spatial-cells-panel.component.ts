@@ -18,7 +18,7 @@ import { SliderModule } from 'primeng/slider';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState, Cells3dStatus } from '../../contracts/display-types';
 import { cellsShown, drawnCellSets } from '../../spatial/lod';
 import { PanelOption, densityColorBarCss, tileOptions } from '../../spatial/spatial-panel-model';
 import type { GenePickerModel } from '../spatial-gene-picker';
@@ -63,6 +63,13 @@ export class SpatialCellsPanelComponent implements OnChanges {
   @Input() colorBarCss: string | null = null;
   /** Whether the section is expanded. */
   @Input() open = true;
+  /**
+   * In the 3D view: the cells are a 3D segmentation's, drawn by cell type or each by itself, and
+   * the 2D boundaries and draw mode do not apply.
+   */
+  @Input() is3d = false;
+  /** The 3D view's individual cells as they stand (null: none drawn). */
+  @Input() cells3dStatus: Cells3dStatus | null = null;
   /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
 
@@ -70,6 +77,26 @@ export class SpatialCellsPanelComponent implements OnChanges {
    *  a few thousand names, and for eight it adds only overhead — a virtual viewport that
    *  short swallows the clicks it is meant to forward. */
   protected readonly geneVirtualScrollFrom = 200;
+
+  /** How the 3D view draws the cells: one surface per cell type, or each cell by itself. */
+  protected readonly cells3dOptions: PanelOption<SpatialViewState['cells3d']>[] = [
+    { label: 'By cell type', value: 'types' },
+    { label: 'Individual cells', value: 'cells' },
+  ];
+
+  protected onCells3d(mode: SpatialViewState['cells3d']): void {
+    this.controls?.setViewState({ cells3d: mode });
+  }
+
+  /** What the 3D cells' status line says, or null. */
+  protected get cells3dHint(): string | null {
+    const s = this.cells3dStatus;
+    if (!s) return null;
+    const n = s.shown.toLocaleString();
+    if (s.building) return s.shown ? `Building cells… ${n} shown so far` : 'Building cells…';
+    if (s.capped) return `${n} cells shown, nearest the centre of the view. Zoom in or move to see the others.`;
+    return `${n} cells shown, each by itself.`;
+  }
 
   protected readonly cellDrawOptions: PanelOption<SpatialViewState['cellDraw']>[] = [
     { label: 'Fill', value: 'fill' },

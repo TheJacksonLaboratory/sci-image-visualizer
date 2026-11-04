@@ -80,6 +80,7 @@ function mockBackend(): any {
     setStackLoading: jest.fn(),
     setRegionPlanes: jest.fn(),
     setRegionPlane: jest.fn(),
+    setRegionCells: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
     getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
@@ -1441,6 +1442,60 @@ describe('RoutingVisualizerService (characterization)', () => {
       router.setClassesHidden(['T'], true);
       store.setSpatialView({ pointScale: 2 });
       expect(hidden()).toEqual(['T']);
+    });
+
+    it("draws the set's classes as individual cells on the panel's switch, a class overridden in the editor", async () => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      stubBuilds();
+      const meshKeys = () => (napari.setRegionMeshes.mock.calls.at(-1)?.[0] ?? []).map((m: any) => m.key);
+      const individual: string[][] = [];
+      router.getIndividualClasses3d$().subscribe((s) => individual.push([...s].sort()));
+
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      await new Promise((r) => setTimeout(r));
+      expect(meshKeys()).toEqual(['B', 'T']);
+      expect(individual.at(-1)).toEqual([]);
+
+      // Every class as cells: no merged surface left, the cells asked for.
+      store.setSpatialView({ cells3d: 'cells' });
+      await new Promise((r) => setTimeout(r));
+      expect(individual.at(-1)).toEqual(['B', 'T']);
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(['B', 'T']);
+      expect(meshKeys()).toEqual([]);
+
+      // One class merged again in the editor.
+      router.setClassesIndividual3d(['T'], false);
+      await new Promise((r) => setTimeout(r));
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(['B']);
+      expect(meshKeys()).toEqual(['T']);
+
+      // The switch back resets the overrides: every class merged, no cells.
+      store.setSpatialView({ cells3d: 'types' });
+      await new Promise((r) => setTimeout(r));
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(null);
+      expect(meshKeys()).toEqual(['B', 'T']);
+      // And a class drawn as cells by itself.
+      router.setClassesIndividual3d(['B'], true);
+      await new Promise((r) => setTimeout(r));
+      expect(individual.at(-1)).toEqual(['B']);
+      expect(meshKeys()).toEqual(['T']);
     });
 
     it('drops a set that opened after another image was plotted, or failed to open', async () => {

@@ -57,6 +57,13 @@ export class ClassTreeComponent implements OnChanges {
   @Input() volume = false;
   /** The classes shown in 3D. */
   @Input() shown3d: ReadonlySet<string> = new Set();
+  /** Classes that can be drawn as individual cells here (a 3D segmentation's, in spatial 3D). */
+  @Input() cellable: ReadonlySet<string> = new Set();
+  /** Those drawn as individual cells now. */
+  @Input() individual: ReadonlySet<string> = new Set();
+  /** Draw a class (its subclasses with it) as individual cells, or merged again. */
+  @Output() toggleCells = new EventEmitter<{ classes: string[]; individual: boolean }>();
+
   /** The classes hidden from view. */
   @Input() hidden: ReadonlySet<string> = new Set();
 
@@ -107,6 +114,24 @@ export class ClassTreeComponent implements OnChanges {
   protected choose(name: string, event: Event): void {
     const e = event as MouseEvent | KeyboardEvent;
     this.pick.emit({ name, classes: subtree(this.tree, name), additive: e.shiftKey || e.metaKey || e.ctrlKey });
+  }
+
+  /** A class (with its subclasses) as individual cells, or merged again: all of them as it is. */
+  protected flipCells(name: string, event: Event): void {
+    event.stopPropagation();
+    const classes = subtree(this.tree, name).filter((c) => this.cellable.has(c));
+    this.toggleCells.emit({ classes, individual: !classes.every((c) => this.individual.has(c)) });
+  }
+
+  /** Whether every cellable class of `name`'s subtree is drawn as cells. */
+  protected allIndividual(name: string): boolean {
+    const classes = subtree(this.tree, name).filter((c) => this.cellable.has(c));
+    return !!classes.length && classes.every((c) => this.individual.has(c));
+  }
+
+  /** Whether `name` or a subclass can be drawn as cells. */
+  protected anyCellable(name: string): boolean {
+    return subtree(this.tree, name).some((c) => this.cellable.has(c));
   }
 
   /** The eye: a class hidden (wholly) is shown again with its subclasses; otherwise they are hidden. */

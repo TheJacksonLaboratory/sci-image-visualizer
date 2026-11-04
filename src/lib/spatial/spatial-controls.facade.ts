@@ -1,3 +1,4 @@
+import type { Cells3dStatus } from '../contracts/display-types';
 import { firstValueFrom, Observable, of, Subscription } from 'rxjs';
 
 import { PlotType, isSpatialOmics3d } from '../contracts/plot-type';
@@ -32,6 +33,7 @@ export interface SpatialRendererFeeds {
   readonly geneCountsInView$: { asObservable(): Observable<Record<string, number> | null> };
   readonly densityStats$: { asObservable(): Observable<{ lo: number; hi: number; max: number } | null> };
   readonly geneFilterFailed$?: { asObservable(): Observable<boolean> };
+  readonly cells3dStatus$?: { asObservable(): Observable<Cells3dStatus | null> };
   /** Observations projected to canvas pixels by the 3D camera, or null when the cloud is not mounted. */
   getSpatialScreenProjection(obs: SpatialObservations): Float32Array | null;
   /** The ids of the regions drawn over the 3D cloud in screen space (its lassos). */
@@ -178,6 +180,7 @@ export class SpatialControlsFacade {
       getGeneCountsInView$: () => this.ctx.napari.geneCountsInView$.asObservable(),
       getDensityStats$: () => this.ctx.napari.densityStats$.asObservable(),
       getGeneFilterFailed$: () => this.ctx.napari.geneFilterFailed$?.asObservable() ?? of(false),
+      getCells3dStatus$: () => this.ctx.napari.cells3dStatus$?.asObservable() ?? of(null),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);
         if (!isCategoricalColumn(column)) {

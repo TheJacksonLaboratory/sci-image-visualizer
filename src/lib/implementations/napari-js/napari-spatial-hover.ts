@@ -3,7 +3,7 @@ import type { Viewer } from 'napari-js';
 import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import { NO_CATEGORY, SpatialDataset, isCategoricalColumn } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
-import { sameSelection, selectByCategory } from '../../spatial/spatial-selection';
+import { sameSelection, selectByCategory, selectByIndices } from '../../spatial/spatial-selection';
 import { type HoverSource, hoverText } from '../../spatial/spatial-hover';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import { Supersede } from '../../util/supersede';
@@ -37,6 +37,11 @@ export interface SpatialHoverHost {
    * drawn index back to the observation.
    */
   pick(clientX: number, clientY: number, slackPx: number): number;
+  /**
+   * The observation of an individual cell's surface under a client position (spatial 3D's cells),
+   * or -1: a click on one selects that cell rather than its class. Optional.
+   */
+  pickCell?(clientX: number, clientY: number): number;
   /** The 2D transcript markers, which sit on top of everything and are asked first. */
   tiles(): NapariSpatialTileLayers | null;
   /** A region tool owns the pointer (placing a polygon vertex is also a still click). */
@@ -272,6 +277,14 @@ export class SpatialHover {
     const source = this.hoverSource;
     const store = this.host.selection;
     const dataset = this.host.dataset();
+    // A cell drawn by itself: the click selects that cell (again: clears it), whatever colours it.
+    const cell = this.host.pickCell?.(clientX, clientY) ?? -1;
+    if (cell >= 0 && store && dataset) {
+      const next = selectByIndices([cell], dataset.observations.count);
+      if (sameSelection(store.current(), next)) store.clear();
+      else store.set(next);
+      return;
+    }
     // Only a categorical source has classes to select. A gene is continuous:
     // there is no set of cells that "is" a value.
     if (!store || !dataset || source?.kind !== 'categorical') return;

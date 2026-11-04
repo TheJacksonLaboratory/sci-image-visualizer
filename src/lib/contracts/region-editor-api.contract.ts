@@ -189,6 +189,15 @@ export interface IRegionEditorApi {
    * drawn or picked, and their surfaces in the volume view are hidden.
    */
   setClassesHidden?(classes: readonly string[], hidden: boolean): void;
+  /**
+   * The classes the spatial 3D view draws as individual cells (each cell its own surface) rather
+   * than as one surface per class, and every change of it. Optional.
+   */
+  getIndividualClasses3d$?(): Observable<ReadonlySet<string>>;
+  /** The classes that can be drawn as individual cells now (a 3D segmentation's, in spatial 3D). */
+  getCellableClasses3d$?(): Observable<ReadonlySet<string>>;
+  /** Draw these classes as individual cells in spatial 3D (or merged again). Optional. */
+  setClassesIndividual3d?(classes: readonly string[], individual: boolean): void;
   /** Select every region of these classes on the slice, the source's included (taken). */
   selectRegionClasses?(classes: readonly string[], additive?: boolean): Promise<void>;
   /** The classes the selection was picked as by {@link selectRegionClasses}; [] once anything

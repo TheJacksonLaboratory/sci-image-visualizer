@@ -43,6 +43,18 @@ file was added.
   the cells rather than drawing them a second time (`RegionStore.getDrawnRegionSourceView$`,
   `setRegionSourceDrawn`); the Region Editor still lists them, and the other views draw them.
 
+- **A 3D segmentation's cells one by one in spatial 3D.** Where a class's cells used to be one merged
+  surface (every "Macrophage + DC" cell fused into one region), the spatial panel's Cells section,
+  now shown in 3D for such a dataset, draws them "By cell type" or as "Individual cells"; a class
+  can be set the other way in the Region Editor (its cells toggle beside the 3D one). Each cell is
+  its own surface in the panel's Cell Color, its groups and selection; hovering one names it,
+  clicking selects it (again: clears). Built so the UI never waits: cells are meshed in a worker of
+  their own (`reconstructCellsInWorker`, a few hundred per call, dropped when the view moves on),
+  by chunks of the region set's area, coarse everywhere first and finer for the chunks on screen
+  as the camera comes close, within a triangle budget; at most 20,000 cells, the nearest the centre
+  of the view, the panel saying when some are left out; colour and visibility change no geometry.
+  The canvas shows "Cells" loading while they build, the panel how many are shown.
+
 ### Fixed
 
 - **The reference volume's checkbox hides it however the 3D view was opened.** A view change while
