@@ -137,6 +137,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   /** The anatomical volume the cloud sits inside, when the dataset has one. */
   private volume: VolumeLayer | null = null;
   private volumeKey: string | null = null;
+  /**
+   * The reference volume on its way (its key and the load), shared by every rebuild that asks for
+   * it meanwhile: each one adding its own left one layer behind, which the view's toggle (bound to
+   * {@link volume}) then never hid.
+   */
+  private volumeLoading: { key: string; done: Promise<void> } | null = null;
   /** Per-cluster density volumes drawn alongside the cloud, and what they were
    *  built from — rasterising is seconds of work, so it must not repeat for a
    *  change that cannot affect the field. */
@@ -1031,6 +1037,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const port = this.session.port;
     const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
     if (key && key === this.volumeKey) return;
+    // Already on its way for an earlier rebuild: wait for that one, add none of our own.
+    if (key && this.volumeLoading?.key === key) return this.volumeLoading.done;
+    this.volumeLoading = null;
 
     if (this.volume) {
       viewer.layers.remove(this.volume);
@@ -1039,16 +1048,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     }
     // The surfaces sat in the volume just removed (or there was none): down until one is placed.
     this.regionMeshes.clearFrame();
-    if (!meta || !port?.getVolume) return;
+    if (!meta || !port?.getVolume || !key) return;
+    const loading = { key, done: this.loadVolume(viewer, dataset, view, key) };
+    this.volumeLoading = loading;
+    try {
+      await loading.done;
+    } finally {
+      if (this.volumeLoading === loading) this.volumeLoading = null;
+    }
+  }
 
+  /** Fetch the reference volume and add it, unless another one was asked for meanwhile. */
+  private async loadVolume(
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    key: string,
+  ): Promise<void> {
+    const meta = dataset.volume!;
     let voxels: Uint8Array;
     try {
-      voxels = await port.getVolume();
+      voxels = await this.session.port!.getVolume!();
     } catch (err) {
       console.warn('[napari-js] reference volume unavailable — drawing the cloud alone', err);
       return;
     }
-    if (this.ctx.signal.aborted) return;
+    if (this.ctx.signal.aborted || this.volumeLoading?.key !== key) return;
 
     const [vx, vy, vz] = meta.voxelSize;
     this.volumeKey = key;

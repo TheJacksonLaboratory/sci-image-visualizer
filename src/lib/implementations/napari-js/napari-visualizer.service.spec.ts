@@ -2349,6 +2349,30 @@ describe('NapariVisualizerService', () => {
         expect(getVolume).toHaveBeenCalledTimes(1);
       });
 
+      it('adds the reference volume once though the view changes while it downloads, and hides it', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        addVolume.mockClear();
+        let release: (v: Uint8Array) => void = () => undefined;
+        spatialPort.getVolume = jest.fn(() => new Promise<Uint8Array>((r) => (release = r)));
+        const mounting = mount3d(spatialDatasetVolume(3));
+        await flush();
+        // Another rebuild while the template is still on its way (a default chosen, a set attached).
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        release(new Uint8Array(4 * 6 * 10));
+        await mounting;
+        await flush();
+        const volumes = addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l: any) => l.name === 'reference volume');
+        expect(volumes).toHaveLength(1);
+        expect(spatialPort.getVolume).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ showVolume: false });
+        await flush();
+        expect(volumes[0].visible).toBe(false);
+      });
+
       it('applies the reference volume opacity, at build and on a change', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));

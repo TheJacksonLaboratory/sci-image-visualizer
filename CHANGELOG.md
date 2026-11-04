@@ -43,6 +43,13 @@ file was added.
   the cells rather than drawing them a second time (`RegionStore.getDrawnRegionSourceView$`,
   `setRegionSourceDrawn`); the Region Editor still lists them, and the other views draw them.
 
+### Fixed
+
+- **The reference volume's checkbox hides it however the 3D view was opened.** A view change while
+  the reference volume was still downloading (as the dataset's region set attaching, or the default
+  boundaries being chosen, makes one) started a second download and added a second volume layer,
+  which the "Reference volume" checkbox never hid. Rebuilds meanwhile now wait for the one load.
+
 ### Changed
 
 - **Up to 22 groups without colours of their own get a colour each.** `DEFAULT_CATEGORICAL_PALETTE`
