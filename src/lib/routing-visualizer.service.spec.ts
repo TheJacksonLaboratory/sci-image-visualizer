@@ -59,6 +59,8 @@ function mockBackend(): any {
     setImageMeta: jest.fn(),
     getImageMeta: jest.fn().mockReturnValue(of([])),
     getRegions: jest.fn().mockReturnValue([]),
+    // The Regions switch, off by default, hides the region classes in the spatial views.
+    setRegionHidden: jest.fn(),
     setRegions: jest.fn(),
     getRegionPolygons: jest.fn().mockReturnValue([]),
     getSelectedShapeIndices$: jest.fn().mockReturnValue(of([])),
@@ -352,7 +354,6 @@ describe('RoutingVisualizerService (characterization)', () => {
     napari.regionVoxelStep = jest.fn().mockReturnValue(1);
     napari.setRegionMeshes = jest.fn();
     napari.setRegionHighlight = jest.fn();
-    napari.setRegionHidden = jest.fn();
     const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
     const reconstruct = jest
       .spyOn(regionStore, 'reconstructClasses')
@@ -1395,7 +1396,7 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(drawnSet).toHaveBeenLastCalledWith(true);
     });
 
-    it("hides the drawn regions' classes in the spatial views while the panel's Regions are off (by default), not the cells'", async () => {
+    it("hides every class in the spatial views while the panel's Regions are off (by default), the cells' too", async () => {
       TestBed.resetTestingModule();
       TestBed.configureTestingModule({
         providers: [
@@ -1427,9 +1428,9 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(store.currentSpatialView().showAnnotations).toBe(false);
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
       expect(hidden()).toEqual(['ROI']);
-      // The dataset's region set is its cell segmentation, the Cell segmentations': left shown.
+      // The dataset's region set, come since: its cell types hidden as the rest are.
       await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
-      expect(hidden()).toEqual(['ROI']);
+      expect(hidden()).toEqual(['B', 'ROI', 'T']);
 
       // On: shown, in 2D as in 3D (the editor's eyes follow).
       store.setSpatialView({ showAnnotations: true });
@@ -1440,20 +1441,20 @@ describe('RoutingVisualizerService (characterization)', () => {
       store.setSpatialView({ showAnnotations: false });
       expect(hidden()).toEqual([]);
 
-      // Entering 3D with it off: the regions' classes hidden, their surfaces too; not the cells'.
+      // Entering 3D with it off: every class hidden, the cell types too, their surfaces with them.
       router.setPlotType(PlotType.SPATIAL_OMICS_3D);
-      expect(hidden()).toEqual(['ROI']);
-      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(['ROI']);
+      expect(hidden()).toEqual(['B', 'ROI', 'T']);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(expect.arrayContaining(['B', 'ROI', 'T']));
 
-      // On again: shown. A cell type hidden by its own eye stays so.
-      router.setClassesHidden(['T'], true);
+      // On again: every class shown.
       store.setSpatialView({ showAnnotations: true });
-      expect(hidden()).toEqual(['T']);
+      expect(hidden()).toEqual([]);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith([]);
 
       // A class hidden by its own eye stays so while the switch does not change.
-      router.setClassesHidden(['ROI'], true);
+      router.setClassesHidden(['T'], true);
       store.setSpatialView({ pointScale: 2 });
-      expect(hidden()).toEqual(['ROI', 'T']);
+      expect(hidden()).toEqual(['T']);
     });
 
     it("draws the set's classes as individual cells on the panel's switch, a class overridden in the editor", async () => {
