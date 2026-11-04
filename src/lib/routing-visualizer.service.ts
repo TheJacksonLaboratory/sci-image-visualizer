@@ -146,6 +146,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   private readonly attachedRegionSets = new Map<string, DatasetRegionSetState>();
   /** The spatial dataset on offer (the port's), for the boundary set its region set is. */
   private spatialDataset: SpatialDataset | null = null;
+  /**
+   * Whether the Annotations switch last hid every class in spatial 3D (see syncAnnotations3d), so a
+   * change of it, not every view emission, hides or shows them.
+   */
+  private annotationsHidden3d = false;
   /** Follows the dataset and the spatial view for {@link updatePlaneCells}. */
   private readonly planeCellsSub: Subscription | null;
   /** The dataset region set's planes while they slice the plotted image (see getDatasetPlanes$). */
@@ -202,6 +207,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       ? combineLatest([this.spatialData.getDataset$(), this.store.getSpatialView$()]).subscribe(([dataset]) => {
           this.spatialDataset = dataset ?? null;
           this.updatePlaneCells();
+          this.syncAnnotations3d();
         })
       : null;
     this.sections = new VolumeSections({
@@ -405,6 +411,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.updateVolumeView(plotType);
     }
     this.updatePlaneCells();
+    this.syncAnnotations3d();
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
@@ -609,6 +616,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.currentPlotType = plotType;
     this.updateVolumeView(plotType);
     this.updatePlaneCells();
+    this.syncAnnotations3d();
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
@@ -995,9 +1003,43 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.napari.setRegionPlanes(planes);
     if (planes) this.napari.setRegionPlane(this.currentZIndex);
     this.datasetPlanes$.next(sliced ? planes : null);
+    // Annotations switched off in 3D before the set came: its classes are hidden as the rest are.
+    if (this.annotationsHidden3d && isSpatialOmics3d(this.currentPlotType)) {
+      this.setClassesHidden(
+        set.groups.flatMap((g) => g.classes),
+        true,
+      );
+    }
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
     this.updatePlaneCells();
+  }
+
+  /**
+   * In spatial 3D, the spatial panel's Annotations switch (`showAnnotations`) is the regions' as the
+   * Region Editor's class eyes are: off, every class is hidden (its surfaces in 3D, and the eyes show
+   * it); on again, every class is shown. Applied when the switch changes, or on entering spatial 3D
+   * with it off, so a class hidden or shown by its own eye meanwhile stays as it was set.
+   */
+  private syncAnnotations3d(): void {
+    if (!isSpatialOmics3d(this.currentPlotType)) return;
+    const hide = this.store.currentSpatialView().showAnnotations === false;
+    if (hide === this.annotationsHidden3d) return;
+    this.annotationsHidden3d = hide;
+    const classes = this.knownClasses();
+    if (classes.length) this.setClassesHidden(classes, hide);
+  }
+
+  /**
+   * Every class the Region Editor lists for the image: the dataset region set's, those shown in 3D,
+   * the drawn regions', and any hidden now.
+   */
+  private knownClasses(): string[] {
+    const out = new Set<string>(this.regionStore.getHiddenClasses());
+    for (const g of this.datasetRegionSet?.groups ?? []) g.classes.forEach((c) => out.add(c));
+    for (const g of this.shown3d) g.classes.forEach((c) => out.add(c));
+    for (const r of this.regionStore.getRegions()) if (r.label) out.add(r.label);
+    return [...out];
   }
 
   /**

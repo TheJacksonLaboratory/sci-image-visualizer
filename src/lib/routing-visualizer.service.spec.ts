@@ -1392,6 +1392,50 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(drawnSet).toHaveBeenLastCalledWith(true);
     });
 
+    it("hides every class in 3D when the panel's Annotations are switched off, and shows them again", async () => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      stubBuilds();
+      napari.setRegionHidden = jest.fn();
+      const hidden = () => [...regionStore.getHiddenClasses()].sort();
+
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      // In 2D the switch is the overlay's alone: the classes stay as they are.
+      store.setSpatialView({ showAnnotations: false });
+      expect(hidden()).toEqual([]);
+
+      // Entering 3D with it off: every class hidden, its surfaces too (the editor's eyes follow).
+      router.setPlotType(PlotType.SPATIAL_OMICS_3D);
+      expect(hidden()).toEqual(['B', 'T']);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(expect.arrayContaining(['B', 'T']));
+
+      // On again: every class shown.
+      store.setSpatialView({ showAnnotations: true });
+      expect(hidden()).toEqual([]);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith([]);
+
+      // A class hidden by its own eye stays so while the switch does not change.
+      router.setClassesHidden(['T'], true);
+      store.setSpatialView({ pointScale: 2 });
+      expect(hidden()).toEqual(['T']);
+    });
+
     it('drops a set that opened after another image was plotted, or failed to open', async () => {
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
       const attach = jest.spyOn(regionStore, 'attachRegionSource');
