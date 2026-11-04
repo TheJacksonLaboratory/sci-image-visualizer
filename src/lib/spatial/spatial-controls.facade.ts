@@ -172,6 +172,18 @@ export class SpatialControlsFacade {
       const current = ctx.store.currentSpatialView();
       const by = current.colorBy;
       if (by && !canColorBy(dataset, by)) ctx.store.setSpatialView({ colorBy: null });
+      // One colouring for the markers and the cells: a segmented dataset's markers start in the
+      // cells' groups, not a flat colour beside them.
+      const view = ctx.store.currentSpatialView();
+      const group = dataset ? cellTypeColumnFor(dataset, view) : null;
+      if (
+        !view.colorBy &&
+        group &&
+        view.cellColorMode === 'group' &&
+        (dataset?.polygonTiles || dataset?.polygons)
+      ) {
+        ctx.store.setSpatialView({ colorBy: { kind: 'column', name: group } });
+      }
       // The gene filter names the old dataset's genes: kept, it could hide every observation.
       if (current.observationGenes?.length) ctx.store.setSpatialView({ observationGenes: [] });
       // Group colours are chosen for this dataset's groupings; another's same-named column is not them.

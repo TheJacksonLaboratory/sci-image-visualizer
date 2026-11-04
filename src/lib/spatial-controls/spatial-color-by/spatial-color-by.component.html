@@ -1,0 +1,96 @@
+<!-- What colours the observations: one choice for the markers and the cells alike. -->
+<div class="sc-subhead">Colour by</div>
+<p-selectButton
+  [options]="modeOptions"
+  optionLabel="label"
+  optionValue="value"
+  [ngModel]="mode"
+  (ngModelChange)="onMode($event)"
+  [allowEmpty]="false"
+  styleClass="sc-buttons"
+  class="sc-color-modes"
+></p-selectButton>
+<small class="sc-hint" *ngIf="!mode">One flat colour. Choose what colours the observations.</small>
+
+<!-- Group: the grouping, its groups' colours and their switches. -->
+<spatial-groups-panel
+  *ngIf="mode === 'group'"
+  [controls]="controls"
+  [dataset]="dataset"
+  [view]="view"
+  [selectedCategory]="selectedCategory"
+  (categoryClicked)="categoryClicked.emit($event)"
+></spatial-groups-panel>
+
+<!-- Gene: one gene's expression, through the colormap. -->
+<ng-container *ngIf="mode === 'gene'">
+  <ng-container *ngIf="genes?.state$ | async as gene">
+    <div class="sc-section" *ngIf="dataset?.features as features">
+      <label class="sc-lbl" for="sc-gene">Gene</label>
+      <!-- A filterable dropdown, not a free-text box: the genes are visible before anything is
+           typed, and each keystroke narrows a list the user can see. Virtual-scrolled because a
+           targeted panel runs to a few thousand names. -->
+      <p-dropdown
+        inputId="sc-gene"
+        [options]="gene.options"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="selectedGene"
+        (ngModelChange)="onGene($event)"
+        [filter]="true"
+        filterBy="label"
+        [resetFilterOnHide]="true"
+        (onFilter)="genes?.onFilter($event.filter)"
+        (onShow)="genes?.ensureList()"
+        [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+        [virtualScrollItemSize]="30"
+        [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
+        [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
+        appendTo="body"
+        placeholder="Search {{ features.count | number }} genes…"
+        styleClass="sc-full"
+      ></p-dropdown>
+      <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
+    </div>
+  </ng-container>
+</ng-container>
+
+<!-- Measurement: a numeric column, through the colormap. -->
+<div class="sc-section" *ngIf="mode === 'measure'">
+  <label class="sc-lbl" for="sc-measure">Measurement</label>
+  <p-dropdown
+    inputId="sc-measure"
+    [options]="measureOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="selectedMeasure"
+    (ngModelChange)="onMeasure($event)"
+    placeholder="Pick a measurement"
+    appendTo="body"
+    styleClass="sc-full"
+  ></p-dropdown>
+</div>
+
+<!-- A gene or a measurement: its colour bar and colormap. -->
+<spatial-key
+  *ngIf="(mode === 'gene' || mode === 'measure') && view.colorBy"
+  [controls]="controls"
+  [dataset]="dataset"
+  [view]="view"
+  [legend]="legend"
+  [colorBarCss]="colorBarCss"
+  [selectedCategory]="selectedCategory"
+  [colormapOptions]="colormapOptions"
+  (categoryClicked)="categoryClicked.emit($event)"
+></spatial-key>
+
+<!-- Single colour: every marker and cell in one colour. -->
+<div class="sc-row" *ngIf="mode === 'single'">
+  <span class="sc-lbl">Colour</span>
+  <input
+    type="color"
+    class="sc-color-input"
+    [value]="view.cellSingleColor"
+    (change)="onSingleColor($any($event.target).value)"
+  />
+</div>

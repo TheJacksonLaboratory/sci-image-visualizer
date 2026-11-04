@@ -12,6 +12,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { TILED_DATASET, fakeSpatialControls, panelNamed, shallowPanel } from '../testing/spatial-panel-testing';
 import { SpatialKeyComponent } from './spatial-key/spatial-key.component';
+import { SpatialColorByComponent } from './spatial-color-by/spatial-color-by.component';
 import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-panel.component';
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel/spatial-groups-panel.component';
 import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
@@ -645,8 +646,9 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
       SpatialMarkerGenesFormComponent,
     ])
       shallowPanel(leaf);
-    shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
-    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    shallowPanel(SpatialCellsPanelComponent);
+    shallowPanel(SpatialColorByComponent, [SpatialGroupsPanelComponent, SpatialKeyComponent]);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialColorByComponent]);
     shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
     shallowPanel(SpatialControlsComponent, [
       SpatialCellsPanelComponent,

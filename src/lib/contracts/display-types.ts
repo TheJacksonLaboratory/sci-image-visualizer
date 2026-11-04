@@ -292,10 +292,13 @@ export interface SpatialViewState {
   cellSet: string | null;
   /**
    * What colours the cells — Xenium Explorer's "Cell Color": the active group
-   * ({@link cellTypeColumn}), one gene's expression ({@link cellColorGene}), the cell's
-   * transcript density, one flat colour, or how the cell was segmented.
+   * ({@link cellTypeColumn}), one gene's expression ({@link cellColorGene}), the numeric column
+   * the observations are coloured by (`column`: {@link colorBy}, a measurement), the cell's
+   * transcript density, one flat colour ({@link cellSingleColor}, the markers' too while
+   * {@link colorBy} is null), or how the cell was segmented. The panel's "Colour by" sets it
+   * with {@link colorBy}, so the markers and the cells are coloured alike.
    */
-  cellColorMode: 'group' | 'gene' | 'transcriptDensity' | 'single' | 'segmentation';
+  cellColorMode: 'group' | 'gene' | 'column' | 'transcriptDensity' | 'single' | 'segmentation';
   cellColorGene: string | null;
   /** `#rrggbb` for {@link cellColorMode} `single`. */
   cellSingleColor: string;

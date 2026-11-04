@@ -1601,6 +1601,23 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 
+  it('colours the cells by the measurement the markers are coloured by', async () => {
+    const { tiles, plan, layers, getColumn } = setup({
+      cellColorMode: 'column',
+      colorBy: { kind: 'column', name: 'area' },
+    });
+    getColumn.mockResolvedValue({
+      meta: { kind: 'continuous', name: 'area' },
+      values: Float32Array.of(10, 30),
+    } as never);
+    await plan();
+    expect(getColumn).toHaveBeenCalledWith('area');
+    const fill = layers()[0];
+    expect(fill.colorMode()).toBe('values');
+    expect(Array.from(fill.values ?? [])).toEqual([10, 30]);
+    tiles.detach();
+  });
+
   it("computes a gene colouring's contrast window once per (vector, clip, log) (SPATIAL-12)", async () => {
     const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
     const { tiles, plan, setView, setExpression, layers } = setup({ cellColorMode: 'gene', cellColorGene: 'G' });

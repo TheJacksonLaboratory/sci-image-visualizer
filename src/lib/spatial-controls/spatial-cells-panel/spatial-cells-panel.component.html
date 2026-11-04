@@ -1,142 +1,77 @@
-<!-- Cell segmentations: a sub-section of the Observations section, for data with a cell
-     segmentation: how the cells are drawn. Its own on/off switch and its own fold. -->
-<div class="sc-subsection" [class.open]="open">
-  <div class="sc-subhead sc-subsection-head" (click)="openChange.emit(!open)">
-    <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
-    <p-checkbox
-      [binary]="true"
-      [ngModel]="cellsOn"
-      (click)="$event.stopPropagation()"
-      (onChange)="onShowCells($event.checked)"
-      pTooltip="Show the cells"
-      tooltipPosition="top"
-    ></p-checkbox>
-    <span class="sc-subsection-title">Cell segmentations</span>
+<!-- Cell segmentations: how the cells are drawn while the observations are shown as them. Their
+     colour is the Observations section's "Colour by", the markers' too. -->
+<div class="sc-subhead">Cell segmentations</div>
+
+<!-- 3D: the cells as one surface per cell type, or each its own surface in the colouring. -->
+<ng-container *ngIf="is3d">
+  <span class="sc-lbl">In 3D</span>
+  <p-selectButton
+    [options]="cells3dOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="view.cells3d"
+    (ngModelChange)="onCells3d($event)"
+    [allowEmpty]="false"
+    styleClass="sc-buttons"
+  ></p-selectButton>
+  <small class="sc-hint" *ngIf="view.cells3d === 'types'">
+    Each cell type is one surface. A type can be shown as its cells in the Region Editor.
+  </small>
+  <small class="sc-hint" *ngIf="cells3dHint">{{ cells3dHint }}</small>
+</ng-container>
+
+<ng-container *ngIf="!is3d && boundarySets.length && boundarySets.length <= 2">
+  <span class="sc-lbl">Boundaries</span>
+  <div class="sc-row" *ngFor="let set of boundarySets">
+    <span class="sc-lbl">{{ set.label }}</span>
+    <p-inputSwitch
+      [ngModel]="boundaryOn(set.name)"
+      (onChange)="onBoundary(set.name, $event.checked)"
+      [attr.aria-label]="set.label"
+    ></p-inputSwitch>
   </div>
-  <div class="sc-subsection-body" *ngIf="open">
-    <!-- 3D: the cells as one surface per cell type, or each its own surface in the Cell Color. -->
-    <ng-container *ngIf="is3d">
-      <div class="sc-subhead">In 3D</div>
-      <p-selectButton
-        [options]="cells3dOptions"
-        optionLabel="label"
-        optionValue="value"
-        [ngModel]="view.cells3d"
-        (ngModelChange)="onCells3d($event)"
-        [allowEmpty]="false"
-        styleClass="sc-buttons"
-      ></p-selectButton>
-      <small class="sc-hint" *ngIf="view.cells3d === 'types'">
-        Each cell type is one surface. A type can be shown as its cells in the Region Editor.
-      </small>
-      <small class="sc-hint" *ngIf="cells3dHint">{{ cells3dHint }}</small>
-    </ng-container>
-    <ng-container *ngIf="!is3d && boundarySets.length && boundarySets.length <= 2">
-      <div class="sc-subhead">Boundaries</div>
-      <div class="sc-row" *ngFor="let set of boundarySets">
-        <span class="sc-lbl">{{ set.label }}</span>
-        <p-inputSwitch
-          [ngModel]="boundaryOn(set.name)"
-          (onChange)="onBoundary(set.name, $event.checked)"
-          [attr.aria-label]="set.label"
-        ></p-inputSwitch>
-      </div>
-    </ng-container>
-    <ng-container *ngIf="!is3d && boundarySets.length > 2">
-      <div class="sc-subhead">Boundaries</div>
-      <p-selectButton
-        [options]="cellSetOptions"
-        optionLabel="label"
-        optionValue="value"
-        [ngModel]="activeCellSet"
-        (ngModelChange)="onCellSet($event)"
-        [allowEmpty]="false"
-        styleClass="sc-buttons"
-      ></p-selectButton>
-    </ng-container>
+</ng-container>
+<ng-container *ngIf="!is3d && boundarySets.length > 2">
+  <span class="sc-lbl">Boundaries</span>
+  <p-selectButton
+    [options]="cellSetOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="activeCellSet"
+    (ngModelChange)="onCellSet($event)"
+    [allowEmpty]="false"
+    styleClass="sc-buttons"
+  ></p-selectButton>
+</ng-container>
 
-    <div class="sc-subhead">Coloring</div>
-    <div class="sc-row">
-      <span class="sc-lbl">Cell Color</span>
-      <p-dropdown
-        [options]="cellColorOptions"
-        optionLabel="label"
-        optionValue="value"
-        [ngModel]="view.cellColorMode"
-        (ngModelChange)="onCellColorMode($event)"
-        appendTo="body"
-      ></p-dropdown>
-    </div>
-    <small class="sc-hint" *ngIf="view.cellColorMode === 'group'">
-      Adjust cell color in the groups section below.
-    </small>
-    <ng-container *ngIf="genes?.state$ | async as gene">
-      <div class="sc-row" *ngIf="view.cellColorMode === 'gene' && dataset?.features">
-        <span class="sc-lbl">Gene</span>
-        <p-dropdown
-          [options]="gene.options"
-          optionLabel="label"
-          optionValue="value"
-          [ngModel]="view.cellColorGene"
-          (ngModelChange)="onCellColorGene($event)"
-          [filter]="true"
-          filterBy="label"
-          [resetFilterOnHide]="true"
-          (onFilter)="genes?.onFilter($event.filter)"
-          (onShow)="genes?.ensureList()"
-          [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
-          [virtualScrollItemSize]="30"
-          appendTo="body"
-          placeholder="Search genes…"
-        ></p-dropdown>
-      </div>
-    </ng-container>
-    <div class="sc-row" *ngIf="view.cellColorMode === 'single'">
-      <span class="sc-lbl">Color</span>
-      <input
-        type="color"
-        class="sc-color-input"
-        [value]="view.cellSingleColor"
-        (change)="onCellSingleColor($any($event.target).value)"
-      />
-    </div>
-    <div *ngIf="view.cellColorMode === 'gene' || view.cellColorMode === 'transcriptDensity'">
-      <div class="sc-colorbar" [style.background]="colorBarCss || densityColorBarCss"></div>
-    </div>
-
-    <spatial-groups-panel [controls]="controls" [dataset]="dataset" [view]="view"></spatial-groups-panel>
-
-    <div class="sc-subhead">Visibility</div>
-    <span class="sc-lbl" *ngIf="!is3d">View cells as</span>
-    <p-selectButton
-      *ngIf="!is3d"
-      [options]="cellDrawOptions"
-      optionLabel="label"
-      optionValue="value"
-      [ngModel]="view.cellDraw"
-      (ngModelChange)="onCellDraw($event)"
-      [allowEmpty]="false"
-      styleClass="sc-buttons"
-    ></p-selectButton>
-    <ng-container *ngIf="is3d || view.cellDraw !== 'outline'">
-      <span class="sc-lbl">{{ is3d ? 'Cell opacity' : 'Cell fill opacity' }}</span>
-      <div class="sc-row sc-row-number">
-        <p-slider
-          [ngModel]="view.cellOpacity"
-          [min]="0.05"
-          [max]="1"
-          [step]="0.05"
-          (onChange)="onCellOpacity($event.value)"
-        ></p-slider>
-        <p-inputNumber
-          [ngModel]="cellOpacityPercent"
-          (ngModelChange)="onCellOpacityPercent($event)"
-          [min]="5"
-          [max]="100"
-          [showButtons]="false"
-          inputStyleClass="sc-num"
-        ></p-inputNumber>
-      </div>
-    </ng-container>
+<span class="sc-lbl" *ngIf="!is3d">View cells as</span>
+<p-selectButton
+  *ngIf="!is3d"
+  [options]="cellDrawOptions"
+  optionLabel="label"
+  optionValue="value"
+  [ngModel]="view.cellDraw"
+  (ngModelChange)="onCellDraw($event)"
+  [allowEmpty]="false"
+  styleClass="sc-buttons"
+></p-selectButton>
+<ng-container *ngIf="is3d || view.cellDraw !== 'outline'">
+  <span class="sc-lbl">{{ is3d ? 'Cell opacity' : 'Cell fill opacity' }}</span>
+  <div class="sc-row sc-row-number">
+    <p-slider
+      [ngModel]="view.cellOpacity"
+      [min]="0.05"
+      [max]="1"
+      [step]="0.05"
+      (onChange)="onCellOpacity($event.value)"
+    ></p-slider>
+    <p-inputNumber
+      [ngModel]="cellOpacityPercent"
+      (ngModelChange)="onCellOpacityPercent($event)"
+      [min]="5"
+      [max]="100"
+      [showButtons]="false"
+      inputStyleClass="sc-num"
+    ></p-inputNumber>
   </div>
-</div>
+</ng-container>

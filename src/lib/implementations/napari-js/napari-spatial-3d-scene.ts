@@ -266,6 +266,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         dataset.id,
         view.cellColorMode,
         view.cellColorGene,
+        view.cellColorMode === 'column' ? view.colorBy : null,
         view.cellSingleColor,
         view.cellTypeColumn,
         view.logScale,
@@ -1441,6 +1442,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         : null;
     if (byGene) return encodeSpatial3dCategorical(byGene.codes, byGene.colors);
     const colorBy = view.colorBy;
+    // One colour, the cells' too ("Single colour").
+    if (!colorBy && view.cellColorMode === 'single') {
+      return encodeSpatial3dCategorical(new Uint16Array(count), [view.cellSingleColor]);
+    }
     if (!port || !colorBy) return null;
 
     if (colorBy.kind === 'column') {
@@ -1496,7 +1501,11 @@ function cloudSubset(
   const clip = view.percentileClip ?? [0.01, 0.99];
   const scalarKey = [
     key,
-    view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    view.colorBy
+      ? `${view.colorBy.kind}:${view.colorBy.name}`
+      : view.cellColorMode === 'single'
+        ? `single:${view.cellSingleColor}`
+        : 'flat',
     groupColorsKey(view.colorBy?.kind === 'column' ? view.colorBy.name : null, view.groupColors),
     observationGeneStyleKey(view),
     view.logScale ? 'log' : 'lin',

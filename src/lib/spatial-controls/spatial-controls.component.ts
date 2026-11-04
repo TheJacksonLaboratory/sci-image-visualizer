@@ -202,12 +202,8 @@ export class SpatialControlsComponent implements OnInit {
       .subscribe((dataset) => {
         this.dataset = dataset;
         this.genes.setDataset(dataset);
-        // The Observations section leads, with its Cells sub-section open for data that has cells.
-        this.open = {
-          ...this.open,
-          cells: !!(dataset?.polygonTiles || dataset?.polygons),
-          observations: !!dataset,
-        };
+        // The Observations section leads.
+        this.open = { ...this.open, observations: !!dataset };
         void this.refreshKey();
         this.cdr.markForCheck();
       });
@@ -433,15 +429,13 @@ export class SpatialControlsComponent implements OnInit {
   }
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
-  protected open: Record<'images' | 'volume' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> =
-    {
-      images: false,
-      volume: false,
-      cells: true,
-      transcripts: false,
-      annotations: false,
-      observations: false,
-    };
+  protected open: Record<'images' | 'volume' | 'transcripts' | 'annotations' | 'observations', boolean> = {
+    images: false,
+    volume: false,
+    transcripts: false,
+    annotations: false,
+    observations: false,
+  };
 
   protected toggleSection(name: keyof SpatialControlsComponent['open']): void {
     this.setOpen(name, !this.open[name]);

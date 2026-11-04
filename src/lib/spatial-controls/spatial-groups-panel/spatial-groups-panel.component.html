@@ -75,7 +75,16 @@
           title="Colour"
           (click)="openGroupStyle($event, row.label, groupPop)"
         ></button>
-        <span class="sc-group-label" [title]="row.label">{{ row.label }}</span>
+        <!-- The name selects the group's observations; again, clears. -->
+        <button
+          type="button"
+          class="sc-group-label sc-group-select"
+          [class.selected]="selectedCategory !== null && selectedCategory === codeOf(row.label)"
+          [title]="'Select ' + row.label"
+          (click)="onGroupClicked(row.label)"
+        >
+          {{ row.label }}
+        </button>
         <span class="sc-count">({{ row.count | number }})</span>
       </div>
     </ng-container>

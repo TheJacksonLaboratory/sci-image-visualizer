@@ -169,6 +169,7 @@ export class CellLayers {
       geometryKey,
       view.cellColorMode,
       view.cellColorGene,
+      view.cellColorMode === 'column' ? JSON.stringify(view.colorBy) : '',
       view.cellSingleColor,
       cellTypeColumnFor(dataset, view),
       this.selectionRev(selection),
@@ -481,6 +482,11 @@ export async function cellColorsFor(
   };
   if (mode === 'gene' && view.cellColorGene) {
     return continuous(await deps.port.getFeatureVector(view.cellColorGene), true);
+  }
+  // A measurement: the numeric column the observations are coloured by, as the markers are.
+  if (mode === 'column' && view.colorBy?.kind === 'column') {
+    const column = await deps.port.getColumn(view.colorBy.name);
+    if (!isCategoricalColumn(column)) return continuous(column.values, view.logScale);
   }
   if (mode === 'transcriptDensity' && dataset.columns.some((c) => c.name === 'transcript_density')) {
     const column = await deps.port.getColumn('transcript_density');

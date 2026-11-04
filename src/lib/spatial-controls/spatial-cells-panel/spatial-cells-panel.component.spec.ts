@@ -2,17 +2,13 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { SpatialCellsPanelComponent } from './spatial-cells-panel.component';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-import { GenePickerModel } from '../spatial-gene-picker';
 import {
   SpatialControlsFake,
   TILED_DATASET,
   bindInputs,
   fakeSpatialControls,
-  fire,
   one,
-  rowLabelled,
   shallowPanel,
-  subsectionNamed,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialCellsPanelComponent', () => {
@@ -168,49 +164,12 @@ describe('SpatialCellsPanelComponent', () => {
     expect(component['cellOpacityPercent']).toBe(5);
   });
 
-  it('offers the colourings the dataset supports, and the gene list behind them', async () => {
-    const genes = new GenePickerModel(
-      () => fake.controls,
-      () => [],
-    );
-    genes.setDataset({ ...TILED_DATASET, features: { count: 2, names: ['Ttr', 'Mbp'] } });
-    await build(TILED_DATASET, { genes });
-    expect(component['cellColorOptions'].map((o) => o.value)).toEqual(['group', 'gene', 'single']);
-    component['onCellColorMode']('gene');
-    const gene = one(rowLabelled(root, 'Gene'), 'p-dropdown');
-    expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual([
-      'Ttr',
-      'Mbp',
-    ]);
-    // The shared model filters, and the OnPush panel follows it.
-    fire(gene, 'onFilter', { filter: 'mb' });
+  it('draws the cells, with no colouring of its own: the Observations section colours them', async () => {
+    await build();
     fixture.detectChanges();
-    expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual(['Mbp']);
-    component['onCellColorGene']('Mbp');
-    component['onCellSingleColor']('#123456');
-    expect(fake.view$.value).toEqual(
-      expect.objectContaining({
-        cellColorMode: 'gene',
-        cellColorGene: 'Mbp',
-        cellSingleColor: '#123456',
-      }),
-    );
-  });
-
-  it("shows the observations colour bar for a gene colouring, else the density map's", async () => {
-    await build(TILED_DATASET, { colorBarCss: 'linear-gradient(red, blue)' });
-    expect(component['densityColorBarCss']).toContain('linear-gradient');
-    const inferno = component['densityColorBarCss'];
-    fake.view$.next({ ...fake.view$.value, densityColormap: 'Viridis' });
-    expect(component['densityColorBarCss']).not.toBe(inferno);
-  });
-
-  it('asks to open and close from its header', async () => {
-    await build(TILED_DATASET, { open: false });
-    const asked: boolean[] = [];
-    component.openChange.subscribe((on) => asked.push(on));
-    expect(root.querySelector('.sc-subsection-body')).toBeNull();
-    (one(subsectionNamed(root, 'Cell segmentations'), '.sc-subsection-head') as HTMLElement).click();
-    expect(asked).toEqual([true]);
+    expect(root.querySelector('.sc-subhead')?.textContent?.trim()).toBe('Cell segmentations');
+    expect(root.textContent).not.toContain('Cell Color');
+    expect(root.querySelector('spatial-groups-panel')).toBeNull();
+    expect(root.textContent).toContain('View cells as');
   });
 });

@@ -227,6 +227,30 @@ describe('SpatialControlsFacade on a new dataset', () => {
     facade.dispose();
   });
 
+  it("colours a segmented dataset's markers by its cells' grouping, unless a colouring is chosen", () => {
+    const cells = {
+      ...dataset,
+      id: 'ileum',
+      columns: [{ kind: 'categorical', name: 'cell_type', categories: ['T', 'B'] }],
+      polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [] },
+    } as unknown as SpatialDataset;
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(cells);
+    const store = new VisualizerStore();
+    const ctx = { store, selectionStore: new SpatialSelectionStore() } as unknown as SpatialControlsContext;
+    const facade = new SpatialControlsFacade({ getDataset$: () => dataset$ } as unknown as SpatialDataPort, ctx);
+    expect(store.currentSpatialView().colorBy).toEqual({ kind: 'column', name: 'cell_type' });
+
+    // One colour chosen: kept for the next segmented dataset.
+    store.setSpatialView({ colorBy: null, cellColorMode: 'single' });
+    dataset$.next({ ...cells, id: 'other' } as SpatialDataset);
+    expect(store.currentSpatialView().colorBy).toBeNull();
+    // Without cells, the markers keep their flat colour.
+    store.setSpatialView({ cellColorMode: 'group' });
+    dataset$.next({ ...cells, id: 'spots', polygonTiles: undefined } as SpatialDataset);
+    expect(store.currentSpatialView().colorBy).toBeNull();
+    facade.dispose();
+  });
+
   it('drops the gene filter, which names the old dataset genes', () => {
     const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
     const store = new VisualizerStore();

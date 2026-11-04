@@ -715,6 +715,14 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     // and the whole tissue reads normally (the CosMx highlight-vs-mute rule).
     const muted = mutedFromSelection(selection);
 
+    // One colour, the cells' too ("Single colour").
+    if (!colorBy && view.cellColorMode === 'single') {
+      return encodeCategorical(new Uint16Array(dataset.observations.count), {
+        colors: [view.cellSingleColor],
+        opacity: view.opacity,
+        muted,
+      });
+    }
     if (!port || !colorBy) {
       // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
       // does not allocate a colour per point.

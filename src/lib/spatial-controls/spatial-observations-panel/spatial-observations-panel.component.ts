@@ -31,7 +31,6 @@ import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-sele
 import {
   CLIP_OPTIONS,
   PanelOption,
-  columnOptions,
   glyphPoints,
   middleSection,
   sectionLabel,
@@ -39,17 +38,19 @@ import {
 import { SpatialGeneStyleComponent } from '../spatial-gene-style/spatial-gene-style.component';
 import type { GenePickerModel } from '../spatial-gene-picker';
 import type { SpatialLegendEntry } from '../spatial-key/spatial-key.model';
-import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
+import { SpatialColorByComponent } from '../spatial-color-by/spatial-color-by.component';
+import { cellsShown } from '../../spatial/lod';
 
 /**
- * The Observations section — one marker per observation (cell centroid, Visium spot) — and
- * what else draws them: what colours them (a column or a gene, mutually exclusive, with
- * the {@link SpatialKeyComponent key}), point size and opacity, the gene map, the 3D scene
- * (volume, cloud, sections, density volumes) and the continuous-only knobs.
+ * The Observations section — one marker per observation (cell centroid, Visium spot), or, with a
+ * cell segmentation, the cells' own shapes — and what else draws them: whether they are shown and
+ * as what (Markers or Cell segmentations), one {@link SpatialColorByComponent colouring} for
+ * either, the gene filter, the markers' size and opacity or the cells' drawing (projected by the
+ * dialog), the gene map, the 3D scene (volume, cloud, sections, density volumes) and the
+ * continuous-only knobs.
  *
  * Renders the section and the sections after it as siblings in the dialog body
- * (`display: contents`). Writes only through the port: `setViewState`, and the colour
- * source's own `colorByColumn` / `colorByFeature` / `clearColorBy`.
+ * (`display: contents`). Writes only through `controls.setViewState`.
  */
 import { SpatialSelectionObservationsComponent } from '../spatial-selection-observations/spatial-selection-observations.component';
 
@@ -66,7 +67,7 @@ import { SpatialSelectionObservationsComponent } from '../spatial-selection-obse
     SelectButtonModule,
     SliderModule,
     TooltipModule,
-    SpatialKeyComponent,
+    SpatialColorByComponent,
     SpatialGeneStyleComponent,
     SpatialSelectionObservationsComponent,
   ],
@@ -100,10 +101,10 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
   /**
-   * Whether the Markers sub-section is unfolded: by default only for data without a cell
-   * segmentation, whose Cell segmentations sub-section leads otherwise.
+   * Whether the dataset's cells can be drawn here (a cell segmentation, and in 3D a 3D one): the
+   * observations are shown as Markers or as Cell segmentations.
    */
-  protected markersOpen = true;
+  @Input() cellsAvailable = false;
   /** A legend row was clicked (see the key). */
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
@@ -116,10 +117,13 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   /** Virtual-scrolled only past this many options (see the cells panel's gene dropdown). */
   protected readonly geneVirtualScrollFrom = 200;
 
-  /** Colour-by column choices — "None" plus every column the dataset declares. */
-  protected columnOptions: PanelOption<string | null>[] = [];
-  protected selectedColumn: string | null = null;
-  protected selectedGene: string | null = null;
+  /** What the observations are shown as, with a cell segmentation. */
+  protected readonly showAsOptions: PanelOption<'markers' | 'cells'>[] = [
+    { label: 'Markers', value: 'markers' },
+    { label: 'Cell segmentations', value: 'cells' },
+  ];
+  /** The choice of Markers or Cell segmentations, kept while the observations are hidden. */
+  private chosenShownAs: 'markers' | 'cells' | null = null;
   /**
    * The dataset's imaged section positions, or null when its z is continuous rather than
    * sectioned. Read once per dataset — the scan walks the z of every observation, so it
@@ -132,40 +136,55 @@ export class SpatialObservationsPanelComponent implements OnChanges {
       this.geneFilterFailed$ = this.controls?.getGeneFilterFailed$?.() ?? of(false);
     }
     if (changes['dataset'] || changes['controls']) {
-      this.columnOptions = columnOptions(this.dataset);
-      if (changes['dataset']) this.markersOpen = !this.hasCells;
-      // A new dataset almost certainly has different columns; drop stale UI state.
-      this.selectedGene = null;
+      if (changes['dataset']) this.chosenShownAs = null;
       this.sections = this.controls?.sampledSections() ?? null;
     }
-    if (changes['view']) {
-      this.selectedColumn = this.view.colorBy?.kind === 'column' ? this.view.colorBy.name : null;
-      this.selectedGene = this.view.colorBy?.kind === 'feature' ? this.view.colorBy.name : null;
-    }
   }
 
-  // ── colour source ───────────────────────────────────────────────────────
+  // ── shown, and as what ──────────────────────────────────────────────────
 
-  /** Column dropdown. Choosing a column supersedes any gene selection. */
-  protected onColumn(name: string | null): void {
-    this.selectedColumn = name;
-    this.selectedGene = null;
-    if (!name) {
-      this.controls?.clearColorBy();
-      return;
-    }
-    this.controls?.colorByColumn(name);
+  /** Whether the cells are drawn (the explicit choice, or automatically for data that has them). */
+  private get cellsOn(): boolean {
+    return this.cellsAvailable && cellsShown(this.dataset, this.view);
   }
 
-  /** A gene was picked; it supersedes any column selection. */
-  protected onGene(name: string | null): void {
-    this.selectedGene = name;
-    if (!name) {
-      this.controls?.clearColorBy();
+  /** Whether the observations are shown at all, as markers or as cells. */
+  protected get observationsShown(): boolean {
+    return this.view.showPoints || this.cellsOn;
+  }
+
+  /** What the observations are shown as: the cells while they are drawn, else the markers (or,
+   *  hidden, what was last chosen). */
+  protected get shownAs(): 'markers' | 'cells' {
+    if (!this.cellsAvailable) return 'markers';
+    if (this.cellsOn) return 'cells';
+    if (this.view.showPoints) return 'markers';
+    return this.chosenShownAs ?? 'cells';
+  }
+
+  /** Show or hide the observations, as what they were shown as. */
+  protected onShowObservations(on: boolean): void {
+    if (on) this.showAs(this.shownAs);
+    else this.controls?.setViewState({ showPoints: false, ...(this.cellsAvailable ? { showCells: false } : {}) });
+  }
+
+  protected onShownAs(as: 'markers' | 'cells' | null): void {
+    if (!as) return;
+    this.chosenShownAs = as;
+    if (this.observationsShown) this.showAs(as);
+  }
+
+  /**
+   * Draw the observations as markers (the cells hidden), or as the cells. In 2D the markers stay
+   * under the cells: zoomed out, where a cell is too small to outline, its dot draws it.
+   */
+  private showAs(as: 'markers' | 'cells'): void {
+    this.chosenShownAs = as;
+    if (as === 'markers' || !this.cellsAvailable) {
+      this.controls?.setViewState({ showPoints: true, ...(this.cellsAvailable ? { showCells: false } : {}) });
       return;
     }
-    this.selectedColumn = null;
-    this.controls?.colorByFeature(name);
+    this.controls?.setViewState({ showCells: true, showPoints: !this.is3d });
   }
 
   // ── which observations are drawn ────────────────────────────────────────
@@ -267,11 +286,6 @@ export class SpatialObservationsPanelComponent implements OnChanges {
       'transcripts assigned to them. The transcript density map, and transcripts grouped by area when zoomed ' +
       'out, are hidden while this is on: they carry no cells to filter by.'
     );
-  }
-
-  /** Cell outlines on offer, which changes what the circles mean. */
-  protected get hasCells(): boolean {
-    return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
   }
 
   /** True while a selection is active — everything else renders muted. */

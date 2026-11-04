@@ -106,12 +106,13 @@
       [selectedCategory]="selectedCategory"
       [colormapOptions]="colormapOptions"
       [is3d]="is3d"
+      [cellsAvailable]="hasCells && (!is3d || hasCells3d)"
       [open]="open.observations"
       (openChange)="setOpen('observations', $event)"
       (categoryClicked)="selectCategory($event)"
     >
-      <!-- Cell segmentations: with a cell segmentation, a sub-section of the Observations, below
-           Markers and above "Observations in selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
+      <!-- Cell segmentations: with a cell segmentation (in 3D, a 3D one), how the cells are drawn
+           while the Observations are shown as them. -->
       <spatial-cells-panel
         *ngIf="hasCells && (!is3d || hasCells3d)"
         [controls]="controls"
@@ -119,10 +120,6 @@
         [view]="view"
         [is3d]="is3d"
         [cells3dStatus]="cells3dStatus"
-        [genes]="genes"
-        [colorBarCss]="colorBarCss"
-        [open]="open.cells"
-        (openChange)="setOpen('cells', $event)"
       ></spatial-cells-panel>
     </spatial-observations-panel>
 
