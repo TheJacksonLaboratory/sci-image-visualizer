@@ -11,6 +11,12 @@ file was added.
 
 ### Added
 
+- **Transcripts follow a selection.** With a cell or a cell type selected, in 2D and in 3D, the
+  transcripts of the selected cells keep their colour and every other transcript fades (alpha scaled
+  to `DEFAULT_MUTED_OPACITY`), as the cells and markers do; zoomed-out density-grid markers, which
+  carry no cells, all fade. In 3D only the layer's per-point alphas change, so a selection reads
+  nothing again (`fadeOutsideSelection` in `spatial-encoding`).
+
 - **A 3D segmentation's cells as 3D regions in the spatial 3D view.** A dataset whose boundary set
   names its outlines as a region set (`SpatialPolygonTilesMeta.sets[i].regionSource`: every cell
   outlined on every plane it spans, as the MERFISH ileum's) now has that set attached to its image in
@@ -81,6 +87,12 @@ file was added.
   read (`ISpatialControls.getObservationsInSelection$`, `ObservationsInSelection`).
 
 ### Fixed
+
+- **A selected 3D cell or cell type is no longer hidden by the faded ones in front of it.** A
+  translucent surface draws only its own nearest faces, so a faded cell in front of the selected one
+  in the same chunk hid it. The selected cells are now drawn as an opaque surface of their own per
+  chunk, and a selected cell type's surface opaque (`REGION_MESH_SELECTED_OPACITY`, 1) while the
+  others are ghosted, so the faded surfaces are blended over the selection and it shows through.
 
 - **Zooming in close in 3D no longer blacks out the far part of the scene.** napari-js puts the
   far plane at four times the camera's distance, so zoomed in on a long section seen at an angle,

@@ -26,6 +26,12 @@ export const REGION_MESH_OPACITY = 0.55;
 export const REGION_MESH_HIGHLIGHT_OPACITY = 0.9;
 /** … and the others' (ghosted: still there for context, not in the way). */
 export const REGION_MESH_DIMMED_OPACITY = 0.12;
+/**
+ * A selection's surfaces while the others are ghosted: opaque, so they are drawn first and write
+ * depth, and the ghosted surfaces in front of them are blended over them rather than hiding them
+ * (a translucent surface draws only its own nearest faces, and is drawn after the opaque ones).
+ */
+export const REGION_MESH_SELECTED_OPACITY = 1;
 
 /**
  * The region reconstructions shown in a volume view: one translucent surface per region, in its
@@ -224,9 +230,9 @@ export class VolumeRegionMeshes {
   }
 
   private opacityOf(key: string): number {
-    if (this.muted.size) return this.muted.has(key) ? REGION_MESH_DIMMED_OPACITY : REGION_MESH_HIGHLIGHT_OPACITY;
+    if (this.muted.size) return this.muted.has(key) ? REGION_MESH_DIMMED_OPACITY : REGION_MESH_SELECTED_OPACITY;
     if (!this.highlighted.size) return REGION_MESH_OPACITY;
-    return this.highlighted.has(key) ? REGION_MESH_HIGHLIGHT_OPACITY : REGION_MESH_DIMMED_OPACITY;
+    return this.highlighted.has(key) ? REGION_MESH_SELECTED_OPACITY : REGION_MESH_DIMMED_OPACITY;
   }
 
   private remove(key: string, layer: SurfaceLayer): void {

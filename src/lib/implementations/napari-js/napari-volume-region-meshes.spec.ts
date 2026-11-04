@@ -3,7 +3,7 @@ import type { SurfaceLayer, Viewer } from 'napari-js';
 
 import {
   REGION_MESH_DIMMED_OPACITY,
-  REGION_MESH_HIGHLIGHT_OPACITY,
+  REGION_MESH_SELECTED_OPACITY,
   REGION_MESH_OPACITY,
   RegionMesh3D,
   VolumeRegionMeshes,
@@ -171,7 +171,7 @@ describe('VolumeRegionMeshes', () => {
     meshes.set([mesh('CTX'), mesh('MB')]);
     const opacity = () => surfaces().map((l) => l.opacity);
     meshes.setHighlight(['MB']);
-    expect(opacity()).toEqual([REGION_MESH_DIMMED_OPACITY, REGION_MESH_HIGHLIGHT_OPACITY]);
+    expect(opacity()).toEqual([REGION_MESH_DIMMED_OPACITY, REGION_MESH_SELECTED_OPACITY]);
     // A surface added later takes the highlight it falls under.
     meshes.set([mesh('CTX'), mesh('MB'), mesh('HPF')]);
     expect(opacity()[2]).toBe(REGION_MESH_DIMMED_OPACITY);
@@ -225,7 +225,7 @@ describe('VolumeRegionMeshes', () => {
     meshes.setMuted(['MB']);
     expect(surfaces()[1].color).toEqual([0, 1, 0, 1]);
     expect(surfaces()[1].opacity).toBe(REGION_MESH_DIMMED_OPACITY);
-    expect(surfaces()[0].opacity).toBe(REGION_MESH_HIGHLIGHT_OPACITY);
+    expect(surfaces()[0].opacity).toBe(REGION_MESH_SELECTED_OPACITY);
     meshes.setMuted([]);
     expect(surfaces()[1].opacity).toBe(REGION_MESH_OPACITY);
     expect(surfaces()[0].opacity).toBe(REGION_MESH_OPACITY);

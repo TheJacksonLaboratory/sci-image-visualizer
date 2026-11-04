@@ -10,12 +10,7 @@ import { placeInWorker, reconstructCellsInWorker } from '../../region-source/wor
 import { cellOutlinesFromTiles, observationIndex } from '../../spatial/plane-cells';
 import { typicalCellDiameter } from '../../spatial/lod';
 import { datasetRegionSet } from '../../visualizer/spatial-region-set';
-import {
-  PlanePlacement,
-  REGION_MESH_DIMMED_OPACITY,
-  REGION_MESH_HIGHLIGHT_OPACITY,
-  toWorld,
-} from './napari-volume-region-meshes';
+import { PlanePlacement, REGION_MESH_DIMMED_OPACITY, toWorld } from './napari-volume-region-meshes';
 
 /**
  * A 3D segmentation's cells in the spatial 3D view, each reconstructed by itself (see
@@ -77,9 +72,19 @@ interface Chunk {
   /** Each meshed cell's class. */
   labels: Map<number, string | null>;
   world: Float32Array | null;
-  /** The triangles drawn (the visible cells'), as indices into the mesh's vertices. */
+  /**
+   * The triangles drawn in {@link layer} (the visible cells', or with a selection those it leaves
+   * out), as indices into the mesh's vertices.
+   */
   drawn: Uint32Array | null;
   layer: SurfaceLayer | null;
+  /**
+   * With a selection, its cells' triangles, drawn in {@link selectedLayer}: an opaque surface of
+   * their own, so the faded cells in front of them (a translucent surface draws only its nearest
+   * faces) show them through rather than hide them.
+   */
+  drawnSelected: Uint32Array | null;
+  selectedLayer: SurfaceLayer | null;
   /** The mesh whose placement is in flight, if any. */
   placing?: CellsMesh | null;
 }
@@ -167,7 +172,10 @@ export class Spatial3dCells {
     const moved = !samePlacement(placement, this.placement);
     this.placement = placement;
     this.zScale = zScale;
-    for (const c of this.chunks) if (c.layer) c.layer.scale3d = [1, 1, zScale];
+    for (const c of this.chunks) {
+      if (c.layer) c.layer.scale3d = [1, 1, zScale];
+      if (c.selectedLayer) c.selectedLayer.scale3d = [1, 1, zScale];
+    }
     if (!moved) return;
     for (const c of this.chunks) {
       c.world = null;
@@ -186,8 +194,9 @@ export class Spatial3dCells {
     if (!this.byLayer.size) return -1;
     const hit = this.host.viewer.pickSurface(x, y, { pickable: (l) => this.byLayer.has(l) });
     const chunk = hit ? this.byLayer.get(hit.layer) : undefined;
-    if (!hit || !chunk?.drawn || !chunk.mesh) return -1;
-    const vertex = chunk.drawn[hit.face * 3];
+    const faces = hit && chunk && hit.layer === chunk.selectedLayer ? chunk.drawnSelected : chunk?.drawn;
+    if (!hit || !faces || !chunk?.mesh) return -1;
+    const vertex = faces[hit.face * 3];
     return vertex === undefined ? -1 : chunk.mesh.vertexCell[vertex];
   }
 
@@ -480,30 +489,57 @@ export class Spatial3dCells {
       this.placeChunk(chunk, placement);
       return;
     }
-    const drawn = this.visibleFaces(chunk);
-    chunk.drawn = drawn;
-    const colors = this.vertexColors(mesh);
-    if (!drawn.length) {
-      if (chunk.layer) chunk.layer.visible = false;
-      return;
+    const visible = this.visibleFaces(chunk);
+    // With a selection, its cells in a surface of their own (see Chunk.selectedLayer).
+    const [selected, rest] = this.selected
+      ? splitFaces(visible, mesh.vertexCell, this.selected)
+      : [new Uint32Array(0), visible];
+    chunk.drawn = rest;
+    chunk.drawnSelected = selected;
+    chunk.layer = this.drawSurface(chunk, chunk.layer, rest, this.vertexColors(mesh), this.opacity, 'cells');
+    chunk.selectedLayer = this.drawSurface(
+      chunk,
+      chunk.selectedLayer,
+      selected,
+      selected.length ? this.vertexColors(mesh, true) : null,
+      1,
+      'selected cells',
+    );
+  }
+
+  /**
+   * One of a chunk's surfaces with these triangles and colours: updated in place, added, or hidden
+   * when it has none. Returns the layer (null: none was ever needed).
+   */
+  private drawSurface(
+    chunk: Chunk,
+    layer: SurfaceLayer | null,
+    faces: Uint32Array,
+    colors: Float32Array | null,
+    opacity: number,
+    name: string,
+  ): SurfaceLayer | null {
+    if (!faces.length || !colors || !chunk.world) {
+      if (layer) layer.visible = false;
+      return layer;
     }
-    if (chunk.layer) {
-      chunk.layer.setData(chunk.world, drawn);
-      chunk.layer.vertexColors = colors;
-      chunk.layer.opacity = this.opacity;
-      chunk.layer.visible = true;
-    } else {
-      const layer = this.host.viewer.addSurface(chunk.world, drawn, undefined, {
-        name: `cells ${chunk.key}`,
-        vertexColors: colors,
-        opacity: this.opacity,
-        blending: 'translucent',
-        scale3d: [1, 1, this.zScale],
-        fit: 'never',
-      });
-      chunk.layer = layer;
-      this.byLayer.set(layer, chunk);
+    if (layer) {
+      layer.setData(chunk.world, faces);
+      layer.vertexColors = colors;
+      layer.opacity = opacity;
+      layer.visible = true;
+      return layer;
     }
+    const added = this.host.viewer.addSurface(chunk.world, faces, undefined, {
+      name: `${name} ${chunk.key}`,
+      vertexColors: colors,
+      opacity,
+      blending: 'translucent',
+      scale3d: [1, 1, this.zScale],
+      fit: 'never',
+    });
+    this.byLayer.set(added, chunk);
+    return added;
   }
 
   /** The triangles of the cells shown: their class not hidden, the observation shown. */
@@ -537,15 +573,14 @@ export class Spatial3dCells {
   /**
    * Each vertex its cell's colour (white without colours). With a selection, a cell it leaves out
    * keeps its colour and fades, as a picked region fades the others: its alpha brought down to the
-   * dimmed regions' opacity, the selected cells drawn near opaque.
+   * dimmed regions' opacity. `solid`: the selected cells' own surface, every vertex opaque.
    */
-  private vertexColors(mesh: CellsMesh): Float32Array {
+  private vertexColors(mesh: CellsMesh, solid = false): Float32Array {
     const out = new Float32Array(mesh.vertexCell.length * 4);
     const colors = this.colors;
     const selected = this.selected;
     const o = this.opacity > 0 ? this.opacity : 1;
     const dim = Math.min(1, REGION_MESH_DIMMED_OPACITY / o);
-    const lit = Math.min(1, REGION_MESH_HIGHLIGHT_OPACITY / o);
     for (let v = 0; v < mesh.vertexCell.length; v++) {
       const o = mesh.vertexCell[v] * 4;
       if (colors && o + 3 < colors.length) {
@@ -556,16 +591,20 @@ export class Spatial3dCells {
       } else {
         out.fill(1, v * 4, v * 4 + 4);
       }
-      if (selected) out[v * 4 + 3] *= selected[mesh.vertexCell[v]] ? lit : dim;
+      if (solid) out[v * 4 + 3] = 1;
+      else if (selected && !selected[mesh.vertexCell[v]]) out[v * 4 + 3] *= dim;
     }
     return out;
   }
 
   private dropLayer(chunk: Chunk): void {
-    if (!chunk.layer) return;
-    this.byLayer.delete(chunk.layer);
-    this.host.viewer.layers.remove(chunk.layer);
+    for (const layer of [chunk.layer, chunk.selectedLayer]) {
+      if (!layer) continue;
+      this.byLayer.delete(layer);
+      this.host.viewer.layers.remove(layer);
+    }
     chunk.layer = null;
+    chunk.selectedLayer = null;
   }
 
   private report(building: boolean): void {
@@ -617,6 +656,8 @@ function makeChunks(source: RegionSource): Chunk[] {
         labels: new Map(),
         world: null,
         drawn: null,
+        drawnSelected: null,
+        selectedLayer: null,
         layer: null,
       });
     }
@@ -671,4 +712,29 @@ function samePlacement(a: PlanePlacement | null, b: PlanePlacement | null): bool
     a.scale.every((v, i) => v === b.scale[i]) &&
     a.offset.every((v, i) => v === b.offset[i])
   );
+}
+
+/**
+ * Triangles `faces` split by whether their cell (`vertexCell` of their first vertex) is selected:
+ * the selected cells' triangles, then the others'.
+ */
+export function splitFaces(
+  faces: Uint32Array,
+  vertexCell: Uint32Array,
+  selected: Uint8Array,
+): [Uint32Array, Uint32Array] {
+  const sel = new Uint32Array(faces.length);
+  const rest = new Uint32Array(faces.length);
+  let s = 0;
+  let r = 0;
+  for (let f = 0; f < faces.length; f += 3) {
+    const out = selected[vertexCell[faces[f]]] ? sel : rest;
+    const at = out === sel ? s : r;
+    out[at] = faces[f];
+    out[at + 1] = faces[f + 1];
+    out[at + 2] = faces[f + 2];
+    if (out === sel) s += 3;
+    else r += 3;
+  }
+  return [sel.slice(0, s), rest.slice(0, r)];
 }

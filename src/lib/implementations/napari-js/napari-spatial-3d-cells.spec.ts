@@ -135,6 +135,43 @@ describe('Spatial3dCells', () => {
     cells.dispose();
   });
 
+  it('draws a selection as a solid surface of its own, so the faded cells in front show it through', async () => {
+    const { v, cells, statuses, surfaces, viewer } = setup();
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['A', 'B']));
+    await settled(statuses);
+    const faces = (layers: SurfaceLayer[]) =>
+      layers.reduce((n, l) => n + (l.visible ? (l as any).faces.length : 0), 0);
+    const all = faces(surfaces());
+    const selectedSurfaces = () =>
+      v.layers.items.filter((l) => l.name.startsWith('selected cells')) as SurfaceLayer[];
+
+    cells.setStyle(Float32Array.of(1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1), null, 0.7, Uint8Array.of(0, 0, 1));
+    await new Promise((r) => setTimeout(r, 20));
+    const selected = selectedSurfaces().filter((l) => l.visible);
+    expect(selected.length).toBeGreaterThan(0);
+    // Opaque: full opacity, every vertex alpha 1, in c3's colour (blue).
+    expect(selected.every((l) => l.opacity === 1 && !l.translucent)).toBe(true);
+    const rgba = selected.flatMap((l) => Array.from(l.vertexColors ?? []));
+    expect(rgba.filter((_v, i) => i % 4 === 3).every((a) => a === 1)).toBe(true);
+    // c3's triangles moved out of the faded surfaces, none lost.
+    expect(faces(surfaces()) + faces(selected)).toBe(all);
+    expect(faces(surfaces())).toBeLessThan(all);
+    // Picked on its own surface, it is still c3.
+    jest
+      .spyOn(viewer, 'pickSurface')
+      .mockReturnValue({ layer: selected[0], face: 0, distance: 1, point: [0, 0, 0] } as any);
+    expect(cells.pick(10, 10)).toBe(2);
+
+    // Cleared: back in one surface per chunk.
+    cells.setStyle(Float32Array.of(1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1), null, 0.7, null);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(selectedSurfaces().some((l) => l.visible)).toBe(false);
+    expect(faces(surfaces())).toBe(all);
+    cells.dispose();
+  });
+
   it('names the cell under the pointer by its observation', async () => {
     const { cells, statuses, surfaces, viewer } = setup();
     cells.setDataset(DATASET);
