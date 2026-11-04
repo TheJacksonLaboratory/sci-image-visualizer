@@ -54,19 +54,17 @@ file was added.
   Editor's eyes hide one: its regions in 2D and surfaces in 3D go, and the eyes show it hidden; on
   again, every class is shown. A class's own eye still works in between.
 
-### Changed
-
-- **The reference volume is a section of the spatial panel in 3D: Volume.** In the Images section's
-  place (Images is 2D's), its header switch shows and hides the volume and its body holds the
-  volume's opacity. The Observations section no longer has a "Reference volume" checkbox and
-  opacity slider.
-
 ### Removed
 
 - **The 3D "Show" section's Observations checkbox.** It repeated the Observations section's own
   checkbox (its header), which shows and hides the same observations.
 
 ### Changed
+
+- **The reference volume is a section of the spatial panel in 3D: Volume.** In the Images section's
+  place (Images is 2D's), its header switch shows and hides the volume and its body holds the
+  volume's opacity. The Observations section no longer has a "Reference volume" checkbox and
+  opacity slider.
 
 - **Up to 22 groups without colours of their own get a colour each.** `DEFAULT_CATEGORICAL_PALETTE`
   keeps its ten colours and gains twelve more after them, so a grouping of 11 to 22 groups (the
