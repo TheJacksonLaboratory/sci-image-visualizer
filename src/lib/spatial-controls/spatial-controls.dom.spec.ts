@@ -11,7 +11,7 @@ import { SpatialObservationsPanelComponent } from './spatial-observations-panel/
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-types';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptsInSelection } from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
@@ -539,6 +539,55 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       fixture.detectChanges();
       expect(controls.clearSelection).toHaveBeenCalled();
       expect(panelNamed(root, 'Annotations').querySelector('p-button[label="Clear"]')).toBeNull();
+    });
+  });
+
+  describe('Transcripts in selection', () => {
+    it('counts only while open, and lists the genes by count with the selection and plane', async () => {
+      const list$ = new BehaviorSubject<TranscriptsInSelection>({ state: 'loading' });
+      controls.getTranscriptsInSelection$ = jest.fn(() => list$);
+      await build();
+      expect(controls.getTranscriptsInSelection$).not.toHaveBeenCalled();
+      let panel = await openSection('Transcripts in selection');
+      expect(controls.getTranscriptsInSelection$).toHaveBeenCalledTimes(1);
+      expect(panel.textContent).toContain('Counting transcripts');
+      list$.next({
+        state: 'ready',
+        scope: 'cells',
+        label: 'Cell c-17',
+        plane: { index: 2, count: 9 },
+        total: 7,
+        cells: 1,
+        genes: [
+          { name: 'Lgr5', count: 5 },
+          { name: 'Actb', count: 2 },
+        ],
+      });
+      fixture.detectChanges();
+      panel = panelNamed(root, 'Transcripts in selection');
+      expect(panel.textContent).toContain('Cell c-17');
+      expect(panel.textContent).toContain('plane 3 of 9');
+      expect(panel.textContent).toContain('7 transcripts');
+      const rows = Array.from(panel.querySelectorAll('.sc-seltx-list li')).map((li) =>
+        Array.from(li.children).map((c) => c.textContent?.trim()),
+      );
+      expect(rows).toEqual([
+        ['Lgr5', '', '5'],
+        ['Actb', '', '2'],
+      ]);
+      // Closed: no longer counted.
+      click(one(panel, '.sc-panel-head'));
+      fixture.detectChanges();
+      expect(list$.observed).toBe(false);
+    });
+
+    it('says what to select while nothing is', async () => {
+      controls.getTranscriptsInSelection$ = jest.fn(() =>
+        of<TranscriptsInSelection>({ state: 'empty', message: 'Select a cell, or pick a cell type.' }),
+      );
+      await build({ is3d: true });
+      const panel = await openSection('Transcripts in selection');
+      expect(panel.textContent).toContain('Select a cell, or pick a cell type.');
     });
   });
 

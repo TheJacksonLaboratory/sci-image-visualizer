@@ -18,6 +18,7 @@ import {
   SpatialViewState,
   SpatialColorBy,
   Cells3dStatus,
+  TranscriptsInSelection,
 } from './display-types';
 import {
   CategoricalColumnMeta,
@@ -439,6 +440,12 @@ export interface ISpatialControls {
   getGeneFilterFailed$?(): Observable<boolean>;
   /** The 3D view's individual cells as they stand (null: none are drawn). Optional. */
   getCells3dStatus$?(): Observable<Cells3dStatus | null>;
+  /**
+   * The transcripts of the selection, by gene, kept up to date as the selection, the picked
+   * classes, the regions or the plane shown change (see {@link TranscriptsInSelection}). Optional:
+   * only a dataset with tiled transcripts has it.
+   */
+  getTranscriptsInSelection$?(): Observable<TranscriptsInSelection>;
   /**
    * The z positions of the sections the dataset was imaged at, ascending — or
    * null when its z is continuous rather than sectioned (so there are no sections

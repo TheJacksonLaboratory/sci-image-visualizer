@@ -352,6 +352,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // A stack can open away from slice 0 (`initialZIndex` — a volume opens
     // mid-specimen), and that arrives here rather than through setZIndex.
     this.currentZIndex = zIndex;
+    this.spatialViewChanged$.next();
     zIndex = this.imageSlice(zIndex, imageInfo);
     const backend = this.imageBackend();
     if (backend === this.napari) {
@@ -402,6 +403,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     inPlace?: boolean,
   ): Promise<boolean> {
     this.currentPlotType = plotType;
+    this.spatialViewChanged$.next();
     this.plottedFileName = imageInfo?.fileName;
     this.plottedInfo = imageInfo ?? null;
     this.plottedHeight = screenHeight;
@@ -578,6 +580,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
   setZIndex(zIndex: number): void {
     this.currentZIndex = zIndex;
+    this.spatialViewChanged$.next();
     const slice = this.imageSlice(zIndex);
     this.renderer().setZIndex(slice);
     if (this.datasetRegionSet?.planes) this.napari.setRegionPlane(zIndex);
@@ -625,6 +628,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;
+    this.spatialViewChanged$.next();
     this.updateVolumeView(plotType);
     this.updatePlaneCells();
     this.syncAnnotations();
@@ -1015,6 +1019,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.napari.setRegionPlanes(planes);
     if (planes) this.napari.setRegionPlane(this.currentZIndex);
     this.datasetPlanes$.next(sliced ? planes : null);
+    this.spatialViewChanged$.next();
     // Annotations switched off in a spatial view before the set came: its classes are hidden as the
     // rest are.
     if (
@@ -1675,6 +1680,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       plotType: () => this.currentPlotType,
       zIndex: () => this.currentZIndex,
       planes: () => (this.plottedInfo?.isStack ? null : (this.datasetRegionSet?.planes ?? null)),
+      slicePlanes: () => this.datasetRegionSet?.planes ?? null,
+      viewChanged$: this.spatialViewChanged$.asObservable(),
     });
     return this.spatialFacade.controls;
   }
@@ -1684,6 +1691,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** Displayed slice. Only a volume-backed spatial dataset reads it, to keep a
    *  region drawn over one section from selecting the whole depth behind it. */
   private currentZIndex = 0;
+  /** The slice shown, the plot type or the dataset's planes changed (the spatial controls recount). */
+  private readonly spatialViewChanged$ = new Subject<void>();
 
   /** Angular calls this when the injector providing the router is destroyed — the host
    *  component for a `provideVisualization()` chain. The dataset subscription would

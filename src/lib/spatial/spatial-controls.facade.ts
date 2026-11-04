@@ -1,10 +1,24 @@
-import type { Cells3dStatus } from '../contracts/display-types';
-import { firstValueFrom, Observable, of, Subscription } from 'rxjs';
+import type { Cells3dStatus, TranscriptsInSelection } from '../contracts/display-types';
+import {
+  debounceTime,
+  defer,
+  distinctUntilChanged,
+  EMPTY,
+  firstValueFrom,
+  map,
+  merge,
+  Observable,
+  of,
+  Subscription,
+  switchMap,
+  tap,
+} from 'rxjs';
 
 import { PlotType, isSpatialOmics3d } from '../contracts/plot-type';
 import { SpatialDataPort } from '../contracts/ports/spatial-data.port';
 import { SpatialColorBy } from '../contracts/display-types';
 import {
+  CategoricalColumnMeta,
   SpatialDataset,
   SpatialObservations,
   SpatialSelectionMask,
@@ -25,7 +39,19 @@ import {
   selectInClassVolumes,
   selectInRegions,
   selectInRegionsProjected,
+  regionShapes,
 } from './spatial-selection';
+import { cellTypeColumnFor, typicalCellDiameter } from './lod';
+import { planeBand } from './spatial-planes';
+import {
+  CELL_REACH_MICRONS,
+  cellsOfCategories,
+  countTranscripts,
+  tileBudget,
+  tilesAroundCells,
+  tilesUnderShapes,
+  type TranscriptFilter,
+} from './transcripts-in-selection';
 
 /** The renderer-side spatial readouts the controls surface (the napari-js backend). */
 export interface SpatialRendererFeeds {
@@ -58,7 +84,18 @@ export interface SpatialControlsContext {
    * `getDatasetPlanes$`): the slice is then one of them, and a region selects within it. Optional.
    */
   planes?(): readonly number[] | null;
+  /**
+   * The dataset region set's planes (its `sliceZ`), whether or not they slice the image (a stack of
+   * as many planes is sliced by its own slices): the 2D view shows plane `zIndex()`'s transcripts.
+   * Optional.
+   */
+  slicePlanes?(): readonly number[] | null;
+  /** Emits when the plot type, the slice shown or the dataset's planes change. Optional. */
+  readonly viewChanged$?: Observable<unknown>;
 }
+
+/** Where the selection the transcript list counts comes from. */
+type SelectionSource = 'cells' | 'types' | 'regions';
 
 /**
  * The spatial-omics controls (`ISpatialControls`) over a host's `SPATIAL_DATA_PORT`.
@@ -129,6 +166,223 @@ export class SpatialControlsFacade {
     return eligible ? 'class-volumes' : 'regions';
   }
 
+  /**
+   * The transcripts of the selection, by gene, counted again whenever what they depend on changes.
+   * The selection is the latest of three, as the user made them: the selected cells (a cell clicked,
+   * a legend group, a brush), the classes picked in the region editor (in spatial 3D the cell types
+   * of the type surfaces), or the regions selected on the image (2D only). Clearing the latest goes
+   * back to the one before, when it still stands.
+   */
+  private transcriptsInSelection$(): Observable<TranscriptsInSelection> {
+    const { ctx } = this;
+    return defer(() => {
+      let active: SelectionSource[] = [];
+      const track = (source: SelectionSource, on: boolean) => {
+        active = active.filter((s) => s !== source);
+        if (on) active.push(source);
+      };
+      const view = ctx.store.getSpatialView$().pipe(
+        map((v) => `${v.transcriptQuality}|${v.cellTypeColumn ?? ''}`),
+        distinctUntilChanged(),
+      );
+      return merge(
+        // On subscribing, the three come in this order: of those standing, the cells come last
+        // (the most specific).
+        ctx.regionStore.getSelectedShapeIndices$().pipe(tap((i) => track('regions', i.length > 0))),
+        ctx.regionStore.getPickedClasses$().pipe(tap((c) => track('types', c.length > 0))),
+        ctx.selectionStore.getSelection$().pipe(tap((sel) => track('cells', sel.count > 0))),
+        ctx.regionStore.getRegionUpdateEvent(),
+        ctx.viewChanged$ ?? EMPTY,
+        view,
+        this.port.getDataset$(),
+      ).pipe(
+        debounceTime(150),
+        switchMap(() => this.countSelection(active.slice())),
+      );
+    });
+  }
+
+  /** {@link transcriptsOf} as a stream: `loading`, then the list; unsubscribing abandons it. */
+  private countSelection(active: readonly SelectionSource[]): Observable<TranscriptsInSelection> {
+    return new Observable<TranscriptsInSelection>((sub) => {
+      let cancelled = false;
+      this.transcriptsOf(
+        active,
+        (state) => {
+          if (!cancelled) sub.next(state);
+        },
+        () => cancelled,
+      )
+        .then((state) => {
+          if (cancelled) return;
+          sub.next(state);
+          sub.complete();
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          sub.next({ state: 'error', message: `The transcripts could not be counted: ${err?.message ?? err}` });
+          sub.complete();
+        });
+      return () => {
+        cancelled = true;
+      };
+    });
+  }
+
+  /**
+   * Count the transcripts of the latest selection in `active` (see {@link transcriptsInSelection$}):
+   * through the whole volume in spatial 3D, on the plane shown in 2D when the dataset's planes slice
+   * it.
+   */
+  private async transcriptsOf(
+    active: readonly SelectionSource[],
+    progress: (state: TranscriptsInSelection) => void,
+    cancelled: () => boolean,
+  ): Promise<TranscriptsInSelection> {
+    const dataset = this.dataset;
+    const meta = dataset?.transcriptTiles;
+    if (!dataset || !meta) return { state: 'empty', message: 'This dataset has no transcripts.' };
+    const is3d = isSpatialOmics3d(this.ctx.plotType());
+    const planes = !is3d && meta.hasZ ? (this.ctx.slicePlanes?.() ?? null) : null;
+    const sliced = planes && planes.length > 1 ? planes : null;
+    const k = sliced ? Math.max(0, Math.min(sliced.length - 1, this.ctx.zIndex())) : 0;
+    const plane = sliced ? { index: k, count: sliced.length } : null;
+    const band = sliced ? planeBand(sliced, k) : null;
+    // Drawn regions are image shapes: they select on the image, in 2D.
+    const eligible = active.filter((s) => !is3d || s !== 'regions');
+    const source = eligible[eligible.length - 1] ?? null;
+    if (!source) {
+      return {
+        state: 'empty',
+        plane,
+        message: is3d
+          ? 'Select a cell, or pick a cell type, to list the transcripts in it.'
+          : `Select a cell or a region${sliced ? ' on this plane' : ''} to list the transcripts in it.`,
+      };
+    }
+
+    const obs = dataset.observations;
+    const quality = this.ctx.store.currentSpatialView().transcriptQuality === 'all' ? 'all' : 'high';
+    const imageRef =
+      dataset.volume && !dataset.imageRef
+        ? volumeImageRef(dataset.volume, dataset.micronsPerUnit)
+        : dataset.imageRef;
+    let scope: 'cells' | 'types' | 'regions' = source;
+    let label: string;
+    let filter: TranscriptFilter;
+    let tiles: { tiles: { level: number; gx: number; gy: number }[]; partial: boolean };
+
+    const cellsTarget = async (): Promise<{ mask: Uint8Array; count: number; label: string } | null> => {
+      if (source === 'cells') {
+        const sel = this.ctx.selectionStore.current();
+        if (!sel.count) return null;
+        let first = -1;
+        if (sel.count === 1) first = sel.mask.indexOf(1);
+        const name = first >= 0 ? (obs.ids?.[first] ?? String(first)) : null;
+        return {
+          mask: sel.mask,
+          count: sel.count,
+          label: name !== null ? `Cell ${name}` : `${sel.count.toLocaleString()} selected cells`,
+        };
+      }
+      const classes = this.ctx.regionStore.getPickedClasses();
+      const column = this.cellTypeColumnOf(dataset, classes);
+      if (!column) return null;
+      const loaded = await this.port.getColumn(column);
+      if (!isCategoricalColumn(loaded)) return null;
+      const cells = cellsOfCategories(loaded.codes, loaded.meta.categories, classes);
+      if (!cells.count) return null;
+      const names =
+        classes.length > 3 ? `${classes.slice(0, 3).join(', ')} +${classes.length - 3}` : classes.join(', ');
+      return { ...cells, label: `${classes.length > 1 ? 'Cell types' : 'Cell type'}: ${names}` };
+    };
+
+    const cells = source === 'regions' ? null : await cellsTarget();
+    if (cancelled()) return { state: 'loading' };
+    if (cells) {
+      label = cells.label;
+      filter = { kind: 'cells', mask: cells.mask };
+      tiles = tilesAroundCells(
+        obs,
+        cells.mask,
+        this.cellReach(dataset),
+        meta.levels,
+        meta.bounds,
+        tileBudget(meta),
+      );
+    } else {
+      // Picked classes that are no cell type: in 2D, the regions of those classes on the plane.
+      if (source === 'types' && is3d) {
+        return {
+          state: 'empty',
+          message: 'The picked classes are not cell types of this dataset: select a cell to list its transcripts.',
+        };
+      }
+      const regions = this.ctx.regionStore.getRegions();
+      let chosen: typeof regions;
+      if (source === 'regions') {
+        chosen = this.ctx.regionStore
+          .getSelectedShapeIndices()
+          .map((i) => regions[i])
+          .filter((r) => !!r);
+        label = `${chosen.length} selected region${chosen.length === 1 ? '' : 's'}`;
+      } else {
+        const classes = new Set(this.ctx.regionStore.getPickedClasses());
+        chosen = regions.filter((r) => !!r.label && classes.has(r.label));
+        label = `Class: ${[...classes].join(', ')}`;
+      }
+      const shapes = chosen.flatMap((r) => regionShapes(r));
+      if (!shapes.length) {
+        return {
+          state: 'empty',
+          plane,
+          message:
+            source === 'regions'
+              ? 'The selected regions enclose no area.'
+              : `No region of those classes${sliced ? ' on this plane' : ''}.`,
+        };
+      }
+      scope = 'regions';
+      filter = { kind: 'shapes', shapes, imageRef };
+      tiles = tilesUnderShapes(shapes, imageRef, meta.levels, meta.bounds, tileBudget(meta));
+    }
+
+    progress({ state: 'loading', scope, label, plane });
+    const count = await countTranscripts({
+      port: this.port,
+      tiles: tiles.tiles,
+      quality,
+      filter,
+      band,
+      names: meta.genes ?? null,
+      cancelled,
+      partial: tiles.partial,
+    });
+    if (!count) return { state: 'loading' };
+    return { state: 'ready', scope, label, plane, ...count };
+  }
+
+  /**
+   * The categorical column the picked classes are cell types of: the dataset's cell-type column
+   * when it holds any of them, else the first categorical column that does; null when none does.
+   */
+  private cellTypeColumnOf(dataset: SpatialDataset, classes: readonly string[]): string | null {
+    if (!classes.length) return null;
+    const categorical = dataset.columns.filter((c): c is CategoricalColumnMeta => c.kind === 'categorical');
+    const holds = (c: CategoricalColumnMeta) => classes.some((name) => c.categories.includes(name));
+    const preferred = cellTypeColumnFor(dataset, this.ctx.store.currentSpatialView());
+    const first = categorical.find((c) => c.name === preferred && holds(c)) ?? categorical.find(holds);
+    return first?.name ?? null;
+  }
+
+  /** How far from a cell's centre its transcripts are looked for, in observation units. */
+  private cellReach(dataset: SpatialDataset): number {
+    const ref = dataset.imageRef;
+    const micronsPerUnit = dataset.micronsPerUnit ?? (ref?.mppX ? ref.mppX * (ref.scale?.[0] ?? 1) : undefined);
+    if (micronsPerUnit && micronsPerUnit > 0) return CELL_REACH_MICRONS / micronsPerUnit;
+    return typicalCellDiameter(dataset.observations.radius) * 3;
+  }
+
   private build(): ISpatialControls {
     const port = this.port;
     return {
@@ -181,6 +435,7 @@ export class SpatialControlsFacade {
       getDensityStats$: () => this.ctx.napari.densityStats$.asObservable(),
       getGeneFilterFailed$: () => this.ctx.napari.geneFilterFailed$?.asObservable() ?? of(false),
       getCells3dStatus$: () => this.ctx.napari.cells3dStatus$?.asObservable() ?? of(null),
+      ...(port.getTranscriptTile ? { getTranscriptsInSelection$: () => this.transcriptsInSelection$() } : {}),
       categoryColors: async (name: string) => {
         const column = await port.getColumn(name);
         if (!isCategoricalColumn(column)) {

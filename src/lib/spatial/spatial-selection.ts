@@ -73,12 +73,12 @@ export function pointInRing(xs: readonly number[], ys: readonly number[], px: nu
   return ringContainsPoint(px, py, xs, ys);
 }
 
-function inBounds(b: Bounds, px: number, py: number): boolean {
+export function inBounds(b: Bounds, px: number, py: number): boolean {
   return px >= b.minX && px <= b.maxX && py >= b.minY && py <= b.maxY;
 }
 
 /** A region flattened to something testable: bounds + a hit test. */
-interface Shape {
+export interface Shape {
   bounds: Bounds;
   hit(px: number, py: number): boolean;
 }

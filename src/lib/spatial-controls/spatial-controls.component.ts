@@ -20,12 +20,18 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { SliderModule } from 'primeng/slider';
 import { DialogModule } from 'primeng/dialog';
 import { TooltipModule } from 'primeng/tooltip';
-import { combineLatest } from 'rxjs';
+import { combineLatest, Subscription } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { Cells3dStatus, ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import {
+  Cells3dStatus,
+  ColormapNode,
+  SpatialViewState,
+  DEFAULT_SPATIAL_VIEW,
+  TranscriptsInSelection,
+} from '../contracts/display-types';
 import { datasetRegionSet } from '../visualizer/spatial-region-set';
 import { PanelOption, parseGeneGroups } from '../spatial/spatial-panel-model';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
@@ -196,6 +202,7 @@ export class SpatialControlsComponent implements OnInit {
     if (!this.controls) return;
 
     const untilDestroyed = <T>() => takeUntilDestroyed<T>(this.destroyRef);
+    this.destroyRef.onDestroy(() => this.selectionTranscriptsSub?.unsubscribe());
     this.controls
       .getDataset$()
       .pipe(untilDestroyed())
@@ -433,15 +440,18 @@ export class SpatialControlsComponent implements OnInit {
   }
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
-  protected open: Record<'images' | 'volume' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> =
-    {
-      images: false,
-      volume: false,
-      cells: true,
-      transcripts: false,
-      annotations: false,
-      observations: false,
-    };
+  protected open: Record<
+    'images' | 'volume' | 'cells' | 'transcripts' | 'selectionTranscripts' | 'annotations' | 'observations',
+    boolean
+  > = {
+    images: false,
+    volume: false,
+    cells: true,
+    transcripts: false,
+    selectionTranscripts: false,
+    annotations: false,
+    observations: false,
+  };
 
   protected toggleSection(name: keyof SpatialControlsComponent['open']): void {
     this.setOpen(name, !this.open[name]);
@@ -450,6 +460,60 @@ export class SpatialControlsComponent implements OnInit {
   /** Expand or collapse a section — what a panel's header asks for. */
   protected setOpen(name: keyof SpatialControlsComponent['open'], on: boolean): void {
     this.open = { ...this.open, [name]: on };
+    if (name === 'selectionTranscripts') this.watchSelectionTranscripts(on);
+  }
+
+  // ── Transcripts in selection ──────────────────────────────────────────
+
+  /** The selection's transcripts by gene (null until the section is first opened). */
+  protected selectionTranscripts: TranscriptsInSelection | null = null;
+  private selectionTranscriptsSub: Subscription | null = null;
+
+  /** The list can be shown: the dataset's transcripts are tiled, and the controls count them. */
+  protected get hasSelectionTranscripts(): boolean {
+    return !!this.dataset?.transcriptTiles && !!this.controls?.getTranscriptsInSelection$;
+  }
+
+  /** The largest gene count, for the bars. */
+  protected get selectionTranscriptsMax(): number {
+    return this.selectionTranscripts?.genes?.[0]?.count ?? 0;
+  }
+
+  /**
+   * Count while the section is open, only: the counts read the finest transcript tiles of the
+   * selection, which is not free on a large one.
+   */
+  private watchSelectionTranscripts(on: boolean): void {
+    this.selectionTranscriptsSub?.unsubscribe();
+    this.selectionTranscriptsSub = null;
+    if (!on) return;
+    const list$ = this.controls?.getTranscriptsInSelection$?.();
+    if (!list$) return;
+    this.selectionTranscriptsSub = list$.subscribe((state) =>
+      this.runAndMark(() => {
+        // Keep the last list on screen while the next one loads, so it does not flicker.
+        this.selectionTranscripts =
+          state.state === 'loading' && this.selectionTranscripts?.state === 'ready'
+            ? {
+                ...this.selectionTranscripts,
+                state: 'loading',
+                label: state.label ?? this.selectionTranscripts.label,
+              }
+            : state;
+      }),
+    );
+  }
+
+  /** The list as tab-separated text (gene, count), for a spreadsheet. */
+  protected copySelectionTranscripts(): void {
+    const list = this.selectionTranscripts;
+    if (!list?.genes?.length) return;
+    const text = ['gene\ttranscripts', ...list.genes.map((g) => `${g.name}\t${g.count}`)].join('\n');
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  }
+
+  protected trackGene(_i: number, g: { name: string }): string {
+    return g.name;
   }
 
   // ── renderer readouts, for the Transcripts section ────────────────────

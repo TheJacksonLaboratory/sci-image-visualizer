@@ -60,6 +60,16 @@ file was added.
   cell clicked, a type picked), what it leaves out fades as a picked region fades the others: the
   cell types' surfaces none of it is in, and the individual cells it leaves out, each keeping its
   colour, while the rest come forward. A whole type is selected as before, with the selection tool.
+- **Transcripts in selection.** A new section of the spatial panel lists the transcripts of what is
+  selected, by gene, most frequent first, with their total, the cells they lie in and a bar each (and a
+  copy button, tab-separated). In spatial 3D they are those of the selected cell (or cells), or of
+  every cell of the cell type picked on the canvas, through the whole volume; in the 2D view of a
+  sliced dataset, only those on the plane shown, of the selected cells or inside the selected regions
+  (or the regions of the picked class). The latest of those selections counts; clearing it goes back to
+  the one before. Read from the finest transcript tiles, every gene, and only the tiles the selection
+  touches (each molecule names its cell); about 20 M transcripts at most, the list saying when it is a
+  lower bound. Counted only while the section is open, again as the selection, the regions or the
+  plane change (`ISpatialControls.getTranscriptsInSelection$`, `TranscriptsInSelection`).
 
 ### Fixed
 

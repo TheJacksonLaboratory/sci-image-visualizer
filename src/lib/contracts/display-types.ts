@@ -97,6 +97,32 @@ export interface Cells3dStatus {
   building: boolean;
 }
 
+/**
+ * The transcripts of what is selected, by gene (the spatial dialog's "Transcripts in selection"):
+ * in spatial 3D those of the selected cells, or of the cells of the picked cell types, through the
+ * whole volume; in the 2D view of a sliced dataset only those on the plane shown, of the selected
+ * cells or inside the selected regions.
+ */
+export interface TranscriptsInSelection {
+  /** `empty`: nothing selected (or nothing it applies to); `loading`; `ready`; `error`. */
+  state: 'empty' | 'loading' | 'ready' | 'error';
+  /** What the counts are of: selected cells, the cells of picked types, or drawn regions. */
+  scope?: 'cells' | 'types' | 'regions';
+  /** The selection, for the heading ("Cell 1234", "Cell type: Goblet", "2 regions"). */
+  label?: string;
+  /** The plane counted (2D, a sliced dataset): its index and how many there are. */
+  plane?: { index: number; count: number } | null;
+  total?: number;
+  /** Distinct cells the counted transcripts lie in. */
+  cells?: number;
+  /** Genes by count, most first. */
+  genes?: { name: string; count: number }[];
+  /** The selection spans more of the section than is read: the counts are a lower bound. */
+  partial?: boolean;
+  /** Why the list is empty, or what failed. */
+  message?: string;
+}
+
 export interface SpatialViewState {
   /** Colour source; `null` renders every observation in one neutral colour
    *  (useful on its own — it shows where the tissue actually is). */
