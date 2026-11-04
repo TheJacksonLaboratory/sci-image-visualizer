@@ -23,6 +23,7 @@ import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { observationsOnPlane, planeBand } from '../../spatial/spatial-planes';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
+import { cellsShown } from '../../spatial/lod';
 import { observationGeneMask, observationGeneStyle } from '../../spatial/spatial-gene-filter';
 import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 import { computeExpressionFieldAsync } from '../../workers/spatial-math';
@@ -232,13 +233,13 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
   }
 
   /**
-   * Whether the markers are drawn: whenever the user wants them, at every zoom. Cell outlines come
-   * and go with the zoom (their level of detail follows it) and are drawn over the markers; the
-   * observations themselves never disappear with them.
+   * Whether the markers are drawn: while the user wants them, at every zoom, and not while the
+   * cells are — the observations are shown as their markers or as their cells, one or the other.
    */
   private pointsVisible(): boolean {
-    const view = this.session.latest?.[1];
-    return view?.showPoints ?? true;
+    const [dataset, view] = this.session.latest ?? [];
+    if (!(view?.showPoints ?? true)) return false;
+    return !(view && dataset && cellsShown(dataset, view));
   }
 
   /**

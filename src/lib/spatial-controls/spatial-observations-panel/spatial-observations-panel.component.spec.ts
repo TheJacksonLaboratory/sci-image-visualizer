@@ -261,12 +261,12 @@ describe('SpatialObservationsPanelComponent', () => {
     });
   });
 
-  it('asks to open from its header, which has no switch of its own', async () => {
+  it('asks to open from its header, whose switch shows the observations without opening it', async () => {
     await build({ open: false });
     const root = fixture.nativeElement as HTMLElement;
     const asked: boolean[] = [];
     component.openChange.subscribe((on) => asked.push(on));
-    expect(one(panelNamed(root, 'Observations'), '.sc-panel-head').querySelector('p-checkbox')).toBeNull();
+    expect(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox')).toBeTruthy();
     (one(panelNamed(root, 'Observations'), '.sc-panel-head') as HTMLElement).click();
     expect(asked).toEqual([true]);
     expect(root.querySelector('.sc-panel-body')).toBeNull();
@@ -275,11 +275,10 @@ describe('SpatialObservationsPanelComponent', () => {
   describe('shown, and as what', () => {
     const CELLS = { ...dataset, polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [] } } as SpatialDataset;
 
-    it('without cells: one switch for the markers, and their display', async () => {
+    it('without cells: the header switch shows the markers; no toggle', async () => {
       await build({ open: true });
       const root = fixture.nativeElement as HTMLElement;
-      expect(root.querySelector('.sc-show-as p-selectButton')).toBeNull();
-      expect(root.querySelector('.sc-show-as p-checkbox')).toBeTruthy();
+      expect(root.querySelector('.sc-show-as')).toBeNull();
       expect(root.textContent).toContain('Point size');
       component['onShowObservations'](false);
       expect(view$.value.showPoints).toBe(false);
@@ -287,7 +286,7 @@ describe('SpatialObservationsPanelComponent', () => {
       expect(view$.value.showPoints).toBe(true);
     });
 
-    it('with cells: shown as the cells by default, else as the markers, and hidden as either', async () => {
+    it('with cells: the markers OR the cells, as toggled; the header switch shows that one, or none', async () => {
       dataset$.next(CELLS);
       await build({ open: true, cellsAvailable: true });
       const root = fixture.nativeElement as HTMLElement;
@@ -301,25 +300,18 @@ describe('SpatialObservationsPanelComponent', () => {
       fixture.detectChanges();
       expect(root.textContent).toContain('Point size');
 
-      // Hidden: neither drawn; shown again as what was chosen.
+      // Unchecked: none drawn; checked again, the one toggled.
       component['onShowObservations'](false);
       expect(view$.value).toEqual(expect.objectContaining({ showPoints: false, showCells: false }));
       expect(component['observationsShown']).toBe(false);
       expect(component['shownAs']).toBe('markers');
+      component['onShownAs']('cells');
+      // Toggled while hidden: nothing drawn until checked.
+      expect(view$.value).toEqual(expect.objectContaining({ showPoints: false, showCells: false }));
       component['onShowObservations'](true);
-      expect(view$.value).toEqual(expect.objectContaining({ showPoints: true, showCells: false }));
-
-      // As the cells in 2D: the markers stay under them, the dots of cells too small to outline.
-      component['onShownAs']('cells');
+      // The cells; the markers stay switched on, and the renderers draw none under the cells.
       expect(view$.value).toEqual(expect.objectContaining({ showPoints: true, showCells: true }));
-    });
-
-    it('in 3D, the cells alone', async () => {
-      dataset$.next(CELLS);
-      await build({ open: true, cellsAvailable: true, is3d: true });
-      component['onShownAs']('markers');
-      component['onShownAs']('cells');
-      expect(view$.value).toEqual(expect.objectContaining({ showPoints: false, showCells: true }));
+      expect(component['shownAs']).toBe('cells');
     });
   });
 });

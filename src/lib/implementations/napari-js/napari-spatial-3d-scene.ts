@@ -2,6 +2,7 @@ import { boxRadius, keepSceneInDepth } from './napari-camera-depth';
 import { RegionMeshPointer } from './napari-region-mesh-pointer';
 import { placeInWorker } from '../../region-source/worker-region-source';
 import { cellTypeColumnFor } from '../../spatial/lod';
+import { datasetRegionSet } from '../../visualizer/spatial-region-set';
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
 import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
@@ -892,8 +893,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       cloud.opacity = view.opacity;
       this.applySelection(cloud, selection, shown, obs.count);
     }
-    // Last, so it also covers a layer this pass just created.
-    if (this.points) this.points.visible = view.showPoints;
+    // Last, so it also covers a layer this pass just created. Not while the cells (a 3D
+    // segmentation's) are drawn: the observations are shown as their markers or as their cells.
+    if (this.points)
+      this.points.visible = view.showPoints && !(datasetRegionSet(dataset) && view.showCells !== false);
     viewer.requestRender();
   }
 

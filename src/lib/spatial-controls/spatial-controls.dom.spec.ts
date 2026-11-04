@@ -329,13 +329,13 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(panelNamed(root, 'Observations').querySelector('spatial-cells-panel')).toBeNull();
       expect(panelNamed(root, 'Observations').textContent).toContain('Point size');
 
-      // The switch hides them, either way.
-      emit(one(panelNamed(root, 'Observations'), '.sc-show-as p-checkbox'), 'onChange', { checked: false });
+      // The section's header switch hides them, either way, and shows the one toggled.
+      emit(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showPoints: false, showCells: false });
       pick(one(panelNamed(root, 'Observations'), '.sc-show-as p-selectButton'), 'cells');
       expect(lastWrite()).toEqual({ showPoints: false, showCells: false });
-      emit(one(panelNamed(root, 'Observations'), '.sc-show-as p-checkbox'), 'onChange', { checked: true });
-      expect(lastWrite()).toEqual({ showCells: true, showPoints: true });
+      emit(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: true });
+      expect(lastWrite()).toEqual({ showPoints: true, showCells: true });
     });
 
     it('writes the boundaries', async () => {
@@ -741,12 +741,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
   describe('Observations', () => {
     it('writes the show switch, the colour source and the display sliders', async () => {
       await build();
-      // No switch on the section itself: the observations' is the Show as row's.
-      expect(panelNamed(root, 'Observations').querySelector('.sc-panel-head p-checkbox')).toBeNull();
+      // The section's header switch shows or hides the observations, as toggled.
       const panel = await openMarkers();
-      emit(one(panel, '.sc-show-as p-checkbox'), 'onChange', { checked: false });
+      emit(one(panel, '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showPoints: false, showCells: false });
-      emit(one(panelNamed(root, 'Observations'), '.sc-show-as p-checkbox'), 'onChange', { checked: true });
+      emit(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: true });
       expect(lastWrite()).toEqual({ showPoints: true, showCells: false });
 
       // A measurement colours the markers, and the cells with them.
@@ -825,9 +824,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       const opened = await openSection('Volume');
       emit(one(rowLabelled(opened, 'Opacity'), 'p-slider'), 'onChange', { value: 0.2 });
       expect(lastWrite()).toEqual({ volumeOpacity: 0.2 });
-      // The cloud is the Observations' own Show switch: no second one here.
+      // The cloud is the Observations section's own header switch: no second one here.
       expect(root.querySelector('p-checkbox[label="Observations"]')).toBeNull();
-      emit(one(await openSection('Observations'), '.sc-show-as p-checkbox'), 'onChange', { checked: false });
+      emit(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showPoints: false });
       view({ showPoints: true });
       emit(one(root, 'p-checkbox[label="One section at a time"]'), 'onChange', { checked: true });

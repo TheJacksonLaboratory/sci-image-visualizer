@@ -129,18 +129,19 @@ file was added.
   start hidden until it is switched on. Selecting from the regions still works while they are hidden.
 
 - **Observations: shown as Markers or Cell segmentations, with one colouring for both.** In the
-  spatial-omics dialog the Observations section starts with a "Show as" row: a switch that shows or
-  hides the observations, and, for a dataset with a cell segmentation, a Markers / Cell segmentations
-  toggle (in 2D the markers stay under the cells, as the dots of cells too small to outline). Below
-  it, one "Colour by" colours the markers and the cells alike, so they cannot disagree: Group (the
-  groups list that was the Cells section's: grouping picker, each group's colour and switch, and now
-  a group's name selects its observations, as the key's rows did), Gene, Measurement (a numeric
-  column) or Single colour. Each writes `colorBy` and the cells' `cellColorMode` together.
-  `cellColorMode` gains `column` (the cells coloured by the numeric column `colorBy` names), and
-  while `colorBy` is null with `cellColorMode` `single`, the markers take `cellSingleColor` too. A
-  segmented dataset's markers now start coloured by its cells' grouping. The markers' size and
-  opacity, or the cells' boundaries, drawing and opacity, follow for the one shown; the Cells
-  section, its "Cell Color" and the separate colour-by-column and colour-by-gene pickers are gone.
+  spatial-omics dialog the Observations section's header switch shows or hides the observations
+  again. For a dataset with a cell segmentation, a "Show as" toggle picks Markers OR Cell
+  segmentations, and the switch shows the one toggled, or none. The renderers draw no markers while
+  the cells are drawn (2D and 3D), so the two never show at once. Below the toggle, one "Colour by"
+  colours the markers and the cells alike, so they cannot disagree: Group (the groups list that was
+  the Cells section's: grouping picker, each group's colour and switch, and now a group's name
+  selects its observations, as the key's rows did), Gene, Measurement (a numeric column) or Single
+  colour. Each writes `colorBy` and the cells' `cellColorMode` together. `cellColorMode` gains
+  `column` (the cells coloured by the numeric column `colorBy` names), and while `colorBy` is null
+  with `cellColorMode` `single`, the markers take `cellSingleColor` too. A segmented dataset's
+  markers now start coloured by its cells' grouping. The markers' size and opacity, or the cells'
+  boundaries, drawing and opacity, follow for the one shown; the Cells section, its "Cell Color" and
+  the separate colour-by-column and colour-by-gene pickers are gone.
 
 - **The reference volume is a section of the spatial panel in 3D: Volume.** In the Images section's
   place (Images is 2D's), its header switch shows and hides the volume and its body holds the

@@ -3,23 +3,24 @@
      colours them. The lead section for datasets without cell outlines. -->
   <div class="sc-panel" [class.open]="open">
     <div class="sc-panel-head" (click)="openChange.emit(!open)">
+      <!-- Shows or hides the observations, as whichever the toggle below shows them as. -->
+      <p-checkbox
+        [binary]="true"
+        [ngModel]="observationsShown"
+        (click)="$event.stopPropagation()"
+        (onChange)="onShowObservations($event.checked)"
+        pTooltip="Show the observations"
+        tooltipPosition="top"
+      ></p-checkbox>
       <span class="sc-panel-title">Observations</span>
       <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
     </div>
     <div class="sc-panel-body" *ngIf="open">
-      <!-- Shown, and as what: the markers, or (with a cell segmentation) the cells' own shapes.
+      <!-- With a cell segmentation: shown as the markers OR as the cells' own shapes, one at a time.
            One colouring for either, below. -->
-      <div class="sc-row sc-show-as">
-        <p-checkbox
-          [binary]="true"
-          [ngModel]="observationsShown"
-          (onChange)="onShowObservations($event.checked)"
-          [label]="cellsAvailable ? 'Show as' : 'Show markers'"
-          pTooltip="Show the observations"
-          tooltipPosition="top"
-        ></p-checkbox>
+      <div class="sc-row sc-show-as" *ngIf="cellsAvailable">
+        <span class="sc-lbl">Show as</span>
         <p-selectButton
-          *ngIf="cellsAvailable"
           [options]="showAsOptions"
           optionLabel="label"
           optionValue="value"
@@ -162,9 +163,6 @@
 
       <!-- Cell segmentations: how the cells are drawn, projected by the dialog. -->
       <ng-container *ngIf="cellsAvailable && shownAs === 'cells'">
-        <small class="sc-hint" *ngIf="!is3d">
-          Zoomed out, where cells are too small to outline, each is drawn as a dot in its colour.
-        </small>
         <ng-content select="spatial-cells-panel"></ng-content>
       </ng-container>
 

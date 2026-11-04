@@ -153,8 +153,8 @@ export class SpatialObservationsPanelComponent implements OnChanges {
     return this.view.showPoints || this.cellsOn;
   }
 
-  /** What the observations are shown as: the cells while they are drawn, else the markers (or,
-   *  hidden, what was last chosen). */
+  /** What the observations are shown as (the toggle): the cells while they are drawn, else the
+   *  markers, or, hidden, what was last chosen. */
   protected get shownAs(): 'markers' | 'cells' {
     if (!this.cellsAvailable) return 'markers';
     if (this.cellsOn) return 'cells';
@@ -175,16 +175,16 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   }
 
   /**
-   * Draw the observations as markers (the cells hidden), or as the cells. In 2D the markers stay
-   * under the cells: zoomed out, where a cell is too small to outline, its dot draws it.
+   * Draw the observations as the markers, or as the cells: one or the other, never both (the
+   * renderers draw no markers while the cells are drawn). The markers stay switched on under the
+   * cells, so a view without them (spatial 3D of a 2D segmentation) still shows the markers.
    */
   private showAs(as: 'markers' | 'cells'): void {
     this.chosenShownAs = as;
-    if (as === 'markers' || !this.cellsAvailable) {
-      this.controls?.setViewState({ showPoints: true, ...(this.cellsAvailable ? { showCells: false } : {}) });
-      return;
-    }
-    this.controls?.setViewState({ showCells: true, showPoints: !this.is3d });
+    this.controls?.setViewState({
+      showPoints: true,
+      ...(this.cellsAvailable ? { showCells: as === 'cells' } : {}),
+    });
   }
 
   // ── which observations are drawn ────────────────────────────────────────

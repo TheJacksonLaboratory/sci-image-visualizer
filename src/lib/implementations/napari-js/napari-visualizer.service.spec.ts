@@ -3567,7 +3567,23 @@ describe('NapariVisualizerService', () => {
       return addPoints.mock.results.at(-1)?.value;
     }
 
-    it('draws the markers at every zoom: never under the screen floor, and still shown under cell outlines', async () => {
+    it('draws no markers while the cells are drawn: the observations are one or the other', async () => {
+      const cells = {
+        ...spatialDataset(),
+        polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [{ name: 'cell', label: 'Cells' }] },
+      } as unknown as SpatialDataset;
+      const layer = await mount(cells);
+      // Cells drawn automatically for data that has them: no markers.
+      expect(layer.visible).toBe(false);
+      store.setSpatialView({ showCells: false });
+      await flush();
+      expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(true);
+      store.setSpatialView({ showCells: true });
+      await flush();
+      expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(false);
+    });
+
+    it('draws the markers at every zoom: never under the screen floor, nor dropped as outlines come and go', async () => {
       const layer = await mount();
       expect(layer.minScreenSize).toBe(SPATIAL_MARKER_MIN_SCREEN_PX);
       expect(layer.visible).toBe(true);
@@ -3581,7 +3597,7 @@ describe('NapariVisualizerService', () => {
       expect((tiles as unknown as { outlinesShown: boolean }).outlinesShown).toBe(true);
       scene.polygonsShownChanged();
       expect(layer.visible).toBe(true);
-      // The Observations switch still hides them.
+      // The Observations switch hides them.
       store.setSpatialView({ showPoints: false });
       await flush();
       expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(false);
