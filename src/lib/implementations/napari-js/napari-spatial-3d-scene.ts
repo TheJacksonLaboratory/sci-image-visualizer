@@ -1,3 +1,4 @@
+import { cellTypeColumnFor } from '../../spatial/lod';
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
 import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
@@ -559,6 +560,47 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     return out;
   }
 
+  /** The region surface (a class) under a client position, or null. */
+  override pickRegion(clientX: number, clientY: number): { key: string; label?: string } | null {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    const mesh = this.regionMeshes.pickAt(clientX - rect.left, clientY - rect.top);
+    return mesh ? { key: mesh.key, ...(mesh.label ? { label: mesh.label } : {}) } : null;
+  }
+
+  /**
+   * With a selection, grey out the class surfaces none of it is in (a class is a category of the
+   * cell-type column: a 3D segmentation's cell type), as the observations it leaves out are muted.
+   */
+  private async muteRegions(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    const request = ++this.muteRequest;
+    if (!selection.count || !this.cellLookup) {
+      this.regionMeshes.setMuted([]);
+      return;
+    }
+    const name = cellTypeColumnFor(dataset, view);
+    const col = name ? await this.cellLookup.codes(name).catch(() => null) : null;
+    if (request !== this.muteRequest) return;
+    if (!col || col.meta.kind !== 'categorical') {
+      this.regionMeshes.setMuted([]);
+      return;
+    }
+    const selected = new Set<number>();
+    for (let i = 0; i < selection.mask.length; i++) if (selection.mask[i]) selected.add(col.codes[i]);
+    const categories = col.meta.categories;
+    const keys = this.regionMeshes.shown.map((m) => m.key);
+    this.regionMeshes.setMuted(
+      keys.filter((k) => {
+        const code = categories.indexOf(k);
+        return code >= 0 && !selected.has(code);
+      }),
+    );
+  }
+  private muteRequest = 0;
+
   /** The observation of the individual cell drawn under a client position, or -1. */
   override pickCell(clientX: number, clientY: number): number {
     const rect = this.ctx.canvas.getBoundingClientRect();
@@ -723,6 +765,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     }
     this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
     void this.styleCells(dataset, view, selection);
+    void this.muteRegions(dataset, view, selection);
     // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
     await this.transcripts3d.sync(dataset, view, this.session.port, {
       origin: this.origin,

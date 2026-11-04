@@ -4,7 +4,8 @@ import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
 import { NO_CATEGORY, SpatialDataset, isCategoricalColumn } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState } from '../../contracts/display-types';
 import { sameSelection, selectByCategory, selectByIndices } from '../../spatial/spatial-selection';
-import { type HoverSource, hoverText } from '../../spatial/spatial-hover';
+import { type CellInfo, type HoverSource, cellText, cellTypeText, hoverText } from '../../spatial/spatial-hover';
+import { cellTypeColumnFor } from '../../spatial/lod';
 import { SpatialSelectionStore } from '../../store/spatial-selection.service';
 import { Supersede } from '../../util/supersede';
 import { NapariSpatialTooltip } from './napari-spatial-tooltip';
@@ -42,6 +43,8 @@ export interface SpatialHoverHost {
    * or -1: a click on one selects that cell rather than its class. Optional.
    */
   pickCell?(clientX: number, clientY: number): number;
+  /** The region surface (a class: a cell type's, in spatial 3D) under a client position, or null. Optional. */
+  pickRegion?(clientX: number, clientY: number): { key: string; label?: string } | null;
   /** The 2D transcript markers, which sit on top of everything and are asked first. */
   tiles(): NapariSpatialTileLayers | null;
   /** A region tool owns the pointer (placing a polygon vertex is also a still click). */
@@ -66,6 +69,10 @@ export class SpatialHover {
   /** What the markers are coloured by, resolved once per colour source rather than per hover. */
   private hoverSource: HoverSource | null = null;
   private hoverSourceKey: string | null = null;
+  /** In 3D: what a cell's tooltip says of it (its type, id, measurements), resolved once per dataset. */
+  private cellInfo: CellInfo | null = null;
+  private cellInfoKey: string | null = null;
+  private readonly cellInfoLoads = new Supersede();
   /** Latest wins within the scene: the KEY is only committed once a resolution lands, so a
    *  superseded fetch cannot leave the cache claiming to hold a source it never stored. */
   private readonly resolutions = new Supersede();
@@ -168,6 +175,7 @@ export class SpatialHover {
    * the pointer moved would be indefensible either way.
    */
   async resolveSource(dataset: SpatialDataset | null, view: SpatialViewState): Promise<void> {
+    if (this.host.is3d) void this.resolveCellInfo(dataset, view);
     const port = this.host.port;
     const colorBy = view.colorBy;
     const key = dataset && colorBy ? `${dataset.id}|${colorBy.kind}:${colorBy.name}` : null;
@@ -224,6 +232,64 @@ export class SpatialHover {
     }
   }
 
+  /**
+   * What a 3D cell's tooltip says (see `cellText`): the cell-type column's codes, the ids, and the
+   * dataset's first few continuous columns. Resolved once per dataset and type column; a failure
+   * leaves the tooltip with what the colouring says.
+   */
+  private async resolveCellInfo(dataset: SpatialDataset | null, view: SpatialViewState): Promise<void> {
+    const port = this.host.port;
+    const typeName = dataset ? cellTypeColumnFor(dataset, view) : null;
+    const key = dataset ? `${dataset.id}|${typeName ?? ''}` : null;
+    if (key === this.cellInfoKey) return;
+    this.cellInfoKey = key;
+    const task = this.cellInfoLoads.next();
+    if (!dataset || !port) {
+      this.cellInfo = null;
+      return;
+    }
+    try {
+      const type = typeName ? await port.getColumn(typeName) : null;
+      const measureNames = dataset.columns
+        .filter((c) => c.kind === 'continuous')
+        .map((c) => c.name)
+        .slice(0, 4);
+      const measures = (await Promise.all(measureNames.map((n) => port.getColumn(n).catch(() => null)))).flatMap(
+        (c) =>
+          c && !isCategoricalColumn(c)
+            ? [{ name: c.meta.name, values: c.values, ...(c.meta.unit ? { unit: c.meta.unit } : {}) }]
+            : [],
+      );
+      if (!task()) return;
+      const categorical = type && isCategoricalColumn(type) ? type : null;
+      let counts: Uint32Array | null = null;
+      if (categorical) {
+        counts = new Uint32Array(categorical.meta.categories.length);
+        for (const c of categorical.codes) if (c !== NO_CATEGORY && c < counts.length) counts[c]++;
+      }
+      this.cellInfo = {
+        typeName: categorical ? typeName : null,
+        categories: categorical?.meta.categories ?? [],
+        codes: categorical?.codes ?? null,
+        counts,
+        ...(dataset.observations.ids ? { ids: dataset.observations.ids } : {}),
+        measures,
+      };
+    } catch {
+      if (!task()) return;
+      this.cellInfo = null;
+      this.cellInfoKey = null;
+    }
+  }
+
+  /** In 3D: the tooltip of the cell, or of the cell type's surface, under a client position. */
+  private cell3dText(clientX: number, clientY: number): string[] | null {
+    if (!this.host.is3d) return null;
+    const cell = this.host.pickCell?.(clientX, clientY) ?? -1;
+    if (cell >= 0) return cellText(this.cellInfo, cell, this.hoverSource);
+    return null;
+  }
+
   /** Hit-test the last pointer position and show or hide the tooltip. */
   private update(el: HTMLElement): void {
     const tip = this.tooltip;
@@ -253,8 +319,19 @@ export class SpatialHover {
       }
     }
 
-    const hit = this.host.pick(pointer.clientX, pointer.clientY, HOVER_RADIUS_PX);
-    const lines = hoverText(this.hoverSource, hit);
+    // A cell drawn by itself names itself; a marker, its colouring; else a cell type's surface.
+    let lines = this.cell3dText(pointer.clientX, pointer.clientY);
+    if (!lines) {
+      const hit = this.host.pick(pointer.clientX, pointer.clientY, HOVER_RADIUS_PX);
+      lines =
+        hit >= 0 && this.host.is3d && this.cellInfo
+          ? cellText(this.cellInfo, hit, this.hoverSource)
+          : hoverText(this.hoverSource, hit);
+      if (!lines && this.host.is3d) {
+        const region = this.host.pickRegion?.(pointer.clientX, pointer.clientY);
+        if (region) lines = cellTypeText(this.cellInfo, region.key, region.label);
+      }
+    }
     if (!lines) {
       tip.hide();
       return;
@@ -284,6 +361,18 @@ export class SpatialHover {
       if (sameSelection(store.current(), next)) store.clear();
       else store.set(next);
       return;
+    }
+    // A cell type's surface (no marker in front): the click selects its cells (again: clears).
+    if (store && dataset && this.host.is3d && this.host.pick(clientX, clientY, HOVER_RADIUS_PX) < 0) {
+      const region = this.host.pickRegion?.(clientX, clientY);
+      const info = this.cellInfo;
+      const code = region && info?.codes ? info.categories.indexOf(region.key) : -1;
+      if (code >= 0 && info?.codes) {
+        const next = selectByCategory(info.codes, code);
+        if (sameSelection(store.current(), next)) store.clear();
+        else store.set(next);
+        return;
+      }
     }
     // Only a categorical source has classes to select. A gene is continuous:
     // there is no set of cells that "is" a value.

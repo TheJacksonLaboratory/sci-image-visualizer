@@ -181,6 +181,7 @@ export abstract class SpatialSceneBase {
       dataset: () => session.latest?.[0] ?? null,
       pick: (clientX, clientY, slackPx) => this.pickObservation(clientX, clientY, slackPx),
       pickCell: (clientX, clientY) => this.pickCell(clientX, clientY),
+      pickRegion: (clientX, clientY) => this.pickRegion(clientX, clientY),
       tiles: () => this.hoverTiles(),
       toolActive: () => !!ctx.tools.regionOverlay?.toolActive,
       outsideZone: (fn) => ctx.outsideZone(fn),
@@ -217,6 +218,10 @@ export abstract class SpatialSceneBase {
   }
   /** The observation drawn under a client position, or -1 (see `SpatialHoverHost.pick`). */
   protected abstract pickObservation(clientX: number, clientY: number, slackPx: number): number;
+  /** The region surface (a class) under a client position, or null (none drawn). */
+  pickRegion(_clientX: number, _clientY: number): { key: string; label?: string } | null {
+    return null;
+  }
   /** The observation of an individual cell's surface under a client position, or -1 (none drawn). */
   pickCell(_clientX: number, _clientY: number): number {
     return -1;
