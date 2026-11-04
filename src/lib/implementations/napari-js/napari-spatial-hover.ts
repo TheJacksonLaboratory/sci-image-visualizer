@@ -362,18 +362,6 @@ export class SpatialHover {
       else store.set(next);
       return;
     }
-    // A cell type's surface (no marker in front): the click selects its cells (again: clears).
-    if (store && dataset && this.host.is3d && this.host.pick(clientX, clientY, HOVER_RADIUS_PX) < 0) {
-      const region = this.host.pickRegion?.(clientX, clientY);
-      const info = this.cellInfo;
-      const code = region && info?.codes ? info.categories.indexOf(region.key) : -1;
-      if (code >= 0 && info?.codes) {
-        const next = selectByCategory(info.codes, code);
-        if (sameSelection(store.current(), next)) store.clear();
-        else store.set(next);
-        return;
-      }
-    }
     // Only a categorical source has classes to select. A gene is continuous:
     // there is no set of cells that "is" a value.
     if (!store || !dataset || source?.kind !== 'categorical') return;

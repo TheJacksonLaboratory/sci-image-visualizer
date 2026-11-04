@@ -108,6 +108,5 @@ export function cellTypeText(info: CellInfo | null, key: string, label?: string)
   const code = info ? info.categories.indexOf(key) : -1;
   const n = code >= 0 ? info?.counts?.[code] : undefined;
   if (n !== undefined) lines.push(`${n.toLocaleString()} cells${info?.typeName ? ` · ${info.typeName}` : ''}`);
-  lines.push('Click to select its cells');
   return lines;
 }

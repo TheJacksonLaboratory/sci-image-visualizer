@@ -81,7 +81,6 @@ describe('3D cell tooltips', () => {
     expect(cellTypeText(info, 'Macrophage + DC')).toEqual([
       'Macrophage + DC',
       '2 cells · cell_type',
-      'Click to select its cells',
     ]);
     expect(cellTypeText(null, 'X', 'X · a region')[0]).toBe('X · a region');
   });
