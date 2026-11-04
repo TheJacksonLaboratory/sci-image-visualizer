@@ -188,6 +188,10 @@
           <span class="sc-val">{{ view.opacity }}</span>
         </div>
       </div>
+
+      <!-- The selected cell's (or cell type's, or region's) observations, by group: through the
+           volume in 3D, on the plane shown in 2D. -->
+      <spatial-selection-observations [controls]="controls" [is3d]="is3d"></spatial-selection-observations>
     </div>
   </div>
 

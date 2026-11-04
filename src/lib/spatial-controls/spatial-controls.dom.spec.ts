@@ -10,9 +10,15 @@ import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.
 import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
 import { SpatialSelectionTranscriptsComponent } from './spatial-selection-transcripts/spatial-selection-transcripts.component';
+import { SpatialSelectionObservationsComponent } from './spatial-selection-observations/spatial-selection-observations.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptsInSelection } from '../contracts/display-types';
+import {
+  DEFAULT_SPATIAL_VIEW,
+  ObservationsInSelection,
+  SpatialViewState,
+  TranscriptsInSelection,
+} from '../contracts/display-types';
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import {
@@ -134,10 +140,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       SpatialGeneTreeComponent,
       SpatialMarkerGenesFormComponent,
       SpatialSelectionTranscriptsComponent,
+      SpatialSelectionObservationsComponent,
     ])
       shallowPanel(leaf);
     shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
-    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent, SpatialSelectionObservationsComponent]);
     shallowPanel(SpatialTranscriptsPanelComponent, [
       SpatialGeneTreeComponent,
       SpatialMarkerGenesFormComponent,
@@ -605,6 +612,43 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       await build({ is3d: true });
       const panel = await openSection('Transcripts');
       expect(panel.textContent).toContain('Select a cell, or pick a cell type.');
+    });
+  });
+
+  describe('Observations in selection (in the Observations section)', () => {
+    it('lists the selection by group with the cell and its values, followed while unfolded', async () => {
+      const list$ = new BehaviorSubject<ObservationsInSelection>({
+        state: 'ready',
+        scope: 'cells',
+        label: 'Cell c-17',
+        plane: null,
+        total: 1,
+        cellId: 'c-17',
+        groupColumn: 'cell_type',
+        groups: [{ name: 'Goblet', count: 1, color: '#ff0000' }],
+        measures: [
+          { name: 'cluster', value: 'k2', mean: false },
+          { name: 'area', value: 123.456, unit: 'µm²', mean: false },
+        ],
+      });
+      controls.getObservationsInSelection$ = jest.fn(() => list$);
+      await build({ is3d: true });
+      const panel = await openSection('Observations');
+      expect(one(panel, '.sc-seltx-toggle').textContent).toContain('Observations in selection');
+      expect(panel.textContent).toContain('whole volume');
+      expect(panel.textContent).toContain('1 observation');
+      expect(panel.textContent).toContain('c-17');
+      const rows = Array.from(panel.querySelectorAll('.sc-seltx-list li')).map((li) =>
+        Array.from(li.children).map((c) => c.textContent?.trim()),
+      );
+      expect(rows).toEqual([['Goblet', '', '1']]);
+      const measures = Array.from(panel.querySelectorAll('.sc-seltx-measures dt, .sc-seltx-measures dd')).map(
+        (e) => e.textContent?.trim(),
+      );
+      expect(measures).toEqual(['cluster', 'k2', 'area', '123 µm²']);
+      click(one(panel, '.sc-seltx-toggle'));
+      fixture.detectChanges();
+      expect(list$.observed).toBe(false);
     });
   });
 

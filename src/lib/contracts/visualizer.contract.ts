@@ -18,6 +18,7 @@ import {
   SpatialViewState,
   SpatialColorBy,
   Cells3dStatus,
+  ObservationsInSelection,
   TranscriptsInSelection,
 } from './display-types';
 import {
@@ -446,6 +447,11 @@ export interface ISpatialControls {
    * only a dataset with tiled transcripts has it.
    */
   getTranscriptsInSelection$?(): Observable<TranscriptsInSelection>;
+  /**
+   * The observations of the same selection, by group, kept up to date as it changes (see
+   * {@link ObservationsInSelection}). Optional.
+   */
+  getObservationsInSelection$?(): Observable<ObservationsInSelection>;
   /**
    * The z positions of the sections the dataset was imaged at, ascending — or
    * null when its z is continuous rather than sectioned (so there are no sections

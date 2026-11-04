@@ -51,6 +51,8 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
  * (`display: contents`). Writes only through the port: `setViewState`, and the colour
  * source's own `colorByColumn` / `colorByFeature` / `clearColorBy`.
  */
+import { SpatialSelectionObservationsComponent } from '../spatial-selection-observations/spatial-selection-observations.component';
+
 @Component({
   selector: 'spatial-observations-panel',
   standalone: true,
@@ -66,6 +68,7 @@ import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
     TooltipModule,
     SpatialKeyComponent,
     SpatialGeneStyleComponent,
+    SpatialSelectionObservationsComponent,
   ],
   templateUrl: './spatial-observations-panel.component.html',
   styleUrls: ['./spatial-observations-panel.component.scss'],

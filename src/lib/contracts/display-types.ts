@@ -123,6 +123,31 @@ export interface TranscriptsInSelection {
   message?: string;
 }
 
+/**
+ * The observations of what is selected (the spatial dialog's "Observations in selection", in the
+ * Observations section): how many, by the grouping they are coloured by (else the cell types), with
+ * a few measurements' means — or, for one cell, its id, groupings and values. In spatial 3D every
+ * observation of the selection; in the 2D view of a sliced dataset those on the plane shown. The
+ * selection is the one {@link TranscriptsInSelection} follows.
+ */
+export interface ObservationsInSelection {
+  /** `empty`: nothing selected (or nothing it applies to); `loading`; `ready`; `error`. */
+  state: 'empty' | 'loading' | 'ready' | 'error';
+  scope?: 'cells' | 'types' | 'regions';
+  label?: string;
+  plane?: { index: number; count: number } | null;
+  total?: number;
+  /** The grouping counted by, or null. */
+  groupColumn?: string | null;
+  /** Groups by count, most first, in their legend colours. */
+  groups?: { name: string; count: number; color: string }[];
+  /** Means over the selection (`mean`), or one cell's own values (text for a grouping). */
+  measures?: { name: string; value: string | number; unit?: string; mean: boolean }[];
+  /** The one cell's id, when one cell is selected. */
+  cellId?: string;
+  message?: string;
+}
+
 export interface SpatialViewState {
   /** Colour source; `null` renders every observation in one neutral colour
    *  (useful on its own — it shows where the tissue actually is). */

@@ -72,6 +72,13 @@ file was added.
   lower bound. Counted only while it is unfolded and the Transcripts section open, again as the
   selection, the regions or the plane change (`ISpatialControls.getTranscriptsInSelection$`,
   `TranscriptsInSelection`).
+- **Observations in selection.** In the Observations section, a foldable "Observations in selection"
+  block (`spatial-selection-observations`) describes the observations of the same selection: how
+  many, by the grouping they are coloured by (else the cell types) in the legend's colours, with the
+  mean of a few measurements; for one cell, its id, its other groupings and its own values. Every
+  observation of the selection in spatial 3D; in the 2D view of a sliced dataset, those on the plane
+  shown (a region selects as "Select from ROIs" does there). From the columns alone, nothing more is
+  read (`ISpatialControls.getObservationsInSelection$`, `ObservationsInSelection`).
 
 ### Fixed
 

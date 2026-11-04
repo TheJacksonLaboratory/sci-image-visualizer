@@ -347,3 +347,127 @@
     border-color: var(--surface-border, rgba(0, 0, 0, 0.2));
   }
 }
+
+// ── "In selection" lists (transcripts, observations): a foldable sub-heading, then a row per
+// gene or group with its count and a bar against the largest. ──
+// The sub-heading, as the section's others, but a button that folds the list.
+.sc-seltx-toggle {
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+
+  i {
+    font-size: 0.65rem;
+  }
+
+  &:hover {
+    color: var(--primary-color, #3b82f6);
+  }
+}
+
+.sc-seltx {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sc-seltx-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.sc-seltx-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-seltx-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.sc-seltx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  font-size: 0.78rem;
+
+  &.stale {
+    opacity: 0.55;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(4rem, 7rem) 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.1rem 0;
+  }
+}
+
+.sc-seltx-gene {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-seltx-bar {
+  height: 0.45rem;
+  border-radius: 2px;
+  background: var(--surface-200, #e9ecef);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--primary-color, #3b82f6);
+  }
+}
+
+.sc-seltx-count {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 3rem;
+}
+
+.sc-seltx-swatch {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  margin-right: 0.35rem;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+
+.sc-seltx-measures {
+  display: grid;
+  grid-template-columns: minmax(4rem, 1fr) auto;
+  gap: 0.1rem 0.75rem;
+  margin: 0;
+  font-size: 0.78rem;
+
+  dt {
+    color: var(--text-color-secondary, #6c757d);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+}

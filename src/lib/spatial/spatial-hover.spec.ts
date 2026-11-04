@@ -78,10 +78,7 @@ describe('3D cell tooltips', () => {
   });
 
   it("names a cell type's surface and how many cells it has", () => {
-    expect(cellTypeText(info, 'Macrophage + DC')).toEqual([
-      'Macrophage + DC',
-      '2 cells · cell_type',
-    ]);
+    expect(cellTypeText(info, 'Macrophage + DC')).toEqual(['Macrophage + DC', '2 cells · cell_type']);
     expect(cellTypeText(null, 'X', 'X · a region')[0]).toBe('X · a region');
   });
 });
