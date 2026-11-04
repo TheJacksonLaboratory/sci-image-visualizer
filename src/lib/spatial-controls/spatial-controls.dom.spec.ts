@@ -9,6 +9,7 @@ import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/sp
 import { SpatialGeneTreeComponent } from './spatial-gene-tree/spatial-gene-tree.component';
 import { SpatialObservationsPanelComponent } from './spatial-observations-panel/spatial-observations-panel.component';
 import { SpatialMarkerGenesFormComponent } from './spatial-marker-genes-form/spatial-marker-genes-form.component';
+import { SpatialSelectionTranscriptsComponent } from './spatial-selection-transcripts/spatial-selection-transcripts.component';
 import { VISUALIZER, ISpatialControls } from '../contracts/visualizer.contract';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState, TranscriptsInSelection } from '../contracts/display-types';
@@ -132,11 +133,16 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       SpatialGroupsPanelComponent,
       SpatialGeneTreeComponent,
       SpatialMarkerGenesFormComponent,
+      SpatialSelectionTranscriptsComponent,
     ])
       shallowPanel(leaf);
     shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
     shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
-    shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
+    shallowPanel(SpatialTranscriptsPanelComponent, [
+      SpatialGeneTreeComponent,
+      SpatialMarkerGenesFormComponent,
+      SpatialSelectionTranscriptsComponent,
+    ]);
     shallowPanel(SpatialControlsComponent, [
       SpatialCellsPanelComponent,
       SpatialTranscriptsPanelComponent,
@@ -542,14 +548,17 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
     });
   });
 
-  describe('Transcripts in selection', () => {
-    it('counts only while open, and lists the genes by count with the selection and plane', async () => {
+  describe('Transcripts in selection (in the Transcripts section)', () => {
+    it('counts while the Transcripts section holds it expanded, and lists the genes by count', async () => {
       const list$ = new BehaviorSubject<TranscriptsInSelection>({ state: 'loading' });
       controls.getTranscriptsInSelection$ = jest.fn(() => list$);
       await build();
+      // No separate section.
+      expect(() => panelNamed(root, 'Transcripts in selection')).toThrow();
       expect(controls.getTranscriptsInSelection$).not.toHaveBeenCalled();
-      let panel = await openSection('Transcripts in selection');
+      let panel = await openSection('Transcripts');
       expect(controls.getTranscriptsInSelection$).toHaveBeenCalledTimes(1);
+      expect(one(panel, '.sc-seltx-toggle').textContent).toContain('Transcripts in selection');
       expect(panel.textContent).toContain('Counting transcripts');
       list$.next({
         state: 'ready',
@@ -564,7 +573,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         ],
       });
       fixture.detectChanges();
-      panel = panelNamed(root, 'Transcripts in selection');
+      panel = panelNamed(root, 'Transcripts');
       expect(panel.textContent).toContain('Cell c-17');
       expect(panel.textContent).toContain('plane 3 of 9');
       expect(panel.textContent).toContain('7 transcripts');
@@ -575,8 +584,16 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         ['Lgr5', '', '5'],
         ['Actb', '', '2'],
       ]);
-      // Closed: no longer counted.
-      click(one(panel, '.sc-panel-head'));
+      // Folded: no longer counted, and counted again when unfolded.
+      click(one(panel, '.sc-seltx-toggle'));
+      fixture.detectChanges();
+      expect(list$.observed).toBe(false);
+      expect(panelNamed(root, 'Transcripts').querySelector('.sc-seltx-list')).toBeNull();
+      click(one(panelNamed(root, 'Transcripts'), '.sc-seltx-toggle'));
+      fixture.detectChanges();
+      expect(list$.observed).toBe(true);
+      // The Transcripts section closed: not counted either.
+      click(one(panelNamed(root, 'Transcripts'), '.sc-panel-head'));
       fixture.detectChanges();
       expect(list$.observed).toBe(false);
     });
@@ -586,7 +603,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         of<TranscriptsInSelection>({ state: 'empty', message: 'Select a cell, or pick a cell type.' }),
       );
       await build({ is3d: true });
-      const panel = await openSection('Transcripts in selection');
+      const panel = await openSection('Transcripts');
       expect(panel.textContent).toContain('Select a cell, or pick a cell type.');
     });
   });

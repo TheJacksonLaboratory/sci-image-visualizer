@@ -102,74 +102,11 @@
       [densityStats]="densityStats"
       [geneCounts]="geneCounts"
       [colormapOptions]="colormapOptions"
+      [is3d]="is3d"
       [open]="open.transcripts"
       (openChange)="setOpen('transcripts', $event)"
     >
     </spatial-transcripts-panel>
-
-    <!-- Transcripts in selection: the selected cell's (or cell type's, or region's) transcripts by
-         gene; through the volume in 3D, on the plane shown in 2D. Counted only while open. -->
-    <div class="sc-panel" *ngIf="hasSelectionTranscripts" [class.open]="open.selectionTranscripts">
-      <div class="sc-panel-head" (click)="toggleSection('selectionTranscripts')">
-        <span class="sc-panel-title">Transcripts in selection</span>
-        <i
-          class="pi"
-          [class.pi-chevron-down]="open.selectionTranscripts"
-          [class.pi-chevron-right]="!open.selectionTranscripts"
-        ></i>
-      </div>
-      <div class="sc-panel-body sc-seltx" *ngIf="open.selectionTranscripts">
-        <ng-container *ngIf="selectionTranscripts as list; else seltxWaiting">
-          <div class="sc-seltx-head" *ngIf="list.label">
-            <span class="sc-seltx-label" [title]="list.label">{{ list.label }}</span>
-            <small class="sc-hint" *ngIf="list.plane">
-              plane {{ list.plane.index + 1 }} of {{ list.plane.count }}
-            </small>
-            <small class="sc-hint" *ngIf="!list.plane && is3d">whole volume</small>
-          </div>
-          <small class="sc-hint" *ngIf="list.state === 'empty'">{{ list.message }}</small>
-          <small class="sc-hint sc-error" *ngIf="list.state === 'error'">{{ list.message }}</small>
-          <small class="sc-hint" *ngIf="list.state === 'loading'">
-            <i class="pi pi-spin pi-spinner"></i> Counting transcripts…
-          </small>
-          <ng-container *ngIf="list.genes && list.state !== 'empty' && list.state !== 'error'">
-            <div class="sc-seltx-summary">
-              <span>
-                <b>{{ list.total | number }}</b> transcripts · {{ list.genes.length | number }} genes
-                <ng-container *ngIf="list.cells"
-                  >· {{ list.cells | number }} {{ list.cells === 1 ? 'cell' : 'cells' }}</ng-container
-                >
-              </span>
-              <p-button
-                icon="pi pi-copy"
-                size="small"
-                [text]="true"
-                [disabled]="!list.genes.length"
-                pTooltip="Copy the list (gene, transcripts) as tab-separated text"
-                tooltipPosition="top"
-                (onClick)="copySelectionTranscripts()"
-              ></p-button>
-            </div>
-            <small class="sc-hint" *ngIf="list.partial">
-              The selection spans more of the section than is read at once: the counts are a lower bound.
-            </small>
-            <small class="sc-hint" *ngIf="!list.genes.length">No transcripts in the selection.</small>
-            <ol class="sc-seltx-list" *ngIf="list.genes.length" [class.stale]="list.state === 'loading'">
-              <li *ngFor="let g of list.genes; trackBy: trackGene">
-                <span class="sc-seltx-gene" [title]="g.name">{{ g.name }}</span>
-                <span class="sc-seltx-bar">
-                  <span [style.width.%]="(100 * g.count) / (selectionTranscriptsMax || 1)"></span>
-                </span>
-                <span class="sc-seltx-count">{{ g.count | number }}</span>
-              </li>
-            </ol>
-          </ng-container>
-        </ng-container>
-        <ng-template #seltxWaiting>
-          <small class="sc-hint"><i class="pi pi-spin pi-spinner"></i> Counting transcripts…</small>
-        </ng-template>
-      </div>
-    </div>
 
     <!-- Annotations: the drawn regions, and selecting what they enclose. -->
     <div class="sc-panel" [class.open]="open.annotations">

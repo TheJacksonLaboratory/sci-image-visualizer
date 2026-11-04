@@ -77,6 +77,14 @@
       [geneTotal]="geneTotal"
     ></spatial-gene-tree>
 
+    <!-- The selected cell's (or cell type's, or region's) transcripts by gene: through the volume
+         in 3D, on the plane shown in 2D. -->
+    <spatial-selection-transcripts
+      *ngIf="dataset?.transcriptTiles"
+      [controls]="controls"
+      [is3d]="is3d"
+    ></spatial-selection-transcripts>
+
     <div class="sc-subhead">Transcript controls</div>
     <span class="sc-lbl">View transcripts as</span>
     <p-selectButton
