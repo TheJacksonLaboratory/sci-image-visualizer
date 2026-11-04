@@ -50,6 +50,11 @@ file was added.
   boundaries being chosen, makes one) started a second download and added a second volume layer,
   which the "Reference volume" checkbox never hid. Rebuilds meanwhile now wait for the one load.
 
+### Removed
+
+- **The 3D "Show" section's Observations checkbox.** It repeated the Observations section's own
+  checkbox (its header), which shows and hides the same observations.
+
 ### Changed
 
 - **Up to 22 groups without colours of their own get a colour each.** `DEFAULT_CATEGORICAL_PALETTE`

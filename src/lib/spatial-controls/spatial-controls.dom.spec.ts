@@ -616,7 +616,9 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       view({ showVolume: true });
       emit(one(rowLabelled(root, 'Volume opacity'), 'p-slider'), 'onChange', { value: 0.2 });
       expect(lastWrite()).toEqual({ volumeOpacity: 0.2 });
-      emit(one(root, 'p-checkbox[label="Observations"]'), 'onChange', { checked: false });
+      // The cloud is the Observations section's own checkbox, in its header: no second one here.
+      expect(root.querySelector('p-checkbox[label="Observations"]')).toBeNull();
+      emit(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showPoints: false });
       view({ showPoints: true });
       emit(one(root, 'p-checkbox[label="One section at a time"]'), 'onChange', { checked: true });

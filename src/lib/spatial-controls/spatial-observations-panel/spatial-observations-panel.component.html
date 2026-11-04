@@ -304,16 +304,7 @@
       ></p-slider>
       <span class="sc-val">{{ view.volumeOpacity }}</span>
     </div>
-    <div class="sc-row">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="view.showPoints"
-        (onChange)="onShowPoints($event.checked)"
-        label="Observations"
-        pTooltip="The measured cells. Hide them to read the density volumes underneath"
-        tooltipPosition="top"
-      ></p-checkbox>
-    </div>
+    <!-- The observations themselves are this section's own checkbox, in its header. -->
     <!-- Only for data that really is sectioned; a continuous z has no sections
        to step through. -->
     <div class="sc-row" *ngIf="view.showPoints && isSectioned">
