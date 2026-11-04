@@ -34,6 +34,8 @@ import {
   IVolumeResolution,
 } from './contracts/visualizer.contract';
 import { SPATIAL_DATA_PORT, SpatialDataPort } from './contracts/ports/spatial-data.port';
+import type { SpatialDataset } from './contracts/spatial-dataset.contract';
+import { drawnCellSets } from './spatial/lod';
 import { CanvasToolOptions, ColormapNode, IBrushOptions, IWandOptions } from './contracts/display-types';
 import { SpatialControlsFacade } from './spatial/spatial-controls.facade';
 import { RegionStore } from './store/region-store.service';
@@ -142,6 +144,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * rather than attaching it again, which would start the source afresh.
    */
   private readonly attachedRegionSets = new Map<string, DatasetRegionSetState>();
+  /** The spatial dataset on offer (the port's), for the boundary set its region set is. */
+  private spatialDataset: SpatialDataset | null = null;
+  /** Follows the dataset and the spatial view for {@link updatePlaneCells}. */
+  private readonly planeCellsSub: Subscription | null;
   /** The dataset region set's planes while they slice the plotted image (see getDatasetPlanes$). */
   private readonly datasetPlanes$ = new BehaviorSubject<readonly number[] | null>(null);
   /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
@@ -192,6 +198,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     private spatialData: SpatialDataPort | null = null,
   ) {
     this.regionUpdates = this.regionStore.getRegionUpdateEvent().subscribe(() => this.onRegionsChanged());
+    this.planeCellsSub = this.spatialData
+      ? combineLatest([this.spatialData.getDataset$(), this.store.getSpatialView$()]).subscribe(([dataset]) => {
+          this.spatialDataset = dataset ?? null;
+          this.updatePlaneCells();
+        })
+      : null;
     this.sections = new VolumeSections({
       volume: () => this.napari.volumeVoxels(),
       image: () => this.plottedFileName,
@@ -392,6 +404,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.datasetPlanes$.next(null);
       this.updateVolumeView(plotType);
     }
+    this.updatePlaneCells();
     this.plotDiv = plotDiv;
     // Apply the per-image region cache (snapshot old regions, restore the new
     // image's, clear selection) for whichever backend renders — Plotly does
@@ -595,6 +608,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   setPlotType(plotType: PlotType): void {
     this.currentPlotType = plotType;
     this.updateVolumeView(plotType);
+    this.updatePlaneCells();
     this.plotly.setPlotType(plotType);
   }
   /** @deprecated Use `getSurface3dControls()`. */
@@ -983,6 +997,45 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.datasetPlanes$.next(sliced ? planes : null);
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
+    this.updatePlaneCells();
+  }
+
+  /**
+   * The Cells panel's boundary set that is the dataset's region set (the one naming it as its
+   * `regionSource`), while its planes are shown on the plotted image with its source still the
+   * store's; null otherwise.
+   */
+  private planeCellSet(): string | null {
+    const set = this.datasetRegionSet;
+    if (!set?.planes || !set.opener || set.opener !== this.regionStore.getPlanesSourceOpener()) return null;
+    return this.spatialDataset?.polygonTiles?.sets.find((s) => s.regionSource === set.key)?.name ?? null;
+  }
+
+  /**
+   * While the dataset region set's planes are shown, the Cells panel draws each plane's cells from
+   * it (its boundary set, see `CellLayers.setPlane`):
+   *  - that set is the panel's boundaries by default: a view that has not chosen a set (none yet, or
+   *    after a reset) is given it;
+   *  - in the 2D spatial view, while the panel draws them, the overlays do not draw the same
+   *    outlines a second time (`RegionStore.setRegionSourceDrawn`). They stay listed and editable
+   *    in the Region Editor, and are drawn by the overlays everywhere else.
+   */
+  private updatePlaneCells(): void {
+    const name = this.planeCellSet();
+    const view = this.store.currentSpatialView();
+    if (name && view.cellSet == null) {
+      // Emits the view, which comes back here with the set chosen.
+      this.store.setSpatialView({ cellSet: name });
+      return;
+    }
+    const drawn = drawnCellSets(this.spatialDataset?.polygonTiles, view.cellSet);
+    const byCells =
+      !!name &&
+      isSpatialOmics(this.currentPlotType) &&
+      (view.showCells ?? true) &&
+      drawn?.set === name &&
+      !drawn.nucleusSet;
+    this.regionStore.setRegionSourceDrawn(!byCells);
   }
 
   /**
@@ -1520,6 +1573,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
     this.regionUpdates.unsubscribe();
+    this.planeCellsSub?.unsubscribe();
     this.sectionSubs.unsubscribe();
     this.sections.stop();
     if (this.rebuildTimer) clearTimeout(this.rebuildTimer);

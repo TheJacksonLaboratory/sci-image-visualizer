@@ -152,7 +152,10 @@ export class OsdRegionOverlay implements IRegionOverlay {
       skip: (region) => this.hidden(region),
     });
     this.sourceLayer = this.store.getRegionSourceView$
-      ? new RegionSourceLayer(this.svg, this.store.getRegionSourceView$())
+      ? new RegionSourceLayer(
+          this.svg,
+          this.store.getDrawnRegionSourceView$?.() ?? this.store.getRegionSourceView$(),
+        )
       : null;
     this.viewer.canvas.addEventListener('pointercancel', this.pointerCancelHandler);
 

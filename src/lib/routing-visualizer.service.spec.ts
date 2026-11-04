@@ -1330,6 +1330,68 @@ describe('RoutingVisualizerService (characterization)', () => {
       warn.mockRestore();
     });
 
+    it("makes the set the Cells panel's boundaries while its planes show, drawn once in 2D", async () => {
+      const dataset: any = {
+        id: 'ileum',
+        observations: { count: 0, x: new Float32Array(0), y: new Float32Array(0) },
+        columns: [],
+        polygonTiles: {
+          bounds: [0, 0, 1, 1],
+          levels: [],
+          defaultSet: 'cell',
+          sets: [
+            { name: 'cell', label: 'Cells' },
+            { name: '3d', label: '3D', regionSource: 'set-1' },
+          ],
+        },
+      };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(dataset) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      const drawnSet = jest.spyOn(regionStore, 'setRegionSourceDrawn');
+
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(store.currentSpatialView().cellSet).toBeNull();
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      // Its boundary set by default, and the overlays leave its outlines to the cells.
+      expect(store.currentSpatialView().cellSet).toBe('3d');
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+
+      // Chosen otherwise, cells off, or another view: the overlays draw them.
+      store.setSpatialView({ cellSet: 'cell' });
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      store.setSpatialView({ cellSet: '3d', showCells: false });
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      store.setSpatialView({ showCells: true });
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+      router.setPlotType(PlotType.SPATIAL_OMICS_3D);
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      router.setPlotType(PlotType.SPATIAL_OMICS);
+      // A reset view (no set chosen) is given it again.
+      store.setSpatialView({ cellSet: null });
+      expect(store.currentSpatialView().cellSet).toBe('3d');
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+
+      // Another image: nothing of the set's.
+      regionStore.setActiveImage({ ...IMAGE_INFO, fileName: 'other.tif' });
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS);
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+    });
+
     it('drops a set that opened after another image was plotted, or failed to open', async () => {
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
       const attach = jest.spyOn(regionStore, 'attachRegionSource');

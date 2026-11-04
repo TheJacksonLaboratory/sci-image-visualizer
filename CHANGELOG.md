@@ -38,7 +38,10 @@ file was added.
   the plane too: a boundary set that names its region set (as the ileum's "3d boundaries") draws the
   plane's outline of each cell, read from the region set's tiles of that plane and joined to its cell
   by id, in the panel's colouring, groups, draw mode and selection; a set without one keeps one
-  outline per cell.
+  outline per cell. While the planes show, that set is the panel's boundaries unless another is
+  chosen (a reset view gets it again), and in the 2D spatial view the overlays leave its outlines to
+  the cells rather than drawing them a second time (`RegionStore.getDrawnRegionSourceView$`,
+  `setRegionSourceDrawn`); the Region Editor still lists them, and the other views draw them.
 
 ### Changed
 
