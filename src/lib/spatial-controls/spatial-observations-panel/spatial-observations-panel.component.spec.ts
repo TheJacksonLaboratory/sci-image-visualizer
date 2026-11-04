@@ -248,25 +248,11 @@ describe('SpatialObservationsPanelComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
-    it('writes the volume and cloud visibility independently', () => {
-      // The point of separate toggles: every combination is reachable, including
-      // the density volumes alone.
-      component['onShowVolume'](false);
-      expect(controls.setViewState).toHaveBeenCalledWith({ showVolume: false });
+    it("writes the cloud visibility (the volume is the Volume section's)", () => {
       component['onShowPoints'](false);
       expect(controls.setViewState).toHaveBeenCalledWith({ showPoints: false });
-      expect(component.view.showVolume).toBe(false);
       expect(component.view.showPoints).toBe(false);
-    });
-
-    it('writes the volume opacity, separately from the markers', () => {
-      component['onVolumeOpacity'](0.2);
-      expect(controls.setViewState).toHaveBeenCalledWith({ volumeOpacity: 0.2 });
-      // Turning the backdrop down must leave the measurement drawn over it alone.
-      expect(component.view.opacity).toBe(DEFAULT_SPATIAL_VIEW.opacity);
-      (controls.setViewState as jest.Mock).mockClear();
-      component['onVolumeOpacity'](undefined);
-      expect(controls.setViewState).not.toHaveBeenCalled();
+      expect(component.view.showVolume).toBe(DEFAULT_SPATIAL_VIEW.showVolume);
     });
 
     it('opens the section picker mid-stack and releases it back to every section', () => {

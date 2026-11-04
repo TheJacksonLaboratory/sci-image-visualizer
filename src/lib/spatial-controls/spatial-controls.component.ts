@@ -17,6 +17,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { CheckboxModule } from 'primeng/checkbox';
+import { SliderModule } from 'primeng/slider';
 import { DialogModule } from 'primeng/dialog';
 import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
@@ -68,6 +69,7 @@ let controlsInstanceSeq = 0;
     FormsModule,
     ButtonModule,
     CheckboxModule,
+    SliderModule,
     DialogModule,
     TooltipModule,
     SpatialCellsPanelComponent,
@@ -399,18 +401,30 @@ export class SpatialControlsComponent implements OnInit {
     this.controls?.setViewState({ showImage: on });
   }
 
+  /** The reference volume, in 3D (the Volume section's switch). */
+  protected onShowVolume(on: boolean): void {
+    this.controls?.setViewState({ showVolume: on });
+  }
+
+  protected onVolumeOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ volumeOpacity: value });
+  }
+
   protected onShowAnnotations(on: boolean): void {
     this.controls?.setViewState({ showAnnotations: on });
   }
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
-  protected open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
-    images: false,
-    cells: true,
-    transcripts: false,
-    annotations: false,
-    observations: false,
-  };
+  protected open: Record<'images' | 'volume' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> =
+    {
+      images: false,
+      volume: false,
+      cells: true,
+      transcripts: false,
+      annotations: false,
+      observations: false,
+    };
 
   protected toggleSection(name: keyof SpatialControlsComponent['open']): void {
     this.setOpen(name, !this.open[name]);

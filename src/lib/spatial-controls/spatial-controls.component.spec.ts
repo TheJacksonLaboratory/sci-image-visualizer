@@ -248,6 +248,19 @@ describe('SpatialControlsComponent', () => {
   describe('display controls', () => {
     beforeEach(async () => build(controls));
 
+    it("writes the Volume section's switch and the volume's opacity, separately from the markers", () => {
+      component['onShowVolume'](false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ showVolume: false });
+      expect(component['view'].showVolume).toBe(false);
+      component['onVolumeOpacity'](0.2);
+      expect(controls.setViewState).toHaveBeenCalledWith({ volumeOpacity: 0.2 });
+      // Turning the backdrop down leaves the measurement drawn over it alone.
+      expect(component['view'].opacity).toBe(DEFAULT_SPATIAL_VIEW.opacity);
+      (controls.setViewState as jest.Mock).mockClear();
+      component['onVolumeOpacity'](undefined);
+      expect(controls.setViewState).not.toHaveBeenCalled();
+    });
+
     it('switches the drawn annotation regions off and on, like the other layer sections', () => {
       component['onShowAnnotations'](false);
       expect(controls.setViewState).toHaveBeenCalledWith({ showAnnotations: false });

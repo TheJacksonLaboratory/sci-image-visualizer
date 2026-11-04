@@ -360,13 +360,6 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   // hides the others to some degree. Independent toggles because the useful views
   // are the combinations, not a single "3D mode".
 
-  protected onShowVolume(on: boolean): void {
-    this.controls?.setViewState({ showVolume: on });
-  }
-  protected onVolumeOpacity(value: number | undefined): void {
-    if (value === undefined) return;
-    this.controls?.setViewState({ volumeOpacity: value });
-  }
   protected onShowPoints(on: boolean): void {
     this.controls?.setViewState({ showPoints: on });
   }

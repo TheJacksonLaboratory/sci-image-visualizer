@@ -230,6 +230,8 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(panel.classList.contains('open')).toBe(false);
       await openSection('Images');
       expect(panelNamed(root, 'Images').textContent).toContain('Channels & Histogram');
+      // The reference volume is 3D's.
+      expect(() => panelNamed(root, 'Volume')).toThrow();
     });
 
     it('is not offered in 3D', async () => {
@@ -239,6 +241,8 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       } as SpatialDataset);
       await build({ is3d: true });
       expect(() => panelNamed(root, 'Images')).toThrow();
+      // The Volume section takes its place.
+      expect(panelNamed(root, 'Volume')).toBeTruthy();
       expect(() => panelNamed(root, 'Cells')).toThrow();
       // Transcripts without z have no place in the cloud.
       expect(() => panelNamed(root, 'Transcripts')).toThrow();
@@ -609,12 +613,17 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
   });
 
   describe('3D scene', () => {
-    it('writes the volume, its opacity, the cloud and its section', async () => {
+    it('writes the volume (its section), its opacity, the cloud and its section', async () => {
       await build({ is3d: true });
-      emit(one(root, 'p-checkbox[label="Reference volume"]'), 'onChange', { checked: false });
+      // The volume is the Volume section's switch, no longer a checkbox among the observations'.
+      expect(root.querySelector('p-checkbox[label="Reference volume"]')).toBeNull();
+      const volume = panelNamed(root, 'Volume');
+      emit(one(volume, '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showVolume: false });
+      expect(volume.classList.contains('open')).toBe(false);
       view({ showVolume: true });
-      emit(one(rowLabelled(root, 'Volume opacity'), 'p-slider'), 'onChange', { value: 0.2 });
+      const opened = await openSection('Volume');
+      emit(one(rowLabelled(opened, 'Opacity'), 'p-slider'), 'onChange', { value: 0.2 });
       expect(lastWrite()).toEqual({ volumeOpacity: 0.2 });
       // The cloud is the Observations section's own checkbox, in its header: no second one here.
       expect(root.querySelector('p-checkbox[label="Observations"]')).toBeNull();

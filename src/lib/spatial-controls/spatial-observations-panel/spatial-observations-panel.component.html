@@ -281,30 +281,8 @@
      the anatomy alone. -->
   <div class="sc-section" *ngIf="is3d">
     <span class="sc-lbl">Show</span>
-    <div class="sc-row" *ngIf="ds.volume">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="view.showVolume"
-        (onChange)="onShowVolume($event.checked)"
-        label="Reference volume"
-        pTooltip="The registered anatomy the observations sit in"
-        tooltipPosition="top"
-      ></p-checkbox>
-    </div>
-    <!-- The backdrop's own opacity: reading the cloud or a density field
-       through the anatomy means turning the anatomy down, not the data. -->
-    <div class="sc-row" *ngIf="ds.volume && view.showVolume">
-      <span class="sc-lbl">Volume opacity</span>
-      <p-slider
-        [ngModel]="view.volumeOpacity"
-        [min]="0.05"
-        [max]="1"
-        [step]="0.05"
-        (onChange)="onVolumeOpacity($event.value)"
-      ></p-slider>
-      <span class="sc-val">{{ view.volumeOpacity }}</span>
-    </div>
-    <!-- The observations themselves are this section's own checkbox, in its header. -->
+    <!-- The reference volume is the Volume section's, the observations this section's own header
+       checkbox. -->
     <!-- Only for data that really is sectioned; a continuous z has no sections
        to step through. -->
     <div class="sc-row" *ngIf="view.showPoints && isSectioned">
