@@ -49,10 +49,10 @@ file was added.
   the reference volume was still downloading (as the dataset's region set attaching, or the default
   boundaries being chosen, makes one) started a second download and added a second volume layer,
   which the "Reference volume" checkbox never hid. Rebuilds meanwhile now wait for the one load.
-- **The spatial panel's Annotations switch hides the regions in 3D too.** Switched off in spatial 3D
-  (or on entering it switched off), every class is hidden as the Region Editor's eyes hide one: its
-  surfaces go, and the eyes show it; on again, every class is shown. A class's own eye still works
-  in between. In 2D the switch still hides the overlay alone.
+- **The spatial panel's Annotations switch hides every class, its eyes showing it.** Switched off in
+  the spatial views (2D and 3D, or on entering one switched off), every class is hidden as the Region
+  Editor's eyes hide one: its regions in 2D and surfaces in 3D go, and the eyes show it hidden; on
+  again, every class is shown. A class's own eye still works in between.
 
 ### Removed
 

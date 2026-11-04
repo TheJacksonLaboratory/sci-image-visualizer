@@ -1392,7 +1392,7 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(drawnSet).toHaveBeenLastCalledWith(true);
     });
 
-    it("hides every class in 3D when the panel's Annotations are switched off, and shows them again", async () => {
+    it("hides every class in the spatial views when the panel's Annotations are switched off, and shows them again", async () => {
       TestBed.resetTestingModule();
       TestBed.configureTestingModule({
         providers: [
@@ -1416,11 +1416,18 @@ describe('RoutingVisualizerService (characterization)', () => {
       regionStore.setActiveImage(PLATE);
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
       await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
-      // In 2D the switch is the overlay's alone: the classes stay as they are.
+      // In 2D as in 3D: every class hidden (the editor's eyes follow).
+      store.setSpatialView({ showAnnotations: false });
+      expect(hidden()).toEqual(['B', 'T']);
+      store.setSpatialView({ showAnnotations: true });
+      expect(hidden()).toEqual([]);
+
+      // Not in a view that is not spatial.
+      router.setPlotType(PlotType.IMAGE);
       store.setSpatialView({ showAnnotations: false });
       expect(hidden()).toEqual([]);
 
-      // Entering 3D with it off: every class hidden, its surfaces too (the editor's eyes follow).
+      // Entering 3D with it off: every class hidden, its surfaces too.
       router.setPlotType(PlotType.SPATIAL_OMICS_3D);
       expect(hidden()).toEqual(['B', 'T']);
       expect(napari.setRegionHidden).toHaveBeenLastCalledWith(expect.arrayContaining(['B', 'T']));
