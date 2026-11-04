@@ -13,7 +13,7 @@ import { DEFAULT_CATEGORICAL_PALETTE, categoryColorsFor, parseHex } from '../../
 import { allGeneShownBy, allGenesHidden } from '../../spatial/spatial-tile-merge';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { clusterColorMap, clusterOfGene } from '../../spatial/transcript-grouping';
-import { tilesInRect } from '../../spatial/lod';
+import { DataRect, tilesInRect, transcriptLevelFor } from '../../spatial/lod';
 import { Supersede } from '../../util/supersede';
 
 /** Most transcripts drawn in the 3D view: past it, every k-th one is drawn (and the console says so). */
@@ -22,6 +22,14 @@ export const TRANSCRIPTS_3D_MAX = 2_000_000;
 export const TRANSCRIPTS_3D_MAX_TILES = 4096;
 /** Tile reads in flight at once. */
 const CONCURRENCY = 8;
+/** The camera resting this long plans the transcripts' detail again. */
+const CAMERA_REST_MS = 300;
+/** Transcript tiles kept read. */
+const TILE_CACHE_SIZE = 1024;
+/** Most tiles read for one view: past them, a coarser level. */
+const VIEW_TILES_MAX = 256;
+/** How far along a ray that never meets the section's plane its reach is taken (world units). */
+const HORIZON = 1e6;
 /** A transcript's marker in the 3D view, in screen pixels at a transcript scale of 1. */
 export const TRANSCRIPT_3D_BASE_SIZE = 2;
 /** A transcript with no colour by cell type (in no cell, or a cell in no group), as the 2D markers. */
@@ -115,12 +123,15 @@ function packed(count: number, at: (i: number) => readonly number[] | undefined)
 }
 
 /**
- * The transcripts of the 3D spatial view: every molecule of the genes the Transcripts panel draws
- * (its selected genes, or "All genes"), at its own x, y and z, in the cloud's box and Z stretch.
+ * The transcripts of the 3D spatial view: the molecules of the genes the Transcripts panel draws
+ * (its selected genes, or "All genes"), at their own x, y and z, in the cloud's box and Z stretch.
  *
- * The 2D view reads transcripts by level of detail for the camera; a 3D orbit has no such window,
- * so this reads the whole level 0 once per gene selection (a few hundred thousand molecules for a
- * MERFISH section) and only restyles after that. Drawn only for a dataset whose transcripts carry z.
+ * By level of detail, as the 2D view reads them: the pyramid level the camera's distance calls for
+ * (`transcriptLevelFor`, the markers per screen kept about constant: aggregates far out, every
+ * molecule close in on a cell), and only the tiles of the part of the section in view (the canvas's
+ * corners cast onto the section's plane). Planned again when the camera rests; tiles are cached, so
+ * coming back reads nothing. "Loading transcripts…" shows on the canvas while they load and draw.
+ * Drawn only for a dataset whose transcripts carry z.
  */
 export class Spatial3dTranscripts {
   private layer: Points3DLayer | null = null;
@@ -129,11 +140,120 @@ export class Spatial3dTranscripts {
   private styleKey: string | null = null;
   private loaded: { tiles: SpatialTranscriptTile[]; names: readonly string[] | null } | null = null;
   private readonly loads = new Supersede();
+  /** The last sync's inputs: the camera resting plans the detail again from them. */
+  private last: {
+    dataset: SpatialDataset;
+    view: SpatialViewState;
+    port: SpatialDataPort | null;
+    frame: Transcripts3dFrame;
+  } | null = null;
+  private cameraTimer: ReturnType<typeof setTimeout> | null = null;
+  private cameraOff: (() => void) | null = null;
+  /** Tiles read, by genes, quality, level and tile (least recently used dropped first). */
+  private readonly tileCache = new Map<string, Promise<SpatialTranscriptTile>>();
 
   constructor(
     private readonly viewer: Viewer,
-    private readonly begin: (label: 'Transcripts') => () => void,
-  ) {}
+    private readonly begin: (message: string) => () => void,
+  ) {
+    this.cameraOff = viewer.camera3d?.changed?.connect(() => this.cameraMoved()) ?? null;
+  }
+
+  /** The camera moved: once it rests, read the level and tiles it now calls for. */
+  private cameraMoved(): void {
+    if (!this.last) return;
+    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    this.cameraTimer = setTimeout(() => {
+      this.cameraTimer = null;
+      const last = this.last;
+      if (last) void this.sync(last.dataset, last.view, last.port, last.frame);
+    }, CAMERA_REST_MS);
+  }
+
+  /** Stop following the camera (the scene went away). */
+  dispose(): void {
+    this.cameraOff?.();
+    this.cameraOff = null;
+    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    this.cameraTimer = null;
+    this.last = null;
+    this.remove();
+  }
+
+  /**
+   * The level and the tiles the camera calls for: the level whose tiles come out about 512 screen
+   * pixels across at the target's depth, the tiles of the section in view (whole, when a corner of
+   * the canvas looks past the section's plane).
+   */
+  private plan(meta: NonNullable<SpatialDataset['transcriptTiles']>, frame: Transcripts3dFrame) {
+    const [vw, vh] = this.viewer.viewportSize?.() ?? [0, 0];
+    const camera = this.viewer.camera3d;
+    const wpp = camera && vh > 0 ? camera.worldPerPixel(vh) : 0;
+    let level = wpp > 0 ? transcriptLevelFor(1 / wpp, meta.levels) : meta.levels.length - 1;
+    const [x0, y0, x1, y1] = meta.bounds;
+    let rect: DataRect = { x0, y0, x1: x1 + 1e-6, y1: y1 + 1e-6 };
+    const seen = vw > 0 && vh > 0 ? this.footprint(vw, vh, frame) : null;
+    if (seen) rect = seen;
+    // Close in but looking far across the section: coarser, until the tiles in view are few enough.
+    let keys = tilesInRect(rect, level, meta.levels, meta.bounds);
+    while (keys.length > VIEW_TILES_MAX && level < meta.levels.length - 1) {
+      level++;
+      keys = tilesInRect(rect, level, meta.levels, meta.bounds);
+    }
+    return { level, keys };
+  }
+
+  /**
+   * The part of the section the canvas sees, in observation units: its corners and centre cast onto
+   * the plane through the camera's target, widened by a quarter. A corner looking past the plane
+   * (towards the horizon) reaches far along its ray instead (the tiles are clipped to the section).
+   */
+  private footprint(vw: number, vh: number, frame: Transcripts3dFrame): DataRect | null {
+    const z = this.viewer.camera3d?.target?.[2];
+    if (z === undefined || !this.viewer.canvasRay) return null;
+    const [ox, oy] = frame.origin;
+    let xa = Infinity,
+      ya = Infinity,
+      xb = -Infinity,
+      yb = -Infinity;
+    for (const [cx, cy] of [
+      [0, 0],
+      [vw, 0],
+      [0, vh],
+      [vw, vh],
+      [vw / 2, vh / 2],
+    ]) {
+      const ray = this.viewer.canvasRay(cx, cy);
+      if (!ray) return null;
+      const hit = Math.abs(ray.dir[2]) > 1e-6 ? (z - ray.origin[2]) / ray.dir[2] : -1;
+      const t = hit > 0 ? hit : HORIZON;
+      const x = ray.origin[0] + ray.dir[0] * t - ox;
+      const y = ray.origin[1] + ray.dir[1] * t - oy;
+      xa = Math.min(xa, x);
+      ya = Math.min(ya, y);
+      xb = Math.max(xb, x);
+      yb = Math.max(yb, y);
+    }
+    const mx = (xb - xa) / 4;
+    const my = (yb - ya) / 4;
+    return { x0: xa - mx, y0: ya - my, x1: xb + mx, y1: yb + my };
+  }
+
+  /** A tile, read once (and again only once dropped from the cache). */
+  private tile(key: string, read: () => Promise<SpatialTranscriptTile>): Promise<SpatialTranscriptTile> {
+    let hit = this.tileCache.get(key);
+    if (hit) {
+      this.tileCache.delete(key);
+      this.tileCache.set(key, hit);
+      return hit;
+    }
+    hit = read();
+    hit.catch(() => this.tileCache.delete(key));
+    this.tileCache.set(key, hit);
+    while (this.tileCache.size > TILE_CACHE_SIZE)
+      this.tileCache.delete(this.tileCache.keys().next().value as string);
+    return hit;
+  }
 
   /** The layer drawn, if any (for tests and the scene's Z stretch). */
   get drawn(): Points3DLayer | null {
@@ -153,27 +273,26 @@ export class Spatial3dTranscripts {
       this.remove();
       return;
     }
-    if (genes.allGenes && (meta.count ?? 0) > TRANSCRIPTS_3D_MAX) {
-      console.warn(`[napari-js] ${meta.count} transcripts are too many to draw in 3D: select genes to see theirs`);
-      this.remove();
-      return;
-    }
+    this.last = { dataset, view, port, frame };
     const quality = view.transcriptQuality === 'all' ? 'all' : 'high';
-    const loadKey = `${dataset.id}|${genes.query.join('\u0001')}|${quality}`;
+    const { level, keys } = this.plan(meta, frame);
+    const genesKey = `${dataset.id}|${genes.query.join('\u0001')}|${quality}`;
+    const loadKey = `${genesKey}|${level}|${keys.map((k) => `${k.gx},${k.gy}`).join(';')}`;
+    let end: (() => void) | null = null;
     if (loadKey !== this.loadKey) {
       const task = this.loads.next();
-      const [x0, y0, x1, y1] = meta.bounds;
-      const keys = tilesInRect({ x0, y0, x1: x1 + 1e-6, y1: y1 + 1e-6 }, 0, meta.levels, meta.bounds);
       if (keys.length > TRANSCRIPTS_3D_MAX_TILES) {
         console.warn(`[napari-js] ${keys.length} transcript tiles are too many to read for the 3D view`);
         this.remove();
         return;
       }
-      const end = this.begin('Transcripts');
+      end = this.begin('Loading transcripts…');
       let tiles: SpatialTranscriptTile[];
       try {
         tiles = await pooled(keys, CONCURRENCY, (k) =>
-          port.getTranscriptTile!(0, k.gx, k.gy, { genes: genes.query, quality }),
+          this.tile(`${genesKey}|${level}/${k.gx}/${k.gy}`, () =>
+            port.getTranscriptTile!(level, k.gx, k.gy, { genes: genes.query, quality }),
+          ),
         );
       } catch (err) {
         console.warn('[napari-js] transcripts for the 3D view could not be read', err);
@@ -181,16 +300,22 @@ export class Spatial3dTranscripts {
         // the old selection up as if it were the new one; the next change reads again. Only the
         // current load may: a superseded one must not tear down what a newer one drew.
         if (task()) this.clearLayer();
-        return;
-      } finally {
         end();
+        return;
       }
-      if (!task()) return;
+      if (!task()) {
+        end();
+        return;
+      }
       this.loadKey = loadKey;
       this.styleKey = null;
       this.loaded = { tiles, names: genes.allGenes ? (meta.genes ?? null) : genes.query };
     }
-    await this.draw(dataset, view, port, frame, genes.allGenes);
+    try {
+      await this.draw(dataset, view, port, frame, genes.allGenes);
+    } finally {
+      end?.();
+    }
   }
 
   /** Follow the scene's Z stretch (nothing is re-uploaded). */

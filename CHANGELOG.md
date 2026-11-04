@@ -63,6 +63,19 @@ file was added.
 
 ### Fixed
 
+- **Zooming in close in 3D no longer blacks out the far part of the scene.** napari-js puts the
+  far plane at four times the camera's distance, so zoomed in on a long section seen at an angle,
+  everything past it was cut away behind a straight edge, and one could not get close to a small
+  part. The spatial 3D and Volume views keep the whole scene within the depth range
+  (`keepSceneInDepth`, the far plane pushed out to the far side of the scene, never nearer than
+  napari-js's), until napari-js takes the scene's extent itself.
+- **3D transcripts by level of detail, with a loading message.** They were read whole at level 0
+  for any view. They are now read at the pyramid level the camera's distance calls for (the
+  markers per screen kept about constant: aggregates far out, every molecule close in on a cell),
+  only the tiles of the part of the section in view, planned again when the camera rests, the tiles
+  cached; "Loading transcripts…" shows on the canvas while they load and draw. "All genes" of a
+  large dataset is drawn this way rather than refused.
+
 - **Building the 3D regions no longer holds the UI.** Placing every class's surface in the world
   (hundreds of thousands of vertices each, a second and more for a 3D segmentation's 20 cell types)
   ran on the main thread, and every mesh came back from the worker copied. The vertices are now

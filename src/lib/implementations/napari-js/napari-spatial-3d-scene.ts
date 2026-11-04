@@ -1,3 +1,4 @@
+import { boxRadius, keepSceneInDepth } from './napari-camera-depth';
 import { RegionMeshPointer } from './napari-region-mesh-pointer';
 import { placeInWorker } from '../../region-source/worker-region-source';
 import { cellTypeColumnFor } from '../../spatial/lod';
@@ -217,7 +218,7 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     super(ctx, session, true);
     // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
     this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
-    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
+    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (message) => ctx.badge.beginTask(message));
     this.cells3d = new Spatial3dCells({
       viewer: ctx.viewer,
       port: session.port,
@@ -460,6 +461,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.ctx.viewer.requestRender();
     });
     this.ctx.tools.install3dInteraction(this.ctx.viewer, this.ctx.host);
+    // Zoomed close, the whole section stays drawn (napari-js's far plane follows the distance).
+    this.restoreDepth = keepSceneInDepth(this.ctx.viewer.camera3d, () =>
+      this.box ? boxRadius(this.box.width, this.box.height, this.box.depth * this.zScale()) : null,
+    );
     this.hover.install(this.ctx.host);
     this.listenToRegionMeshes();
     this.subscribeSpatial();
@@ -485,6 +490,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     );
   }
   private meshPointer: RegionMeshPointer | null = null;
+  /** Gives the camera back napari-js's own depth range (see keepSceneInDepth). */
+  private restoreDepth: (() => void) | null = null;
   private toolSub: Subscription | null = null;
   private selecting = false;
 
@@ -641,13 +648,15 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   dispose(): void {
+    this.restoreDepth?.();
+    this.restoreDepth = null;
     this.meshPointer?.destroy();
     this.meshPointer = null;
     this.toolSub?.unsubscribe();
     this.toolSub = null;
     this.cells3d.dispose();
     this.regionMeshes.clear();
-    this.transcripts3d.remove();
+    this.transcripts3d.dispose();
     this.disposeSpatial();
     this.invertSub?.unsubscribe();
     this.invertSub = null;

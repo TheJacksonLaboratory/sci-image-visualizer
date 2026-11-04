@@ -1,3 +1,4 @@
+import { boxRadius, keepSceneInDepth } from './napari-camera-depth';
 import { placeInWorker } from '../../region-source/worker-region-source';
 import { Subscription } from 'rxjs';
 import { MultiChannelVolumeView, histogramScalar } from 'napari-js';
@@ -197,6 +198,11 @@ export class VolumeScene implements NapariScene {
    */
   async mount(): Promise<void> {
     const { ctx, info } = this;
+    // Zoomed close, the whole volume stays drawn (napari-js's far plane follows the distance).
+    this.restoreDepth = keepSceneInDepth(ctx.viewer.camera3d, () => {
+      const b = this.worldBase;
+      return b ? boxRadius(b.width, b.height, b.depth * ctx.settings.volumeZScale) : null;
+    });
     const loading = ctx.loading(); // bail before rendering on a Cancel / new plot
     const desc = await ctx.tiles.ensureDescriptor(ctx.info());
     // Serverless multichannel (tiled:false + channelUrls): no tile descriptor, so
@@ -404,7 +410,12 @@ export class VolumeScene implements NapariScene {
     return this.view ? surface3dControls(this.ctx, () => this.gizmo) : null;
   }
 
+  /** Gives the camera back napari-js's own depth range (see keepSceneInDepth). */
+  private restoreDepth: (() => void) | null = null;
+
   dispose(): void {
+    this.restoreDepth?.();
+    this.restoreDepth = null;
     this.displaySub?.unsubscribe();
     this.displaySub = null;
     this.gizmo?.destroy();
