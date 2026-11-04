@@ -304,6 +304,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     napari.regionVoxelStep = jest.fn().mockReturnValue(2);
     napari.setRegionMeshes = jest.fn();
     napari.setRegionHighlight = jest.fn();
+    napari.setRegionHidden = jest.fn();
     const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
     jest
       .spyOn(regionStore, 'reconstructClasses')
@@ -351,6 +352,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     napari.regionVoxelStep = jest.fn().mockReturnValue(1);
     napari.setRegionMeshes = jest.fn();
     napari.setRegionHighlight = jest.fn();
+    napari.setRegionHidden = jest.fn();
     const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
     const reconstruct = jest
       .spyOn(regionStore, 'reconstructClasses')
@@ -1393,7 +1395,7 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(drawnSet).toHaveBeenLastCalledWith(true);
     });
 
-    it("hides every class in the spatial views when the panel's Annotations are switched off, and shows them again", async () => {
+    it("hides the drawn regions' classes in the spatial views while the panel's Regions are off (by default), not the cells'", async () => {
       TestBed.resetTestingModule();
       TestBed.configureTestingModule({
         providers: [
@@ -1413,13 +1415,23 @@ describe('RoutingVisualizerService (characterization)', () => {
       stubBuilds();
       napari.setRegionHidden = jest.fn();
       const hidden = () => [...regionStore.getHiddenClasses()].sort();
+      const drawn = (label: string) =>
+        Object.assign(new Region(), {
+          label,
+          bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 }),
+        });
 
       regionStore.setActiveImage(PLATE);
+      regionStore.addRegion(drawn('ROI'));
+      // Off by default: entering a spatial view hides the drawn regions' classes.
+      expect(store.currentSpatialView().showAnnotations).toBe(false);
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(hidden()).toEqual(['ROI']);
+      // The dataset's region set is its cell segmentation, the Cell segmentations': left shown.
       await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
-      // In 2D as in 3D: every class hidden (the editor's eyes follow).
-      store.setSpatialView({ showAnnotations: false });
-      expect(hidden()).toEqual(['B', 'T']);
+      expect(hidden()).toEqual(['ROI']);
+
+      // On: shown, in 2D as in 3D (the editor's eyes follow).
       store.setSpatialView({ showAnnotations: true });
       expect(hidden()).toEqual([]);
 
@@ -1428,20 +1440,20 @@ describe('RoutingVisualizerService (characterization)', () => {
       store.setSpatialView({ showAnnotations: false });
       expect(hidden()).toEqual([]);
 
-      // Entering 3D with it off: every class hidden, its surfaces too.
+      // Entering 3D with it off: the regions' classes hidden, their surfaces too; not the cells'.
       router.setPlotType(PlotType.SPATIAL_OMICS_3D);
-      expect(hidden()).toEqual(['B', 'T']);
-      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(expect.arrayContaining(['B', 'T']));
+      expect(hidden()).toEqual(['ROI']);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(['ROI']);
 
-      // On again: every class shown.
+      // On again: shown. A cell type hidden by its own eye stays so.
+      router.setClassesHidden(['T'], true);
       store.setSpatialView({ showAnnotations: true });
-      expect(hidden()).toEqual([]);
-      expect(napari.setRegionHidden).toHaveBeenLastCalledWith([]);
+      expect(hidden()).toEqual(['T']);
 
       // A class hidden by its own eye stays so while the switch does not change.
-      router.setClassesHidden(['T'], true);
+      router.setClassesHidden(['ROI'], true);
       store.setSpatialView({ pointScale: 2 });
-      expect(hidden()).toEqual(['T']);
+      expect(hidden()).toEqual(['ROI', 'T']);
     });
 
     it("draws the set's classes as individual cells on the panel's switch, a class overridden in the editor", async () => {

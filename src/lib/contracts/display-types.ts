@@ -326,7 +326,7 @@ export interface SpatialViewState {
   observationGeneGlyphs: Record<string, TranscriptGlyphName>;
   /** Draw the tissue image (the Images section's switch). */
   showImage: boolean;
-  /** Draw the annotation regions (the Annotations section's switch). Selecting from them
+  /** Draw the regions (the Regions section's switch; off by default). Selecting from them
    *  still works while they are hidden. */
   showAnnotations: boolean;
   /** Fill the cells with their colour, outline them, or both. */
@@ -460,5 +460,5 @@ export const DEFAULT_SPATIAL_VIEW: SpatialViewState = {
   observationGeneColors: {},
   observationGeneGlyphs: {},
   showImage: true,
-  showAnnotations: true,
+  showAnnotations: false,
 };

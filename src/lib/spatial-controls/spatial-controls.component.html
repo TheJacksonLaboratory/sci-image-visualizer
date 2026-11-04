@@ -93,7 +93,8 @@
     >
     </spatial-transcripts-panel>
 
-    <!-- Annotations: the drawn regions, and selecting what they enclose. -->
+    <!-- Regions: the drawn regions (and a dataset's region set), and selecting what they enclose.
+         Off by default. -->
     <div class="sc-panel" [class.open]="open.annotations">
       <div class="sc-panel-head" (click)="toggleSection('annotations')">
         <p-checkbox
@@ -101,10 +102,10 @@
           [ngModel]="view.showAnnotations !== false"
           (click)="$event.stopPropagation()"
           (onChange)="onShowAnnotations($event.checked)"
-          pTooltip="Show the drawn regions"
+          pTooltip="Show the regions"
           tooltipPosition="top"
         ></p-checkbox>
-        <span class="sc-panel-title">Annotations</span>
+        <span class="sc-panel-title">Regions</span>
         <i class="pi" [class.pi-chevron-down]="open.annotations" [class.pi-chevron-right]="!open.annotations"></i>
       </div>
       <div class="sc-panel-body" *ngIf="open.annotations">

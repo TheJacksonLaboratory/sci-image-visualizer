@@ -672,7 +672,7 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
     const text = () => (host.nativeElement as HTMLElement).textContent ?? '';
     expect((SpatialControlsComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
     // Open the Annotations section, where the selection count is shown.
-    (panelNamed(host.nativeElement, 'Annotations').querySelector('.sc-panel-head') as HTMLElement).click();
+    (panelNamed(host.nativeElement, 'Regions').querySelector('.sc-panel-head') as HTMLElement).click();
     host.detectChanges();
     expect(host.nativeElement.querySelector('p-button[icon="pi pi-object-group"]')).not.toBeNull();
     expect(text()).not.toContain('selected —');

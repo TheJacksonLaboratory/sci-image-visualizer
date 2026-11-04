@@ -1020,17 +1020,6 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (planes) this.napari.setRegionPlane(this.currentZIndex);
     this.datasetPlanes$.next(sliced ? planes : null);
     this.spatialViewChanged$.next();
-    // Annotations switched off in a spatial view before the set came: its classes are hidden as the
-    // rest are.
-    if (
-      this.annotationsHidden &&
-      (isSpatialOmics(this.currentPlotType) || isSpatialOmics3d(this.currentPlotType))
-    ) {
-      this.setClassesHidden(
-        set.groups.flatMap((g) => g.classes),
-        true,
-      );
-    }
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
     this.updatePlaneCells();
@@ -1095,30 +1084,32 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   }
 
   /**
-   * In the spatial views (2D and 3D), the spatial panel's Annotations switch (`showAnnotations`) is
-   * the regions' as the Region Editor's class eyes are: off, every class is hidden (its regions in 2D,
-   * its surfaces in 3D, and the eyes show it); on again, every class is shown. Applied when the switch
-   * changes, or on entering a spatial view with it off, so a class hidden or shown by its own eye
-   * meanwhile stays as it was set.
+   * In the spatial views (2D and 3D), the spatial panel's Regions switch (`showAnnotations`, off by
+   * default) is the regions' as the Region Editor's class eyes are: off, every region class is hidden
+   * (its regions in 2D, its surfaces in 3D, and the eyes show it); on again, every one is shown.
+   * Applied when the switch changes, or on entering a spatial view with it off, so a class hidden or
+   * shown by its own eye meanwhile stays as it was set. The dataset's own region set (its cell
+   * segmentation, by cell type) is not a region of the user's: it is the Cell segmentations', and
+   * left as it is.
    */
   private syncAnnotations(): void {
     if (!isSpatialOmics(this.currentPlotType) && !isSpatialOmics3d(this.currentPlotType)) return;
     const hide = this.store.currentSpatialView().showAnnotations === false;
     if (hide === this.annotationsHidden) return;
     this.annotationsHidden = hide;
-    const classes = this.knownClasses();
+    const classes = this.regionClasses();
     if (classes.length) this.setClassesHidden(classes, hide);
   }
 
   /**
-   * Every class the Region Editor lists for the image: the dataset region set's, those shown in 3D,
-   * the drawn regions', and any hidden now.
+   * The region classes the Region Editor lists for the image, but for the dataset region set's (the
+   * cell segmentation's): those shown in 3D, the drawn regions', and any hidden now.
    */
-  private knownClasses(): string[] {
+  private regionClasses(): string[] {
     const out = new Set<string>(this.regionStore.getHiddenClasses());
-    for (const g of this.datasetRegionSet?.groups ?? []) g.classes.forEach((c) => out.add(c));
     for (const g of this.shown3d) g.classes.forEach((c) => out.add(c));
     for (const r of this.regionStore.getRegions()) if (r.label) out.add(r.label);
+    for (const g of this.datasetRegionSet?.groups ?? []) g.classes.forEach((c) => out.delete(c));
     return [...out];
   }
 

@@ -566,21 +566,26 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
     });
   });
 
-  describe('Annotations', () => {
+  describe('Regions', () => {
     it('writes the region switch, selects from the ROIs and clears', async () => {
       await build();
-      emit(one(panelNamed(root, 'Annotations'), '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
+      // Off by default: the regions are shown only when asked for.
+      const regionSwitch = one(panelNamed(root, 'Regions'), '.sc-panel-head p-checkbox');
+      expect(accessorOf(fixture, regionSwitch).value).toBe(false);
+      emit(regionSwitch, 'onChange', { checked: true });
+      expect(lastWrite()).toEqual({ showAnnotations: true });
+      emit(one(panelNamed(root, 'Regions'), '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showAnnotations: false });
-      const panel = await openSection('Annotations');
+      const panel = await openSection('Regions');
       emit(one(panel, 'p-button[label="Select from ROIs"]'), 'onClick');
       await fixture.whenStable();
       fixture.detectChanges();
       expect(controls.selectFromRegions).toHaveBeenCalled();
-      expect(panelNamed(root, 'Annotations').textContent).toContain('2 of 4 selected');
-      emit(one(panelNamed(root, 'Annotations'), 'p-button[label="Clear"]'), 'onClick');
+      expect(panelNamed(root, 'Regions').textContent).toContain('2 of 4 selected');
+      emit(one(panelNamed(root, 'Regions'), 'p-button[label="Clear"]'), 'onClick');
       fixture.detectChanges();
       expect(controls.clearSelection).toHaveBeenCalled();
-      expect(panelNamed(root, 'Annotations').querySelector('p-button[label="Clear"]')).toBeNull();
+      expect(panelNamed(root, 'Regions').querySelector('p-button[label="Clear"]')).toBeNull();
     });
   });
 
