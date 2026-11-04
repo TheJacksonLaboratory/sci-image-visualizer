@@ -66,6 +66,12 @@ export interface IImageInfo {
   showStack: boolean;
   scaleRatio: boolean;
   fileName: string;
+  /**
+   * The host's id of the image, as a spatial dataset's `SpatialImageRef.imageId` names it (jit-ui:
+   * its path in the bucket). Optional: given, the image is a dataset's own only when the two are
+   * equal; without it, only its file name can be compared (see `isDatasetImage`).
+   */
+  imageId?: string;
   roiJsonStr?: string;
   /** Per-slice ROI GeoJSON, aligned 1:1 with `urls`, for a folder stack where
    *  each slice is a separate file with its own sibling `<stem>.geojson`

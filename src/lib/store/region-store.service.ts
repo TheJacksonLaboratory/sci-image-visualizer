@@ -883,6 +883,19 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return this.sources.has(this.scope.activeImage, this.sourceSlice);
   }
 
+  /** Whether the current image has any region source, over all its slices or a slice's own. */
+  hasAnyRegionSource(): boolean {
+    return this.sources.hasAny(this.scope.activeImage);
+  }
+
+  /**
+   * The opener of the current image's source over all its slices, as attached (see
+   * {@link attachRegionSource}), or null without one: tells whose source it still is.
+   */
+  getPlanesSourceOpener(): RegionSourceOpener | null {
+    return this.sources.planesOpener(this.scope.activeImage);
+  }
+
   /** The slice's region source as a source layer draws it; null without one (or until it opens). */
   getRegionSourceView(): RegionSourceView | null {
     return this.sourceView$.value;

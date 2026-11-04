@@ -17,7 +17,12 @@ file was added.
   the region editor, over every plane, once the dataset and its image are both on screen
   (`SpatialDataPort.openRegionSet`; `SpatialDataHttpService` opens it at `{base}/regions/{id}/`). In
   spatial 3D the editor offers its classes in 3D, and each cell type is shown as a surface once by
-  itself; hiding them, or the editor's own choice, then stands.
+  itself; hiding them, or the editor's own choice, then stands. The image is matched exactly by
+  `IImageInfo.imageId` (new, optional: the host's id for it, as `imageRef.imageId` names it); without
+  it, by file name, and then only an image that landed under that dataset (or none), so another
+  bundle's `plate.ome.tif` still on screen is not taken for it. Back on an image, its set is restored
+  with what was deleted from it, not attached again; an image with region sources of its own keeps
+  them, and the set is not attached over them.
 - **Region surfaces placed by their planes' z.** A region set that says where its planes are
   (`RegionSourceInfo.sliceZ`, in its coordinates' units, with `micronsPerUnit`) has its surfaces placed
   at those planes among the observations in spatial 3D, its pixels taken back through the dataset's

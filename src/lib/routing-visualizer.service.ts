@@ -135,13 +135,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * which places its surfaces in spatial 3D on an image of one plane. `shown3d` once its classes
    * were shown in 3D by themselves, which happens once per image.
    */
-  private datasetRegionSet: {
-    image: string;
-    key: string;
-    planes: readonly number[] | null;
-    groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;
-    shown3d: boolean;
-  } | null = null;
+  private datasetRegionSet: DatasetRegionSetState | null = null;
+  /**
+   * Each image's attached region set, kept across image switches: coming back to the image finds
+   * its source still in the store (with what was taken from it, or deleted) and restores the set
+   * rather than attaching it again, which would start the source afresh.
+   */
+  private readonly attachedRegionSets = new Map<string, DatasetRegionSetState>();
   /** The dataset region set's planes while they slice the plotted image (see getDatasetPlanes$). */
   private readonly datasetPlanes$ = new BehaviorSubject<readonly number[] | null>(null);
   /** The groups last asked for in 3D, with their colours: what an edit's rebuild shows again. */
@@ -384,7 +384,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     if (!this.imageVolumeView) this.unmountSlice();
     // Region surfaces belong to the image they were built from: another image drops them.
     if (this.classes3d$.value.length && this.plottedFileName !== this.classes3dImage) this.clearRegionClasses3d();
-    // So does a dataset's region set: where its planes are is no other image's.
+    // So does a dataset's region set: where its planes are is no other image's. Its attachment is
+    // kept (attachedRegionSets), to be restored when its image is back.
     if (this.datasetRegionSet && this.datasetRegionSet.image !== this.importImageKey()) {
       this.datasetRegionSet = null;
       this.napari.setRegionPlanes(null);
@@ -893,8 +894,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    * dataset re-emitted, the image re-plotted) it changes nothing. Where the set's slices are (its
    * `sliceZ`) places its surfaces among the observations in spatial 3D, where the region editor then
    * offers its classes in 3D; there, every class is shown once by itself (see showDatasetRegionSet3d).
+   * Back on an image the set was attached to, with its source still the store's, it is restored as
+   * it was (what was taken from the source, or deleted, stays so), not attached again.
    * Resolves false, changing nothing (the source disposed), when another image was plotted or
-   * another set attached while it opened, or it could not be opened.
+   * another set attached while it opened, it could not be opened, or the image has region sources
+   * of its own (which it would replace, see keepsOwnSources).
    */
   async attachDatasetRegionSet(open: RegionSourceOpener, key: string): Promise<boolean> {
     const image = this.importImageKey();
@@ -904,8 +908,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.showDatasetRegionSet3d();
       return true;
     }
+    // Back on an image whose set is attached: its source is still the store's, with what was taken
+    // from it. Restored, not attached again.
+    const known = this.attachedRegionSets.get(image);
+    if (known?.key === key && known.opener && known.opener === this.regionStore.getPlanesSourceOpener()) {
+      this.useDatasetRegionSet(known);
+      return true;
+    }
+    if (this.keepsOwnSources(key)) return false;
     // Claimed before the source opens: a second call meanwhile changes nothing.
-    const claim = { image, key, planes: null, groups: [], shown3d: false };
+    const claim: DatasetRegionSetState = { image, key, planes: null, groups: [], shown3d: false, opener: null };
     this.datasetRegionSet = claim;
     let first: RegionSource | null;
     try {
@@ -915,7 +927,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       console.warn("[visualizer] the dataset's region set could not be opened", err);
       return false;
     }
-    if (this.datasetRegionSet !== claim || this.importImageKey() !== image) {
+    if (this.datasetRegionSet !== claim || this.importImageKey() !== image || this.keepsOwnSources(key)) {
+      if (this.datasetRegionSet === claim) this.datasetRegionSet = null;
       first.dispose();
       return false;
     }
@@ -926,21 +939,50 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       return source ? Promise.resolve(source) : open();
     };
     const planes = info.sliceZ?.length && info.sliceZ.length === info.planes.length ? info.sliceZ : null;
-    // Sliced by its planes, the image's regions are held per plane, as a stack's per slice: the
-    // set's own (each plane's outlines) and those drawn, on the plane they were drawn on. The ones
-    // drawn before go to the plane shown.
+    // Sliced by its planes, the image's regions are held per plane (see useDatasetRegionSet): stack
+    // mode first, so the source is laid out on the plane shown.
     if (planes && planes.length > 1 && !this.plottedInfo?.isStack && !this.regionStore.isStackMode()) {
       const z = this.currentZIndex < planes.length ? this.currentZIndex : 0;
       this.regionStore.enterStackMode(new Map([[z, this.regionStore.getRegions()]]), z, 'combined');
     }
     this.regionStore.attachRegionSource(reuse, 'planes');
-    this.datasetRegionSet = { ...claim, planes, groups: regionSetGroups(info) };
+    const set: DatasetRegionSetState = { ...claim, planes, groups: regionSetGroups(info), opener: reuse };
+    this.attachedRegionSets.set(image, set);
+    this.useDatasetRegionSet(set);
+    return true;
+  }
+
+  /**
+   * Whether the plotted image has region sources of its own (a served set, large saved ROIs, an
+   * annotation folder's slices), which attaching the dataset's set over every plane would replace,
+   * dropping them and what was taken from them: they are kept, and the set is not attached.
+   */
+  private keepsOwnSources(key: string): boolean {
+    if (!this.regionStore.hasAnyRegionSource()) return false;
+    console.warn(
+      `[visualizer] the image has region sources of its own: the dataset's region set (${key}) is not attached over them`,
+    );
+    return true;
+  }
+
+  /**
+   * Make `set` the plotted image's region set: its planes slice the image (its regions per plane,
+   * as a stack's per slice: those drawn before go to the plane shown), place its surfaces in
+   * spatial 3D and drive the slider.
+   */
+  private useDatasetRegionSet(set: DatasetRegionSetState): void {
+    this.datasetRegionSet = set;
+    const planes = set.planes;
+    const sliced = !!planes && planes.length > 1 && !this.plottedInfo?.isStack;
+    if (sliced && !this.regionStore.isStackMode()) {
+      const z = this.currentZIndex < planes.length ? this.currentZIndex : 0;
+      this.regionStore.enterStackMode(new Map([[z, this.regionStore.getRegions()]]), z, 'combined');
+    }
     this.napari.setRegionPlanes(planes);
     if (planes) this.napari.setRegionPlane(this.currentZIndex);
-    this.datasetPlanes$.next(planes && planes.length > 1 && !this.plottedInfo?.isStack ? planes : null);
+    this.datasetPlanes$.next(sliced ? planes : null);
     this.updateVolumeView(this.currentPlotType);
     this.showDatasetRegionSet3d();
-    return true;
   }
 
   /**
@@ -1546,6 +1588,21 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   unsubscribe(): void {
     this.detach();
   }
+}
+
+/**
+ * A spatial dataset's region set on an image (see `attachDatasetRegionSet`): the image (its region
+ * scope key), the set's key, its planes' z (its `sliceZ`, when it says), its class groups, whether
+ * they were shown in 3D by themselves, and the opener it was attached to the store with (null while
+ * it opens): while the store's source over every plane is that one, the set is still attached.
+ */
+interface DatasetRegionSetState {
+  image: string;
+  key: string;
+  planes: readonly number[] | null;
+  groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;
+  shown3d: boolean;
+  opener: RegionSourceOpener | null;
 }
 
 /**

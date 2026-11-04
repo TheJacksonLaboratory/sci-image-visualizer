@@ -42,6 +42,12 @@ describe('isDatasetImage', () => {
     expect(isDatasetImage(PLATE, { ...ILEUM, imageRef: undefined })).toBe(false);
     expect(isDatasetImage(null, ILEUM)).toBe(false);
   });
+
+  it("is, given the host's id for the image, that id and nothing else", () => {
+    expect(isDatasetImage({ ...PLATE, imageId: 'demo/ileum.omics/image/plate.ome.tif' }, ILEUM)).toBe(true);
+    // Another bundle's image of the same file name.
+    expect(isDatasetImage({ ...PLATE, imageId: 'demo/colon.omics/image/plate.ome.tif' }, ILEUM)).toBe(false);
+  });
 });
 
 describe('SpatialRegionSetLink', () => {
@@ -87,5 +93,28 @@ describe('SpatialRegionSetLink', () => {
     none.dataset$.next(ILEUM);
     none.l.imageLanded(PLATE);
     expect(none.target.attachDatasetRegionSet).not.toHaveBeenCalled();
+  });
+
+  it("takes no image another dataset's was by its file name: waits for its own", () => {
+    const COLON: any = { ...ILEUM, id: 'colon', imageRef: { imageId: 'demo/colon.omics/image/plate.ome.tif' } };
+    const colonSet = { ...COLON, polygonTiles: tiles([{ name: '3d', label: '3D', regionSource: 'rs-colon' }]) };
+    const { l, dataset$, target } = link(jest.fn());
+    dataset$.next(ILEUM);
+    l.imageLanded(PLATE);
+    expect(target.attachDatasetRegionSet).toHaveBeenCalledTimes(1);
+    // The colon selected while the ileum's plate.ome.tif is still on screen.
+    dataset$.next(colonSet);
+    expect(target.attachDatasetRegionSet).toHaveBeenCalledTimes(1);
+    l.imageLanded(PLATE);
+    expect(target.attachDatasetRegionSet).toHaveBeenCalledTimes(2);
+    expect(target.attachDatasetRegionSet).toHaveBeenLastCalledWith(expect.any(Function), 'rs-colon');
+  });
+
+  it("takes the image another dataset's was when the host's id says it is this one's", () => {
+    const { l, dataset$, target } = link(jest.fn());
+    dataset$.next({ ...ILEUM, id: 'before', imageRef: { imageId: 'x/before.tif' } });
+    l.imageLanded({ ...PLATE, imageId: 'demo/ileum.omics/image/plate.ome.tif' });
+    dataset$.next(ILEUM);
+    expect(target.attachDatasetRegionSet).toHaveBeenCalledWith(expect.any(Function), 'rs-3d');
   });
 });

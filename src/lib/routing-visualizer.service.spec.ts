@@ -1276,6 +1276,60 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(napari.setZIndex).toHaveBeenLastCalledWith(1);
     });
 
+    /** Plot `info` as a host does: the store's active image follows (Plotly's job, mocked here). */
+    async function show(info: any): Promise<void> {
+      regionStore.setActiveImage(info);
+      await router.plot('div', {}, info, 600, PlotType.SPATIAL_OMICS);
+    }
+    const scope = () => (regionStore as any).sources;
+    const imageKey = () => (regionStore as any).scope.activeImage as string;
+
+    it('restores its set on coming back to an image, keeping what was deleted from its source', async () => {
+      const OTHER: any = { ...IMAGE_INFO, fileName: 'other.tif' };
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await show(PLATE);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      const plate = imageKey();
+      scope().setTaken(plate, 0, new Set(['deleted-cell']));
+
+      await show(OTHER);
+      await show(PLATE);
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(Array.from(scope().taken(plate, 0))).toEqual(['deleted-cell']);
+      // Its planes slice the image again, its regions per plane.
+      expect(planes[planes.length - 1]).toEqual([0, 10, 20]);
+      expect(regionStore.isStackMode()).toBe(true);
+    });
+
+    it("keeps the image's own region sources: the set is not attached over them", async () => {
+      await show(PLATE);
+      const own = jest.fn();
+      regionStore.attachRegionSource(own as any, { slice: 0 });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(false);
+      expect(scope().hasOwnSource(imageKey(), 0)).toBe(true);
+      expect(open).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalled();
+
+      // One attached while the set opened is kept too.
+      await show({ ...IMAGE_INFO, fileName: 'late.tif' });
+      const source = { ...SOURCE, dispose: jest.fn() };
+      let resolve: (s: unknown) => void = () => undefined;
+      const late = router.attachDatasetRegionSet(() => new Promise((r) => (resolve = r)) as never, 'set-1');
+      regionStore.attachRegionSource(own as any, { slice: 0 });
+      resolve(source);
+      await expect(late).resolves.toBe(false);
+      expect(source.dispose).toHaveBeenCalled();
+      expect(scope().hasOwnSource(imageKey(), 0)).toBe(true);
+      warn.mockRestore();
+    });
+
     it('drops a set that opened after another image was plotted, or failed to open', async () => {
       await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
       const attach = jest.spyOn(regionStore, 'attachRegionSource');
