@@ -26,10 +26,10 @@ import type { GenePickerModel } from '../spatial-gene-picker';
 import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-groups-panel.component';
 
 /**
- * The Cells sub-section of the Observations section (projected into it, above "Observations in
- * selection"), for data with a cell segmentation, as Xenium Explorer's Cells section: the outlines'
- * on/off switch, which boundary set
- * is drawn, how cells are coloured (with the gene, the colour, or the colour bar that
+ * The "Cell segmentations" sub-section of the Observations section (projected into it, below
+ * Markers and above "Observations in selection"), for data with a cell segmentation, as Xenium
+ * Explorer's Cells section: the outlines' on/off switch, which boundary set is drawn, how cells
+ * are coloured (with the gene, the colour, or the colour bar that
  * goes with it), the {@link SpatialGroupsPanelComponent groups}, and how cells are drawn.
  *
  * Writes only through `controls.setViewState`.

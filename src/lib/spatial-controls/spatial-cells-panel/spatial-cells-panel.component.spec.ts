@@ -210,7 +210,7 @@ describe('SpatialCellsPanelComponent', () => {
     const asked: boolean[] = [];
     component.openChange.subscribe((on) => asked.push(on));
     expect(root.querySelector('.sc-subsection-body')).toBeNull();
-    (one(subsectionNamed(root, 'Cells'), '.sc-subsection-head') as HTMLElement).click();
+    (one(subsectionNamed(root, 'Cell segmentations'), '.sc-subsection-head') as HTMLElement).click();
     expect(asked).toEqual([true]);
   });
 });

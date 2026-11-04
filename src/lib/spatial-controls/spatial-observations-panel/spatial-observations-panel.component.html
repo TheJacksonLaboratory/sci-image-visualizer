@@ -3,193 +3,206 @@
      colours them. The lead section for datasets without cell outlines. -->
   <div class="sc-panel" [class.open]="open">
     <div class="sc-panel-head" (click)="openChange.emit(!open)">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="view.showPoints"
-        (click)="$event.stopPropagation()"
-        (onChange)="onShowPoints($event.checked)"
-      ></p-checkbox>
       <span class="sc-panel-title">Observations</span>
       <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
     </div>
     <div class="sc-panel-body" *ngIf="open">
-      <small class="sc-hint" *ngIf="hasCells && !is3d">
-        One circle per cell, at every zoom. Cell outlines are drawn over the circles once cells are big enough on
-        screen to outline.
-      </small>
-      <!-- Colour source. Column and gene are mutually exclusive: picking one
+      <!-- Markers: the observations' markers, their own switch, and what colours and filters them. -->
+      <div class="sc-subsection" [class.open]="markersOpen">
+        <div class="sc-subhead sc-subsection-head" (click)="markersOpen = !markersOpen">
+          <i class="pi" [class.pi-chevron-down]="markersOpen" [class.pi-chevron-right]="!markersOpen"></i>
+          <p-checkbox
+            [binary]="true"
+            [ngModel]="view.showPoints"
+            (click)="$event.stopPropagation()"
+            (onChange)="onShowPoints($event.checked)"
+            pTooltip="Show the observation markers"
+            tooltipPosition="top"
+          ></p-checkbox>
+          <span class="sc-subsection-title">Markers</span>
+        </div>
+        <div class="sc-subsection-body" *ngIf="markersOpen">
+          <small class="sc-hint" *ngIf="hasCells && !is3d">
+            One circle per cell, at every zoom. Cell outlines are drawn over the circles once cells are big enough
+            on screen to outline.
+          </small>
+          <!-- Colour source. Column and gene are mutually exclusive: picking one
      clears the other, so what drives the colours is never ambiguous. -->
-      <div class="sc-section">
-        <label class="sc-lbl" for="sc-column">Colour by column</label>
-        <p-dropdown
-          inputId="sc-column"
-          [options]="columnOptions"
-          optionLabel="label"
-          optionValue="value"
-          [ngModel]="selectedColumn"
-          (ngModelChange)="onColumn($event)"
-          placeholder="None (flat colour)"
-          appendTo="body"
-          styleClass="sc-full"
-        ></p-dropdown>
-      </div>
+          <div class="sc-section">
+            <label class="sc-lbl" for="sc-column">Colour by column</label>
+            <p-dropdown
+              inputId="sc-column"
+              [options]="columnOptions"
+              optionLabel="label"
+              optionValue="value"
+              [ngModel]="selectedColumn"
+              (ngModelChange)="onColumn($event)"
+              placeholder="None (flat colour)"
+              appendTo="body"
+              styleClass="sc-full"
+            ></p-dropdown>
+          </div>
 
-      <ng-container *ngIf="genes?.state$ | async as gene">
-        <div class="sc-section" *ngIf="ds.features">
-          <label class="sc-lbl" for="sc-gene">Colour by gene</label>
-          <!-- A filterable dropdown, not a free-text box: the genes are visible before
+          <ng-container *ngIf="genes?.state$ | async as gene">
+            <div class="sc-section" *ngIf="ds.features">
+              <label class="sc-lbl" for="sc-gene">Colour by gene</label>
+              <!-- A filterable dropdown, not a free-text box: the genes are visible before
        anything is typed, and each keystroke narrows a list the user can see.
        Virtual-scrolled because a targeted panel runs to a few thousand names. -->
-          <p-dropdown
-            inputId="sc-gene"
-            [options]="gene.options"
-            optionLabel="label"
-            optionValue="value"
-            [ngModel]="selectedGene"
-            (ngModelChange)="onGene($event)"
-            [filter]="true"
-            filterBy="label"
-            [resetFilterOnHide]="true"
-            (onFilter)="genes?.onFilter($event.filter)"
-            (onShow)="genes?.ensureList()"
-            [showClear]="true"
-            [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
-            [virtualScrollItemSize]="30"
-            [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
-            [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
-            appendTo="body"
-            placeholder="Search {{ ds.features.count | number }} genes…"
-            styleClass="sc-full"
-          ></p-dropdown>
-          <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
-        </div>
+              <p-dropdown
+                inputId="sc-gene"
+                [options]="gene.options"
+                optionLabel="label"
+                optionValue="value"
+                [ngModel]="selectedGene"
+                (ngModelChange)="onGene($event)"
+                [filter]="true"
+                filterBy="label"
+                [resetFilterOnHide]="true"
+                (onFilter)="genes?.onFilter($event.filter)"
+                (onShow)="genes?.ensureList()"
+                [showClear]="true"
+                [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+                [virtualScrollItemSize]="30"
+                [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
+                [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
+                appendTo="body"
+                placeholder="Search {{ ds.features.count | number }} genes…"
+                styleClass="sc-full"
+              ></p-dropdown>
+              <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
+            </div>
 
-        <!-- Which observations are drawn at all, by what they express. Several genes at
+            <!-- Which observations are drawn at all, by what they express. Several genes at
        once, unlike the colour, which reads one: picking genes here hides every
        observation that expresses none of them (or not all of them), and by default
        colours (and, in 2D, marks) each drawn one by its gene. -->
-        <div class="sc-section" *ngIf="ds.features">
-          <label class="sc-lbl" for="sc-show-genes">Show observations expressing</label>
-          <p-multiSelect
-            inputId="sc-show-genes"
-            [options]="gene.options"
-            optionLabel="label"
-            optionValue="value"
-            [ngModel]="view.observationGenes"
-            (onChange)="onObservationGenes($event.value)"
-            [filter]="true"
-            filterBy="label"
-            [resetFilterOnHide]="true"
-            (onFilter)="genes?.onFilter($event.filter)"
-            (onPanelShow)="genes?.ensureList()"
-            [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
-            [virtualScrollItemSize]="30"
-            [showToggleAll]="false"
-            [showClear]="true"
-            [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
-            [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
-            appendTo="body"
-            placeholder="Any gene (every observation)"
-            [selectedItemsLabel]="'{0} genes'"
-            [maxSelectedLabels]="3"
-            styleClass="sc-full"
-          >
-            <!-- A picked gene shows its icon in its colour; clicking it edits them. -->
-            <ng-template let-option pTemplate="item">
-              <div class="sc-obs-gene-option">
-                <span class="sc-obs-gene-name">{{ option.label }}</span>
-                <ng-container *ngIf="isObservationGene(option.value)">
-                  <ng-container *ngTemplateOutlet="geneMark; context: { $implicit: option.value }"></ng-container>
-                </ng-container>
-              </div>
-            </ng-template>
-          </p-multiSelect>
-          <p-selectButton
-            *ngIf="view.observationGenes.length > 1"
-            [options]="matchOptions"
-            optionLabel="label"
-            optionValue="value"
-            [ngModel]="view.observationGenesMatch"
-            (ngModelChange)="onObservationGenesMatch($event)"
-            [allowEmpty]="false"
-            styleClass="sc-buttons"
-          ></p-selectButton>
-          <!-- The picked genes: each one's icon and colour (click to edit), and a way out. -->
-          <div class="sc-obs-genes" *ngIf="view.observationGenes.length">
-            <div class="sc-obs-gene-row" *ngFor="let g of view.observationGenes; trackBy: trackByGene">
-              <ng-container *ngTemplateOutlet="geneMark; context: { $implicit: g }"></ng-container>
-              <span class="sc-obs-gene-name">{{ g }}</span>
-              <button
-                type="button"
-                class="sc-icon-btn"
-                [attr.aria-label]="'Stop showing ' + g"
-                pTooltip="Remove"
-                tooltipPosition="top"
-                (click)="removeObservationGene(g)"
+            <div class="sc-section" *ngIf="ds.features">
+              <label class="sc-lbl" for="sc-show-genes">Show observations expressing</label>
+              <p-multiSelect
+                inputId="sc-show-genes"
+                [options]="gene.options"
+                optionLabel="label"
+                optionValue="value"
+                [ngModel]="view.observationGenes"
+                (onChange)="onObservationGenes($event.value)"
+                [filter]="true"
+                filterBy="label"
+                [resetFilterOnHide]="true"
+                (onFilter)="genes?.onFilter($event.filter)"
+                (onPanelShow)="genes?.ensureList()"
+                [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
+                [virtualScrollItemSize]="30"
+                [showToggleAll]="false"
+                [showClear]="true"
+                [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
+                [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
+                appendTo="body"
+                placeholder="Any gene (every observation)"
+                [selectedItemsLabel]="'{0} genes'"
+                [maxSelectedLabels]="3"
+                styleClass="sc-full"
               >
-                <i class="pi pi-times"></i>
-              </button>
+                <!-- A picked gene shows its icon in its colour; clicking it edits them. -->
+                <ng-template let-option pTemplate="item">
+                  <div class="sc-obs-gene-option">
+                    <span class="sc-obs-gene-name">{{ option.label }}</span>
+                    <ng-container *ngIf="isObservationGene(option.value)">
+                      <ng-container
+                        *ngTemplateOutlet="geneMark; context: { $implicit: option.value }"
+                      ></ng-container>
+                    </ng-container>
+                  </div>
+                </ng-template>
+              </p-multiSelect>
+              <p-selectButton
+                *ngIf="view.observationGenes.length > 1"
+                [options]="matchOptions"
+                optionLabel="label"
+                optionValue="value"
+                [ngModel]="view.observationGenesMatch"
+                (ngModelChange)="onObservationGenesMatch($event)"
+                [allowEmpty]="false"
+                styleClass="sc-buttons"
+              ></p-selectButton>
+              <!-- The picked genes: each one's icon and colour (click to edit), and a way out. -->
+              <div class="sc-obs-genes" *ngIf="view.observationGenes.length">
+                <div class="sc-obs-gene-row" *ngFor="let g of view.observationGenes; trackBy: trackByGene">
+                  <ng-container *ngTemplateOutlet="geneMark; context: { $implicit: g }"></ng-container>
+                  <span class="sc-obs-gene-name">{{ g }}</span>
+                  <button
+                    type="button"
+                    class="sc-icon-btn"
+                    [attr.aria-label]="'Stop showing ' + g"
+                    pTooltip="Remove"
+                    tooltipPosition="top"
+                    (click)="removeObservationGene(g)"
+                  >
+                    <i class="pi pi-times"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="sc-row" *ngIf="view.observationGenes.length">
+                <p-checkbox
+                  [binary]="true"
+                  [ngModel]="view.observationGenesColorBy"
+                  (onChange)="onObservationGenesColorBy($event.checked)"
+                  label="Colour by these genes"
+                  pTooltip="Each observation in the colour (and, in 2D, the icon) of the picked gene it expresses most, relative to that gene's highest value. Off, Colour by column or gene applies."
+                  tooltipPosition="top"
+                ></p-checkbox>
+              </div>
+              <small class="sc-hint" *ngIf="view.observationGenes.length">{{ geneFilterHint }}</small>
+              <!-- The filter is never dropped silently: a failed expression read keeps the observations
+               as they were drawn, and says so. -->
+              <small class="sc-hint sc-error" *ngIf="view.observationGenes.length && (geneFilterFailed$ | async)">
+                The expression of the picked genes could not be read, so the observations still show the previous
+                filter.
+                <a href="" (click)="$event.preventDefault(); retryGeneFilter()">Try again</a>
+              </small>
+            </div>
+          </ng-container>
+
+          <spatial-key
+            [controls]="controls"
+            [dataset]="ds"
+            [view]="view"
+            [legend]="legend"
+            [colorBarCss]="colorBarCss"
+            [selectedCategory]="selectedCategory"
+            [colormapOptions]="colormapOptions"
+            (categoryClicked)="categoryClicked.emit($event)"
+          ></spatial-key>
+
+          <!-- Display -->
+          <div class="sc-section">
+            <div class="sc-row">
+              <span class="sc-lbl">Point size</span>
+              <p-slider
+                [ngModel]="view.pointScale"
+                [min]="0.25"
+                [max]="5"
+                [step]="0.25"
+                (onChange)="onPointScale($event.value)"
+              ></p-slider>
+              <span class="sc-val">{{ view.pointScale }}×</span>
+            </div>
+            <div class="sc-row">
+              <span class="sc-lbl">Opacity</span>
+              <p-slider
+                [ngModel]="view.opacity"
+                [min]="0.1"
+                [max]="1"
+                [step]="0.05"
+                (onChange)="onOpacity($event.value)"
+              ></p-slider>
+              <span class="sc-val">{{ view.opacity }}</span>
             </div>
           </div>
-          <div class="sc-row" *ngIf="view.observationGenes.length">
-            <p-checkbox
-              [binary]="true"
-              [ngModel]="view.observationGenesColorBy"
-              (onChange)="onObservationGenesColorBy($event.checked)"
-              label="Colour by these genes"
-              pTooltip="Each observation in the colour (and, in 2D, the icon) of the picked gene it expresses most, relative to that gene's highest value. Off, Colour by column or gene applies."
-              tooltipPosition="top"
-            ></p-checkbox>
-          </div>
-          <small class="sc-hint" *ngIf="view.observationGenes.length">{{ geneFilterHint }}</small>
-          <!-- The filter is never dropped silently: a failed expression read keeps the observations
-               as they were drawn, and says so. -->
-          <small class="sc-hint sc-error" *ngIf="view.observationGenes.length && (geneFilterFailed$ | async)">
-            The expression of the picked genes could not be read, so the observations still show the previous
-            filter.
-            <a href="" (click)="$event.preventDefault(); retryGeneFilter()">Try again</a>
-          </small>
-        </div>
-      </ng-container>
-
-      <spatial-key
-        [controls]="controls"
-        [dataset]="ds"
-        [view]="view"
-        [legend]="legend"
-        [colorBarCss]="colorBarCss"
-        [selectedCategory]="selectedCategory"
-        [colormapOptions]="colormapOptions"
-        (categoryClicked)="categoryClicked.emit($event)"
-      ></spatial-key>
-
-      <!-- Display -->
-      <div class="sc-section">
-        <div class="sc-row">
-          <span class="sc-lbl">Point size</span>
-          <p-slider
-            [ngModel]="view.pointScale"
-            [min]="0.25"
-            [max]="5"
-            [step]="0.25"
-            (onChange)="onPointScale($event.value)"
-          ></p-slider>
-          <span class="sc-val">{{ view.pointScale }}×</span>
-        </div>
-        <div class="sc-row">
-          <span class="sc-lbl">Opacity</span>
-          <p-slider
-            [ngModel]="view.opacity"
-            [min]="0.1"
-            [max]="1"
-            [step]="0.05"
-            (onChange)="onOpacity($event.value)"
-          ></p-slider>
-          <span class="sc-val">{{ view.opacity }}</span>
         </div>
       </div>
 
-      <!-- With a cell segmentation: the Cells sub-section, projected by the dialog. -->
+      <!-- With a cell segmentation: the Cell segmentations sub-section, projected by the dialog. -->
       <ng-content select="spatial-cells-panel"></ng-content>
 
       <!-- The selected cell's (or cell type's, or region's) observations, by group: through the

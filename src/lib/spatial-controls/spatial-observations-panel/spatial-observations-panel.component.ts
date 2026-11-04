@@ -99,6 +99,11 @@ export class SpatialObservationsPanelComponent implements OnChanges {
   @Input() open = false;
   /** Asks to open or close it; two-way with `open`. */
   @Output() readonly openChange = new EventEmitter<boolean>();
+  /**
+   * Whether the Markers sub-section is unfolded: by default only for data without a cell
+   * segmentation, whose Cell segmentations sub-section leads otherwise.
+   */
+  protected markersOpen = true;
   /** A legend row was clicked (see the key). */
   @Output() readonly categoryClicked = new EventEmitter<number>();
 
@@ -128,6 +133,7 @@ export class SpatialObservationsPanelComponent implements OnChanges {
     }
     if (changes['dataset'] || changes['controls']) {
       this.columnOptions = columnOptions(this.dataset);
+      if (changes['dataset']) this.markersOpen = !this.hasCells;
       // A new dataset almost certainly has different columns; drop stale UI state.
       this.selectedGene = null;
       this.sections = this.controls?.sampledSections() ?? null;

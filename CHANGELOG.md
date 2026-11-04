@@ -121,11 +121,15 @@ file was added.
 
 ### Changed
 
-- **Cells is a sub-section of the Observations.** In the spatial-omics dialog, a dataset with a cell
-  segmentation no longer has a Cells section of its own: its controls (the outlines' switch,
-  boundaries, colouring, groups, how cells are drawn, and in 3D how they are shown) are a foldable
-  "Cells" sub-section inside the Observations section, above "Observations in selection". The
-  Observations section now opens first for every dataset, with Cells open in it when there are cells.
+- **The Observations section holds Markers and Cell segmentations sub-sections.** In the
+  spatial-omics dialog the Observations section has no switch of its own. Its first sub-section,
+  "Markers", has the switch that shows or hides the observation markers, and holds what colours and
+  filters them (colour by column or gene, the genes they express, the key, point size and opacity).
+  A dataset with a cell segmentation no longer has a Cells section: its controls (the outlines'
+  switch, boundaries, colouring, groups, how cells are drawn, and in 3D how they are shown) are a
+  foldable "Cell segmentations" sub-section after Markers, above "Observations in selection".
+  Observations now opens first for every dataset. Markers starts unfolded without a segmentation,
+  and Cell segmentations starts unfolded with one.
 
 - **The reference volume is a section of the spatial panel in 3D: Volume.** In the Images section's
   place (Images is 2D's), its header switch shows and hides the volume and its body holds the

@@ -13,6 +13,7 @@ import {
   one,
   panelNamed,
   shallowPanel,
+  subsectionNamed,
 } from '../../testing/spatial-panel-testing';
 
 const dataset: SpatialDataset = {
@@ -314,15 +315,31 @@ describe('SpatialObservationsPanelComponent', () => {
     expect(component['columnOptions']).toHaveLength(1); // just "None"
   });
 
-  it('asks to open from its header, and switches the points from its checkbox', async () => {
+  it('asks to open from its header, which has no switch of its own', async () => {
     await build({ open: false });
     const root = fixture.nativeElement as HTMLElement;
     const asked: boolean[] = [];
     component.openChange.subscribe((on) => asked.push(on));
+    expect(one(panelNamed(root, 'Observations'), '.sc-panel-head').querySelector('p-checkbox')).toBeNull();
     (one(panelNamed(root, 'Observations'), '.sc-panel-head') as HTMLElement).click();
     expect(asked).toEqual([true]);
     expect(root.querySelector('.sc-panel-body')).toBeNull();
+  });
+
+  it('holds the markers in a Markers sub-section, with their switch and their fold', async () => {
+    await build({ open: true });
+    const root = fixture.nativeElement as HTMLElement;
+    // Unfolded for data without a cell segmentation: the markers are all there is.
+    const markers = subsectionNamed(root, 'Markers');
+    expect(one(markers, '.sc-subsection-body').querySelector('p-dropdown[inputId=sc-column]')).toBeTruthy();
+    (one(markers, '.sc-subsection-head') as HTMLElement).click();
+    fixture.detectChanges();
+    expect(subsectionNamed(root, 'Markers').querySelector('.sc-subsection-body')).toBeNull();
     component['onShowPoints'](false);
     expect(view$.value.showPoints).toBe(false);
+    // Folded for data with one, whose Cell segmentations sub-section leads.
+    dataset$.next({ ...dataset, polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [] } } as SpatialDataset);
+    fixture.detectChanges();
+    expect(subsectionNamed(root, 'Markers').querySelector('.sc-subsection-body')).toBeNull();
   });
 });

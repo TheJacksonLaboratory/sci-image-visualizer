@@ -173,8 +173,8 @@
       (openChange)="setOpen('observations', $event)"
       (categoryClicked)="selectCategory($event)"
     >
-      <!-- Cells: with a cell segmentation, a sub-section of the Observations, above "Observations in
-           selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
+      <!-- Cell segmentations: with a cell segmentation, a sub-section of the Observations, below
+           Markers and above "Observations in selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
       <spatial-cells-panel
         *ngIf="hasCells && (!is3d || hasCells3d)"
         [controls]="controls"

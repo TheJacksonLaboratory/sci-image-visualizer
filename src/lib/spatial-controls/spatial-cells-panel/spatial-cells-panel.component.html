@@ -1,5 +1,5 @@
-<!-- A sub-section of the Observations section, for data with a cell segmentation: how the cells
-     are drawn. Its own on/off switch and its own fold. -->
+<!-- Cell segmentations: a sub-section of the Observations section, for data with a cell
+     segmentation: how the cells are drawn. Its own on/off switch and its own fold. -->
 <div class="sc-subsection" [class.open]="open">
   <div class="sc-subhead sc-subsection-head" (click)="openChange.emit(!open)">
     <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
@@ -11,7 +11,7 @@
       pTooltip="Show the cells"
       tooltipPosition="top"
     ></p-checkbox>
-    <span class="sc-subsection-title">Cells</span>
+    <span class="sc-subsection-title">Cell segmentations</span>
   </div>
   <div class="sc-subsection-body" *ngIf="open">
     <!-- 3D: the cells as one surface per cell type, or each its own surface in the Cell Color. -->
