@@ -9,7 +9,13 @@ import {
   type SpatialDataset,
   type SpatialTranscriptTile,
 } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_CATEGORICAL_PALETTE, categoryColorsFor, parseHex } from '../../spatial/spatial-encoding';
+import {
+  DEFAULT_CATEGORICAL_PALETTE,
+  DEFAULT_MUTED_OPACITY,
+  categoryColorsFor,
+  parseHex,
+} from '../../spatial/spatial-encoding';
+import type { SpatialSelectionMask } from '../../spatial/spatial-selection';
 import { allGeneShownBy, allGenesHidden } from '../../spatial/spatial-tile-merge';
 import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { clusterColorMap, clusterOfGene } from '../../spatial/transcript-grouping';
@@ -140,12 +146,17 @@ export class Spatial3dTranscripts {
   private styleKey: string | null = null;
   private loaded: { tiles: SpatialTranscriptTile[]; names: readonly string[] | null } | null = null;
   private readonly loads = new Supersede();
+  /** Each drawn transcript's cell ({@link NO_OBSERVATION} for none), for fading by the selection. */
+  private drawnCells: Uint32Array | null = null;
+  /** The selection the layer's alphas fade by (null: none, every transcript as it is). */
+  private fadedBy: SpatialSelectionMask | null = null;
   /** The last sync's inputs: the camera resting plans the detail again from them. */
   private last: {
     dataset: SpatialDataset;
     view: SpatialViewState;
     port: SpatialDataPort | null;
     frame: Transcripts3dFrame;
+    selection: SpatialSelectionMask | null;
   } | null = null;
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
   private cameraOff: (() => void) | null = null;
@@ -166,7 +177,7 @@ export class Spatial3dTranscripts {
     this.cameraTimer = setTimeout(() => {
       this.cameraTimer = null;
       const last = this.last;
-      if (last) void this.sync(last.dataset, last.view, last.port, last.frame);
+      if (last) void this.sync(last.dataset, last.view, last.port, last.frame, last.selection);
     }, CAMERA_REST_MS);
   }
 
@@ -260,12 +271,17 @@ export class Spatial3dTranscripts {
     return this.layer;
   }
 
-  /** Draw what `view` asks for, loading the molecules when the genes changed. */
+  /**
+   * Draw what `view` asks for, loading the molecules when the genes changed. With a `selection`
+   * (a cell, or a cell type's cells), the transcripts of the selected cells keep their colour and
+   * the others fade, as the cells do.
+   */
   async sync(
     dataset: SpatialDataset,
     view: SpatialViewState,
     port: SpatialDataPort | null,
     frame: Transcripts3dFrame,
+    selection: SpatialSelectionMask | null = null,
   ): Promise<void> {
     const meta = dataset.transcriptTiles;
     const genes = meta?.hasZ && port?.getTranscriptTile ? transcripts3dGenes(dataset, view) : null;
@@ -273,7 +289,7 @@ export class Spatial3dTranscripts {
       this.remove();
       return;
     }
-    this.last = { dataset, view, port, frame };
+    this.last = { dataset, view, port, frame, selection };
     const quality = view.transcriptQuality === 'all' ? 'all' : 'high';
     const { level, keys } = this.plan(meta, frame);
     const genesKey = `${dataset.id}|${genes.query.join('\u0001')}|${quality}`;
@@ -313,6 +329,8 @@ export class Spatial3dTranscripts {
     }
     try {
       await this.draw(dataset, view, port, frame, genes.allGenes);
+      // The newest sync's selection: an older draw finishing late must not fade by a stale one.
+      if (this.last?.selection === selection) this.fade(selection);
     } finally {
       end?.();
     }
@@ -335,6 +353,30 @@ export class Spatial3dTranscripts {
     this.loadKey = null;
     this.styleKey = null;
     this.loaded = null;
+    this.drawnCells = null;
+    this.fadedBy = null;
+  }
+
+  /**
+   * Fade the drawn transcripts outside the selection (their alpha only: the colours stay
+   * uploaded), or bring them all back without one. A no-op for the selection already applied.
+   */
+  private fade(selection: SpatialSelectionMask | null): void {
+    const live = selection && selection.count > 0 ? selection : null;
+    const layer = this.layer;
+    const cells = this.drawnCells;
+    if (!layer || !cells || live === this.fadedBy) return;
+    this.fadedBy = live;
+    if (!live) {
+      layer.alphas = null;
+      return;
+    }
+    const alphas = new Float32Array(cells.length);
+    for (let i = 0; i < cells.length; i++) {
+      const o = cells[i];
+      alphas[i] = o !== NO_OBSERVATION && o < live.mask.length && live.mask[o] ? 1 : DEFAULT_MUTED_OPACITY;
+    }
+    layer.alphas = alphas;
   }
 
   private async draw(
@@ -416,8 +458,11 @@ export class Spatial3dTranscripts {
     }
     if (this.layer) this.viewer.layers.remove(this.layer);
     this.layer = null;
+    this.drawnCells = null;
+    this.fadedBy = null;
     this.styleKey = styleKey;
     if (!count) return;
+    this.drawnCells = Uint32Array.from(cells);
     this.layer = this.viewer.addPoints3D(Float32Array.from(positions), new Float32Array(count), {
       name: 'transcripts',
       size,

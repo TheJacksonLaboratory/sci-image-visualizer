@@ -13,7 +13,7 @@ import {
 import { densityAutoRange } from '../../spatial/density-raster';
 import { TRANSCRIPT_GLYPHS, glyphOutline } from '../../spatial/glyphs';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
-import { emptySelection } from '../../spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 import { GLYPH_SYMBOLS } from './spatial-tiles/transcript-layers';
 
@@ -151,7 +151,12 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
   function setup(
     individualCount: number,
     colorBy: 'cellType' | 'gene',
-    o: { codes?: number[]; genes?: string[]; view?: Partial<typeof DEFAULT_SPATIAL_VIEW> } = {},
+    o: {
+      codes?: number[];
+      genes?: string[];
+      view?: Partial<typeof DEFAULT_SPATIAL_VIEW>;
+      selection?: SpatialSelectionMask;
+    } = {},
   ) {
     const coded = () => {
       const t = tile(individualCount);
@@ -190,7 +195,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
       ...o.view,
     };
     const host: SpatialTileHost = {
-      latest: () => [dataset, view, emptySelection(1)],
+      latest: () => [dataset, view, o.selection ?? emptySelection(1)],
       canvasSize: () => [400, 400],
       continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
@@ -202,6 +207,22 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const colors = jest.spyOn(transcriptsOf<WithColors>(tiles), 'transcriptColors');
     return { tiles, getTranscriptTile, getTranscriptBins, colors };
   }
+
+  it("fades the transcripts outside a selected cell, and keeps the selection's as they are", async () => {
+    const alphas = async (selection?: SpatialSelectionMask) => {
+      const { tiles } = setup(3, 'gene', { selection });
+      await (tiles as unknown as { plan(): Promise<void> }).plan();
+      const face = drawnOf<{ layer: { faceColor: Float32Array } }>(tiles).layer.faceColor;
+      tiles.detach();
+      return Array.from(face).filter((_v, i) => i % 4 === 3);
+    };
+    // Every transcript of these tiles is in cell 0.
+    const none = await alphas();
+    expect(none.every((a) => a === 1)).toBe(true);
+    expect(await alphas({ mask: Uint8Array.of(1), count: 1 })).toEqual(none);
+    const faded = await alphas({ mask: Uint8Array.of(0, 1), count: 1 });
+    faded.forEach((a) => expect(a).toBeCloseTo(spatialEncoding.DEFAULT_MUTED_OPACITY));
+  });
 
   it('shows every transcript when the view really is under budget', async () => {
     const { tiles, getTranscriptBins } = setup(100, 'cellType');

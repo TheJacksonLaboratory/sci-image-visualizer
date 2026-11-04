@@ -8,7 +8,7 @@ import {
 } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import type { SpatialDataset, SpatialTranscriptTile } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_CATEGORICAL_PALETTE, parseHex } from '../../spatial/spatial-encoding';
+import { DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, parseHex } from '../../spatial/spatial-encoding';
 import { Spatial3dTranscripts, transcripts3dColors, transcripts3dGenes } from './napari-spatial-3d-transcripts';
 
 /** A 2 × 1 tile dataset (tiles 100 wide) whose transcripts carry z. */
@@ -139,6 +139,30 @@ describe('Spatial3dTranscripts', () => {
     // Turning transcripts off takes the layer down.
     await t.sync(dataset(), view({ transcriptMode: 'off' }), port, frame);
     expect(layers()).toHaveLength(0);
+  });
+
+  it('fades the transcripts outside a selected cell or cell type, as the cells are, without reading again', async () => {
+    const { t, port, layers } = setup();
+    (port.getTranscriptTile as jest.Mock).mockImplementation(async (_l: number, gx: number) =>
+      gx === 0 ? tile([10, 20], [0, 1], [0, 1]) : tile([120], [2], [2]),
+    );
+    const v = view({ transcriptGenes: ['Acta2', 'Cd3e', 'Krt5'] });
+    await t.sync(dataset(), v, port, frame);
+    expect(layers()[0].alphas).toBeNull();
+
+    // Cell 1 selected: its transcript as it is, the others faded.
+    const selection = { mask: Uint8Array.of(0, 1, 0), count: 1 };
+    await t.sync(dataset(), v, port, frame, selection);
+    const alphas = Array.from(layers()[0].alphas ?? []);
+    const cellOf = (x: number) => (x === 10 ? 0 : x === 20 ? 1 : 2);
+    const xs = Array.from({ length: alphas.length }, (_v, i) => layers()[0].positions[3 * i] + 75);
+    xs.forEach((x, i) => expect(alphas[i]).toBeCloseTo(cellOf(Math.round(x)) === 1 ? 1 : DEFAULT_MUTED_OPACITY));
+    expect(alphas).toHaveLength(3);
+    expect(port.getTranscriptTile as jest.Mock).toHaveBeenCalledTimes(2); // faded, not read again
+
+    // Cleared: every transcript as it is again.
+    await t.sync(dataset(), v, port, frame, { mask: new Uint8Array(3), count: 0 });
+    expect(layers()[0].alphas).toBeNull();
   });
 
   it('leaves out the genes hidden from "All genes"', async () => {

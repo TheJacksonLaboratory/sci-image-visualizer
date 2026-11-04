@@ -253,7 +253,7 @@ export class NapariSpatialTileLayers {
     await Promise.all([
       settle('density', this.density.plan(dataset, view, ctx)),
       settle('cells', this.cells.plan(dataset, view, selection, rect, pxPerUnit, ctx)),
-      settle('transcripts', this.transcripts.plan(dataset, view, rect, pxPerUnit, ctx, this.zBand)),
+      settle('transcripts', this.transcripts.plan(dataset, view, rect, pxPerUnit, ctx, this.zBand, selection)),
     ]);
     this.groups.restoreOrder(false);
     if (ctx.stale()) return;

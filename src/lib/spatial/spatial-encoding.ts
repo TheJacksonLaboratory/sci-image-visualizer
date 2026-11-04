@@ -1,7 +1,12 @@
 import { Rgb, buildColormapLut } from '../contracts/colormap-lut';
 import { parseCssColor } from '../contracts/color';
 import { fallbackColorFor } from '../store/class-color.util';
-import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
+import {
+  CategoricalColumnMeta,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialObservations,
+} from '../contracts/spatial-dataset.contract';
 import { ColormapValue } from '../contracts/display-types';
 import { percentileWindow } from './stats';
 
@@ -284,4 +289,25 @@ export function spatialContinuousLut(
   if (chosen) return lutFor(chosen, reverse);
   const lut = lutFor(colormapValue, reverse);
   return isGrayscaleLut(lut) ? buildColormapLut('Viridis', reverse)! : lut;
+}
+
+/**
+ * Fade the transcripts outside a selection, as the cells and markers are: while `selected` (an
+ * observation mask) selects any cell, every packed-RGBA entry of `rgba` whose cell (`ownerOf(i)`)
+ * is not selected, or that is in no cell, has its alpha scaled to {@link DEFAULT_MUTED_OPACITY}.
+ * The selection's own transcripts keep their colour. Nothing changes without a selection.
+ */
+export function fadeOutsideSelection(
+  rgba: Float32Array,
+  count: number,
+  ownerOf: (i: number) => number,
+  selected: { mask: Uint8Array; count: number } | null,
+): void {
+  if (!selected || selected.count === 0) return;
+  const mask = selected.mask;
+  for (let i = 0; i < count; i++) {
+    const o = ownerOf(i);
+    if (o !== NO_OBSERVATION && o >= 0 && o < mask.length && mask[o]) continue;
+    rgba[4 * i + 3] *= DEFAULT_MUTED_OPACITY;
+  }
 }

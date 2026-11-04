@@ -13,9 +13,11 @@ import {
 import {
   DEFAULT_CATEGORICAL_PALETTE,
   categoryColorsFor,
+  fadeOutsideSelection,
   groupColorsKey,
   parseHex,
 } from '../../../spatial/spatial-encoding';
+import type { SpatialSelectionMask } from '../../../spatial/spatial-selection';
 import { DataRect, cellTypeColumnFor } from '../../../spatial/lod';
 import { clusterColorMap } from '../../../spatial/transcript-grouping';
 import { TranscriptGlyph, defaultGlyphFor } from '../../../spatial/glyphs';
@@ -74,8 +76,10 @@ function transcriptPlanKey(
   job: TranscriptJob,
   pxPerUnit: number,
   zBand: readonly [number, number] | null,
+  selectionRev: number,
 ): string {
   return [
+    selectionRev,
     dataset.id,
     zBand ? zBand.join(',') : '',
     view.transcriptMode,
@@ -179,6 +183,7 @@ export class TranscriptLayers {
     pxPerUnit: number,
     ctx: PlanContext,
     zBand: readonly [number, number] | null = null,
+    selection: SpatialSelectionMask | null = null,
   ): Promise<void> {
     const mode = view.transcriptMode;
     const job = this.jobs.jobFor(dataset, view, rect, pxPerUnit);
@@ -188,7 +193,7 @@ export class TranscriptLayers {
       this.countSource = null;
       return;
     }
-    const planKey = transcriptPlanKey(dataset, view, job, pxPerUnit, zBand);
+    const planKey = transcriptPlanKey(dataset, view, job, pxPerUnit, zBand, this.selectionRev(selection));
     if (planKey === this.groups.key('transcripts') && this.groups.shown('transcripts')) {
       return;
     }
@@ -247,6 +252,9 @@ export class TranscriptLayers {
     const clusterOf = (i: number): string | null =>
       entryGroup && groupNames ? (groupNames[entryGroup[i]] ?? null) : (geneCluster[merged.gene[i]] ?? null);
     const rgba = await this.transcriptColors(dataset, colorView, merged, kind === 'genes' ? clusterOf : undefined);
+    // A selected cell or cell type: its transcripts as they are, the others faded, as the cells are.
+    // Density-grid markers carry no cells, so they all fade.
+    fadeOutsideSelection(rgba, merged.count, (i) => (loaded.clustered ? -1 : merged.observation[i]), selection);
     const typeColumn = cellTypeColumnFor(dataset, view);
     const types = typeColumn ? await this.lookup.codes(typeColumn).catch(() => null) : null;
     // Nothing is recorded before the last await: a superseded plan that had already keyed the
@@ -351,6 +359,19 @@ export class TranscriptLayers {
     });
     this.groups.replace('transcripts', layer);
     return layer;
+  }
+
+  /** The selection the last plan faded by, and its revision, bumped each time it changes. */
+  private lastSelection: SpatialSelectionMask | null = null;
+  private selectionRevision = 0;
+
+  private selectionRev(selection: SpatialSelectionMask | null): number {
+    const live = selection && selection.count > 0 ? selection : null;
+    if (live !== this.lastSelection) {
+      this.lastSelection = live;
+      this.selectionRevision++;
+    }
+    return this.selectionRevision;
   }
 
   /** Per-entry colours, as packed RGBA. */

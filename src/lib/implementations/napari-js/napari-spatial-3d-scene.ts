@@ -815,10 +815,13 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     void this.styleCells(dataset, view, selection);
     void this.muteRegions(dataset, view, selection);
     // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
-    await this.transcripts3d.sync(dataset, view, this.session.port, {
-      origin: this.origin,
-      zScale: this.zScale(),
-    });
+    await this.transcripts3d.sync(
+      dataset,
+      view,
+      this.session.port,
+      { origin: this.origin, zScale: this.zScale() },
+      selection,
+    );
   }
 
   /**
