@@ -6,7 +6,7 @@ import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
 import type { CellsMesh } from '../../geometry/cell-meshes';
 import type { RegionSource } from '../../region-source/region-source';
 import { regionTilesInRect } from '../../region-source/region-tiles';
-import { reconstructCellsInWorker } from '../../region-source/worker-region-source';
+import { placeInWorker, reconstructCellsInWorker } from '../../region-source/worker-region-source';
 import { cellOutlinesFromTiles, observationIndex } from '../../spatial/plane-cells';
 import { typicalCellDiameter } from '../../spatial/lod';
 import { datasetRegionSet } from '../../visualizer/spatial-region-set';
@@ -42,6 +42,8 @@ export const CELLS_3D_MAX_CELLS = 20_000;
 export const CELLS_3D_TRIANGLE_BUDGET = 3_000_000;
 /** Chunks across the longer side of the region set's bounds. */
 const CHUNKS_ACROSS = 8;
+/** A redraw yields the main thread after this long. */
+const REDRAW_SLICE_MS = 8;
 /** Cells per worker call: the build can be dropped between calls. */
 const BATCH = 400;
 /** A pause in the camera's movement this long re-plans the detail. */
@@ -78,6 +80,8 @@ interface Chunk {
   /** The triangles drawn (the visible cells'), as indices into the mesh's vertices. */
   drawn: Uint32Array | null;
   layer: SurfaceLayer | null;
+  /** The mesh whose placement is in flight, if any. */
+  placing?: CellsMesh | null;
 }
 
 export type { Cells3dStatus };
@@ -165,7 +169,10 @@ export class Spatial3dCells {
     this.zScale = zScale;
     for (const c of this.chunks) if (c.layer) c.layer.scale3d = [1, 1, zScale];
     if (!moved) return;
-    for (const c of this.chunks) c.world = null;
+    for (const c of this.chunks) {
+      c.world = null;
+      c.placing = null; // one in flight was for the old placement: it is dropped when it lands
+    }
     if (!placement) {
       for (const c of this.chunks) this.dropLayer(c);
     } else {
@@ -415,9 +422,49 @@ export class Spatial3dCells {
 
   // ── drawing ───────────────────────────────────────────────────────────────────────
 
+  /**
+   * Draw every chunk again (a recolour, a hidden class, a selection): a few at a time, yielding the
+   * main thread between them so that a click selecting a cell never holds a frame; a newer redraw
+   * takes over from this one.
+   */
   private redraw(): void {
-    for (const c of this.chunks) if (c.mesh) this.draw(c);
-    this.host.viewer.requestRender();
+    const generation = ++this.redrawGeneration;
+    const chunks = this.chunks.filter((c) => c.mesh);
+    void (async () => {
+      let start = performance.now();
+      for (const c of chunks) {
+        if (generation !== this.redrawGeneration) return;
+        this.draw(c);
+        if (performance.now() - start > REDRAW_SLICE_MS) {
+          this.host.viewer.requestRender();
+          await new Promise((r) => setTimeout(r));
+          start = performance.now();
+        }
+      }
+      this.host.viewer.requestRender();
+    })();
+  }
+  private redrawGeneration = 0;
+
+  /** Place a chunk's vertices in the world, in the cells' worker, then draw it (unless superseded). */
+  private placeChunk(chunk: Chunk, placement: PlanePlacement): void {
+    const mesh = chunk.mesh;
+    if (!mesh || chunk.placing === mesh) return;
+    chunk.placing = mesh;
+    placeInWorker(mesh.vertices, { size: [1, 1, 1], world: [1, 1, 1], planes: placement }).then(
+      (world) => {
+        if (chunk.placing !== mesh) return;
+        chunk.placing = null;
+        if (chunk.mesh !== mesh || this.placement !== placement) return;
+        chunk.world = world;
+        this.draw(chunk);
+        this.host.viewer.requestRender();
+      },
+      (err) => {
+        if (chunk.placing === mesh) chunk.placing = null;
+        console.warn('[napari-js] cells could not be placed in 3D', err);
+      },
+    );
   }
 
   /** Draw a chunk's visible cells, in their colours: its layer updated in place, or added. */
@@ -428,7 +475,11 @@ export class Spatial3dCells {
       this.dropLayer(chunk);
       return;
     }
-    chunk.world ??= toWorld(mesh.vertices, { size: [1, 1, 1], world: [1, 1, 1], planes: placement });
+    if (!chunk.world) {
+      // Placed off the main thread; drawn when it lands.
+      this.placeChunk(chunk, placement);
+      return;
+    }
     const drawn = this.visibleFaces(chunk);
     chunk.drawn = drawn;
     const colors = this.vertexColors(mesh);

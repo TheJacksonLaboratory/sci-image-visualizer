@@ -1,5 +1,10 @@
 import type { SurfaceLayer, Viewer } from 'napari-js';
 
+import { PlanePlacement, VolumeFrame, sliceZ, toWorld } from '../../geometry/place';
+
+export type { PlanePlacement, VolumeFrame };
+export { sliceZ, toWorld };
+
 /** A region's 3D reconstruction to show in the volume: a mesh in image px (x, y) and slices (z). */
 export interface RegionMesh3D {
   /** Identity (a class name): a mesh with the same key and arrays is kept, not rebuilt. */
@@ -12,37 +17,8 @@ export interface RegionMesh3D {
   faces: Uint32Array;
 }
 
-/** Where the stack sits in the volume's world: its full size, and the centred world box it fills. */
-export interface VolumeFrame {
-  /** Image width, height (px) and slice count. */
-  size: [number, number, number];
-  /** The world box (centred on the origin), Z as currently stretched. */
-  world: [number, number, number];
-  /**
-   * How much of {@link world}'s depth is the view's Z stretch (default 1). The region surfaces keep
-   * their geometry in the unstretched box and take the stretch as a GPU scale (`scale3d`), so
-   * dragging the Z handle re-uploads no mesh.
-   */
-  zScale?: number;
-  /**
-   * The slices at z of their own rather than spread over the box: a region set's planes (a 3D
-   * segmentation's, outlined on an image of one plane) placed where the observations are. Given,
-   * it places the surfaces and {@link size} and {@link world} do not.
-   */
-  planes?: PlanePlacement;
-}
-
-/**
- * Image px and slices → world, slice by slice: `x * scale[0] + offset[0]`, `y * scale[1] +
- * offset[1]`, and slice k at `z[k] + offset[2]` (unstretched): between two slices in proportion,
- * past the ends by the nearest spacing (a surface's caps, half a slice out).
- */
-export interface PlanePlacement {
-  /** Each slice's z, by slice index, ascending. */
-  z: readonly number[];
-  scale: [number, number];
-  offset: [number, number, number];
-}
+/** Places a mesh's vertices (image px, slices) in a 3D view's world, off the main thread. */
+export type RegionPlacer = (vertices: Float32Array, frame: VolumeFrame) => Promise<Float32Array>;
 
 /** Opacity of a region's surface in the volume. */
 export const REGION_MESH_OPACITY = 0.55;
@@ -72,7 +48,20 @@ export class VolumeRegionMeshes {
   private wanted: readonly RegionMesh3D[] = [];
   private frame: VolumeFrame | null = null;
 
-  constructor(private readonly viewer: Viewer) {}
+  /** The placements in flight, by key: the mesh and box each is for. */
+  private readonly placing = new Map<string, { mesh: RegionMesh3D; frame: VolumeFrame; token: number }>();
+  private token = 0;
+
+  /**
+   * `placer`, when given, places a mesh's vertices in the world off the main thread (a worker, see
+   * `placeInWorker`): a class's surface has hundreds of thousands of vertices, and placing every
+   * one in a loop here held the UI for seconds. Each surface then comes up as its placement lands,
+   * the one it replaces kept until then. Without one, they are placed at once (the tests).
+   */
+  constructor(
+    private readonly viewer: Viewer,
+    private readonly placer?: RegionPlacer,
+  ) {}
 
   /** Show exactly `meshes` (adding, keeping or removing surfaces). */
   set(meshes: readonly RegionMesh3D[]): void {
@@ -91,7 +80,7 @@ export class VolumeRegionMeshes {
     this.frame = frame;
     const scale = this.scale3d();
     for (const e of this.layers.values()) {
-      if (!sameBox) e.layer.setData(toWorld(e.mesh.vertices, next), e.mesh.faces);
+      if (!sameBox) this.place(e.mesh);
       e.layer.scale3d = scale;
     }
     this.sync();
@@ -167,21 +156,62 @@ export class VolumeRegionMeshes {
         continue;
       }
       // Rebuilt or recoloured: the same surface, updated in place.
-      if (want.vertices !== e.mesh.vertices && this.frame) {
-        e.layer.setData(toWorld(want.vertices, baseFrame(this.frame)), want.faces);
-      }
+      const rebuilt = want.vertices !== e.mesh.vertices;
       if (want.color !== e.mesh.color) e.layer.color = want.color;
       e.mesh = want;
+      if (rebuilt && this.frame) this.place(want);
     }
     if (this.frame) {
-      for (const mesh of this.wanted) if (!this.layers.has(mesh.key) && mesh.faces.length) this.add(mesh);
+      for (const mesh of this.wanted) if (!this.layers.has(mesh.key) && mesh.faces.length) this.place(mesh);
     }
     this.viewer.requestRender();
   }
 
-  private add(mesh: RegionMesh3D): void {
-    const frame = this.frame as VolumeFrame;
-    const layer = this.viewer.addSurface(toWorld(mesh.vertices, baseFrame(frame)), mesh.faces, undefined, {
+  /**
+   * Place `mesh` in the current box, adding its surface or updating it: at once, or through the
+   * placer, its result kept only if the mesh and the box are still the ones wanted. A placement
+   * already in flight for the same mesh and box is not asked again.
+   */
+  private place(mesh: RegionMesh3D): void {
+    const frame = this.frame;
+    if (!frame) return;
+    const base = baseFrame(frame);
+    if (!this.placer) {
+      this.apply(mesh, toWorld(mesh.vertices, base));
+      return;
+    }
+    const pending = this.placing.get(mesh.key);
+    if (pending && pending.mesh === mesh && sameFrame(pending.frame, base)) return;
+    const token = ++this.token;
+    this.placing.set(mesh.key, { mesh, frame: base, token });
+    this.placer(mesh.vertices, base).then(
+      (world) => {
+        if (this.placing.get(mesh.key)?.token !== token) return;
+        this.placing.delete(mesh.key);
+        const wanted = this.wanted.find((m) => m.key === mesh.key);
+        if (wanted !== mesh || !this.frame || !sameFrame(baseFrame(this.frame), base)) return;
+        this.apply(mesh, world);
+        this.viewer.requestRender();
+      },
+      (err) => {
+        if (this.placing.get(mesh.key)?.token === token) this.placing.delete(mesh.key);
+        console.warn(`[napari-js] region ${mesh.key} could not be placed in 3D`, err);
+      },
+    );
+  }
+
+  /** `mesh`'s surface with its vertices placed at `world`: updated in place, or added. */
+  private apply(mesh: RegionMesh3D, world: Float32Array): void {
+    const e = this.layers.get(mesh.key);
+    if (e) {
+      e.layer.setData(world, mesh.faces);
+      return;
+    }
+    this.add(mesh, world);
+  }
+
+  private add(mesh: RegionMesh3D, world: Float32Array): void {
+    const layer = this.viewer.addSurface(world, mesh.faces, undefined, {
       name: `region ${mesh.key}`,
       scale3d: this.scale3d(),
       color: mesh.color,
@@ -202,6 +232,7 @@ export class VolumeRegionMeshes {
   private remove(key: string, layer: SurfaceLayer): void {
     this.viewer.layers.remove(layer);
     this.layers.delete(key);
+    this.placing.delete(key);
   }
 }
 
@@ -232,46 +263,4 @@ function sameFrame(a: VolumeFrame, b: VolumeFrame): boolean {
     );
   }
   return a.size.every((v, i) => v === b.size[i]) && a.world.every((v, i) => near(v, b.world[i]));
-}
-
-/**
- * Image px / slice coordinates → the volume's centred world box: pixel x of a `w`-wide image
- * spans the box's width, slice k sits at the middle of its share of the box's depth. With
- * {@link VolumeFrame.planes}, as they place them instead.
- */
-export function toWorld(vertices: Float32Array, frame: VolumeFrame): Float32Array {
-  if (frame.planes) return planesToWorld(vertices, frame.planes);
-  const [w, h, d] = frame.size;
-  const [ww, wh, wd] = frame.world;
-  const out = new Float32Array(vertices.length);
-  for (let i = 0; i < vertices.length; i += 3) {
-    out[i] = (vertices[i] / w - 0.5) * ww;
-    out[i + 1] = (vertices[i + 1] / h - 0.5) * wh;
-    out[i + 2] = ((vertices[i + 2] + 0.5) / d - 0.5) * wd;
-  }
-  return out;
-}
-
-/** Image px / slice coordinates → world, as {@link PlanePlacement} places them. */
-function planesToWorld(vertices: Float32Array, planes: PlanePlacement): Float32Array {
-  const { z, scale, offset } = planes;
-  const out = new Float32Array(vertices.length);
-  for (let i = 0; i < vertices.length; i += 3) {
-    out[i] = vertices[i] * scale[0] + offset[0];
-    out[i + 1] = vertices[i + 1] * scale[1] + offset[1];
-    out[i + 2] = sliceZ(z, vertices[i + 2]) + offset[2];
-  }
-  return out;
-}
-
-/**
- * The z of slice `k` (fractional): between two slices in proportion, past the ends by the nearest
- * spacing (one slice alone: a unit apart).
- */
-export function sliceZ(z: readonly number[], k: number): number {
-  const n = z.length;
-  if (!n) return k;
-  if (n === 1) return z[0] + k;
-  const i = Math.min(n - 2, Math.max(0, Math.floor(k)));
-  return z[i] + (k - i) * (z[i + 1] - z[i]);
 }

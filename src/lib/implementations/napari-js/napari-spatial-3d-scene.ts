@@ -1,3 +1,5 @@
+import { RegionMeshPointer } from './napari-region-mesh-pointer';
+import { placeInWorker } from '../../region-source/worker-region-source';
 import { cellTypeColumnFor } from '../../spatial/lod';
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
@@ -213,7 +215,8 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     private readonly info?: IImageInfo,
   ) {
     super(ctx, session, true);
-    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
     this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
     this.cells3d = new Spatial3dCells({
       viewer: ctx.viewer,
@@ -458,8 +461,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     });
     this.ctx.tools.install3dInteraction(this.ctx.viewer, this.ctx.host);
     this.hover.install(this.ctx.host);
+    this.listenToRegionMeshes();
     this.subscribeSpatial();
   }
+
+  /**
+   * Picking the region surfaces (a cell type's, by type), as the Volume view does: with the selection
+   * tool armed, a click on one picks its class (null beside them), and the Region Editor highlights
+   * it, the others fading. Hovering is the spatial tooltip's (the type and its cells).
+   */
+  private listenToRegionMeshes(): void {
+    const { ctx } = this;
+    if (this.meshPointer) return;
+    this.toolSub = ctx.store.getActiveTool$().subscribe((tool) => (this.selecting = tool === 'select'));
+    this.meshPointer = ctx.outsideZone(
+      () =>
+        new RegionMeshPointer(ctx.canvas, ctx.host, {
+          pickAt: (x, y) => this.regionMeshes.pickAt(x, y),
+          active: () => this.selecting && this.regionMeshes.shown.length > 0,
+          hoverable: () => false,
+          onPick: (key, additive) => ctx.inZone(() => ctx.regionMeshPicked(key, additive)),
+        }),
+    );
+  }
+  private meshPointer: RegionMeshPointer | null = null;
+  private toolSub: Subscription | null = null;
+  private selecting = false;
 
   /** The observations' own z is on screen: there is no plane to step. */
   setZ(): void {
@@ -614,6 +641,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   }
 
   dispose(): void {
+    this.meshPointer?.destroy();
+    this.meshPointer = null;
+    this.toolSub?.unsubscribe();
+    this.toolSub = null;
     this.cells3d.dispose();
     this.regionMeshes.clear();
     this.transcripts3d.remove();

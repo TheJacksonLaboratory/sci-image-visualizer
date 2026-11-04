@@ -1,3 +1,4 @@
+import { placeInWorker } from '../../region-source/worker-region-source';
 import { Subscription } from 'rxjs';
 import { MultiChannelVolumeView, histogramScalar } from 'napari-js';
 import type { Points3DLayer, VolumeChannel } from 'napari-js';
@@ -87,7 +88,8 @@ export class VolumeScene implements NapariScene {
     private readonly info: IImageInfo | undefined,
     private readonly rendering: 'iso' | 'mip',
   ) {
-    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
+    // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
     this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, {
       onMove: (axis, value) => ctx.inZone(() => ctx.slicePlaneMoved(axis, value)),
     });

@@ -230,4 +230,23 @@ describe('VolumeRegionMeshes', () => {
     expect(surfaces()[1].opacity).toBe(REGION_MESH_OPACITY);
     expect(surfaces()[0].opacity).toBe(REGION_MESH_OPACITY);
   });
+
+  it('places surfaces through the placer off the main thread, one by one, dropping a stale placement', async () => {
+    const { viewer, surfaces } = makeViewer();
+    const resolves: ((w: Float32Array) => void)[] = [];
+    const placer = jest.fn(() => new Promise<Float32Array>((r) => resolves.push(r)));
+    const meshes = new VolumeRegionMeshes(viewer, placer);
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
+    meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]);
+    expect(placer).toHaveBeenCalledTimes(2);
+    expect(surfaces()).toHaveLength(0); // nothing placed on this thread
+    meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]); // asked again: the new meshes are placed instead
+    resolves[0](Float32Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9)); // a stale CTX placement
+    await Promise.resolve();
+    expect(surfaces()).toHaveLength(0);
+    resolves[2](Float32Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    await Promise.resolve();
+    expect(surfaces()).toHaveLength(1);
+    expect(Array.from(surfaces()[0].vertices.slice(0, 3))).toEqual([1, 2, 3]);
+  });
 });

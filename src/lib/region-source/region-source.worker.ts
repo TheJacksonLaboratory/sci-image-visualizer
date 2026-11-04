@@ -16,14 +16,19 @@ const tables = new RegionSourceTables();
 self.onmessage = (event: MessageEvent<RegionSourceMessage>) => {
   const { id } = event.data;
   let reply: RegionSourceReply;
-  // Cells' meshes are large: their buffers are handed over, not copied.
+  // Meshes and placed vertices are large: their buffers are handed over, not copied.
   let transfer: ArrayBuffer[] = [];
   try {
     const result = tables.run(event.data);
     if (event.data.op === 'cells') transfer = cellsMeshBuffers(result as CellsMesh);
+    else if (event.data.op === 'mesh') {
+      const mesh = result as { vertices: Float32Array; faces: Uint32Array };
+      transfer = [mesh.vertices.buffer, mesh.faces.buffer] as ArrayBuffer[];
+    } else if (event.data.op === 'place') transfer = [(result as Float32Array).buffer as ArrayBuffer];
     reply = { id, ok: true, result };
   } catch (err) {
     reply = { id, ok: false, error: (err as Error)?.message ?? String(err) };
   }
-  (self as unknown as Worker).postMessage(reply, transfer);
+  // A buffer listed twice cannot be transferred: each once.
+  (self as unknown as Worker).postMessage(reply, [...new Set(transfer)]);
 };

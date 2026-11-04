@@ -63,6 +63,16 @@ file was added.
 
 ### Fixed
 
+- **Building the 3D regions no longer holds the UI.** Placing every class's surface in the world
+  (hundreds of thousands of vertices each, a second and more for a 3D segmentation's 20 cell types)
+  ran on the main thread, and every mesh came back from the worker copied. The vertices are now
+  placed in the cells' worker (`placeInWorker`, op `place`), each surface coming up as its own
+  placement lands; meshes and placements are handed over, not copied; the individual cells are
+  placed there too, and redrawn a few chunks at a time.
+- **Cell types picked on the canvas in spatial 3D.** With the selection tool, a click on a cell
+  type's surface picks its class, as in the Volume view (the Region Editor highlights it, the
+  others fading); spatial 3D had no such picking.
+
 - **The reference volume's checkbox hides it however the 3D view was opened.** A view change while
   the reference volume was still downloading (as the dataset's region set attaching, or the default
   boundaries being chosen, makes one) started a second download and added a second volume layer,

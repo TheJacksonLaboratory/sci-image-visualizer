@@ -24,6 +24,7 @@ import type {
 } from './region-tiles';
 import type { ReconstructOptions, SliceOutlines } from '../geometry/reconstruct';
 import type { CellOutlines, CellsMesh } from '../geometry/cell-meshes';
+import type { VolumeFrame } from '../geometry/place';
 import type { Mesh } from 'napari-js/geometry';
 
 /** Makes the worker; may be async, as the default one is (it imports the factory on demand). */
@@ -202,6 +203,19 @@ export function reconstructCellsInWorker(
   client: RegionSourceWorkerClient = cellsWorkerClient(),
 ): Promise<CellsMesh> {
   return client.call({ op: 'cells', cells, options });
+}
+
+/**
+ * A mesh's vertices placed in a 3D view's world (see `geometry/place`), in the cells' worker: a
+ * class's surface has hundreds of thousands, and placing every surface on the main thread held it
+ * for seconds.
+ */
+export function placeInWorker(
+  vertices: Float32Array,
+  frame: VolumeFrame,
+  client: RegionSourceWorkerClient = cellsWorkerClient(),
+): Promise<Float32Array> {
+  return client.call({ op: 'place', vertices, frame });
 }
 
 /**
