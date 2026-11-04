@@ -15,6 +15,7 @@ import { DropdownModule } from 'primeng/dropdown';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
+import { TooltipModule } from 'primeng/tooltip';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -25,7 +26,9 @@ import type { GenePickerModel } from '../spatial-gene-picker';
 import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-groups-panel.component';
 
 /**
- * The Cells section, as Xenium Explorer's: the outlines' on/off switch, which boundary set
+ * The Cells sub-section of the Observations section (projected into it, above "Observations in
+ * selection"), for data with a cell segmentation, as Xenium Explorer's Cells section: the outlines'
+ * on/off switch, which boundary set
  * is drawn, how cells are coloured (with the gene, the colour, or the colour bar that
  * goes with it), the {@link SpatialGroupsPanelComponent groups}, and how cells are drawn.
  *
@@ -43,6 +46,7 @@ import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-gro
     InputNumberModule,
     SelectButtonModule,
     SliderModule,
+    TooltipModule,
     SpatialGroupsPanelComponent,
   ],
   templateUrl: './spatial-cells-panel.component.html',
@@ -61,7 +65,7 @@ export class SpatialCellsPanelComponent implements OnChanges {
   @Input() genes: GenePickerModel | null = null;
   /** The observations' continuous colour bar, shown for the gene colouring while it has one. */
   @Input() colorBarCss: string | null = null;
-  /** Whether the section is expanded. */
+  /** Whether the sub-section is expanded. */
   @Input() open = true;
   /**
    * In the 3D view: the cells are a 3D segmentation's, drawn by cell type or each by itself, and

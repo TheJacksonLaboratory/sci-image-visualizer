@@ -189,6 +189,9 @@
         </div>
       </div>
 
+      <!-- With a cell segmentation: the Cells sub-section, projected by the dialog. -->
+      <ng-content select="spatial-cells-panel"></ng-content>
+
       <!-- The selected cell's (or cell type's, or region's) observations, by group: through the
            volume in 3D, on the plane shown in 2D. -->
       <spatial-selection-observations [controls]="controls" [is3d]="is3d"></spatial-selection-observations>

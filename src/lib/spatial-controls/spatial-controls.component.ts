@@ -202,11 +202,11 @@ export class SpatialControlsComponent implements OnInit {
       .subscribe((dataset) => {
         this.dataset = dataset;
         this.genes.setDataset(dataset);
-        // A dataset with no cells to outline leads with its observations.
+        // The Observations section leads, with its Cells sub-section open for data that has cells.
         this.open = {
           ...this.open,
           cells: !!(dataset?.polygonTiles || dataset?.polygons),
-          observations: !(dataset?.polygonTiles || dataset?.polygons),
+          observations: !!dataset,
         };
         void this.refreshKey();
         this.cdr.markForCheck();

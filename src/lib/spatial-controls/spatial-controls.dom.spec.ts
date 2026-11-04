@@ -30,6 +30,7 @@ import {
   panelNamed,
   rowLabelled,
   shallowPanel,
+  subsectionNamed,
 } from '../testing/spatial-panel-testing';
 
 /**
@@ -256,7 +257,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(() => panelNamed(root, 'Images')).toThrow();
       // The Volume section takes its place.
       expect(panelNamed(root, 'Volume')).toBeTruthy();
-      expect(() => panelNamed(root, 'Cells')).toThrow();
+      expect(() => subsectionNamed(root, 'Cells')).toThrow();
       // Transcripts without z have no place in the cloud.
       expect(() => panelNamed(root, 'Transcripts')).toThrow();
     });
@@ -275,7 +276,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         },
       } as SpatialDataset);
       await build({ is3d: true });
-      const panel = await openSection('Cells');
+      const panel = subsectionNamed(root, 'Cells');
       expect(panel.textContent).toContain('In 3D');
       expect(panel.textContent).not.toContain('Boundaries');
       expect(panel.textContent).not.toContain('View cells as');
@@ -290,23 +291,33 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       } as SpatialDataset);
       await build({ is3d: true });
       expect(panelNamed(root, 'Transcripts')).toBeTruthy();
-      expect(() => panelNamed(root, 'Cells')).toThrow();
+      expect(() => subsectionNamed(root, 'Cells')).toThrow();
     });
   });
 
   describe('Cells', () => {
-    it('opens first for a dataset with cells, and writes the header switch', async () => {
+    it('is a sub-section of the Observations, open for a dataset with cells, and writes its switch', async () => {
       await build();
-      const panel = panelNamed(root, 'Cells');
+      const observations = panelNamed(root, 'Observations');
+      expect(observations.classList.contains('open')).toBe(true);
+      // Inside the Observations, above "Observations in selection"; no section of its own.
+      const panel = subsectionNamed(observations, 'Cells');
       expect(panel.classList.contains('open')).toBe(true);
-      expect(panelNamed(root, 'Observations').classList.contains('open')).toBe(false);
-      emit(one(panel, '.sc-panel-head p-checkbox'), 'onChange', { checked: false });
+      expect(() => panelNamed(root, 'Cells')).toThrow();
+      const selection = one(observations, 'spatial-selection-observations');
+      expect(panel.compareDocumentPosition(selection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      emit(one(panel, '.sc-subsection-head p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ showCells: false });
+      // Its fold is its own: closing it keeps the Observations open.
+      click(one(panel, '.sc-subsection-head'));
+      fixture.detectChanges();
+      expect(subsectionNamed(root, 'Cells').querySelector('.sc-subsection-body')).toBeNull();
+      expect(panelNamed(root, 'Observations').classList.contains('open')).toBe(true);
     });
 
     it('writes the boundaries, the cell colour and its gene, and a single colour', async () => {
       await build();
-      const panel = panelNamed(root, 'Cells');
+      const panel = subsectionNamed(root, 'Cells');
       // A switch per boundary set: the nuclei's on draws them with the cells'.
       const nuclei = one(rowLabelled(panel, 'Nuclei'), 'p-inputSwitch');
       expect(accessorOf(fixture, nuclei)).toBeTruthy();
@@ -315,7 +326,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
 
       pick(one(rowLabelled(panel, 'Cell Color'), 'p-dropdown'), 'gene');
       expect(lastWrite()).toEqual({ cellColorMode: 'gene' });
-      const gene = one(rowLabelled(panelNamed(root, 'Cells'), 'Gene'), 'p-dropdown');
+      const gene = one(rowLabelled(subsectionNamed(root, 'Cells'), 'Gene'), 'p-dropdown');
       pick(gene, 'Mbp');
       expect(lastWrite()).toEqual({ cellColorGene: 'Mbp' });
       // The shared gene picker: the dropdown filters through it.
@@ -324,10 +335,13 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual([
         'Snap25',
       ]);
-      expect(one(panelNamed(root, 'Cells'), '.sc-colorbar')).toBeTruthy();
+      expect(one(subsectionNamed(root, 'Cells'), '.sc-colorbar')).toBeTruthy();
 
-      pick(one(rowLabelled(panelNamed(root, 'Cells'), 'Cell Color'), 'p-dropdown'), 'single');
-      const color = one(rowLabelled(panelNamed(root, 'Cells'), 'Color'), 'input[type=color]') as HTMLInputElement;
+      pick(one(rowLabelled(subsectionNamed(root, 'Cells'), 'Cell Color'), 'p-dropdown'), 'single');
+      const color = one(
+        rowLabelled(subsectionNamed(root, 'Cells'), 'Color'),
+        'input[type=color]',
+      ) as HTMLInputElement;
       color.value = '#123456';
       emit(color, 'change');
       expect(lastWrite()).toEqual({ cellSingleColor: '#123456' });
@@ -335,49 +349,49 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
 
     it('writes the group picker, a family variant, the group rows and All groups', async () => {
       await build();
-      let panel = panelNamed(root, 'Cells');
+      let panel = subsectionNamed(root, 'Cells');
       const groupPicker = one(panel, '.sc-row-picker p-dropdown');
       // A k-means family is one entry; choosing it applies its first variant.
       pick(groupPicker, 'family:kmeans');
       expect(lastWrite()).toEqual({ cellTypeColumn: 'kmeans_2', hiddenGroups: [] });
       await settle();
-      panel = panelNamed(root, 'Cells');
+      panel = subsectionNamed(root, 'Cells');
       const variant = panel.querySelectorAll('.sc-row-picker p-dropdown')[1];
       pick(variant, 'kmeans_3');
       expect(lastWrite()).toEqual({ cellTypeColumn: 'kmeans_3', hiddenGroups: [] });
 
       pick(groupPicker, 'graphclust');
       await settle();
-      panel = panelNamed(root, 'Cells');
+      panel = subsectionNamed(root, 'Cells');
       const rows = panel.querySelectorAll('.sc-group-row:not(.sc-group-all)');
       expect(Array.from(rows).map((r) => r.querySelector('.sc-group-label')?.textContent)).toEqual(['A', 'B']);
       emit(one(rows[1] as HTMLElement, 'p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ hiddenGroups: ['B'] });
-      emit(one(panelNamed(root, 'Cells'), '.sc-group-all p-checkbox'), 'onChange', { checked: false });
+      emit(one(subsectionNamed(root, 'Cells'), '.sc-group-all p-checkbox'), 'onChange', { checked: false });
       expect(lastWrite()).toEqual({ hiddenGroups: ['A', 'B'] });
-      emit(one(panelNamed(root, 'Cells'), '.sc-group-all p-checkbox'), 'onChange', { checked: true });
+      emit(one(subsectionNamed(root, 'Cells'), '.sc-group-all p-checkbox'), 'onChange', { checked: true });
       expect(lastWrite()).toEqual({ hiddenGroups: [] });
 
       // The chevron collapses the rows without writing anything.
       (controls.setViewState as jest.Mock).mockClear();
-      click(one(panelNamed(root, 'Cells'), '.sc-group-all button'));
+      click(one(subsectionNamed(root, 'Cells'), '.sc-group-all button'));
       fixture.detectChanges();
-      expect(panelNamed(root, 'Cells').querySelectorAll('.sc-group-row').length).toBe(1);
+      expect(subsectionNamed(root, 'Cells').querySelectorAll('.sc-group-row').length).toBe(1);
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
     it('writes how cells are drawn and their fill opacity, from the slider or the box', async () => {
       await build();
-      const panel = panelNamed(root, 'Cells');
+      const panel = subsectionNamed(root, 'Cells');
       pick(afterLabel(panel, 'View cells as', 'p-selectButton'), 'both');
       expect(lastWrite()).toEqual({ cellDraw: 'both' });
-      const opacity = one(panelNamed(root, 'Cells'), '.sc-row-number');
+      const opacity = one(subsectionNamed(root, 'Cells'), '.sc-row-number');
       emit(one(opacity, 'p-slider'), 'onChange', { value: 0.3 });
       expect(lastWrite()).toEqual({ cellOpacity: 0.3 });
       pick(one(opacity, 'p-inputNumber'), 40);
       expect(lastWrite()).toEqual({ cellOpacity: 0.4 });
-      pick(afterLabel(panelNamed(root, 'Cells'), 'View cells as', 'p-selectButton'), 'outline');
-      expect(panelNamed(root, 'Cells').querySelector('.sc-row-number')).toBeNull();
+      pick(afterLabel(subsectionNamed(root, 'Cells'), 'View cells as', 'p-selectButton'), 'outline');
+      expect(subsectionNamed(root, 'Cells').querySelector('.sc-row-number')).toBeNull();
     });
   });
 

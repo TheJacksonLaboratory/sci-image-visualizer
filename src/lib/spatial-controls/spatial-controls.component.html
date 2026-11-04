@@ -76,21 +76,6 @@
       </div>
     </div>
 
-    <!-- Cells -->
-    <!-- In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
-    <spatial-cells-panel
-      *ngIf="hasCells && (!is3d || hasCells3d)"
-      [controls]="controls"
-      [dataset]="ds"
-      [view]="view"
-      [is3d]="is3d"
-      [cells3dStatus]="cells3dStatus"
-      [genes]="genes"
-      [colorBarCss]="colorBarCss"
-      [open]="open.cells"
-      (openChange)="setOpen('cells', $event)"
-    ></spatial-cells-panel>
-
     <!-- Transcripts -->
     <spatial-transcripts-panel
       *ngIf="hasTranscripts && (!is3d || hasTranscripts3d)"
@@ -187,7 +172,22 @@
       [open]="open.observations"
       (openChange)="setOpen('observations', $event)"
       (categoryClicked)="selectCategory($event)"
-    ></spatial-observations-panel>
+    >
+      <!-- Cells: with a cell segmentation, a sub-section of the Observations, above "Observations in
+           selection". In 3D, for a dataset whose cells are a 3D segmentation: how they are drawn there. -->
+      <spatial-cells-panel
+        *ngIf="hasCells && (!is3d || hasCells3d)"
+        [controls]="controls"
+        [dataset]="ds"
+        [view]="view"
+        [is3d]="is3d"
+        [cells3dStatus]="cells3dStatus"
+        [genes]="genes"
+        [colorBarCss]="colorBarCss"
+        [open]="open.cells"
+        (openChange)="setOpen('cells', $event)"
+      ></spatial-cells-panel>
+    </spatial-observations-panel>
 
     <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
          the colour controls on purpose: changing the gene and watching the

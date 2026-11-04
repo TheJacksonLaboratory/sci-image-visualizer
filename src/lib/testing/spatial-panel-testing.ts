@@ -94,6 +94,15 @@ export function panelNamed(root: ParentNode, title: string): HTMLElement {
   return panel;
 }
 
+/** The `.sc-subsection` (a foldable part of a section, as the Observations' Cells) titled `title`. */
+export function subsectionNamed(root: ParentNode, title: string): HTMLElement {
+  const sub = Array.from(root.querySelectorAll<HTMLElement>('.sc-subsection')).find(
+    (p) => p.querySelector('.sc-subsection-title')?.textContent?.trim() === title,
+  );
+  if (!sub) throw new Error(`no sub-section titled ${title}`);
+  return sub;
+}
+
 /** The `.sc-row` whose `.sc-lbl` reads `label` (the first, when several do). */
 export function rowLabelled(root: ParentNode, label: string): HTMLElement {
   const row = Array.from(root.querySelectorAll<HTMLElement>('.sc-row')).find(

@@ -168,6 +168,35 @@
   }
 }
 
+// A foldable sub-section inside a section (the Observations' Cells): a sub-heading with a chevron
+// and its own switch, then its controls, set in under a rule so its own sub-headings read as its.
+.sc-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.sc-subsection-head {
+  cursor: pointer;
+  user-select: none;
+
+  i {
+    font-size: 0.65rem;
+  }
+
+  &:hover .sc-subsection-title {
+    color: var(--primary-color, #3b82f6);
+  }
+}
+
+.sc-subsection-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--surface-border, #dee2e6);
+}
+
 :host ::ng-deep .sc-buttons .p-button {
   padding: 0.35rem 0.75rem;
   font-size: 0.85rem;

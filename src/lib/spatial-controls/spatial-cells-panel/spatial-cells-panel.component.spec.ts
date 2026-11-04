@@ -10,9 +10,9 @@ import {
   fakeSpatialControls,
   fire,
   one,
-  panelNamed,
   rowLabelled,
   shallowPanel,
+  subsectionNamed,
 } from '../../testing/spatial-panel-testing';
 
 describe('SpatialCellsPanelComponent', () => {
@@ -209,8 +209,8 @@ describe('SpatialCellsPanelComponent', () => {
     await build(TILED_DATASET, { open: false });
     const asked: boolean[] = [];
     component.openChange.subscribe((on) => asked.push(on));
-    expect(root.querySelector('.sc-panel-body')).toBeNull();
-    (one(panelNamed(root, 'Cells'), '.sc-panel-head') as HTMLElement).click();
+    expect(root.querySelector('.sc-subsection-body')).toBeNull();
+    (one(subsectionNamed(root, 'Cells'), '.sc-subsection-head') as HTMLElement).click();
     expect(asked).toEqual([true]);
   });
 });
