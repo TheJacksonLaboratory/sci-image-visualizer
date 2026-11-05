@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.18.1] — 2026-11-05
+
 ### Fixed
 
 - **Observations "Show as" toggle stays on one line.** The Markers / Cell segmentations toggle now
@@ -2729,7 +2731,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.15.0...v0.16.0
