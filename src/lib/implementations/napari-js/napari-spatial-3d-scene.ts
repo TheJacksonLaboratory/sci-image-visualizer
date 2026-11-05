@@ -364,8 +364,14 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         z.every((v, i) => v === this.regionPlanes?.[i]));
     if (same) return;
     this.regionPlanes = z?.length ? [...z] : null;
-    const dataset = this.session.latest?.[0];
+    const latest = this.session.latest;
+    const dataset = latest?.[0];
     if (dataset) this.placeRegionMeshes(dataset);
+    // The cells stand in for the markers only while the set is placed.
+    if (dataset && latest?.[1]) {
+      this.showPointsAsAsked(dataset, latest[1]);
+      this.ctx.viewer.requestRender();
+    }
   }
 
   /** As the Volume view: the reference volume hides the surfaces behind what it shows, or none. */
@@ -896,11 +902,21 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       cloud.opacity = view.opacity;
       this.applySelection(cloud, selection, shown, obs.count);
     }
-    // Last, so it also covers a layer this pass just created. Not while the cells (a 3D
-    // segmentation's) are drawn: the observations are shown as their markers or as their cells.
-    if (this.points)
-      this.points.visible = view.showPoints && !(datasetRegionSet(dataset) && view.showCells !== false);
+    // Last, so it also covers a layer this pass just created.
+    this.showPointsAsAsked(dataset, view);
     viewer.requestRender();
+  }
+
+  /**
+   * The markers shown as the view asks, but not while the cells (a 3D segmentation's) stand in for
+   * them: the observations are shown as their markers or as their cells. Only once the set is placed
+   * here (its planes known): a set that could not be opened, has no planes or was not attached draws
+   * no cells, and the markers stay.
+   */
+  private showPointsAsAsked(dataset: SpatialDataset, view: SpatialViewState): void {
+    if (!this.points) return;
+    const cells = !!this.regionPlanes && !!datasetRegionSet(dataset) && view.showCells !== false;
+    this.points.visible = view.showPoints && !cells;
   }
 
   /** Interleaved x,y,z of the `shown` observations (null: all of them), offset by {@link origin}. */

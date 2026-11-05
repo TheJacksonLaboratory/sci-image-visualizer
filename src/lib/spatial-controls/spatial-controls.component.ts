@@ -227,6 +227,14 @@ export class SpatialControlsComponent implements OnInit {
           this.cells3dStatus = s;
         }),
       );
+    this.controls
+      .getCells3dAvailable$?.()
+      ?.pipe(untilDestroyed())
+      .subscribe((a) =>
+        this.runAndMark(() => {
+          this.cells3dAvailable = a;
+        }),
+      );
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     estimate$?.pipe(untilDestroyed()).subscribe((e) =>
       this.runAndMark(() => {
@@ -395,9 +403,18 @@ export class SpatialControlsComponent implements OnInit {
   /** The 3D view's individual cells as they stand (null: none drawn). */
   protected cells3dStatus: Cells3dStatus | null = null;
 
-  /** The dataset's cells can be drawn in 3D: its boundaries name a 3D segmentation's region set. */
+  /**
+   * Whether the router has the dataset's region set attached and placed (null: it does not say).
+   * See {@link hasCells3d}.
+   */
+  protected cells3dAvailable: boolean | null = null;
+
+  /**
+   * The dataset's cells can be drawn in 3D: its boundaries name a 3D segmentation's region set, and
+   * it is attached with its planes (else the 3D view draws no cells, and the markers stay).
+   */
   protected get hasCells3d(): boolean {
-    return !!datasetRegionSet(this.dataset);
+    return !!datasetRegionSet(this.dataset) && this.cells3dAvailable !== false;
   }
 
   /** Transcripts on offer: tiles to draw, or a density map. */

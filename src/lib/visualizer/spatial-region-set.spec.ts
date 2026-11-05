@@ -54,7 +54,10 @@ describe('SpatialRegionSetLink', () => {
   function link(openRegionSet?: jest.Mock) {
     const dataset$ = new BehaviorSubject<any>(null);
     const port: any = { getDataset$: () => dataset$.asObservable(), openRegionSet };
-    const target = { attachDatasetRegionSet: jest.fn().mockResolvedValue(true) };
+    const target = {
+      attachDatasetRegionSet: jest.fn().mockResolvedValue(true),
+      releaseDatasetRegionSet: jest.fn(),
+    };
     const l = new SpatialRegionSetLink(port, target);
     const until$ = new Subject<void>();
     l.bind(until$);
@@ -116,5 +119,23 @@ describe('SpatialRegionSetLink', () => {
     l.imageLanded({ ...PLATE, imageId: 'demo/ileum.omics/image/plate.ome.tif' });
     dataset$.next(ILEUM);
     expect(target.attachDatasetRegionSet).toHaveBeenCalledWith(expect.any(Function), 'rs-3d');
+  });
+
+  it('releases the attached set when the dataset is cleared or names another, not when it re-emits', () => {
+    const { l, dataset$, target } = link(jest.fn());
+    // Nothing attached yet: nothing to release.
+    dataset$.next({ ...ILEUM, polygonTiles: tiles([{ name: 'cell', label: 'Cells' }]) });
+    expect(target.releaseDatasetRegionSet).not.toHaveBeenCalled();
+    dataset$.next(ILEUM);
+    l.imageLanded(PLATE);
+    dataset$.next({ ...ILEUM }); // the same set again
+    expect(target.releaseDatasetRegionSet).not.toHaveBeenCalled();
+    dataset$.next(null);
+    expect(target.releaseDatasetRegionSet).toHaveBeenCalledWith(null);
+    // Back: asked again (the router restores it as it was), and released for a dataset without one.
+    dataset$.next(ILEUM);
+    expect(target.attachDatasetRegionSet).toHaveBeenCalledTimes(3);
+    dataset$.next({ ...ILEUM, polygonTiles: tiles([{ name: 'cell', label: 'Cells' }]) });
+    expect(target.releaseDatasetRegionSet).toHaveBeenCalledTimes(2);
   });
 });

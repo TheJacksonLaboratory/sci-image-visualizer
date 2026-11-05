@@ -9,6 +9,7 @@ import type { RegionSourceOpener } from '../store/region-source-scope';
 /** What {@link SpatialRegionSetLink} attaches a dataset's region set through (the router). */
 export interface DatasetRegionSetTarget {
   attachDatasetRegionSet?(open: RegionSourceOpener, key: string): Promise<boolean>;
+  releaseDatasetRegionSet?(keep: string | null): void;
 }
 
 /**
@@ -58,6 +59,8 @@ export class SpatialRegionSetLink {
   private image: IImageInfo | null = null;
   /** The dataset selected when the image landed (its id), or null: none was. */
   private imageDataset: string | null = null;
+  /** The region set last asked to be attached, until the dataset stops naming it. */
+  private asked: string | null = null;
 
   constructor(
     private readonly port: SpatialDataPort | undefined,
@@ -71,6 +74,13 @@ export class SpatialRegionSetLink {
       .pipe(takeUntil(until$))
       .subscribe((dataset) => {
         this.dataset = dataset ?? null;
+        // Cleared, or another dataset that names another set (or none): the set attached for the
+        // last one is not this one's.
+        const id = datasetRegionSet(this.dataset);
+        if (this.asked && id !== this.asked) {
+          this.asked = null;
+          this.target.releaseDatasetRegionSet?.(id);
+        }
         this.sync();
       });
   }
@@ -95,6 +105,7 @@ export class SpatialRegionSetLink {
     const port = this.port;
     const id = datasetRegionSet(this.dataset);
     if (!id || !port?.openRegionSet || !this.imageOf(this.dataset)) return;
+    this.asked = id;
     void this.target.attachDatasetRegionSet?.(() => port.openRegionSet!(id), id);
   }
 }

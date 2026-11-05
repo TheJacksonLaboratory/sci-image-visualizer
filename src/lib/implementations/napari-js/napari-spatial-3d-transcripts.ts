@@ -286,6 +286,10 @@ export class Spatial3dTranscripts {
     const meta = dataset.transcriptTiles;
     const genes = meta?.hasZ && port?.getTranscriptTile ? transcripts3dGenes(dataset, view) : null;
     if (!meta || !genes || !port) {
+      // Off (or no gene shown): a camera move must not bring back the last view that drew some.
+      this.last = null;
+      if (this.cameraTimer) clearTimeout(this.cameraTimer);
+      this.cameraTimer = null;
       this.remove();
       return;
     }

@@ -1310,6 +1310,42 @@ describe('RoutingVisualizerService (characterization)', () => {
       expect(regionStore.isStackMode()).toBe(true);
     });
 
+    it('takes the set down when the dataset stops naming it, keeping it to restore on the same image', async () => {
+      stubBuilds();
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      await new Promise((r) => setTimeout(r));
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+      const plate = imageKey();
+      scope().setTaken(plate, 0, new Set(['deleted-cell']));
+
+      // The same set kept: nothing changes.
+      router.releaseDatasetRegionSet('set-1');
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+
+      // The dataset cleared, its image still up: its planes, surfaces and cells go.
+      router.releaseDatasetRegionSet(null);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith(null);
+      expect(planes[planes.length - 1]).toBeNull();
+      expect(shown[shown.length - 1]).toEqual([]);
+      // Nor are its classes offered as cells in 3D.
+      expect((await firstValueFrom(router.getCellableClasses3d$())).size).toBe(0);
+
+      // Asked for again: restored as it was, not opened or attached again.
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(Array.from(scope().taken(plate, 0))).toEqual(['deleted-cell']);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+    });
+
     it("keeps the image's own region sources: the set is not attached over them", async () => {
       await show(PLATE);
       const own = jest.fn();

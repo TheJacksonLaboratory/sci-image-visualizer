@@ -419,6 +419,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.datasetRegionSet = null;
       this.napari.setRegionPlanes(null);
       this.datasetPlanes$.next(null);
+      this.spatialViewChanged$.next();
       this.updateVolumeView(plotType);
       this.updateCells3d();
     }
@@ -1035,6 +1036,27 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.showDatasetRegionSet3d();
     this.updatePlaneCells();
     this.updateCells3d();
+  }
+
+  /**
+   * The dataset no longer names the attached set while its image is still plotted (see
+   * IVisualizer.releaseDatasetRegionSet): its planes, its surfaces and cells in 3D go, as on another
+   * image. Its attachment is kept (attachedRegionSets): the same set asked for again is restored.
+   */
+  releaseDatasetRegionSet(keep: string | null): void {
+    const set = this.datasetRegionSet;
+    if (!set || set.key === keep) return;
+    // One still opening (the claim) is dropped when it opens.
+    this.datasetRegionSet = null;
+    if (set.planes && this.classes3d$.value.length && this.classes3dImage === this.plottedFileName) {
+      this.clearRegionClasses3d();
+    }
+    this.napari.setRegionPlanes(null);
+    this.datasetPlanes$.next(null);
+    this.spatialViewChanged$.next();
+    this.updateVolumeView(this.currentPlotType);
+    this.updateCells3d();
+    this.updatePlaneCells();
   }
 
   /** The dataset region set's classes while in spatial 3D: those that can be drawn as cells. */

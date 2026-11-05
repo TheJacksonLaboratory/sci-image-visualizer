@@ -140,4 +140,32 @@ describe('Spatial3dScene region surfaces', () => {
       expect(s.voxelStep()).toBe(1);
     });
   });
+
+  it("hides the markers for the cells only once the dataset's 3D segmentation is placed", () => {
+    const SEGMENTED: any = {
+      id: 'seg',
+      imageRef: { imageId: 'x/plate.ome.tif', scale: [1, 1] },
+      polygonTiles: {
+        bounds: [0, 0, 1, 1],
+        levels: [],
+        sets: [{ name: '3d', label: '3D', regionSource: 'rs-3d' }],
+      },
+    };
+    const { s } = scene({ trueImageSize: [4, 2] }, SEGMENTED);
+    const points: any = { visible: true };
+    (s as any).points = points;
+    (s as any).session = { latest: [SEGMENTED, { showPoints: true }, {}] };
+    // Named by the dataset, not placed (it could not be opened, has no planes, was not attached).
+    (s as any).showPointsAsAsked(SEGMENTED, { showPoints: true });
+    expect(points.visible).toBe(true);
+    // Placed: the cells stand in for the markers, unless the panel shows the markers.
+    s.setRegionPlanes([0, 10]);
+    expect(points.visible).toBe(false);
+    (s as any).showPointsAsAsked(SEGMENTED, { showPoints: true, showCells: false });
+    expect(points.visible).toBe(true);
+    // Gone again: the markers come back.
+    (s as any).showPointsAsAsked(SEGMENTED, { showPoints: true });
+    s.setRegionPlanes(null);
+    expect(points.visible).toBe(true);
+  });
 });

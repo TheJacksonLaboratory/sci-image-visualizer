@@ -14,6 +14,7 @@ import {
   merge,
   Observable,
   of,
+  startWith,
   Subscription,
   switchMap,
   tap,
@@ -589,6 +590,16 @@ export class SpatialControlsFacade {
       getDensityStats$: () => this.ctx.napari.densityStats$.asObservable(),
       getGeneFilterFailed$: () => this.ctx.napari.geneFilterFailed$?.asObservable() ?? of(false),
       getCells3dStatus$: () => this.ctx.napari.cells3dStatus$?.asObservable() ?? of(null),
+      ...(this.ctx.viewChanged$ && this.ctx.slicePlanes
+        ? {
+            getCells3dAvailable$: () =>
+              this.ctx.viewChanged$!.pipe(
+                startWith(null),
+                map(() => !!this.ctx.slicePlanes?.()?.length),
+                distinctUntilChanged(),
+              ),
+          }
+        : {}),
       ...(port.getTranscriptTile ? { getTranscriptsInSelection$: () => this.transcriptsInSelection$() } : {}),
       getObservationsInSelection$: () => this.observationsInSelection$(),
       categoryColors: async (name: string) => {

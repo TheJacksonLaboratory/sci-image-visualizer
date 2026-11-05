@@ -295,6 +295,30 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       expect(lastWrite()).toEqual({ cells3d: 'cells' });
     });
 
+    it("keeps the markers in 3D until the dataset's 3D segmentation is attached and placed", async () => {
+      dataset$.next({
+        ...dataset,
+        polygonTiles: {
+          bounds: [0, 0, 1, 1],
+          levels: [],
+          defaultSet: 'cell',
+          sets: [
+            { name: 'cell', label: 'Cells' },
+            { name: '3d', label: '3D', regionSource: 'rs-3d' },
+          ],
+        },
+      } as SpatialDataset);
+      const available$ = new BehaviorSubject(false);
+      (controls as any).getCells3dAvailable$ = () => available$;
+      await build({ is3d: true });
+      // Named by the dataset, but not (yet) attached: no cells to show, so none offered.
+      expect(root.querySelector('spatial-cells-panel')).toBeNull();
+      expect(panelNamed(root, 'Observations').querySelector('.sc-show-as')).toBeNull();
+      available$.next(true);
+      await settle();
+      expect(root.querySelector('spatial-cells-panel')).not.toBeNull();
+    });
+
     it('offers the Transcripts in 3D when they carry z', async () => {
       dataset$.next({
         ...dataset,

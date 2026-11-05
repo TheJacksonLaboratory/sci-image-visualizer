@@ -1,7 +1,8 @@
 import { HeadlessViewer } from 'napari-js/testing';
 import type { SurfaceLayer, Viewer } from 'napari-js';
 
-import { CELLS_3D_MAX_CELLS, Spatial3dCells } from './napari-spatial-3d-cells';
+import { CELLS_3D_MAX_CELLS, CELLS_3D_TRIANGLE_BUDGET, Spatial3dCells } from './napari-spatial-3d-cells';
+import * as workers from '../../region-source/worker-region-source';
 import type { Cells3dStatus } from '../../contracts/display-types';
 
 /** A square cell outline at (x, y), `s` across. */
@@ -235,6 +236,147 @@ describe('Spatial3dCells', () => {
     // Off screen (no pixels): coarse.
     (cells as any).assignTiers([{ chunk, ppi: 0, onScreen: false, d2: 0 }], [10, 5, 2.5]);
     expect(chunk.want).toBe(0);
+    cells.dispose();
+  });
+
+  it('builds the classes asked for while a build of others was still reading', async () => {
+    const { cells, statuses, surfaces, src } = setup();
+    // Class A's tiles held back: its build is in flight when B is asked for.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const read = src.getTile.getMockImplementation()!;
+    src.getTile.mockImplementation(async (z: number) => {
+      await held;
+      return read(z);
+    });
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['A']));
+    await new Promise((r) => setTimeout(r, 20));
+    cells.setClasses(new Set(['B']));
+    await new Promise((r) => setTimeout(r, 20)); // B's plan ran, while A's build held the runner
+    release();
+    await settled(statuses);
+    expect(statuses.at(-1)).toEqual({ shown: 1, capped: false, building: false });
+    expect(surfaces().some((l) => l.visible && (l as any).faces.length > 0)).toBe(true);
+    cells.dispose();
+  });
+
+  it('draws a placement that lands after the scene passed the same placement again', async () => {
+    const { cells, statuses, surfaces } = setup();
+    const place = workers.placeInWorker;
+    const pending: (() => void)[] = [];
+    const spy = jest.spyOn(workers, 'placeInWorker').mockImplementation((vertices, frame) => {
+      const out = place(vertices, frame);
+      return new Promise((resolve) => pending.push(() => resolve(out)));
+    });
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['A', 'B']));
+    for (let i = 0; i < 100 && !pending.length; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(pending.length).toBeGreaterThan(0);
+    // The same placement in a new object, with a new Z stretch: what is in flight still holds.
+    cells.setPlacement({ ...PLANES }, 2);
+    for (let i = 0; i < 100; i++) {
+      pending.splice(0).forEach((go) => go());
+      await new Promise((r) => setTimeout(r, 5));
+      if (statuses.at(-1)?.building === false && surfaces().some((l) => l.visible)) break;
+    }
+    expect(surfaces().some((l) => l.visible)).toBe(true);
+    expect(surfaces().every((l) => l.scale3d[2] === 2)).toBe(true);
+    spy.mockRestore();
+    cells.dispose();
+  });
+
+  it('draws the new placement when it lands after the one it replaced', async () => {
+    const { cells, surfaces } = setup();
+    const place = workers.placeInWorker;
+    const pending: (() => void)[] = [];
+    const spy = jest.spyOn(workers, 'placeInWorker').mockImplementation((vertices, frame) => {
+      const out = place(vertices, frame);
+      return new Promise((resolve) => pending.push(() => resolve(out)));
+    });
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['B']));
+    for (let i = 0; i < 100 && !pending.length; i++) await new Promise((r) => setTimeout(r, 5));
+    const old = pending.splice(0);
+    // Moved while the first is in flight: placed again; the first lands late and is dropped.
+    cells.setPlacement({ ...PLANES, offset: [0, 0, 0] }, 1);
+    for (let i = 0; i < 100 && !pending.length; i++) await new Promise((r) => setTimeout(r, 5));
+    old.forEach((go) => go());
+    await new Promise((r) => setTimeout(r, 5));
+    pending.splice(0).forEach((go) => go());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(surfaces().some((l) => l.visible)).toBe(true);
+    spy.mockRestore();
+    cells.dispose();
+  });
+
+  it('recolours without uploading the geometry again', async () => {
+    const { cells, statuses, surfaces } = setup();
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['A', 'B']));
+    await settled(statuses);
+    const layers = surfaces();
+    const data = layers.map((l) => l.dataVersion);
+    const colors = layers.map((l) => l.colorVersion);
+    cells.setStyle(Float32Array.of(1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1), null, 0.5);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(layers.map((l) => l.dataVersion)).toEqual(data);
+    expect(layers.every((l, i) => l.colorVersion > colors[i])).toBe(true);
+    // Hiding cells still takes them out of what is drawn (here B's chunk, c3 alone: none left).
+    cells.setHiddenClasses(['B']);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(layers.filter((l) => l.visible).length).toBe(layers.length - 1);
+    cells.dispose();
+  });
+
+  it('meshes only the cells that fit of a first chunk over the cap or the budget by itself', () => {
+    const { cells } = setup();
+    const chunk = (key: string, n: number, triangles: number) =>
+      ({
+        key,
+        box: [0, 0, 1, 1],
+        tier: -1,
+        want: -1,
+        cells: n,
+        meshed: -1,
+        limit: Infinity,
+        builtLimit: Infinity,
+        triangles: new Map([[0, triangles]]),
+        labels: new Map(),
+      }) as any;
+    const order = (...chunks: any[]) => chunks.map((c, i) => ({ chunk: c, ppi: 0, onScreen: true, d2: i }));
+
+    // Over the cap: drawn, but cut to it.
+    const dense = chunk('dense', CELLS_3D_MAX_CELLS + 1, 1000);
+    (cells as any).chunks = [dense];
+    (cells as any).assignTiers(order(dense), [10, 5, 2.5]);
+    expect(dense.want).toBe(0);
+    expect(dense.limit).toBe(CELLS_3D_MAX_CELLS);
+
+    // Over the budget at its coarsest: cut to the cells that fit in it.
+    const heavy = chunk('heavy', 10_000, 4_000_000);
+    (cells as any).chunks = [heavy];
+    (cells as any).assignTiers(order(heavy), [10, 5, 2.5]);
+    expect(heavy.want).toBe(0);
+    expect(heavy.limit).toBe(Math.floor((CELLS_3D_TRIANGLE_BUDGET / 4_000_000) * 10_000));
+
+    // Two over the budget together at their coarsest: the second is left out.
+    const a = chunk('a', 100, 2_000_000);
+    const b = chunk('b', 100, 2_000_000);
+    (cells as any).chunks = [a, b];
+    (cells as any).assignTiers(order(a, b), [10, 5, 2.5]);
+    expect([a.want, b.want]).toEqual([0, -1]);
+    expect(a.limit).toBe(Infinity);
+
+    // A chunk not built yet: no more cells than the cap leaves it.
+    const fresh = { ...chunk('fresh', -1, 0), triangles: new Map() };
+    (cells as any).chunks = [fresh];
+    (cells as any).assignTiers(order(fresh), [10, 5, 2.5]);
+    expect(fresh.limit).toBe(CELLS_3D_MAX_CELLS);
     cells.dispose();
   });
 });

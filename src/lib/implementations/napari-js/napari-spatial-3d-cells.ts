@@ -24,8 +24,10 @@ import { PlanePlacement, REGION_MESH_DIMMED_OPACITY, toWorld } from './napari-vo
  *  - level of detail by chunk: a coarse mesh everywhere first, then the chunks on screen are meshed
  *    finer as the camera comes close, within a triangle budget for the whole scene; the region
  *    set's tiles are read at the level of detail that mesh needs;
- *  - at most {@link CELLS_3D_MAX_CELLS} cells, the chunks nearest the centre of the view first;
- *    the status says when cells are left out, so the view never claims to show them all;
+ *  - at most {@link CELLS_3D_MAX_CELLS} cells and {@link CELLS_3D_TRIANGLE_BUDGET} triangles, the
+ *    chunks nearest the centre of the view first (one chunk over either by itself is meshed in
+ *    part), planned again as each chunk's real size is learnt; the status says when cells are left
+ *    out, so the view never claims to show them all;
  *  - colour and visibility change no geometry: colours are per vertex (each vertex's cell), and a
  *    hidden cell's triangles are left out of what is drawn.
  * Builds report on the canvas's loading badge.
@@ -68,6 +70,11 @@ interface Chunk {
   /** Cells it has (-1 until built), and its triangles by tier built. */
   cells: number;
   triangles: Map<number, number>;
+  /** The most cells it may mesh (the cap, or the budget, left for it; Infinity: all). */
+  limit: number;
+  /** The limit it was built with, and the cells it meshed (-1 until built). */
+  builtLimit: number;
+  meshed: number;
   mesh: CellsMesh | null;
   /** Each meshed cell's class. */
   labels: Map<number, string | null>;
@@ -85,8 +92,8 @@ interface Chunk {
    */
   drawnSelected: Uint32Array | null;
   selectedLayer: SurfaceLayer | null;
-  /** The mesh whose placement is in flight, if any. */
-  placing?: CellsMesh | null;
+  /** The placement in flight (its mesh and where it places it), if any. */
+  placing?: { mesh: CellsMesh; placement: PlanePlacement } | null;
 }
 
 export type { Cells3dStatus };
@@ -108,6 +115,9 @@ export class Spatial3dCells {
   private generation = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private disposed = false;
+  /** Each surface's geometry as last set: a recolour that leaves it so uploads none again. */
+  private readonly installed = new WeakMap<SurfaceLayer, { world: Float32Array; faces: Uint32Array }>();
   private cameraOff: (() => void) | null;
 
   constructor(private readonly host: Cells3dHost) {
@@ -170,7 +180,9 @@ export class Spatial3dCells {
   /** Where the planes are among the observations (null: nowhere, nothing drawn), and the Z stretch. */
   setPlacement(placement: PlanePlacement | null, zScale: number): void {
     const moved = !samePlacement(placement, this.placement);
-    this.placement = placement;
+    // The same placement kept as it was (a scene passes a new object each time): a placement in
+    // flight for it is still good when it lands.
+    if (moved) this.placement = placement;
     this.zScale = zScale;
     for (const c of this.chunks) {
       if (c.layer) c.layer.scale3d = [1, 1, zScale];
@@ -206,6 +218,7 @@ export class Spatial3dCells {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.cameraOff?.();
     this.cameraOff = null;
     if (this.timer) clearTimeout(this.timer);
@@ -218,6 +231,7 @@ export class Spatial3dCells {
   // ── planning ──────────────────────────────────────────────────────────────────────
 
   private schedule(delay: number): void {
+    if (this.disposed) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -262,11 +276,15 @@ export class Spatial3dCells {
     if (generation !== this.generation) return;
     if (!this.chunks.length) this.chunks = makeChunks(source);
     const steps = this.steps(dataset);
-    const order = this.priority();
-    this.assignTiers(order, steps);
-    for (const c of this.chunks) if (c.want < 0) this.dropLayer(c);
+    this.replanTiers(steps);
     this.report(false);
     if (!this.running) void this.run(source, index, steps);
+  }
+
+  /** {@link assignTiers} from the view as it is now, taking down what it leaves out. */
+  private replanTiers(steps: number[]): void {
+    this.assignTiers(this.priority(), steps);
+    for (const c of this.chunks) if (c.want < 0) this.dropLayer(c);
   }
 
   /** Voxel edge of each tier, image px: fractions of a typical cell's diameter. */
@@ -310,19 +328,26 @@ export class Spatial3dCells {
     return out.sort((a, b) => Number(b.onScreen) - Number(a.onScreen) || a.d2 - b.d2);
   }
 
-  /** Each chunk's tier: in order, within the cell cap, as fine as the screen asks within the budget. */
+  /**
+   * Each chunk's tier: in order, within the cell cap, as fine as the screen asks within the
+   * triangle budget. The chunks last in order give up their detail first, then are left out; the
+   * first is never left out, but one over the cap or the budget by itself meshes only the cells
+   * that fit (its {@link Chunk.limit}).
+   */
   private assignTiers(order: { chunk: Chunk; ppi: number }[], steps: number[]): void {
     const known = this.chunks.filter((c) => c.cells >= 0);
     const avgCells = known.length ? known.reduce((s, c) => s + c.cells, 0) / known.length : 200;
     let cells = 0;
-    const included: { chunk: Chunk; tier: number }[] = [];
+    const included: { chunk: Chunk; tier: number; take: number; room: number }[] = [];
     for (const { chunk, ppi } of order) {
       const n = chunk.cells >= 0 ? chunk.cells : avgCells;
-      if (cells + n > CELLS_3D_MAX_CELLS && included.length) {
+      const room = CELLS_3D_MAX_CELLS - cells;
+      if (n > room && included.length) {
         chunk.want = -1;
         continue;
       }
-      cells += n;
+      const take = Math.min(n, room);
+      cells += take;
       let tier = 0;
       for (let t = steps.length - 1; t > 0; t--) {
         if (ppi * steps[t] >= MIN_VOXEL_PX) {
@@ -330,20 +355,38 @@ export class Spatial3dCells {
           break;
         }
       }
-      included.push({ chunk, tier });
+      included.push({ chunk, tier, take, room });
     }
-    // The budget: the chunks last in order give up their detail first.
-    let total = included.reduce((s, e) => s + this.trianglesAt(e.chunk, e.tier, steps, avgCells), 0);
+    const triangles = (e: { chunk: Chunk; tier: number }) => this.trianglesAt(e.chunk, e.tier, steps, avgCells);
+    // The budget: the chunks last in order give up their detail first, then their place.
+    let total = included.reduce((s, e) => s + triangles(e), 0);
     for (let i = included.length - 1; i >= 0 && total > CELLS_3D_TRIANGLE_BUDGET; i--) {
       const e = included[i];
       while (e.tier > 0 && total > CELLS_3D_TRIANGLE_BUDGET) {
-        total -=
-          this.trianglesAt(e.chunk, e.tier, steps, avgCells) -
-          this.trianglesAt(e.chunk, e.tier - 1, steps, avgCells);
+        total -= triangles(e) - triangles({ chunk: e.chunk, tier: e.tier - 1 });
         e.tier--;
       }
     }
-    for (const e of included) e.chunk.want = e.tier;
+    while (included.length > 1 && total > CELLS_3D_TRIANGLE_BUDGET) {
+      const e = included.pop()!;
+      total -= triangles(e);
+      e.chunk.want = -1;
+    }
+    for (const e of included) {
+      const n = e.chunk.cells >= 0 ? e.chunk.cells : avgCells;
+      let take = e.take;
+      // The first chunk alone over the budget, at its coarsest: as many cells as fit in it.
+      const all = triangles(e);
+      if (all > CELLS_3D_TRIANGLE_BUDGET) {
+        const perCell = all / Math.max(1, e.chunk.meshed > 0 ? e.chunk.meshed : n);
+        take = Math.min(take, CELLS_3D_TRIANGLE_BUDGET / perCell);
+      }
+      e.chunk.want = e.tier;
+      // Cut short when over; and one not built yet, which may have more cells than the guess, to
+      // the room the cap leaves it.
+      const most = take < n ? take : e.chunk.cells < 0 ? e.room : Infinity;
+      e.chunk.limit = Number.isFinite(most) ? Math.max(1, Math.floor(most)) : Infinity;
+    }
   }
 
   /** A chunk's triangles at `tier`: as built, else scaled from a tier built (by the step's square). */
@@ -360,13 +403,14 @@ export class Spatial3dCells {
   /** Build every chunk whose tier changed, nearest first, one at a time, until none is left. */
   private async run(source: RegionSource, index: ReadonlyMap<string, number>, steps: number[]): Promise<void> {
     this.running = true;
+    let stale = false;
     const end = this.host.beginTask('Cells');
     try {
       for (;;) {
         const generation = this.generation;
         const next = this.priority()
           .map((e) => e.chunk)
-          .find((c) => c.want >= 0 && c.want !== c.tier);
+          .find((c) => needsBuild(c));
         if (!next) break;
         this.report(true);
         try {
@@ -375,12 +419,20 @@ export class Spatial3dCells {
           console.warn('[napari-js] cells could not be built in 3D', err);
           next.want = next.tier; // not retried until the view asks again
         }
-        if (generation !== this.generation) break;
+        if (generation !== this.generation) {
+          // Superseded (other classes, another dataset): the plan made for those found this run
+          // still going and started none of its own. Plan again, now that it has stopped.
+          stale = true;
+          break;
+        }
+        // The chunk's real size is known now, where the plan guessed: plan again by it.
+        this.replanTiers(steps);
       }
     } finally {
       end();
       this.running = false;
       this.report(false);
+      if (stale) this.schedule(0);
     }
   }
 
@@ -411,7 +463,9 @@ export class Spatial3dCells {
       })),
     );
     if (generation !== this.generation) return;
-    const cells = cellOutlinesFromTiles(planes, index, this.classes, chunk.box);
+    const found = cellOutlinesFromTiles(planes, index, this.classes, chunk.box);
+    const limit = chunk.limit;
+    const cells = found.length > limit ? found.slice(0, limit) : found;
     const labels = new Map(cells.map((c) => [c.cell, c.label] as [number, string | null]));
     const parts: CellsMesh[] = [];
     for (let i = 0; i < cells.length; i += BATCH) {
@@ -423,7 +477,9 @@ export class Spatial3dCells {
     chunk.mesh = mesh;
     chunk.labels = labels;
     chunk.tier = tier;
-    chunk.cells = mesh.cells.length;
+    chunk.cells = found.length;
+    chunk.meshed = mesh.cells.length;
+    chunk.builtLimit = limit;
     chunk.triangles.set(tier, mesh.faces.length / 3);
     chunk.world = null;
     this.draw(chunk);
@@ -458,11 +514,14 @@ export class Spatial3dCells {
   /** Place a chunk's vertices in the world, in the cells' worker, then draw it (unless superseded). */
   private placeChunk(chunk: Chunk, placement: PlanePlacement): void {
     const mesh = chunk.mesh;
-    if (!mesh || chunk.placing === mesh) return;
-    chunk.placing = mesh;
+    if (!mesh || (chunk.placing?.mesh === mesh && chunk.placing.placement === placement)) return;
+    // This request's own token: one superseded (another mesh, or placement) is dropped when it
+    // lands, without dropping the request that replaced it.
+    const placing = { mesh, placement };
+    chunk.placing = placing;
     placeInWorker(mesh.vertices, { size: [1, 1, 1], world: [1, 1, 1], planes: placement }).then(
       (world) => {
-        if (chunk.placing !== mesh) return;
+        if (chunk.placing !== placing) return;
         chunk.placing = null;
         if (chunk.mesh !== mesh || this.placement !== placement) return;
         chunk.world = world;
@@ -470,7 +529,7 @@ export class Spatial3dCells {
         this.host.viewer.requestRender();
       },
       (err) => {
-        if (chunk.placing === mesh) chunk.placing = null;
+        if (chunk.placing === placing) chunk.placing = null;
         console.warn('[napari-js] cells could not be placed in 3D', err);
       },
     );
@@ -524,7 +583,12 @@ export class Spatial3dCells {
       return layer;
     }
     if (layer) {
-      layer.setData(chunk.world, faces);
+      // A recolour, a new opacity: the geometry stays as uploaded.
+      const had = this.installed.get(layer);
+      if (!had || had.world !== chunk.world || !sameFaces(had.faces, faces)) {
+        layer.setData(chunk.world, faces);
+        this.installed.set(layer, { world: chunk.world, faces });
+      }
       layer.vertexColors = colors;
       layer.opacity = opacity;
       layer.visible = true;
@@ -539,6 +603,7 @@ export class Spatial3dCells {
       fit: 'never',
     });
     this.byLayer.set(added, chunk);
+    this.installed.set(added, { world: chunk.world, faces });
     return added;
   }
 
@@ -613,8 +678,8 @@ export class Spatial3dCells {
       return;
     }
     const drawn = this.chunks.filter((c) => c.layer && c.want >= 0);
-    const shown = drawn.reduce((s, c) => s + Math.max(0, c.cells), 0);
-    const capped = this.chunks.some((c) => c.want < 0);
+    const shown = drawn.reduce((s, c) => s + Math.max(0, c.meshed), 0);
+    const capped = this.chunks.some((c) => c.want < 0 || (c.want >= 0 && c.builtLimit < c.cells));
     this.emit({ shown, capped, building: building || this.running });
   }
 
@@ -652,6 +717,9 @@ function makeChunks(source: RegionSource): Chunk[] {
         want: -1,
         cells: -1,
         triangles: new Map(),
+        limit: Infinity,
+        builtLimit: Infinity,
+        meshed: -1,
         mesh: null,
         labels: new Map(),
         world: null,
@@ -695,6 +763,24 @@ function concatMeshes(parts: readonly CellsMesh[]): CellsMesh {
 /** The middle of the planes' slice range (slice units). */
 function midZ(p: PlanePlacement): number {
   return (p.z.length - 1) / 2;
+}
+
+/**
+ * Whether a chunk is to be built (again): its tier changed, or it was meshed in part and the plan
+ * now lets it have more of its cells, or fewer.
+ */
+function needsBuild(c: Chunk): boolean {
+  if (c.want < 0) return false;
+  if (c.want !== c.tier) return true;
+  return c.cells >= 0 && Math.min(c.builtLimit, c.cells) !== Math.min(c.limit, c.cells);
+}
+
+/** Whether two face lists are the same triangles. */
+function sameFaces(a: Uint32Array, b: Uint32Array): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function sameSet(a: ReadonlySet<string> | null, b: ReadonlySet<string> | null): boolean {

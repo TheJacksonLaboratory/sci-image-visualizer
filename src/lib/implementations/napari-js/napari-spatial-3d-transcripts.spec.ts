@@ -226,6 +226,29 @@ describe('Spatial3dTranscripts', () => {
     }
   });
 
+  it('stays off when the camera moves after the transcripts were turned off', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const v = new HeadlessViewer({ canvasRect: { width: 200, height: 100 } });
+      const viewer = v as unknown as Viewer;
+      const { port } = setup();
+      const t = new Spatial3dTranscripts(viewer, () => () => undefined);
+      const layers = () => v.layers.items.filter((l) => l.name === 'transcripts');
+      await t.sync(dataset(), view({ transcriptGenes: ['Acta2'] }), port, frame);
+      expect(layers()).toHaveLength(1);
+      // A move pending as they are turned off, then another after: neither draws them again.
+      viewer.camera3d.distance = viewer.camera3d.distance * 2;
+      await t.sync(dataset(), view({ transcriptMode: 'off' }), port, frame);
+      viewer.camera3d.distance = viewer.camera3d.distance / 3;
+      jest.advanceTimersByTime(400);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(layers()).toHaveLength(0);
+      t.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   describe('Colour by', () => {
     const typed = () =>
       ({

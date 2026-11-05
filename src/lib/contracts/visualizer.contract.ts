@@ -442,6 +442,13 @@ export interface ISpatialControls {
   /** The 3D view's individual cells as they stand (null: none are drawn). Optional. */
   getCells3dStatus$?(): Observable<Cells3dStatus | null>;
   /**
+   * Whether the dataset's region set (a 3D segmentation's) is attached and placed among the
+   * observations, so the 3D view can show the cells: not until its source opened with its planes,
+   * and never when it could not be or was not attached. Optional: without it, the dataset naming a
+   * set is taken for it.
+   */
+  getCells3dAvailable$?(): Observable<boolean>;
+  /**
    * The transcripts of the selection, by gene, kept up to date as the selection, the picked
    * classes, the regions or the plane shown change (see {@link TranscriptsInSelection}). Optional:
    * only a dataset with tiled transcripts has it.
@@ -587,6 +594,14 @@ export interface IVisualizer
    * once per image and `key`. Resolves whether it is attached. Optional: the router's.
    */
   attachDatasetRegionSet?(open: () => Promise<RegionSource>, key: string): Promise<boolean>;
+  /**
+   * The spatial dataset no longer names the attached region set (it was cleared, or another was
+   * selected) while its image is still plotted: take down what the set brought to the views (its
+   * planes, its cells and surfaces in 3D) unless `keep` is its key. Its regions stay the image's,
+   * with what was taken from or deleted in them, as on another image: the same set attached again
+   * is restored as it was. Optional: the router's.
+   */
+  releaseDatasetRegionSet?(keep: string | null): void;
   /**
    * The planes of that region set (its `sliceZ`) while they slice the plotted image, an image of
    * one plane; null otherwise. The host's slice slider runs over them: each position shows that

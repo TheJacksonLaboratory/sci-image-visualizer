@@ -88,6 +88,29 @@ file was added.
 
 ### Fixed
 
+- **3D cells and transcripts: review fixes.**
+  - Turning the 3D transcripts off (or hiding every gene shown) no longer lets the next camera move
+    draw them again: the last view that drew some is forgotten.
+  - Other cell classes, or another dataset, asked for while a 3D cells build was still reading are
+    built once that build stops; before, nothing was drawn until the camera or view changed again.
+  - A cell chunk's placement that lands after the scene passed the same placement again (as each
+    Z-stretch change does) is drawn; and one that lands after the placement it was for was replaced
+    no longer drops the replacing one's result.
+  - A recolour, opacity or selection change no longer uploads the cells' geometry again: a surface's
+    vertices and triangles are set only when they changed.
+  - The 3D cells keep to their limits: the first chunk, when over the cell cap or the triangle budget
+    by itself, meshes only the cells that fit; chunks over the budget at their coarsest are left out;
+    a chunk not yet built meshes at most the cells the cap leaves it; and the plan is made again as
+    each chunk's real size is learnt. The status says when cells are left out.
+  - The markers are no longer hidden for a dataset's 3D segmentation that is not attached and placed
+    (it could not be opened, has no planes, or the image has region sources of its own): the 3D view
+    hides them only once the set's planes are known, and the controls offer Cell segmentations in 3D
+    only then (`ISpatialControls.getCells3dAvailable$`, new, optional).
+  - The dataset cleared, or another selected that names another region set (or none), while its
+    image is still plotted takes down what the attached set brought to the views: its planes, and its
+    surfaces and cells in 3D (`IVisualizer.releaseDatasetRegionSet`, new, optional). Its regions stay
+    the image's, so the same set asked for again is restored as it was.
+
 - **A selected 3D cell or cell type is no longer hidden by the faded ones in front of it.** A
   translucent surface draws only its own nearest faces, so a faded cell in front of the selected one
   in the same chunk hid it. The selected cells are now drawn as an opaque surface of their own per
