@@ -32,3 +32,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+// "Show as" is a short label beside a two-button toggle, not a label over a
+// slider: the shared half-width label column (`.sc-row .sc-lbl`) left the toggle
+// too little room, so "Cell segmentations" wrapped under "Markers". The toggle
+// sits right after the label instead, its buttons on one line.
+.sc-show-as .sc-lbl {
+  flex: 0 0 auto;
+}
+:host ::ng-deep .sc-show-as .p-selectbutton {
+  display: flex;
+  flex-wrap: nowrap;
+}
+:host ::ng-deep .sc-show-as .p-button {
+  white-space: nowrap;
+}
