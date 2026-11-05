@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { BehaviorSubject, of } from 'rxjs';
 
 import { SpatialObservationsPanelComponent } from './spatial-observations-panel.component';
-import { SpatialKeyComponent } from '../spatial-key/spatial-key.component';
+import { SpatialColorByComponent } from '../spatial-color-by/spatial-color-by.component';
 import { GenePickerModel } from '../spatial-gene-picker';
 import { ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -34,9 +34,9 @@ describe('SpatialObservationsPanelComponent', () => {
   let dataset$: BehaviorSubject<SpatialDataset | null>;
 
   async function build(inputs: Record<string, unknown> = {}) {
-    // The key is a child component: kept (shallow), so opening the section binds its inputs.
-    shallowPanel(SpatialKeyComponent);
-    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    // The colouring is a child component: kept (shallow), so opening the section binds its inputs.
+    shallowPanel(SpatialColorByComponent);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialColorByComponent]);
     await TestBed.configureTestingModule({ imports: [SpatialObservationsPanelComponent] }).compileComponents();
     fixture = TestBed.createComponent(SpatialObservationsPanelComponent);
     component = fixture.componentInstance;
@@ -45,51 +45,6 @@ describe('SpatialObservationsPanelComponent', () => {
 
   beforeEach(() => {
     ({ controls, view$, dataset$ } = fakeSpatialControls(dataset));
-  });
-
-  describe('colour source', () => {
-    beforeEach(async () => {
-      await build();
-      (controls.setViewState as jest.Mock).mockClear();
-    });
-
-    it('offers "None" plus every column, labelled by kind', () => {
-      expect(component['columnOptions'][0]).toEqual({ label: 'None (flat colour)', value: null });
-      expect(component['columnOptions'].map((o) => o.value)).toEqual([null, 'region', 'total_counts']);
-      expect(component['columnOptions'][1].label).toContain('2 categories');
-      expect(component['columnOptions'][2].label).toContain('counts');
-    });
-
-    it('colours by a column', () => {
-      component['onColumn']('region');
-      expect(controls.colorByColumn).toHaveBeenCalledWith('region');
-    });
-
-    it('clears the colouring when None is chosen', () => {
-      component['onColumn'](null);
-      expect(controls.clearColorBy).toHaveBeenCalled();
-    });
-
-    it('column and gene are mutually exclusive, so the source is never ambiguous', () => {
-      component['onGene']('Ttr');
-      expect(component['selectedColumn']).toBeNull();
-      expect(controls.colorByFeature).toHaveBeenCalledWith('Ttr');
-
-      component['onColumn']('region');
-      expect(component['selectedGene']).toBeNull();
-    });
-
-    it('reflects a colour source set elsewhere (e.g. by the host)', () => {
-      controls.colorByFeature('Mbp');
-      expect(component['selectedGene']).toBe('Mbp');
-      expect(component['selectedColumn']).toBeNull();
-    });
-
-    it('clearing the dropdown clears the colour source', () => {
-      component['onGene'](null);
-      expect(controls.clearColorBy).toHaveBeenCalled();
-      expect(component['selectedGene']).toBeNull();
-    });
   });
 
   describe('observations by gene', () => {
@@ -228,7 +183,7 @@ describe('SpatialObservationsPanelComponent', () => {
 
     it('offers the gene map only while a gene is the colour source', () => {
       expect(component['canMapGene']).toBe(false); // nothing to map
-      component['onColumn']('region');
+      view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
       expect(component['canMapGene']).toBe(false); // a column is not a gene
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       expect(component['canMapGene']).toBe(true);
@@ -248,25 +203,11 @@ describe('SpatialObservationsPanelComponent', () => {
       expect(controls.setViewState).not.toHaveBeenCalled();
     });
 
-    it('writes the volume and cloud visibility independently', () => {
-      // The point of separate toggles: every combination is reachable, including
-      // the density volumes alone.
-      component['onShowVolume'](false);
-      expect(controls.setViewState).toHaveBeenCalledWith({ showVolume: false });
+    it("writes the cloud visibility (the volume is the Volume section's)", () => {
       component['onShowPoints'](false);
       expect(controls.setViewState).toHaveBeenCalledWith({ showPoints: false });
-      expect(component.view.showVolume).toBe(false);
       expect(component.view.showPoints).toBe(false);
-    });
-
-    it('writes the volume opacity, separately from the markers', () => {
-      component['onVolumeOpacity'](0.2);
-      expect(controls.setViewState).toHaveBeenCalledWith({ volumeOpacity: 0.2 });
-      // Turning the backdrop down must leave the measurement drawn over it alone.
-      expect(component.view.opacity).toBe(DEFAULT_SPATIAL_VIEW.opacity);
-      (controls.setViewState as jest.Mock).mockClear();
-      component['onVolumeOpacity'](undefined);
-      expect(controls.setViewState).not.toHaveBeenCalled();
+      expect(component.view.showVolume).toBe(DEFAULT_SPATIAL_VIEW.showVolume);
     });
 
     it('opens the section picker mid-stack and releases it back to every section', () => {
@@ -320,23 +261,57 @@ describe('SpatialObservationsPanelComponent', () => {
     });
   });
 
-  it('drops stale picker state when the dataset changes', async () => {
-    await build();
-    component['onGene']('Ttr');
-    dataset$.next({ ...dataset, id: 'other', name: 'Other', columns: [] });
-    expect(component['selectedGene']).toBeNull();
-    expect(component['columnOptions']).toHaveLength(1); // just "None"
-  });
-
-  it('asks to open from its header, and switches the points from its checkbox', async () => {
+  it('asks to open from its header, whose switch shows the observations without opening it', async () => {
     await build({ open: false });
     const root = fixture.nativeElement as HTMLElement;
     const asked: boolean[] = [];
     component.openChange.subscribe((on) => asked.push(on));
+    expect(one(panelNamed(root, 'Observations'), '.sc-panel-head p-checkbox')).toBeTruthy();
     (one(panelNamed(root, 'Observations'), '.sc-panel-head') as HTMLElement).click();
     expect(asked).toEqual([true]);
     expect(root.querySelector('.sc-panel-body')).toBeNull();
-    component['onShowPoints'](false);
-    expect(view$.value.showPoints).toBe(false);
+  });
+
+  describe('shown, and as what', () => {
+    const CELLS = { ...dataset, polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [] } } as SpatialDataset;
+
+    it('without cells: the header switch shows the markers; no toggle', async () => {
+      await build({ open: true });
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.sc-show-as')).toBeNull();
+      expect(root.textContent).toContain('Point size');
+      component['onShowObservations'](false);
+      expect(view$.value.showPoints).toBe(false);
+      component['onShowObservations'](true);
+      expect(view$.value.showPoints).toBe(true);
+    });
+
+    it('with cells: the markers OR the cells, as toggled; the header switch shows that one, or none', async () => {
+      dataset$.next(CELLS);
+      await build({ open: true, cellsAvailable: true });
+      const root = fixture.nativeElement as HTMLElement;
+      expect(root.querySelector('.sc-show-as p-selectButton')).toBeTruthy();
+      // The cells by default (drawn automatically for data that has them).
+      expect(component['shownAs']).toBe('cells');
+      expect(root.textContent).not.toContain('Point size');
+
+      component['onShownAs']('markers');
+      expect(view$.value).toEqual(expect.objectContaining({ showPoints: true, showCells: false }));
+      fixture.detectChanges();
+      expect(root.textContent).toContain('Point size');
+
+      // Unchecked: none drawn; checked again, the one toggled.
+      component['onShowObservations'](false);
+      expect(view$.value).toEqual(expect.objectContaining({ showPoints: false, showCells: false }));
+      expect(component['observationsShown']).toBe(false);
+      expect(component['shownAs']).toBe('markers');
+      component['onShownAs']('cells');
+      // Toggled while hidden: nothing drawn until checked.
+      expect(view$.value).toEqual(expect.objectContaining({ showPoints: false, showCells: false }));
+      component['onShowObservations'](true);
+      // The cells; the markers stay switched on, and the renderers draw none under the cells.
+      expect(view$.value).toEqual(expect.objectContaining({ showPoints: true, showCells: true }));
+      expect(component['shownAs']).toBe('cells');
+    });
   });
 });

@@ -8,13 +8,8 @@ import {
 } from '../../contracts/ports/spatial-data.port';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import type { SpatialDataset, SpatialTranscriptTile } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_CATEGORICAL_PALETTE, parseHex } from '../../spatial/spatial-encoding';
-import {
-  Spatial3dTranscripts,
-  TRANSCRIPTS_3D_MAX,
-  transcripts3dColors,
-  transcripts3dGenes,
-} from './napari-spatial-3d-transcripts';
+import { DEFAULT_CATEGORICAL_PALETTE, DEFAULT_MUTED_OPACITY, parseHex } from '../../spatial/spatial-encoding';
+import { Spatial3dTranscripts, transcripts3dColors, transcripts3dGenes } from './napari-spatial-3d-transcripts';
 
 /** A 2 × 1 tile dataset (tiles 100 wide) whose transcripts carry z. */
 function dataset(over: Partial<NonNullable<SpatialDataset['transcriptTiles']>> = {}): SpatialDataset {
@@ -121,7 +116,7 @@ describe('Spatial3dTranscripts', () => {
       ]),
     );
     expect(calls[0].query).toEqual({ genes: ['Acta2', 'Cd3e', 'Krt5'], quality: 'high' });
-    expect(ends).toEqual(['Transcripts']);
+    expect(ends).toEqual(['Loading transcripts…']); // on the canvas while they load and draw
     const [layer] = layers();
     expect(layer).toBeDefined();
     expect(Array.from(layer.positions)).toEqual(
@@ -146,6 +141,30 @@ describe('Spatial3dTranscripts', () => {
     expect(layers()).toHaveLength(0);
   });
 
+  it('fades the transcripts outside a selected cell or cell type, as the cells are, without reading again', async () => {
+    const { t, port, layers } = setup();
+    (port.getTranscriptTile as jest.Mock).mockImplementation(async (_l: number, gx: number) =>
+      gx === 0 ? tile([10, 20], [0, 1], [0, 1]) : tile([120], [2], [2]),
+    );
+    const v = view({ transcriptGenes: ['Acta2', 'Cd3e', 'Krt5'] });
+    await t.sync(dataset(), v, port, frame);
+    expect(layers()[0].alphas).toBeNull();
+
+    // Cell 1 selected: its transcript as it is, the others faded.
+    const selection = { mask: Uint8Array.of(0, 1, 0), count: 1 };
+    await t.sync(dataset(), v, port, frame, selection);
+    const alphas = Array.from(layers()[0].alphas ?? []);
+    const cellOf = (x: number) => (x === 10 ? 0 : x === 20 ? 1 : 2);
+    const xs = Array.from({ length: alphas.length }, (_v, i) => layers()[0].positions[3 * i] + 75);
+    xs.forEach((x, i) => expect(alphas[i]).toBeCloseTo(cellOf(Math.round(x)) === 1 ? 1 : DEFAULT_MUTED_OPACITY));
+    expect(alphas).toHaveLength(3);
+    expect(port.getTranscriptTile as jest.Mock).toHaveBeenCalledTimes(2); // faded, not read again
+
+    // Cleared: every transcript as it is again.
+    await t.sync(dataset(), v, port, frame, { mask: new Uint8Array(3), count: 0 });
+    expect(layers()[0].alphas).toBeNull();
+  });
+
   it('leaves out the genes hidden from "All genes"', async () => {
     const { t, port, calls, layers } = setup();
     await t.sync(dataset(), view({ transcriptAllGenes: true, transcriptAllGenesHidden: ['Cd3e'] }), port, frame);
@@ -154,12 +173,80 @@ describe('Spatial3dTranscripts', () => {
     expect(layers()[0].positions.length).toBe(6);
   });
 
-  it('draws nothing for transcripts without z, or too many of them for "All genes"', async () => {
+  it('draws nothing for transcripts without z', async () => {
     const { t, port, calls, layers } = setup();
     await t.sync(dataset({ hasZ: false }), view({ transcriptGenes: ['Acta2'] }), port, frame);
-    await t.sync(dataset({ count: TRANSCRIPTS_3D_MAX + 1 }), view({ transcriptAllGenes: true }), port, frame);
     expect(calls).toHaveLength(0);
     expect(layers()).toHaveLength(0);
+  });
+
+  it('reads the pyramid level the camera calls for, and only the tiles in view, again when it rests', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const v = new HeadlessViewer({ canvasRect: { width: 200, height: 100 } });
+      const viewer = v as unknown as Viewer;
+      const levels: number[] = [];
+      const tiles: string[] = [];
+      const port = {
+        getTranscriptTile: jest.fn(async (level: number, gx: number, gy: number) => {
+          levels.push(level);
+          tiles.push(`${level}/${gx}/${gy}`);
+          return tile([gx * 10], [0]);
+        }),
+      } as unknown as SpatialDataPort;
+      const t = new Spatial3dTranscripts(viewer, () => () => undefined);
+      // A 10,000-unit section, a pyramid of levels four times coarser each (tiles twice as wide).
+      const big = dataset({
+        bounds: [0, 0, 10000, 10000],
+        count: 10_000_000,
+        levels: [0, 1, 2, 3, 4, 5].map((l) => ({ tileSize: 100 * 2 ** l, aggregated: l > 0 })),
+      });
+      const at = { origin: [-5000, -5000, 0] as const, zScale: 1 };
+      // Far out (the whole section in view): a coarse level, every one of its tiles.
+      viewer.camera3d.target = [0, 0, 0];
+      viewer.camera3d.azimuth = 0; // looking straight down on the section
+      viewer.camera3d.elevation = 0;
+      viewer.camera3d.distance = 20000;
+      await t.sync(big, view({ transcriptAllGenes: true }), port, at);
+      const far = Math.max(...levels);
+      expect(far).toBeGreaterThan(0);
+      // Close in on a cell at the centre: level 0, a few tiles around it only.
+      levels.length = 0;
+      tiles.length = 0;
+      viewer.camera3d.distance = 15;
+      jest.advanceTimersByTime(400);
+      await Promise.resolve();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(new Set(levels)).toEqual(new Set([0]));
+      expect(tiles.length).toBeGreaterThan(0);
+      expect(tiles.length).toBeLessThan(16); // not the 10,000 tiles of level 0
+      t.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('stays off when the camera moves after the transcripts were turned off', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const v = new HeadlessViewer({ canvasRect: { width: 200, height: 100 } });
+      const viewer = v as unknown as Viewer;
+      const { port } = setup();
+      const t = new Spatial3dTranscripts(viewer, () => () => undefined);
+      const layers = () => v.layers.items.filter((l) => l.name === 'transcripts');
+      await t.sync(dataset(), view({ transcriptGenes: ['Acta2'] }), port, frame);
+      expect(layers()).toHaveLength(1);
+      // A move pending as they are turned off, then another after: neither draws them again.
+      viewer.camera3d.distance = viewer.camera3d.distance * 2;
+      await t.sync(dataset(), view({ transcriptMode: 'off' }), port, frame);
+      viewer.camera3d.distance = viewer.camera3d.distance / 3;
+      jest.advanceTimersByTime(400);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(layers()).toHaveLength(0);
+      t.dispose();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   describe('Colour by', () => {

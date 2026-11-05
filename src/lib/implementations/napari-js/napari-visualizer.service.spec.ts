@@ -2349,6 +2349,30 @@ describe('NapariVisualizerService', () => {
         expect(getVolume).toHaveBeenCalledTimes(1);
       });
 
+      it('adds the reference volume once though the view changes while it downloads, and hides it', async () => {
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        addVolume.mockClear();
+        let release: (v: Uint8Array) => void = () => undefined;
+        spatialPort.getVolume = jest.fn(() => new Promise<Uint8Array>((r) => (release = r)));
+        const mounting = mount3d(spatialDatasetVolume(3));
+        await flush();
+        // Another rebuild while the template is still on its way (a default chosen, a set attached).
+        store.setSpatialView({ pointScale: 2 });
+        await flush();
+        release(new Uint8Array(4 * 6 * 10));
+        await mounting;
+        await flush();
+        const volumes = addVolume.mock.results
+          .map((r) => r.value)
+          .filter((l: any) => l.name === 'reference volume');
+        expect(volumes).toHaveLength(1);
+        expect(spatialPort.getVolume).toHaveBeenCalledTimes(1);
+
+        store.setSpatialView({ showVolume: false });
+        await flush();
+        expect(volumes[0].visible).toBe(false);
+      });
+
       it('applies the reference volume opacity, at build and on a change', async () => {
         const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
@@ -3543,7 +3567,23 @@ describe('NapariVisualizerService', () => {
       return addPoints.mock.results.at(-1)?.value;
     }
 
-    it('draws the markers at every zoom: never under the screen floor, and still shown under cell outlines', async () => {
+    it('draws no markers while the cells are drawn: the observations are one or the other', async () => {
+      const cells = {
+        ...spatialDataset(),
+        polygonTiles: { bounds: [0, 0, 1, 1], levels: [], sets: [{ name: 'cell', label: 'Cells' }] },
+      } as unknown as SpatialDataset;
+      const layer = await mount(cells);
+      // Cells drawn automatically for data that has them: no markers.
+      expect(layer.visible).toBe(false);
+      store.setSpatialView({ showCells: false });
+      await flush();
+      expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(true);
+      store.setSpatialView({ showCells: true });
+      await flush();
+      expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(false);
+    });
+
+    it('draws the markers at every zoom: never under the screen floor, nor dropped as outlines come and go', async () => {
       const layer = await mount();
       expect(layer.minScreenSize).toBe(SPATIAL_MARKER_MIN_SCREEN_PX);
       expect(layer.visible).toBe(true);
@@ -3557,7 +3597,7 @@ describe('NapariVisualizerService', () => {
       expect((tiles as unknown as { outlinesShown: boolean }).outlinesShown).toBe(true);
       scene.polygonsShownChanged();
       expect(layer.visible).toBe(true);
-      // The Observations switch still hides them.
+      // The Observations switch hides them.
       store.setSpatialView({ showPoints: false });
       await flush();
       expect((addPoints.mock.results.at(-1)?.value ?? layer).visible).toBe(false);
@@ -3876,6 +3916,27 @@ describe('NapariVisualizerService', () => {
         // nothing to filter, and the dataset's own affine still wins.
         expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
         expect(layer.scale).toEqual([2, 2]);
+      });
+
+      it("draws the region set's plane shown over a real imageRef, as the slider moves", async () => {
+        const ds = { ...sliced(), imageRef: { imageId: 'tissue', scale: [2, 2] } } as SpatialDataset;
+        // The planes are the region set's (its sliceZ); the image keeps its one slice.
+        service.setRegionPlanes([0, 450, 900]);
+        service.setRegionPlane(1);
+        let layer = await mountAt(ds, 0);
+        expect(Array.from(layer.positions)).toEqual([10, 20]);
+        expect(layer.scale).toEqual([2, 2]);
+
+        service.setRegionPlane(2);
+        await flush();
+        layer = addPoints.mock.results.at(-1)?.value;
+        expect(Array.from(layer.positions)).toEqual([20, 40]);
+
+        // No planes: every observation again.
+        service.setRegionPlanes(null);
+        await flush();
+        layer = addPoints.mock.results.at(-1)?.value;
+        expect(Array.from(layer.positions)).toEqual([0, 0, 10, 20, 20, 40]);
       });
     });
 

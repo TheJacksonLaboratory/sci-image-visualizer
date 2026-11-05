@@ -3,10 +3,11 @@ import type { SurfaceLayer, Viewer } from 'napari-js';
 
 import {
   REGION_MESH_DIMMED_OPACITY,
-  REGION_MESH_HIGHLIGHT_OPACITY,
+  REGION_MESH_SELECTED_OPACITY,
   REGION_MESH_OPACITY,
   RegionMesh3D,
   VolumeRegionMeshes,
+  sliceZ,
   toWorld,
 } from './napari-volume-region-meshes';
 
@@ -36,6 +37,60 @@ describe('toWorld', () => {
   it('maps image px and slices onto the centred world box', () => {
     const out = toWorld(Float32Array.of(0, 0, 0, 100, 50, 9), { size: [100, 50, 10], world: [200, 100, 40] });
     expect(Array.from(out)).toEqual([-100, -50, -18, 100, 50, 18]);
+  });
+
+  it("places slices at their planes' z instead, and pixels by scale and offset", () => {
+    const planes = {
+      z: [0, 10, 30],
+      scale: [0.5, 2] as [number, number],
+      offset: [1, 2, -15] as [number, number, number],
+    };
+    // Slices 0, 1.5 (half way to 2), 2.5 (half a slice past the last: its cap), -0.5 (before the first).
+    const out = toWorld(Float32Array.of(0, 0, 0, 4, 4, 1.5, 0, 0, 2.5, 0, 0, -0.5), {
+      size: [1, 1, 3],
+      world: [1, 1, 1],
+      planes,
+    });
+    expect(Array.from(out)).toEqual([1, 2, -15, 3, 10, 5, 1, 2, 25, 1, 2, -20]);
+  });
+});
+
+describe('sliceZ', () => {
+  it('interpolates between planes and extrapolates past the ends', () => {
+    expect(sliceZ([0, 10, 30], 1)).toBe(10);
+    expect(sliceZ([0, 10, 30], 0.5)).toBe(5);
+    expect(sliceZ([0, 10, 30], 3)).toBe(50);
+    expect(sliceZ([0, 10, 30], -1)).toBe(-10);
+    // One plane: a unit apart; none: the slice itself.
+    expect(sliceZ([7], 0.5)).toBe(7.5);
+    expect(sliceZ([], 2)).toBe(2);
+  });
+});
+
+describe('VolumeRegionMeshes on planes', () => {
+  it('re-places the surfaces when the planes move, and only scales them for a Z stretch', () => {
+    const { viewer, surfaces } = makeViewer();
+    const meshes = new VolumeRegionMeshes(viewer);
+    meshes.set([square('C')]);
+    const planes = {
+      z: [0, 1, 2, 3, 4, 5],
+      scale: [1, 1] as [number, number],
+      offset: [0, 0, 0] as [number, number, number],
+    };
+    meshes.setFrame({ size: [1, 1, 6], world: [1, 1, 1], planes });
+    expect(surfaces()[0].vertices[2]).toBe(5);
+    const setData = jest.spyOn(surfaces()[0], 'setData');
+    meshes.setFrame({ size: [1, 1, 6], world: [1, 1, 1], zScale: 3, planes });
+    expect(setData).not.toHaveBeenCalled();
+    expect(surfaces()[0].scale3d).toEqual([1, 1, 3]);
+    meshes.setFrame({
+      size: [1, 1, 6],
+      world: [1, 1, 1],
+      zScale: 3,
+      planes: { ...planes, z: planes.z.map((z) => z * 2) },
+    });
+    expect(setData).toHaveBeenCalledTimes(1);
+    expect(surfaces()[0].vertices[2]).toBe(10);
   });
 });
 
@@ -116,7 +171,7 @@ describe('VolumeRegionMeshes', () => {
     meshes.set([mesh('CTX'), mesh('MB')]);
     const opacity = () => surfaces().map((l) => l.opacity);
     meshes.setHighlight(['MB']);
-    expect(opacity()).toEqual([REGION_MESH_DIMMED_OPACITY, REGION_MESH_HIGHLIGHT_OPACITY]);
+    expect(opacity()).toEqual([REGION_MESH_DIMMED_OPACITY, REGION_MESH_SELECTED_OPACITY]);
     // A surface added later takes the highlight it falls under.
     meshes.set([mesh('CTX'), mesh('MB'), mesh('HPF')]);
     expect(opacity()[2]).toBe(REGION_MESH_DIMMED_OPACITY);
@@ -160,5 +215,38 @@ describe('VolumeRegionMeshes', () => {
     meshes.setHidden([]);
     expect(visible()).toEqual([true]);
     expect(meshes.pickAt(100, 100)?.key).toBe('A');
+  });
+
+  it('fades the surfaces none of a selection is in, as a picked region does, keeping their colours', () => {
+    const { viewer, surfaces } = makeViewer();
+    const meshes = new VolumeRegionMeshes(viewer);
+    meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]);
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
+    meshes.setMuted(['MB']);
+    expect(surfaces()[1].color).toEqual([0, 1, 0, 1]);
+    expect(surfaces()[1].opacity).toBe(REGION_MESH_DIMMED_OPACITY);
+    expect(surfaces()[0].opacity).toBe(REGION_MESH_SELECTED_OPACITY);
+    meshes.setMuted([]);
+    expect(surfaces()[1].opacity).toBe(REGION_MESH_OPACITY);
+    expect(surfaces()[0].opacity).toBe(REGION_MESH_OPACITY);
+  });
+
+  it('places surfaces through the placer off the main thread, one by one, dropping a stale placement', async () => {
+    const { viewer, surfaces } = makeViewer();
+    const resolves: ((w: Float32Array) => void)[] = [];
+    const placer = jest.fn(() => new Promise<Float32Array>((r) => resolves.push(r)));
+    const meshes = new VolumeRegionMeshes(viewer, placer);
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
+    meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]);
+    expect(placer).toHaveBeenCalledTimes(2);
+    expect(surfaces()).toHaveLength(0); // nothing placed on this thread
+    meshes.set([mesh('CTX'), mesh('MB', '#00ff00')]); // asked again: the new meshes are placed instead
+    resolves[0](Float32Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9)); // a stale CTX placement
+    await Promise.resolve();
+    expect(surfaces()).toHaveLength(0);
+    resolves[2](Float32Array.of(1, 2, 3, 4, 5, 6, 7, 8, 9));
+    await Promise.resolve();
+    expect(surfaces()).toHaveLength(1);
+    expect(Array.from(surfaces()[0].vertices.slice(0, 3))).toEqual([1, 2, 3]);
   });
 });

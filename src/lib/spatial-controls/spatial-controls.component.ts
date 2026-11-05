@@ -17,6 +17,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { CheckboxModule } from 'primeng/checkbox';
+import { SliderModule } from 'primeng/slider';
 import { DialogModule } from 'primeng/dialog';
 import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
@@ -24,7 +25,8 @@ import { combineLatest } from 'rxjs';
 import { VISUALIZER, IVisualizer, ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { SpatialChartsComponent } from './spatial-charts/spatial-charts.component';
 import { SpatialDataset } from '../contracts/spatial-dataset.contract';
-import { ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import { Cells3dStatus, ColormapNode, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../contracts/display-types';
+import { datasetRegionSet } from '../visualizer/spatial-region-set';
 import { PanelOption, parseGeneGroups } from '../spatial/spatial-panel-model';
 import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selection';
 import { GenePickerModel } from './spatial-gene-picker';
@@ -68,6 +70,7 @@ let controlsInstanceSeq = 0;
     FormsModule,
     ButtonModule,
     CheckboxModule,
+    SliderModule,
     DialogModule,
     TooltipModule,
     SpatialCellsPanelComponent,
@@ -199,12 +202,8 @@ export class SpatialControlsComponent implements OnInit {
       .subscribe((dataset) => {
         this.dataset = dataset;
         this.genes.setDataset(dataset);
-        // A dataset with no cells to outline leads with its observations.
-        this.open = {
-          ...this.open,
-          cells: !!(dataset?.polygonTiles || dataset?.polygons),
-          observations: !(dataset?.polygonTiles || dataset?.polygons),
-        };
+        // The Observations section leads.
+        this.open = { ...this.open, observations: !!dataset };
         void this.refreshKey();
         this.cdr.markForCheck();
       });
@@ -220,6 +219,22 @@ export class SpatialControlsComponent implements OnInit {
 
     // The renderer's own streams may emit outside the zone: re-entered here, once, for
     // every panel they feed.
+    this.controls
+      .getCells3dStatus$?.()
+      ?.pipe(untilDestroyed())
+      .subscribe((s) =>
+        this.runAndMark(() => {
+          this.cells3dStatus = s;
+        }),
+      );
+    this.controls
+      .getCells3dAvailable$?.()
+      ?.pipe(untilDestroyed())
+      .subscribe((a) =>
+        this.runAndMark(() => {
+          this.cells3dAvailable = a;
+        }),
+      );
     const estimate$ = this.controls.getTranscriptEstimate$?.();
     estimate$?.pipe(untilDestroyed()).subscribe((e) =>
       this.runAndMark(() => {
@@ -385,6 +400,23 @@ export class SpatialControlsComponent implements OnInit {
     return !!(this.dataset?.polygonTiles || this.dataset?.polygons);
   }
 
+  /** The 3D view's individual cells as they stand (null: none drawn). */
+  protected cells3dStatus: Cells3dStatus | null = null;
+
+  /**
+   * Whether the router has the dataset's region set attached and placed (null: it does not say).
+   * See {@link hasCells3d}.
+   */
+  protected cells3dAvailable: boolean | null = null;
+
+  /**
+   * The dataset's cells can be drawn in 3D: its boundaries name a 3D segmentation's region set, and
+   * it is attached with its planes (else the 3D view draws no cells, and the markers stay).
+   */
+  protected get hasCells3d(): boolean {
+    return !!datasetRegionSet(this.dataset) && this.cells3dAvailable !== false;
+  }
+
   /** Transcripts on offer: tiles to draw, or a density map. */
   protected get hasTranscripts(): boolean {
     return !!this.dataset?.transcriptTiles || !!this.dataset?.density;
@@ -399,14 +431,24 @@ export class SpatialControlsComponent implements OnInit {
     this.controls?.setViewState({ showImage: on });
   }
 
+  /** The reference volume, in 3D (the Volume section's switch). */
+  protected onShowVolume(on: boolean): void {
+    this.controls?.setViewState({ showVolume: on });
+  }
+
+  protected onVolumeOpacity(value: number | undefined): void {
+    if (value === undefined) return;
+    this.controls?.setViewState({ volumeOpacity: value });
+  }
+
   protected onShowAnnotations(on: boolean): void {
     this.controls?.setViewState({ showAnnotations: on });
   }
 
   /** Which collapsible sections are open. Per dialog instance, not persisted. */
-  protected open: Record<'images' | 'cells' | 'transcripts' | 'annotations' | 'observations', boolean> = {
+  protected open: Record<'images' | 'volume' | 'transcripts' | 'annotations' | 'observations', boolean> = {
     images: false,
-    cells: true,
+    volume: false,
     transcripts: false,
     annotations: false,
     observations: false,

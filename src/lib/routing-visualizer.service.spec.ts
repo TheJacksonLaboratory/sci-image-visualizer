@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Subject, firstValueFrom, of } from 'rxjs';
 
-import { RoutingVisualizerService } from './routing-visualizer.service';
+import { RoutingVisualizerService, regionSetGroups } from './routing-visualizer.service';
 import { PlotlyService } from './implementations/plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './implementations/osd/openseadragon-visualizer.service';
 import { NapariVisualizerService } from './implementations/napari-js/napari-visualizer.service';
@@ -59,6 +59,8 @@ function mockBackend(): any {
     setImageMeta: jest.fn(),
     getImageMeta: jest.fn().mockReturnValue(of([])),
     getRegions: jest.fn().mockReturnValue([]),
+    // The Regions switch, off by default, hides the region classes in the spatial views.
+    setRegionHidden: jest.fn(),
     setRegions: jest.fn(),
     getRegionPolygons: jest.fn().mockReturnValue([]),
     getSelectedShapeIndices$: jest.fn().mockReturnValue(of([])),
@@ -78,6 +80,9 @@ function mockBackend(): any {
     resetSurfaceCamera: jest.fn(),
     getPlotTypeDescriptors: jest.fn().mockReturnValue([]),
     setStackLoading: jest.fn(),
+    setRegionPlanes: jest.fn(),
+    setRegionPlane: jest.fn(),
+    setRegionCells: jest.fn(),
     isStackLoading: jest.fn().mockReturnValue(of(false)),
     getStackLoadingProgress: jest.fn().mockReturnValue(of(0)),
     getAutoscaleEvent: jest.fn().mockReturnValue(new Subject<void>()),
@@ -301,6 +306,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     napari.regionVoxelStep = jest.fn().mockReturnValue(2);
     napari.setRegionMeshes = jest.fn();
     napari.setRegionHighlight = jest.fn();
+    napari.setRegionHidden = jest.fn();
     const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
     jest
       .spyOn(regionStore, 'reconstructClasses')
@@ -1161,6 +1167,425 @@ describe('RoutingVisualizerService (characterization)', () => {
     const chans = await firstValueFrom(router.getChannels$());
     expect(chans).toHaveLength(1);
     expect(chans[0].name).toBe('Intensity');
+  });
+
+  // ── a spatial dataset's region set (a 3D segmentation's cells) ───────
+  describe("a spatial dataset's region set", () => {
+    const PLATE: any = { ...IMAGE_INFO, fileName: 'plate.ome.tif' };
+    /** A served 3D segmentation: three planes 10 apart, two cell types. */
+    const SOURCE: any = {
+      info: {
+        featureCount: 2,
+        bounds: [0, 0, 10, 10],
+        tileSize: 256,
+        levels: 1,
+        planes: [0, 1, 2],
+        classColors: { B: '#0000ff' },
+        hierarchy: [
+          { name: 'T', color: '#ff0000', order: 1 },
+          { name: 'B', color: '#00ff00', order: 0 },
+        ],
+        sliceZ: [0, 10, 20],
+      },
+      dispose: jest.fn(),
+    };
+
+    function stubBuilds(): jest.SpyInstance {
+      napari.beginTask = jest.fn().mockReturnValue(() => undefined);
+      napari.regionVoxelStep = jest.fn().mockReturnValue(5);
+      napari.setRegionMeshes = jest.fn();
+      napari.setRegionHighlight = jest.fn();
+      const mesh = { vertices: new Float32Array(9), faces: new Uint32Array(3) };
+      return jest
+        .spyOn(regionStore, 'reconstructClasses')
+        .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
+    }
+
+    it('attaches it over every plane, places its planes, offers its classes in 3D and shows each once', async () => {
+      const build = stubBuilds();
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const views: boolean[] = [];
+      router.getVolumeView$().subscribe((v) => views.push(v));
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      expect(views[views.length - 1]).toBe(false);
+
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(attach).toHaveBeenCalledWith(expect.any(Function), 'planes');
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+      expect(views[views.length - 1]).toBe(true);
+      await new Promise((r) => setTimeout(r));
+      // Each cell type, in the hierarchy's order and colours.
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+      expect(build).toHaveBeenCalledWith(
+        [expect.objectContaining({ classes: ['B'] }), expect.objectContaining({ classes: ['T'] })],
+        5,
+      );
+      expect(napari.setRegionMeshes).toHaveBeenLastCalledWith(
+        [
+          expect.objectContaining({ key: 'B', color: '#00ff00' }),
+          expect.objectContaining({ key: 'T', color: '#ff0000' }),
+        ],
+        'plate.ome.tif',
+      );
+
+      // Asked again (the dataset re-emitted, the image re-plotted): nothing opens, nothing shows again.
+      router.showRegionClasses3d([]);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await new Promise((r) => setTimeout(r));
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(shown[shown.length - 1]).toEqual([]);
+    });
+
+    it('waits for spatial 3D to show its classes, and forgets its planes on another image', async () => {
+      stubBuilds();
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      expect(shown[shown.length - 1]).toEqual([]);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await new Promise((r) => setTimeout(r));
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS_3D);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith(null);
+    });
+
+    it('slices an image of one plane by its planes: the slider runs over them, the image stays', async () => {
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(regionStore.isStackMode()).toBe(false);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      expect(planes[planes.length - 1]).toEqual([0, 10, 20]);
+      // Held per plane, as a stack's regions per slice, on the plane shown.
+      expect(regionStore.isStackMode()).toBe(true);
+      expect(regionStore.getDisplaySlice()).toBe(0);
+      expect(napari.setRegionPlane).toHaveBeenLastCalledWith(0);
+
+      // The slider picks the plane; the image keeps its one slice.
+      router.setZIndex(2);
+      expect(napari.setRegionPlane).toHaveBeenLastCalledWith(2);
+      expect(napari.setZIndex).toHaveBeenLastCalledWith(0);
+      await router.load(PLATE, 2);
+      expect(napari.load).toHaveBeenLastCalledWith(PLATE, 0, undefined);
+
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS);
+      expect(planes[planes.length - 1]).toBeNull();
+      router.setZIndex(1);
+      expect(napari.setZIndex).toHaveBeenLastCalledWith(1);
+    });
+
+    /** Plot `info` as a host does: the store's active image follows (Plotly's job, mocked here). */
+    async function show(info: any): Promise<void> {
+      regionStore.setActiveImage(info);
+      await router.plot('div', {}, info, 600, PlotType.SPATIAL_OMICS);
+    }
+    const scope = () => (regionStore as any).sources;
+    const imageKey = () => (regionStore as any).scope.activeImage as string;
+
+    it('restores its set on coming back to an image, keeping what was deleted from its source', async () => {
+      const OTHER: any = { ...IMAGE_INFO, fileName: 'other.tif' };
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await show(PLATE);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      const plate = imageKey();
+      scope().setTaken(plate, 0, new Set(['deleted-cell']));
+
+      await show(OTHER);
+      await show(PLATE);
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(Array.from(scope().taken(plate, 0))).toEqual(['deleted-cell']);
+      // Its planes slice the image again, its regions per plane.
+      expect(planes[planes.length - 1]).toEqual([0, 10, 20]);
+      expect(regionStore.isStackMode()).toBe(true);
+    });
+
+    it('takes the set down when the dataset stops naming it, keeping it to restore on the same image', async () => {
+      stubBuilds();
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      const planes: (readonly number[] | null)[] = [];
+      router.getDatasetPlanes$().subscribe((p) => planes.push(p));
+      const shown: string[][] = [];
+      router.getRegionClasses3d$().subscribe((g) => shown.push(g.map((x) => x.key)));
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await router.attachDatasetRegionSet(open, 'set-1');
+      await new Promise((r) => setTimeout(r));
+      expect(shown[shown.length - 1]).toEqual(['B', 'T']);
+      const plate = imageKey();
+      scope().setTaken(plate, 0, new Set(['deleted-cell']));
+
+      // The same set kept: nothing changes.
+      router.releaseDatasetRegionSet('set-1');
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+
+      // The dataset cleared, its image still up: its planes, surfaces and cells go.
+      router.releaseDatasetRegionSet(null);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith(null);
+      expect(planes[planes.length - 1]).toBeNull();
+      expect(shown[shown.length - 1]).toEqual([]);
+      // Nor are its classes offered as cells in 3D.
+      expect((await firstValueFrom(router.getCellableClasses3d$())).size).toBe(0);
+
+      // Asked for again: restored as it was, not opened or attached again.
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(true);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(Array.from(scope().taken(plate, 0))).toEqual(['deleted-cell']);
+      expect(napari.setRegionPlanes).toHaveBeenLastCalledWith([0, 10, 20]);
+    });
+
+    it("keeps the image's own region sources: the set is not attached over them", async () => {
+      await show(PLATE);
+      const own = jest.fn();
+      regionStore.attachRegionSource(own as any, { slice: 0 });
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const open = jest.fn().mockResolvedValue(SOURCE);
+      await expect(router.attachDatasetRegionSet(open, 'set-1')).resolves.toBe(false);
+      expect(scope().hasOwnSource(imageKey(), 0)).toBe(true);
+      expect(open).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalled();
+
+      // One attached while the set opened is kept too.
+      await show({ ...IMAGE_INFO, fileName: 'late.tif' });
+      const source = { ...SOURCE, dispose: jest.fn() };
+      let resolve: (s: unknown) => void = () => undefined;
+      const late = router.attachDatasetRegionSet(() => new Promise((r) => (resolve = r)) as never, 'set-1');
+      regionStore.attachRegionSource(own as any, { slice: 0 });
+      resolve(source);
+      await expect(late).resolves.toBe(false);
+      expect(source.dispose).toHaveBeenCalled();
+      expect(scope().hasOwnSource(imageKey(), 0)).toBe(true);
+      warn.mockRestore();
+    });
+
+    it("makes the set the Cells panel's boundaries while its planes show, drawn once in 2D", async () => {
+      const dataset: any = {
+        id: 'ileum',
+        observations: { count: 0, x: new Float32Array(0), y: new Float32Array(0) },
+        columns: [],
+        polygonTiles: {
+          bounds: [0, 0, 1, 1],
+          levels: [],
+          defaultSet: 'cell',
+          sets: [
+            { name: 'cell', label: 'Cells' },
+            { name: '3d', label: '3D', regionSource: 'set-1' },
+          ],
+        },
+      };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(dataset) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      const drawnSet = jest.spyOn(regionStore, 'setRegionSourceDrawn');
+
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(store.currentSpatialView().cellSet).toBeNull();
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      // Its boundary set by default, and the overlays leave its outlines to the cells.
+      expect(store.currentSpatialView().cellSet).toBe('3d');
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+
+      // Chosen otherwise, cells off, or another view: the overlays draw them.
+      store.setSpatialView({ cellSet: 'cell' });
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      store.setSpatialView({ cellSet: '3d', showCells: false });
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      store.setSpatialView({ showCells: true });
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+      router.setPlotType(PlotType.SPATIAL_OMICS_3D);
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+      router.setPlotType(PlotType.SPATIAL_OMICS);
+      // A reset view (no set chosen) is given it again.
+      store.setSpatialView({ cellSet: null });
+      expect(store.currentSpatialView().cellSet).toBe('3d');
+      expect(drawnSet).toHaveBeenLastCalledWith(false);
+
+      // Another image: nothing of the set's.
+      regionStore.setActiveImage({ ...IMAGE_INFO, fileName: 'other.tif' });
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS);
+      expect(drawnSet).toHaveBeenLastCalledWith(true);
+    });
+
+    it("hides every class in the spatial views while the panel's Regions are off (by default), the cells' too", async () => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      stubBuilds();
+      napari.setRegionHidden = jest.fn();
+      const hidden = () => [...regionStore.getHiddenClasses()].sort();
+      const drawn = (label: string) =>
+        Object.assign(new Region(), {
+          label,
+          bounds: Object.assign(new Rectangle(), { x: 0, y: 0, width: 5, height: 5 }),
+        });
+
+      regionStore.setActiveImage(PLATE);
+      regionStore.addRegion(drawn('ROI'));
+      // Off by default: entering a spatial view hides the drawn regions' classes.
+      expect(store.currentSpatialView().showAnnotations).toBe(false);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS);
+      expect(hidden()).toEqual(['ROI']);
+      // The dataset's region set, come since: its cell types hidden as the rest are.
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      expect(hidden()).toEqual(['B', 'ROI', 'T']);
+
+      // On: shown, in 2D as in 3D (the editor's eyes follow).
+      store.setSpatialView({ showAnnotations: true });
+      expect(hidden()).toEqual([]);
+
+      // Not in a view that is not spatial.
+      router.setPlotType(PlotType.IMAGE);
+      store.setSpatialView({ showAnnotations: false });
+      expect(hidden()).toEqual([]);
+
+      // Entering 3D with it off: every class hidden, the cell types too, their surfaces with them.
+      router.setPlotType(PlotType.SPATIAL_OMICS_3D);
+      expect(hidden()).toEqual(['B', 'ROI', 'T']);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith(expect.arrayContaining(['B', 'ROI', 'T']));
+
+      // On again: every class shown.
+      store.setSpatialView({ showAnnotations: true });
+      expect(hidden()).toEqual([]);
+      expect(napari.setRegionHidden).toHaveBeenLastCalledWith([]);
+
+      // A class hidden by its own eye stays so while the switch does not change.
+      router.setClassesHidden(['T'], true);
+      store.setSpatialView({ pointScale: 2 });
+      expect(hidden()).toEqual(['T']);
+    });
+
+    it("draws the set's classes as individual cells on the panel's switch, a class overridden in the editor", async () => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          RoutingVisualizerService,
+          VisualizerStore,
+          { provide: PlotlyService, useValue: mockBackend() },
+          { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
+          { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+          { provide: IntensityProfileService, useValue: {} },
+          { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
+        ],
+      });
+      router = TestBed.inject(RoutingVisualizerService);
+      store = TestBed.inject(VisualizerStore);
+      regionStore = TestBed.inject(RegionStore);
+      stubBuilds();
+      const meshKeys = () => (napari.setRegionMeshes.mock.calls.at(-1)?.[0] ?? []).map((m: any) => m.key);
+      const individual: string[][] = [];
+      router.getIndividualClasses3d$().subscribe((s) => individual.push([...s].sort()));
+
+      regionStore.setActiveImage(PLATE);
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(SOURCE), 'set-1');
+      await new Promise((r) => setTimeout(r));
+      expect(meshKeys()).toEqual(['B', 'T']);
+      expect(individual.at(-1)).toEqual([]);
+
+      // Every class as cells: no merged surface left, the cells asked for.
+      store.setSpatialView({ cells3d: 'cells' });
+      await new Promise((r) => setTimeout(r));
+      expect(individual.at(-1)).toEqual(['B', 'T']);
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(['B', 'T']);
+      expect(meshKeys()).toEqual([]);
+
+      // One class merged again in the editor.
+      router.setClassesIndividual3d(['T'], false);
+      await new Promise((r) => setTimeout(r));
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(['B']);
+      expect(meshKeys()).toEqual(['T']);
+
+      // The switch back resets the overrides: every class merged, no cells.
+      store.setSpatialView({ cells3d: 'types' });
+      await new Promise((r) => setTimeout(r));
+      expect(napari.setRegionCells).toHaveBeenLastCalledWith(null);
+      expect(meshKeys()).toEqual(['B', 'T']);
+      // And a class drawn as cells by itself.
+      router.setClassesIndividual3d(['B'], true);
+      await new Promise((r) => setTimeout(r));
+      expect(individual.at(-1)).toEqual(['B']);
+      expect(meshKeys()).toEqual(['T']);
+    });
+
+    it('drops a set that opened after another image was plotted, or failed to open', async () => {
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      const attach = jest.spyOn(regionStore, 'attachRegionSource');
+      let resolve: (s: unknown) => void = () => undefined;
+      const late = router.attachDatasetRegionSet(() => new Promise((r) => (resolve = r)) as never, 'set-1');
+      await router.plot('div', {}, { ...IMAGE_INFO, fileName: 'other.tif' }, 600, PlotType.SPATIAL_OMICS_3D);
+      const source = { ...SOURCE, dispose: jest.fn() };
+      resolve(source);
+      await expect(late).resolves.toBe(false);
+      expect(source.dispose).toHaveBeenCalled();
+      expect(attach).not.toHaveBeenCalled();
+
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await expect(
+        router.attachDatasetRegionSet(jest.fn().mockRejectedValue(new Error('404')), 'set-2'),
+      ).resolves.toBe(false);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe('regionSetGroups', () => {
+    it('makes one group per root of the hierarchy, with the classes under it', () => {
+      const info: any = {
+        classColors: { CA1: '#111111' },
+        hierarchy: [
+          { name: 'HPF', color: '#7ed04b', order: 0 },
+          { name: 'CA1', parent: 'HPF', order: 0 },
+          { name: 'CB', color: '#f0f080', order: 1 },
+        ],
+      };
+      expect(regionSetGroups(info)).toEqual([
+        { key: 'HPF', classes: ['HPF', 'CA1'], color: '#7ed04b' },
+        { key: 'CB', classes: ['CB'], color: '#f0f080' },
+      ]);
+      expect(regionSetGroups({ classColors: { A: '#123456' } } as any)).toEqual([
+        { key: 'A', classes: ['A'], color: '#123456' },
+      ]);
+    });
   });
 });
 

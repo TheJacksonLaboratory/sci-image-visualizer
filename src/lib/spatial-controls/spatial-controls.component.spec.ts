@@ -12,6 +12,7 @@ import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../contracts/display-typ
 import { COLORMAP_OPTIONS } from '../plot.utilities';
 import { TILED_DATASET, fakeSpatialControls, panelNamed, shallowPanel } from '../testing/spatial-panel-testing';
 import { SpatialKeyComponent } from './spatial-key/spatial-key.component';
+import { SpatialColorByComponent } from './spatial-color-by/spatial-color-by.component';
 import { SpatialCellsPanelComponent } from './spatial-cells-panel/spatial-cells-panel.component';
 import { SpatialGroupsPanelComponent } from './spatial-groups-panel/spatial-groups-panel.component';
 import { SpatialTranscriptsPanelComponent } from './spatial-transcripts-panel/spatial-transcripts-panel.component';
@@ -247,6 +248,19 @@ describe('SpatialControlsComponent', () => {
 
   describe('display controls', () => {
     beforeEach(async () => build(controls));
+
+    it("writes the Volume section's switch and the volume's opacity, separately from the markers", () => {
+      component['onShowVolume'](false);
+      expect(controls.setViewState).toHaveBeenCalledWith({ showVolume: false });
+      expect(component['view'].showVolume).toBe(false);
+      component['onVolumeOpacity'](0.2);
+      expect(controls.setViewState).toHaveBeenCalledWith({ volumeOpacity: 0.2 });
+      // Turning the backdrop down leaves the measurement drawn over it alone.
+      expect(component['view'].opacity).toBe(DEFAULT_SPATIAL_VIEW.opacity);
+      (controls.setViewState as jest.Mock).mockClear();
+      component['onVolumeOpacity'](undefined);
+      expect(controls.setViewState).not.toHaveBeenCalled();
+    });
 
     it('switches the drawn annotation regions off and on, like the other layer sections', () => {
       component['onShowAnnotations'](false);
@@ -632,8 +646,9 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
       SpatialMarkerGenesFormComponent,
     ])
       shallowPanel(leaf);
-    shallowPanel(SpatialCellsPanelComponent, [SpatialGroupsPanelComponent]);
-    shallowPanel(SpatialObservationsPanelComponent, [SpatialKeyComponent]);
+    shallowPanel(SpatialCellsPanelComponent);
+    shallowPanel(SpatialColorByComponent, [SpatialGroupsPanelComponent, SpatialKeyComponent]);
+    shallowPanel(SpatialObservationsPanelComponent, [SpatialColorByComponent]);
     shallowPanel(SpatialTranscriptsPanelComponent, [SpatialGeneTreeComponent, SpatialMarkerGenesFormComponent]);
     shallowPanel(SpatialControlsComponent, [
       SpatialCellsPanelComponent,
@@ -659,7 +674,7 @@ describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
     const text = () => (host.nativeElement as HTMLElement).textContent ?? '';
     expect((SpatialControlsComponent as unknown as { ɵcmp: { onPush: boolean } }).ɵcmp.onPush).toBe(true);
     // Open the Annotations section, where the selection count is shown.
-    (panelNamed(host.nativeElement, 'Annotations').querySelector('.sc-panel-head') as HTMLElement).click();
+    (panelNamed(host.nativeElement, 'Regions').querySelector('.sc-panel-head') as HTMLElement).click();
     host.detectChanges();
     expect(host.nativeElement.querySelector('p-button[icon="pi pi-object-group"]')).not.toBeNull();
     expect(text()).not.toContain('selected —');

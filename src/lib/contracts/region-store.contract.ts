@@ -106,6 +106,12 @@ export interface IRegionEditApi {
 export interface IRegionSourceApi {
   /** The current slice's source as a layer draws it, and every change of it; null without one. */
   getRegionSourceView$(): Observable<RegionSourceView | null>;
+  /**
+   * The source view the overlays draw: null while another layer draws the same outlines (see
+   * `RegionStore.setRegionSourceDrawn`). Optional: without it, the overlays draw
+   * {@link getRegionSourceView$}.
+   */
+  getDrawnRegionSourceView$?(): Observable<RegionSourceView | null>;
   /** Take source features into the working set as regions and select them (added to the
    *  selection with `additive`). Resolves the region ids. */
   selectSourceFeatures(ids: readonly string[], additive?: boolean): Promise<number[]>;

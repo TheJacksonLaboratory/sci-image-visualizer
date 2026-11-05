@@ -155,7 +155,7 @@ export class NapariRegionOverlay implements IRegionOverlay {
     this.renderer = new NapariRegionSvgRenderer(this.svg, this.store, (r) => this.draws(r));
     this.projection = new OverlayProjection(this.svg, this.viewer);
     this.sourceLayer =
-      opts.regionSource === false ? null : new RegionSourceLayer(this.svg, this.store.getRegionSourceView$());
+      opts.regionSource === false ? null : new RegionSourceLayer(this.svg, this.store.getDrawnRegionSourceView$());
 
     this.svg.addEventListener('pointerdown', this.onPointerDown);
     this.svg.addEventListener('pointermove', this.onPointerMove);

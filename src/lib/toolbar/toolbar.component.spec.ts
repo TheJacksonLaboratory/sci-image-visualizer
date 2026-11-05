@@ -132,6 +132,21 @@ describe('ToolbarComponent', () => {
     expect(toggle()).toBeNull();
   });
 
+  it("offers the slice slider over a spatial dataset's planes on an image of one plane, in the live views", () => {
+    const set = (inputs: Record<string, unknown>) => {
+      for (const [k, v] of Object.entries(inputs)) fixture.componentRef.setInput(k, v);
+      fixture.detectChanges();
+    };
+    const slider = () => fixture.nativeElement.querySelector('toolbar-stack-controls');
+    set({ selectedPlotType: PlotType.SPATIAL_OMICS, imageInfo: { isStack: false, urls: ['a'] }, maxIndex: 8 });
+    expect(slider()).toBeNull();
+    set({ planeSlices: true });
+    expect(slider()).not.toBeNull();
+    // The 3D cloud shows every plane at once: no slider.
+    set({ selectedPlotType: PlotType.SPATIAL_OMICS_3D });
+    expect(slider()).toBeNull();
+  });
+
   it('isNapariSurfaceMode is true only for the napari surface, isNapari3dMode for all napari 3D', () => {
     component.selectedPlotType = PlotType.NAPARI_SURFACE;
     expect(component['isNapariSurfaceMode']).toBe(true);

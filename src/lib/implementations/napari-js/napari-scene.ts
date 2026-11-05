@@ -41,6 +41,18 @@ export interface NapariScene {
   screenProjection?(obs: SpatialObservations): Float32Array | null;
   /** Show these region reconstructions in the 3D view (volume scenes only). */
   setRegionMeshes?(meshes: readonly RegionMesh3D[]): void;
+  /**
+   * Where the reconstructions' slices are, in the observations' units, when their region set says
+   * (a 3D segmentation's planes); null: they are the plotted stack's slices (spatial 3D only).
+   */
+  setRegionPlanes?(z: readonly number[] | null): void;
+  /**
+   * The plane of those (see {@link setRegionPlanes}) the 2D spatial view shows, over an image of
+   * one plane: its observations and transcripts are the ones drawn (spatial 2D only).
+   */
+  setRegionPlane?(k: number): void;
+  /** Draw these classes of the dataset's region set as individual cells (spatial 3D only). */
+  setRegionCells?(classes: readonly string[] | null): void;
   /** Highlight the reconstructions of these keys (none: all as usual). */
   setRegionHighlight?(keys: readonly string[]): void;
   /** Hide the reconstructions of these keys. */

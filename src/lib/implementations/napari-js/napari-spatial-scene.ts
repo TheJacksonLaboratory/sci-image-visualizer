@@ -1,3 +1,4 @@
+import type { Cells3dStatus } from '../../contracts/display-types';
 import { Observable, Subscription, combineLatest, of } from 'rxjs';
 
 import { SpatialDataPort } from '../../contracts/ports/spatial-data.port';
@@ -27,6 +28,8 @@ export interface SpatialTileSinks {
   loadingChanged(layers: string[]): void;
   /** Whether the observation gene filter could be applied; see {@link SpatialSession.reportGeneFilter}. */
   geneFilterFailed?(failed: boolean): void;
+  /** How the 3D view's individual cells stand; see {@link SpatialSession.reportCells3d}. */
+  cells3dStatus?(status: Cells3dStatus | null): void;
 }
 
 /** The 2D scene the tile layers currently draw into. */
@@ -70,6 +73,11 @@ export class SpatialSession {
     readonly selection: SpatialSelectionStore | null,
     private readonly sinks: SpatialTileSinks,
   ) {}
+
+  /** Tell the panel how the 3D view's individual cells stand (null: none drawn). */
+  reportCells3d(status: Cells3dStatus | null): void {
+    this.sinks.cells3dStatus?.(status);
+  }
 
   /** Tell the panel whether the observation gene filter could be applied this rebuild. */
   reportGeneFilter(failed: boolean): void {
@@ -172,6 +180,8 @@ export abstract class SpatialSceneBase {
       selection: session.selection,
       dataset: () => session.latest?.[0] ?? null,
       pick: (clientX, clientY, slackPx) => this.pickObservation(clientX, clientY, slackPx),
+      pickCell: (clientX, clientY) => this.pickCell(clientX, clientY),
+      pickRegion: (clientX, clientY) => this.pickRegion(clientX, clientY),
       tiles: () => this.hoverTiles(),
       toolActive: () => !!ctx.tools.regionOverlay?.toolActive,
       outsideZone: (fn) => ctx.outsideZone(fn),
@@ -208,6 +218,14 @@ export abstract class SpatialSceneBase {
   }
   /** The observation drawn under a client position, or -1 (see `SpatialHoverHost.pick`). */
   protected abstract pickObservation(clientX: number, clientY: number, slackPx: number): number;
+  /** The region surface (a class) under a client position, or null (none drawn). */
+  pickRegion(_clientX: number, _clientY: number): { key: string; label?: string } | null {
+    return null;
+  }
+  /** The observation of an individual cell's surface under a client position, or -1 (none drawn). */
+  pickCell(_clientX: number, _clientY: number): number {
+    return -1;
+  }
   protected hoverTiles(): NapariSpatialTileLayers | null {
     return null;
   }

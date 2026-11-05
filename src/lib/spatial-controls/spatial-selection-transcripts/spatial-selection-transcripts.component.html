@@ -1,0 +1,55 @@
+<ng-container *ngIf="available">
+  <button type="button" class="sc-seltx-toggle sc-subhead" [attr.aria-expanded]="expanded" (click)="toggle()">
+    <i class="pi" [class.pi-chevron-down]="expanded" [class.pi-chevron-right]="!expanded"></i>
+    Transcripts in selection
+  </button>
+  <div class="sc-seltx" *ngIf="expanded">
+    <ng-container *ngIf="list; else waiting">
+      <div class="sc-seltx-head" *ngIf="list.label">
+        <span class="sc-seltx-label" [title]="list.label">{{ list.label }}</span>
+        <small class="sc-hint" *ngIf="list.plane">
+          plane {{ list.plane.index + 1 }} of {{ list.plane.count }}
+        </small>
+        <small class="sc-hint" *ngIf="!list.plane && is3d">whole volume</small>
+      </div>
+      <small class="sc-hint" *ngIf="list.state === 'empty'">{{ list.message }}</small>
+      <small class="sc-hint sc-error" *ngIf="list.state === 'error'">{{ list.message }}</small>
+      <small class="sc-hint" *ngIf="list.state === 'loading'">
+        <i class="pi pi-spin pi-spinner"></i> Counting transcripts…
+      </small>
+      <ng-container *ngIf="list.genes && list.state !== 'empty' && list.state !== 'error'">
+        <div class="sc-seltx-summary">
+          <span>
+            <b>{{ list.total | number }}</b> transcripts · {{ list.genes.length | number }} genes
+            <ng-container *ngIf="list.cells"
+              >· {{ list.cells | number }} {{ list.cells === 1 ? 'cell' : 'cells' }}</ng-container
+            >
+          </span>
+          <p-button
+            icon="pi pi-copy"
+            size="small"
+            [text]="true"
+            [disabled]="!list.genes.length"
+            pTooltip="Copy the list (gene, transcripts) as tab-separated text"
+            tooltipPosition="top"
+            (onClick)="copy()"
+          ></p-button>
+        </div>
+        <small class="sc-hint" *ngIf="list.partial">
+          The selection spans more of the section than is read at once: the counts are a lower bound.
+        </small>
+        <small class="sc-hint" *ngIf="!list.genes.length">No transcripts in the selection.</small>
+        <ol class="sc-seltx-list" *ngIf="list.genes.length" [class.stale]="list.state === 'loading'">
+          <li *ngFor="let g of list.genes; trackBy: trackGene">
+            <span class="sc-seltx-gene" [title]="g.name">{{ g.name }}</span>
+            <span class="sc-seltx-bar"><span [style.width.%]="(100 * g.count) / (max || 1)"></span></span>
+            <span class="sc-seltx-count">{{ g.count | number }}</span>
+          </li>
+        </ol>
+      </ng-container>
+    </ng-container>
+    <ng-template #waiting>
+      <small class="sc-hint"><i class="pi pi-spin pi-spinner"></i> Counting transcripts…</small>
+    </ng-template>
+  </div>
+</ng-container>

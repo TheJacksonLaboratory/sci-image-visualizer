@@ -13,7 +13,7 @@ import {
 import { densityAutoRange } from '../../spatial/density-raster';
 import { TRANSCRIPT_GLYPHS, glyphOutline } from '../../spatial/glyphs';
 import * as spatialEncoding from '../../spatial/spatial-encoding';
-import { emptySelection } from '../../spatial/spatial-selection';
+import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import { NapariSpatialTileLayers, SpatialTileHost } from './napari-spatial-tiles';
 import { GLYPH_SYMBOLS } from './spatial-tiles/transcript-layers';
 
@@ -151,7 +151,12 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
   function setup(
     individualCount: number,
     colorBy: 'cellType' | 'gene',
-    o: { codes?: number[]; genes?: string[]; view?: Partial<typeof DEFAULT_SPATIAL_VIEW> } = {},
+    o: {
+      codes?: number[];
+      genes?: string[];
+      view?: Partial<typeof DEFAULT_SPATIAL_VIEW>;
+      selection?: SpatialSelectionMask;
+    } = {},
   ) {
     const coded = () => {
       const t = tile(individualCount);
@@ -190,7 +195,7 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
       ...o.view,
     };
     const host: SpatialTileHost = {
-      latest: () => [dataset, view, emptySelection(1)],
+      latest: () => [dataset, view, o.selection ?? emptySelection(1)],
       canvasSize: () => [400, 400],
       continuousLut: () => LUT,
       polygonsShownChanged: () => undefined,
@@ -202,6 +207,22 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     const colors = jest.spyOn(transcriptsOf<WithColors>(tiles), 'transcriptColors');
     return { tiles, getTranscriptTile, getTranscriptBins, colors };
   }
+
+  it("fades the transcripts outside a selected cell, and keeps the selection's as they are", async () => {
+    const alphas = async (selection?: SpatialSelectionMask) => {
+      const { tiles } = setup(3, 'gene', { selection });
+      await (tiles as unknown as { plan(): Promise<void> }).plan();
+      const face = drawnOf<{ layer: { faceColor: Float32Array } }>(tiles).layer.faceColor;
+      tiles.detach();
+      return Array.from(face).filter((_v, i) => i % 4 === 3);
+    };
+    // Every transcript of these tiles is in cell 0.
+    const none = await alphas();
+    expect(none.every((a) => a === 1)).toBe(true);
+    expect(await alphas({ mask: Uint8Array.of(1), count: 1 })).toEqual(none);
+    const faded = await alphas({ mask: Uint8Array.of(0, 1), count: 1 });
+    faded.forEach((a) => expect(a).toBeCloseTo(spatialEncoding.DEFAULT_MUTED_OPACITY));
+  });
 
   it('shows every transcript when the view really is under budget', async () => {
     const { tiles, getTranscriptBins } = setup(100, 'cellType');
@@ -255,6 +276,24 @@ describe('NapariSpatialTileLayers: every gene at once', () => {
     // Counts in view are taken before hiding, by name; the hover names a code by the same list.
     expect(tiles.geneCountsIn({ x0: 0, y0: 0, x1: 10, y1: 10 })).toMatchObject({ ACTA2: 1, KRT5: 2 });
     expect(drawn.genes).toEqual(['ACTA2', '', 'KRT5']);
+    tiles.detach();
+  });
+
+  it("draws one plane's transcripts when the view shows one plane, and every depth again after", async () => {
+    const { tiles, getTranscriptTile } = setup(4, 'gene');
+    getTranscriptTile.mockImplementation(() => {
+      const t = tile(4);
+      t.gene.set([0, 1, 2, 3]);
+      t.z.set([0, 9, 11, 30]);
+      return Promise.resolve(t);
+    });
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    tiles.setZBand([5, 20]);
+    await plan();
+    expect(Array.from(drawnOf<{ merged: SpatialTranscriptTile }>(tiles).merged.gene)).toEqual([1, 2]);
+    tiles.setZBand(null);
+    await plan();
+    expect(drawnOf<{ merged: SpatialTranscriptTile }>(tiles).merged.count).toBe(4);
     tiles.detach();
   });
 });
@@ -1583,6 +1622,23 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     tiles.detach();
   });
 
+  it('colours the cells by the measurement the markers are coloured by', async () => {
+    const { tiles, plan, layers, getColumn } = setup({
+      cellColorMode: 'column',
+      colorBy: { kind: 'column', name: 'area' },
+    });
+    getColumn.mockResolvedValue({
+      meta: { kind: 'continuous', name: 'area' },
+      values: Float32Array.of(10, 30),
+    } as never);
+    await plan();
+    expect(getColumn).toHaveBeenCalledWith('area');
+    const fill = layers()[0];
+    expect(fill.colorMode()).toBe('values');
+    expect(Array.from(fill.values ?? [])).toEqual([10, 30]);
+    tiles.detach();
+  });
+
   it("computes a gene colouring's contrast window once per (vector, clip, log) (SPATIAL-12)", async () => {
     const sort = jest.spyOn(spatialEncoding, 'contrastWindow');
     const { tiles, plan, setView, setExpression, layers } = setup({ cellColorMode: 'gene', cellColorGene: 'G' });
@@ -1764,5 +1820,132 @@ describe('NapariSpatialTileLayers: grouped transcripts and the observation gene 
     await plan(tiles);
     expect(drawnCount(tiles)).toBe(0);
     tiles.detach();
+  });
+});
+
+describe("NapariSpatialTileLayers: a 3D segmentation's cells follow the plane shown", () => {
+  const footprint = (): SpatialPolygonTile => ({
+    count: 1,
+    coords: new Float32Array([0, 0, 10, 0, 10, 10, 0, 10]),
+    offsets: new Uint32Array([0, 4]),
+    observation: new Uint32Array([0]),
+  });
+  /** A cell's outline on a plane, as a folder region set serves it: `<slice>:<cell id>`. */
+  const outline = (id: string, x: number) => ({
+    id,
+    label: 'T',
+    color: null,
+    bbox: [x, 0, x + 5, 5],
+    open: false,
+    rings: [new Float32Array([x, 0, x + 5, 0, x + 5, 5, x, 5])],
+  });
+
+  function setup() {
+    const getPolygonTile = jest.fn(async () => footprint());
+    const getTile = jest.fn(async (z: number) => ({
+      z,
+      level: 0,
+      gx: 0,
+      gy: 0,
+      // Plane 1 has c1; plane 0 has c2 (and a cell the dataset has not).
+      features: z === 1 ? [outline('1:c1', 20)] : [outline('0:c2', 40), outline('0:gone', 60)],
+    }));
+    const source = {
+      info: {
+        featureCount: 3,
+        bounds: [0, 0, 100, 100],
+        tileSize: 256,
+        levels: 1,
+        planes: [0, 1],
+        classColors: {},
+      },
+      getTile,
+      dispose: jest.fn(),
+    };
+    const openRegionSet = jest.fn(async () => source);
+    const port = { getPolygonTile, openRegionSet } as unknown as SpatialDataPort;
+    const dataset = {
+      id: 'd',
+      name: 'd',
+      columns: [],
+      observations: {
+        count: 2,
+        x: new Float32Array([5, 6]),
+        y: new Float32Array([5, 6]),
+        radius: 5,
+        ids: ['c1', 'c2'],
+      },
+      polygonTiles: {
+        bounds: [0, 0, 100, 100],
+        sets: [
+          { name: 'cell', label: 'Cell' },
+          { name: '3d', label: '3D', regionSource: 'rs-3d' },
+        ],
+        defaultSet: 'cell',
+        levels: [{ tileSize: 200 }],
+      },
+    } as unknown as SpatialDataset;
+    let view = { ...DEFAULT_SPATIAL_VIEW, cellColorMode: 'single' as const, cellSet: '3d' };
+    const host: SpatialTileHost = {
+      latest: () => [dataset, view, emptySelection(2)],
+      canvasSize: () => [400, 400],
+      continuousLut: () => LUT,
+      polygonsShownChanged: () => undefined,
+    };
+    const tiles = new NapariSpatialTileLayers(port, host);
+    tiles.attach(viewerAt([50, 50], 4));
+    const plan = () => (tiles as unknown as { plan(): Promise<void> }).plan();
+    const rings = () => (tiles as unknown as { cells: { currentRings: SpatialPolygonTile } }).cells.currentRings;
+    return {
+      tiles,
+      plan,
+      rings,
+      getPolygonTile,
+      getTile,
+      openRegionSet,
+      source,
+      setCellSet: (cellSet: string) => (view = { ...view, cellSet }),
+    };
+  }
+
+  it("draws the plane's outline of each cell from the set's region set, owned by its cell", async () => {
+    const { tiles, plan, rings, getPolygonTile, getTile, openRegionSet } = setup();
+    // No plane: the set's own tiles, one outline per cell.
+    await plan();
+    expect(getPolygonTile).toHaveBeenCalled();
+    expect(openRegionSet).not.toHaveBeenCalled();
+
+    tiles.setPlane(1);
+    await plan();
+    expect(openRegionSet).toHaveBeenCalledWith('rs-3d');
+    expect(getTile).toHaveBeenLastCalledWith(1, expect.objectContaining({ level: 0 }));
+    expect(Array.from(rings().observation)).toEqual([0]); // c1
+    expect(Array.from(rings().coords.subarray(0, 2))).toEqual([20, 0]);
+
+    // Another plane: its own cells; a cell the dataset has not is left out. The set is opened once.
+    tiles.setPlane(0);
+    await plan();
+    expect(Array.from(rings().observation)).toEqual([1]); // c2
+    expect(openRegionSet).toHaveBeenCalledTimes(1);
+    tiles.detach();
+  });
+
+  it('keeps a set without a region set, and the plane gone, on its own tiles', async () => {
+    const { tiles, plan, getPolygonTile, getTile, setCellSet, source } = setup();
+    setCellSet('cell');
+    tiles.setPlane(1);
+    await plan();
+    expect(getTile).not.toHaveBeenCalled();
+    expect(getPolygonTile).toHaveBeenCalledWith('cell', 0, 0, 0);
+
+    setCellSet('3d');
+    await plan();
+    tiles.setPlane(null);
+    getPolygonTile.mockClear();
+    await plan();
+    expect(getPolygonTile).toHaveBeenCalledWith('3d', 0, 0, 0);
+    tiles.detach();
+    await Promise.resolve();
+    expect(source.dispose).toHaveBeenCalled();
   });
 });

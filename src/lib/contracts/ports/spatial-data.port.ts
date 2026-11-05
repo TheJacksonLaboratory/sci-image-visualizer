@@ -1,5 +1,6 @@
 import { InjectionToken } from '@angular/core';
 import { Observable } from 'rxjs';
+import type { RegionSource } from '../../region-source/region-source';
 
 import {
   SpatialColumn,
@@ -178,6 +179,13 @@ export interface SpatialDataPort {
    * mode should never pay for it.
    */
   getVolume?(): Promise<Uint8Array>;
+
+  /**
+   * Open the region set a boundary set names (`SpatialPolygonTilesMeta.sets[i].regionSource`): a
+   * 3D segmentation's outlines, every plane of them, as a tiled region source. Optional: without
+   * it the set is drawn as boundaries only.
+   */
+  openRegionSet?(id: string): Promise<RegionSource>;
 }
 
 /**

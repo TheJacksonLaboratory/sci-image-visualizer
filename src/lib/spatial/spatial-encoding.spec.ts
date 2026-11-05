@@ -12,8 +12,14 @@ import {
   resolveCategoryColors,
   categoryColorsFor,
   groupColorsKey,
+  fadeOutsideSelection,
 } from './spatial-encoding';
-import { CategoricalColumnMeta, NO_CATEGORY, SpatialObservations } from '../contracts/spatial-dataset.contract';
+import {
+  CategoricalColumnMeta,
+  NO_CATEGORY,
+  NO_OBSERVATION,
+  SpatialObservations,
+} from '../contracts/spatial-dataset.contract';
 
 /** RGBA of point i, as 0–255 ints plus alpha, for readable assertions.
  *  Alpha is rounded because the buffer is `Float32Array`: 0.15 stores as
@@ -307,5 +313,19 @@ describe('categoryColorsFor', () => {
     expect(groupColorsKey('k', { k: { A: '#000000' }, j: { B: '#1' } })).toBe(
       groupColorsKey('k', { k: { A: '#000000' } }),
     );
+  });
+});
+
+describe('fadeOutsideSelection', () => {
+  it("fades the entries outside the selection's cells, and those in no cell; nothing without one", () => {
+    const rgba = new Float32Array([1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0.5]);
+    const owners = Uint32Array.of(0, 1, NO_OBSERVATION);
+    fadeOutsideSelection(rgba, 3, (i) => owners[i], { mask: new Uint8Array(2), count: 0 });
+    expect(Array.from(rgba).filter((_v, i) => i % 4 === 3)).toEqual([1, 1, 0.5]);
+    fadeOutsideSelection(rgba, 3, (i) => owners[i], { mask: Uint8Array.of(0, 1), count: 1 });
+    const alphas = Array.from(rgba).filter((_v, i) => i % 4 === 3);
+    expect(alphas[0]).toBeCloseTo(DEFAULT_MUTED_OPACITY);
+    expect(alphas[1]).toBe(1);
+    expect(alphas[2]).toBeCloseTo(0.5 * DEFAULT_MUTED_OPACITY);
   });
 });

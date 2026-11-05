@@ -92,6 +92,11 @@ export class ToolbarComponent {
   @Input() isoRange: number[] = [0, 255];
   /** The last slice index of a stack. */
   @Input() maxIndex = 0;
+  /**
+   * The image is one plane, but a spatial dataset's region set slices it into planes: the live
+   * views offer the slider over them ({@link maxIndex} is the last plane), as over a stack.
+   */
+  @Input() planeSlices = false;
   /** The current slice (0-based). */
   @Input() zIndex = 0;
   /** True for any 2D (non Surface-3D) plot type. */

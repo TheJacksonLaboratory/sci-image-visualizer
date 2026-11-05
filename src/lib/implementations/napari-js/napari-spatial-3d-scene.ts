@@ -1,3 +1,8 @@
+import { boxRadius, keepSceneInDepth } from './napari-camera-depth';
+import { RegionMeshPointer } from './napari-region-mesh-pointer';
+import { placeInWorker } from '../../region-source/worker-region-source';
+import { cellTypeColumnFor } from '../../spatial/lod';
+import { datasetRegionSet } from '../../visualizer/spatial-region-set';
 import { Subscription } from 'rxjs';
 import { PointPicker, colormapFromLut } from 'napari-js';
 import type { Points3DLayer, Viewer, VolumeLayer } from 'napari-js';
@@ -32,7 +37,7 @@ import {
 import { computeExpressionVolumeAsync, rasterizeDensityAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import type { IImageInfo } from '../../contracts/image.contract';
-import { RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
+import { PlanePlacement, RegionMesh3D, VolumeRegionMeshes } from './napari-volume-region-meshes';
 import { isAbortError } from '../tile-server';
 import {
   DensityGroup,
@@ -53,6 +58,11 @@ import { HOVER_RADIUS_PX } from './napari-spatial-hover';
 import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
+import { Spatial3dCells } from './napari-spatial-3d-cells';
+import { cellColorsFor, cellColorsRgba } from './spatial-tiles/cell-layers';
+import { CategoricalLookup } from './spatial-tiles/categorical-lookup';
+import { ContrastWindowCache } from './napari-spatial-encoding';
+import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
 import { SpatialSceneBase, SpatialSession } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
@@ -62,6 +72,11 @@ export const SPATIAL_Z_SCALE_MIN = 0.1;
 const SPATIAL_Z_SCALE_MAX = 10;
 /** Nor more than this, however thin the cloud is. */
 const SPATIAL_Z_SCALE_CEILING = 1000;
+/**
+ * In-plane voxels across the image when a region set's planes are reconstructed over the dataset's
+ * own image (see voxelStep): a step of about 5 px on a 5,700 px wide MERFISH section (0.6 µm).
+ */
+export const REGION_PLANES_VOXELS = 1024;
 
 /**
  * The most a box's Z may be stretched: until it is twice as deep as it is wide, so even a section
@@ -132,6 +147,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   /** The anatomical volume the cloud sits inside, when the dataset has one. */
   private volume: VolumeLayer | null = null;
   private volumeKey: string | null = null;
+  /**
+   * The reference volume on its way (its key and the load), shared by every rebuild that asks for
+   * it meanwhile: each one adding its own left one layer behind, which the view's toggle (bound to
+   * {@link volume}) then never hid.
+   */
+  private volumeLoading: { key: string; done: Promise<void> } | null = null;
   /** Per-cluster density volumes drawn alongside the cloud, and what they were
    *  built from — rasterising is seconds of work, so it must not repeat for a
    *  change that cannot affect the field. */
@@ -177,6 +198,11 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   private readonly transcripts3d: Spatial3dTranscripts;
   /** Whether the reference volume lets every region surface through (see setRegionsThroughVolume). */
   private regionsThrough = false;
+  /**
+   * Each slice's z, in the observations' units, of the region set the surfaces are built from when
+   * it says where its slices are (a 3D segmentation's planes, see setRegionPlanes); else null.
+   */
+  private regionPlanes: readonly number[] | null = null;
   /** The store's invert setting, which the density volumes follow (no other subscription of
    *  this scene carries it). */
   private invertSub: Subscription | null = null;
@@ -191,8 +217,122 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     private readonly info?: IImageInfo,
   ) {
     super(ctx, session, true);
-    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer);
-    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (label) => ctx.badge.begin(label));
+    // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
+    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
+    this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (message) => ctx.badge.beginTask(message));
+    this.cells3d = new Spatial3dCells({
+      viewer: ctx.viewer,
+      port: session.port,
+      beginTask: (label) => ctx.badge.begin(label),
+      status: (status) => session.reportCells3d(status),
+    });
+    this.cellLookup = session.port ? new CategoricalLookup(session.port) : null;
+  }
+
+  /** The region set's classes drawn as individual cells (none: the class surfaces only). */
+  private readonly cells3d: Spatial3dCells;
+  private readonly cellLookup: CategoricalLookup | null;
+  private readonly cellWindows = new ContrastWindowCache();
+  private cellClasses: readonly string[] | null = null;
+  /** What the cells were last coloured for, so a rebuild that changed none of it recolours nothing. */
+  private cellStyleKey: string | null = null;
+  private cellStyleRequest = 0;
+
+  /**
+   * Draw these classes of the dataset's region set as individual cells, each its own surface in
+   * the panel's Cell Color (see Spatial3dCells); none: no cells.
+   */
+  setRegionCells(classes: readonly string[] | null): void {
+    this.cellClasses = classes?.length ? classes : null;
+    this.cells3d.setClasses(this.cellClasses ? new Set(this.cellClasses) : null);
+    this.cellStyleKey = null;
+    const latest = this.session.latest;
+    if (latest?.[0]) void this.styleCells(latest[0], latest[1], latest[2]);
+  }
+
+  /**
+   * The cells' colours (the panel's Cell Color, its selection muting), which are shown (its groups
+   * switched off and gene filter hide theirs; the Cells switch all), and their opacity.
+   */
+  private async styleCells(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    this.cells3d.setDataset(dataset);
+    const port = this.session.port;
+    if (!this.cellClasses || !port || !this.cellLookup) return;
+    const key =
+      JSON.stringify([
+        dataset.id,
+        view.cellColorMode,
+        view.cellColorGene,
+        view.cellColorMode === 'column' ? view.colorBy : null,
+        view.cellSingleColor,
+        view.cellTypeColumn,
+        view.logScale,
+        view.percentileClip,
+        view.continuousColormap,
+        view.groupColors,
+        view.hiddenGroups,
+        view.showCells,
+        view.cellOpacity,
+        geneFilterKey(view),
+        this.ctx.display.continuousColormapKey(view),
+      ]) + `|${selection.count}|${this.cellSelectionRev(selection)}`;
+    if (key === this.cellStyleKey) return;
+    this.cellStyleKey = key;
+    const request = ++this.cellStyleRequest;
+    const count = dataset.observations.count;
+    try {
+      const owners = Uint32Array.from({ length: count }, (_, i) => i);
+      const [colors, hidden] = await Promise.all([
+        cellColorsFor(
+          {
+            port,
+            lookup: this.cellLookup,
+            contrastWindows: this.cellWindows,
+            continuousLut: (v) => this.ctx.display.spatialLut(v),
+          },
+          dataset,
+          view,
+          // Colours as they are: a selection fades what it leaves out (see Spatial3dCells), not grey.
+          emptySelection(count),
+          owners,
+        ),
+        this.cellLookup.hiddenCodes(dataset, view),
+      ]);
+      if (request !== this.cellStyleRequest) return;
+      let visible: Uint8Array | null = null;
+      if (view.showCells === false) {
+        visible = new Uint8Array(count);
+      } else if (hidden) {
+        visible = new Uint8Array(count);
+        for (let i = 0; i < count; i++) {
+          const c = hidden.codes[i];
+          visible[i] = c !== NO_CATEGORY && hidden.hidden[c] ? 0 : 1;
+        }
+      }
+      this.cells3d.setStyle(
+        cellColorsRgba(colors, count),
+        visible,
+        view.cellOpacity ?? 1,
+        selection.count ? selection.mask : null,
+      );
+    } catch (err) {
+      if (request === this.cellStyleRequest) this.cellStyleKey = null;
+      console.warn('[napari-js] the 3D cells could not be coloured', err);
+    }
+  }
+
+  private lastCellSelection: SpatialSelectionMask | null = null;
+  private cellSelectionCount = 0;
+  private cellSelectionRev(selection: SpatialSelectionMask): number {
+    if (selection !== this.lastCellSelection) {
+      this.lastCellSelection = selection;
+      this.cellSelectionCount++;
+    }
+    return this.cellSelectionCount;
   }
 
   /** Show these region reconstructions with the cloud (replacing the ones shown). */
@@ -206,6 +346,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   setRegionHidden(keys: readonly string[]): void {
     this.regionMeshes.setHidden(keys);
+    // A surface's key is its class's name: a hidden class's cells are hidden too.
+    this.cells3d.setHiddenClasses(keys);
+  }
+
+  /**
+   * Where the region set's slices are, in the observations' units (null: they are the plotted
+   * stack's slices): its surfaces then sit at their planes among the observations (see
+   * placeRegionMeshes), on an image of one plane too.
+   */
+  setRegionPlanes(z: readonly number[] | null): void {
+    const same =
+      z === this.regionPlanes ||
+      (!!z &&
+        !!this.regionPlanes &&
+        z.length === this.regionPlanes.length &&
+        z.every((v, i) => v === this.regionPlanes?.[i]));
+    if (same) return;
+    this.regionPlanes = z?.length ? [...z] : null;
+    const latest = this.session.latest;
+    const dataset = latest?.[0];
+    if (dataset) this.placeRegionMeshes(dataset);
+    // The cells stand in for the markers only while the set is placed.
+    if (dataset && latest?.[1]) {
+      this.showPointsAsAsked(dataset, latest[1]);
+      this.ctx.viewer.requestRender();
+    }
   }
 
   /** As the Volume view: the reference volume hides the surfaces behind what it shows, or none. */
@@ -222,11 +388,28 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * is offset to sit in it). Only when the plotted image IS that volume's stack: regions drawn on
    * another image (a tissue image) have no place in it, and are not shown - nor are surfaces
    * placed in a volume this one replaced.
+   *
+   * Unless the region set says where its slices are ({@link setRegionPlanes}: a 3D segmentation's
+   * planes) and the plotted image is the dataset's own (`imageRef`): image pixels are then taken
+   * back to the observations' units through `imageRef`, slice k to its plane's z, and both moved
+   * by the offset the cloud is, so each cell's surface sits around its observation.
    */
   private placeRegionMeshes(dataset: SpatialDataset): void {
+    // The individual cells sit where the region set's planes are, as its class surfaces do.
+    this.cells3d.setPlacement(this.planePlacement(dataset), this.zScale());
     const meta = dataset.volume;
     if (!meta || !this.isVolumeStack(meta)) {
-      this.regionMeshes.clearFrame();
+      const planes = this.planePlacement(dataset);
+      if (planes) {
+        this.regionMeshes.setFrame({
+          size: [1, 1, planes.z.length],
+          world: [1, 1, 1],
+          zScale: this.zScale(),
+          planes,
+        });
+      } else {
+        this.regionMeshes.clearFrame();
+      }
       return;
     }
     const [vx, vy, vz] = meta.voxelSize;
@@ -243,8 +426,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * share its cached surface). Null while there is no volume stack to place them in.
    */
   voxelStep(): number | null {
-    const meta = this.session.latest?.[0]?.volume;
-    return this.volume && meta && this.isVolumeStack(meta) ? 1 : null;
+    const dataset = this.session.latest?.[0];
+    const meta = dataset?.volume;
+    if (this.volume && meta && this.isVolumeStack(meta)) return 1;
+    // A region set's planes over the dataset's image: cells a few microns across, so a step that
+    // keeps every cell several voxels wide while a class's mask over the tissue stays small.
+    if (dataset && this.planePlacement(dataset)) {
+      const width = this.info?.trueImageSize?.[0] ?? 0;
+      return Math.max(1, width / REGION_PLANES_VOXELS);
+    }
+    return null;
+  }
+
+  /**
+   * Where the region set's slices go (see placeRegionMeshes): only with their planes known, on the
+   * dataset's own image (one with an `imageRef`, not the reference volume's stack), once the box
+   * the cloud is offset into is there.
+   */
+  private planePlacement(dataset: SpatialDataset): PlanePlacement | null {
+    const z = this.regionPlanes;
+    const ref = dataset.imageRef;
+    if (!z?.length || !ref || !this.info || !this.box) return null;
+    const [sx, sy] = ref.scale ?? [1, 1];
+    const [tx, ty] = ref.translate ?? [0, 0];
+    if (!sx || !sy) return null;
+    const [ox, oy, oz] = this.origin;
+    return { z, scale: [1 / sx, 1 / sy], offset: [ox - tx / sx, oy - ty / sy, oz] };
   }
 
   /** Whether the plotted image is the reference volume's stack: its size and slice count. */
@@ -262,9 +469,39 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.ctx.viewer.requestRender();
     });
     this.ctx.tools.install3dInteraction(this.ctx.viewer, this.ctx.host);
+    // Zoomed close, the whole section stays drawn (napari-js's far plane follows the distance).
+    this.restoreDepth = keepSceneInDepth(this.ctx.viewer.camera3d, () =>
+      this.box ? boxRadius(this.box.width, this.box.height, this.box.depth * this.zScale()) : null,
+    );
     this.hover.install(this.ctx.host);
+    this.listenToRegionMeshes();
     this.subscribeSpatial();
   }
+
+  /**
+   * Picking the region surfaces (a cell type's, by type), as the Volume view does: with the selection
+   * tool armed, a click on one picks its class (null beside them), and the Region Editor highlights
+   * it, the others fading. Hovering is the spatial tooltip's (the type and its cells).
+   */
+  private listenToRegionMeshes(): void {
+    const { ctx } = this;
+    if (this.meshPointer) return;
+    this.toolSub = ctx.store.getActiveTool$().subscribe((tool) => (this.selecting = tool === 'select'));
+    this.meshPointer = ctx.outsideZone(
+      () =>
+        new RegionMeshPointer(ctx.canvas, ctx.host, {
+          pickAt: (x, y) => this.regionMeshes.pickAt(x, y),
+          active: () => this.selecting && this.regionMeshes.shown.length > 0,
+          hoverable: () => false,
+          onPick: (key, additive) => ctx.inZone(() => ctx.regionMeshPicked(key, additive)),
+        }),
+    );
+  }
+  private meshPointer: RegionMeshPointer | null = null;
+  /** Gives the camera back napari-js's own depth range (see keepSceneInDepth). */
+  private restoreDepth: (() => void) | null = null;
+  private toolSub: Subscription | null = null;
+  private selecting = false;
 
   /** The observations' own z is on screen: there is no plane to step. */
   setZ(): void {
@@ -371,9 +608,63 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     return out;
   }
 
+  /** The region surface (a class) under a client position, or null. */
+  override pickRegion(clientX: number, clientY: number): { key: string; label?: string } | null {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    const mesh = this.regionMeshes.pickAt(clientX - rect.left, clientY - rect.top);
+    return mesh ? { key: mesh.key, ...(mesh.label ? { label: mesh.label } : {}) } : null;
+  }
+
+  /**
+   * With a selection, grey out the class surfaces none of it is in (a class is a category of the
+   * cell-type column: a 3D segmentation's cell type), as the observations it leaves out are muted.
+   */
+  private async muteRegions(
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    selection: SpatialSelectionMask,
+  ): Promise<void> {
+    const request = ++this.muteRequest;
+    if (!selection.count || !this.cellLookup) {
+      this.regionMeshes.setMuted([]);
+      return;
+    }
+    const name = cellTypeColumnFor(dataset, view);
+    const col = name ? await this.cellLookup.codes(name).catch(() => null) : null;
+    if (request !== this.muteRequest) return;
+    if (!col || col.meta.kind !== 'categorical') {
+      this.regionMeshes.setMuted([]);
+      return;
+    }
+    const selected = new Set<number>();
+    for (let i = 0; i < selection.mask.length; i++) if (selection.mask[i]) selected.add(col.codes[i]);
+    const categories = col.meta.categories;
+    const keys = this.regionMeshes.shown.map((m) => m.key);
+    this.regionMeshes.setMuted(
+      keys.filter((k) => {
+        const code = categories.indexOf(k);
+        return code >= 0 && !selected.has(code);
+      }),
+    );
+  }
+  private muteRequest = 0;
+
+  /** The observation of the individual cell drawn under a client position, or -1. */
+  override pickCell(clientX: number, clientY: number): number {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    return this.cells3d.pick(clientX - rect.left, clientY - rect.top);
+  }
+
   dispose(): void {
+    this.restoreDepth?.();
+    this.restoreDepth = null;
+    this.meshPointer?.destroy();
+    this.meshPointer = null;
+    this.toolSub?.unsubscribe();
+    this.toolSub = null;
+    this.cells3d.dispose();
     this.regionMeshes.clear();
-    this.transcripts3d.remove();
+    this.transcripts3d.dispose();
     this.disposeSpatial();
     this.invertSub?.unsubscribe();
     this.invertSub = null;
@@ -397,9 +688,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
    * per-point `sizes`, so a selected marker, drawn larger, is as large to the pointer.
    */
   protected pickObservation(clientX: number, clientY: number, slackPx: number): number {
+    const rect = this.ctx.canvas.getBoundingClientRect();
+    // A cell drawn by itself is what is under the pointer before any marker inside it.
+    const cell = this.cells3d.pick(clientX - rect.left, clientY - rect.top);
+    if (cell >= 0) return cell;
     const picker = this.picker;
     if (!picker) return -1;
-    const rect = this.ctx.canvas.getBoundingClientRect();
     const k = picker.pick(clientX - rect.left, clientY - rect.top, slackPx);
     if (k < 0) return -1;
     return this.drawn ? this.drawn[k] : k;
@@ -524,11 +818,16 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.volume.opacity = view.volumeOpacity;
     }
     this.drawCloud(viewer, dataset, view, selection, enc, geneShown);
+    void this.styleCells(dataset, view, selection);
+    void this.muteRegions(dataset, view, selection);
     // The transcripts last: they sit in the box the cloud fixed, and their first read can take a while.
-    await this.transcripts3d.sync(dataset, view, this.session.port, {
-      origin: this.origin,
-      zScale: this.zScale(),
-    });
+    await this.transcripts3d.sync(
+      dataset,
+      view,
+      this.session.port,
+      { origin: this.origin, zScale: this.zScale() },
+      selection,
+    );
   }
 
   /**
@@ -604,8 +903,20 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
       this.applySelection(cloud, selection, shown, obs.count);
     }
     // Last, so it also covers a layer this pass just created.
-    if (this.points) this.points.visible = view.showPoints;
+    this.showPointsAsAsked(dataset, view);
     viewer.requestRender();
+  }
+
+  /**
+   * The markers shown as the view asks, but not while the cells (a 3D segmentation's) stand in for
+   * them: the observations are shown as their markers or as their cells. Only once the set is placed
+   * here (its planes known): a set that could not be opened, has no planes or was not attached draws
+   * no cells, and the markers stay.
+   */
+  private showPointsAsAsked(dataset: SpatialDataset, view: SpatialViewState): void {
+    if (!this.points) return;
+    const cells = !!this.regionPlanes && !!datasetRegionSet(dataset) && view.showCells !== false;
+    this.points.visible = view.showPoints && !cells;
   }
 
   /** Interleaved x,y,z of the `shown` observations (null: all of them), offset by {@link origin}. */
@@ -964,6 +1275,9 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     const port = this.session.port;
     const key = meta ? `${dataset.id}:${meta.width}x${meta.height}x${meta.depth}` : null;
     if (key && key === this.volumeKey) return;
+    // Already on its way for an earlier rebuild: wait for that one, add none of our own.
+    if (key && this.volumeLoading?.key === key) return this.volumeLoading.done;
+    this.volumeLoading = null;
 
     if (this.volume) {
       viewer.layers.remove(this.volume);
@@ -972,16 +1286,32 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
     }
     // The surfaces sat in the volume just removed (or there was none): down until one is placed.
     this.regionMeshes.clearFrame();
-    if (!meta || !port?.getVolume) return;
+    if (!meta || !port?.getVolume || !key) return;
+    const loading = { key, done: this.loadVolume(viewer, dataset, view, key) };
+    this.volumeLoading = loading;
+    try {
+      await loading.done;
+    } finally {
+      if (this.volumeLoading === loading) this.volumeLoading = null;
+    }
+  }
 
+  /** Fetch the reference volume and add it, unless another one was asked for meanwhile. */
+  private async loadVolume(
+    viewer: Viewer,
+    dataset: SpatialDataset,
+    view: SpatialViewState,
+    key: string,
+  ): Promise<void> {
+    const meta = dataset.volume!;
     let voxels: Uint8Array;
     try {
-      voxels = await port.getVolume();
+      voxels = await this.session.port!.getVolume!();
     } catch (err) {
       console.warn('[napari-js] reference volume unavailable — drawing the cloud alone', err);
       return;
     }
-    if (this.ctx.signal.aborted) return;
+    if (this.ctx.signal.aborted || this.volumeLoading?.key !== key) return;
 
     const [vx, vy, vz] = meta.voxelSize;
     this.volumeKey = key;
@@ -1134,6 +1464,10 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
         : null;
     if (byGene) return encodeSpatial3dCategorical(byGene.codes, byGene.colors);
     const colorBy = view.colorBy;
+    // One colour, the cells' too ("Single colour").
+    if (!colorBy && view.cellColorMode === 'single') {
+      return encodeSpatial3dCategorical(new Uint16Array(count), [view.cellSingleColor]);
+    }
     if (!port || !colorBy) return null;
 
     if (colorBy.kind === 'column') {
@@ -1189,7 +1523,11 @@ function cloudSubset(
   const clip = view.percentileClip ?? [0.01, 0.99];
   const scalarKey = [
     key,
-    view.colorBy ? `${view.colorBy.kind}:${view.colorBy.name}` : 'flat',
+    view.colorBy
+      ? `${view.colorBy.kind}:${view.colorBy.name}`
+      : view.cellColorMode === 'single'
+        ? `single:${view.cellSingleColor}`
+        : 'flat',
     groupColorsKey(view.colorBy?.kind === 'column' ? view.colorBy.name : null, view.groupColors),
     observationGeneStyleKey(view),
     view.logScale ? 'log' : 'lin',

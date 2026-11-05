@@ -1,0 +1,67 @@
+<ng-container *ngIf="available">
+  <button type="button" class="sc-seltx-toggle sc-subhead" [attr.aria-expanded]="expanded" (click)="toggle()">
+    <i class="pi" [class.pi-chevron-down]="expanded" [class.pi-chevron-right]="!expanded"></i>
+    Observations in selection
+  </button>
+  <div class="sc-seltx" *ngIf="expanded">
+    <ng-container *ngIf="list; else waiting">
+      <div class="sc-seltx-head" *ngIf="list.label">
+        <span class="sc-seltx-label" [title]="list.label">{{ list.label }}</span>
+        <small class="sc-hint" *ngIf="list.plane">
+          plane {{ list.plane.index + 1 }} of {{ list.plane.count }}
+        </small>
+        <small class="sc-hint" *ngIf="!list.plane && is3d">whole volume</small>
+      </div>
+      <small class="sc-hint" *ngIf="list.state === 'empty'">{{ list.message }}</small>
+      <small class="sc-hint sc-error" *ngIf="list.state === 'error'">{{ list.message }}</small>
+      <small class="sc-hint" *ngIf="list.state === 'loading'">
+        <i class="pi pi-spin pi-spinner"></i> Listing observations…
+      </small>
+      <ng-container *ngIf="list.total !== undefined && list.state !== 'empty' && list.state !== 'error'">
+        <div class="sc-seltx-summary">
+          <span>
+            <b>{{ list.total | number }}</b> {{ list.total === 1 ? 'observation' : 'observations' }}
+            <ng-container *ngIf="list.groupColumn && list.groups?.length"
+              >· {{ list.groups!.length | number }} {{ list.groups!.length === 1 ? 'group' : 'groups' }} of
+              {{ list.groupColumn }}</ng-container
+            >
+          </span>
+          <p-button
+            *ngIf="list.groups?.length"
+            icon="pi pi-copy"
+            size="small"
+            [text]="true"
+            pTooltip="Copy the groups (group, observations) as tab-separated text"
+            tooltipPosition="top"
+            (onClick)="copy()"
+          ></p-button>
+        </div>
+        <small class="sc-hint" *ngIf="list.total === 0">No observations in the selection.</small>
+        <div class="sc-seltx-head" *ngIf="list.cellId">
+          <span class="sc-hint">Cell id</span>
+          <span class="sc-seltx-label" [title]="list.cellId">{{ list.cellId }}</span>
+        </div>
+        <ol class="sc-seltx-list" *ngIf="list.groups?.length" [class.stale]="list.state === 'loading'">
+          <li *ngFor="let g of list.groups; trackBy: trackGroup">
+            <span class="sc-seltx-gene" [title]="g.name"
+              ><span class="sc-seltx-swatch" [style.background]="g.color"></span>{{ g.name }}</span
+            >
+            <span class="sc-seltx-bar"
+              ><span [style.width.%]="(100 * g.count) / (max || 1)" [style.background]="g.color"></span
+            ></span>
+            <span class="sc-seltx-count">{{ g.count | number }}</span>
+          </li>
+        </ol>
+        <dl class="sc-seltx-measures" *ngIf="list.measures?.length" [class.stale]="list.state === 'loading'">
+          <ng-container *ngFor="let m of list.measures">
+            <dt [title]="m.name">{{ m.mean ? 'Mean ' + m.name : m.name }}</dt>
+            <dd>{{ format(m) }}</dd>
+          </ng-container>
+        </dl>
+      </ng-container>
+    </ng-container>
+    <ng-template #waiting>
+      <small class="sc-hint"><i class="pi pi-spin pi-spinner"></i> Listing observations…</small>
+    </ng-template>
+  </div>
+</ng-container>

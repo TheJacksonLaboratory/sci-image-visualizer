@@ -6,6 +6,8 @@
  * Protocol: `{ id, op, ...args }` → `{ id, ok: true, result }` | `{ id, ok: false, error }`.
  */
 import { ReconstructOptions, SliceOutlines, reconstruct } from '../geometry/reconstruct';
+import { CellOutlines, CellsMesh, reconstructCells } from '../geometry/cell-meshes';
+import { VolumeFrame, toWorld } from '../geometry/place';
 import type { Mesh } from 'napari-js/geometry';
 import {
   ClassOutlines,
@@ -31,6 +33,8 @@ export type RegionSourceRequest =
       exclude?: readonly string[];
     }
   | { op: 'mesh'; slices: readonly SliceOutlines[]; options?: ReconstructOptions }
+  | { op: 'cells'; cells: readonly CellOutlines[]; options?: ReconstructOptions }
+  | { op: 'place'; vertices: Float32Array; frame: VolumeFrame }
   | { op: 'export'; handle: number; exclude: readonly string[]; extra: readonly object[] }
   | { op: 'close'; handle: number };
 
@@ -42,6 +46,8 @@ export interface RegionSourceResults {
   classes: Record<string, number>;
   outlines: ClassOutlines[];
   mesh: Mesh;
+  cells: CellsMesh;
+  place: Float32Array;
   export: string;
   close: null;
 }
@@ -80,6 +86,10 @@ export class RegionSourceTables {
         return this.table(r.handle).classOutlines(r.classes, r.level, r.exclude);
       case 'mesh':
         return reconstruct(r.slices, r.options);
+      case 'cells':
+        return reconstructCells(r.cells, r.options);
+      case 'place':
+        return toWorld(r.vertices, r.frame);
       case 'export':
         return this.table(r.handle).exportGeoJson(r.exclude, r.extra);
       case 'close':

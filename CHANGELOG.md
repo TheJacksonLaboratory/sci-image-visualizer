@@ -9,6 +9,185 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Transcripts follow a selection.** With a cell or a cell type selected, in 2D and in 3D, the
+  transcripts of the selected cells keep their colour and every other transcript fades (alpha scaled
+  to `DEFAULT_MUTED_OPACITY`), as the cells and markers do; zoomed-out density-grid markers, which
+  carry no cells, all fade. In 3D only the layer's per-point alphas change, so a selection reads
+  nothing again (`fadeOutsideSelection` in `spatial-encoding`).
+
+- **A 3D segmentation's cells as 3D regions in the spatial 3D view.** A dataset whose boundary set
+  names its outlines as a region set (`SpatialPolygonTilesMeta.sets[i].regionSource`: every cell
+  outlined on every plane it spans, as the MERFISH ileum's) now has that set attached to its image in
+  the region editor, over every plane, once the dataset and its image are both on screen
+  (`SpatialDataPort.openRegionSet`; `SpatialDataHttpService` opens it at `{base}/regions/{id}/`). In
+  spatial 3D the editor offers its classes in 3D, and each cell type is shown as a surface once by
+  itself; hiding them, or the editor's own choice, then stands. The image is matched exactly by
+  `IImageInfo.imageId` (new, optional: the host's id for it, as `imageRef.imageId` names it); without
+  it, by file name, and then only an image that landed under that dataset (or none), so another
+  bundle's `plate.ome.tif` still on screen is not taken for it. Back on an image, its set is restored
+  with what was deleted from it, not attached again; an image with region sources of its own keeps
+  them, and the set is not attached over them.
+- **Region surfaces placed by their planes' z.** A region set that says where its planes are
+  (`RegionSourceInfo.sliceZ`, in its coordinates' units, with `micronsPerUnit`) has its surfaces placed
+  at those planes among the observations in spatial 3D, its pixels taken back through the dataset's
+  `imageRef`, so they show over the dataset's own image of one plane, not only over the reference
+  volume's stack (`VolumeFrame.planes`). They follow the Z handle as the cloud does.
+- **One plane at a time in the 2D spatial view of a 3D assay imaged on one plane.** When that
+  region set's planes slice the dataset's image (an image of one plane, as the ileum's projection),
+  the slice slider runs over the planes (`IVisualizer.getDatasetPlanes$`, the toolbar's `planeSlices`)
+  in the live 2D views, as over a stack: the region editor holds the regions per plane and shows the
+  plane's outlines, and the 2D spatial view draws the observations and transcripts nearest that plane
+  (each z on one plane, halfway between neighbours; zoomed-out aggregates stay whole). The image keeps
+  its one slice. A region drawn there selects within the plane. The Cells panel's boundaries follow
+  the plane too: a boundary set that names its region set (as the ileum's "3d boundaries") draws the
+  plane's outline of each cell, read from the region set's tiles of that plane and joined to its cell
+  by id, in the panel's colouring, groups, draw mode and selection; a set without one keeps one
+  outline per cell. While the planes show, that set is the panel's boundaries unless another is
+  chosen (a reset view gets it again), and in the 2D spatial view the overlays leave its outlines to
+  the cells rather than drawing them a second time (`RegionStore.getDrawnRegionSourceView$`,
+  `setRegionSourceDrawn`); the Region Editor still lists them, and the other views draw them.
+
+- **A 3D segmentation's cells one by one in spatial 3D.** Where a class's cells used to be one merged
+  surface (every "Macrophage + DC" cell fused into one region), the spatial panel's Cells section,
+  now shown in 3D for such a dataset, draws them "By cell type" or as "Individual cells"; a class
+  can be set the other way in the Region Editor (its cells toggle beside the 3D one). Each cell is
+  its own surface in the panel's Cell Color, its groups and selection; hovering one names it,
+  clicking selects it (again: clears). Built so the UI never waits: cells are meshed in a worker of
+  their own (`reconstructCellsInWorker`, a few hundred per call, dropped when the view moves on),
+  by chunks of the region set's area, coarse everywhere first and finer for the chunks on screen
+  as the camera comes close, within a triangle budget; at most 20,000 cells, the nearest the centre
+  of the view, the panel saying when some are left out; colour and visibility change no geometry.
+  The canvas shows "Cells" loading while they build, the panel how many are shown.
+- **3D cells and cell types tell what they are, and a selection fades what it leaves out.** Hovering a cell (drawn by itself,
+  or its marker) names its type and id, the colouring's value and a few of its measurements;
+  hovering a cell type's surface names the type and how many cells it has. With a selection (a
+  cell clicked, a type picked), what it leaves out fades as a picked region fades the others: the
+  cell types' surfaces none of it is in, and the individual cells it leaves out, each keeping its
+  colour, while the rest come forward. A whole type is selected as before, with the selection tool.
+- **Transcripts in selection.** In the spatial panel's Transcripts section, a foldable "Transcripts in
+  selection" list (`spatial-selection-transcripts`) gives the transcripts of what is selected, by
+  gene, most frequent first, with their total, the cells they lie in and a bar each (and a copy
+  button, tab-separated). In spatial 3D they are those of the selected cell (or cells), or of every
+  cell of the cell type picked on the canvas, through the whole volume; in the 2D view of a sliced
+  dataset, only those on the plane shown, of the selected cells or inside the selected regions (or the
+  regions of the picked class). The latest of those selections counts; clearing it goes back to the
+  one before. Read from the finest transcript tiles, every gene, and only the tiles the selection
+  touches (each molecule names its cell); about 20 M transcripts at most, the list saying when it is a
+  lower bound. Counted only while it is unfolded and the Transcripts section open, again as the
+  selection, the regions or the plane change (`ISpatialControls.getTranscriptsInSelection$`,
+  `TranscriptsInSelection`).
+- **Observations in selection.** In the Observations section, a foldable "Observations in selection"
+  block (`spatial-selection-observations`) describes the observations of the same selection: how
+  many, by the grouping they are coloured by (else the cell types) in the legend's colours, with the
+  mean of a few measurements; for one cell, its id, its other groupings and its own values. Every
+  observation of the selection in spatial 3D; in the 2D view of a sliced dataset, those on the plane
+  shown (a region selects as "Select from ROIs" does there). From the columns alone, nothing more is
+  read (`ISpatialControls.getObservationsInSelection$`, `ObservationsInSelection`).
+
+### Fixed
+
+- **3D cells and transcripts: review fixes.**
+  - Turning the 3D transcripts off (or hiding every gene shown) no longer lets the next camera move
+    draw them again: the last view that drew some is forgotten.
+  - Other cell classes, or another dataset, asked for while a 3D cells build was still reading are
+    built once that build stops; before, nothing was drawn until the camera or view changed again.
+  - A cell chunk's placement that lands after the scene passed the same placement again (as each
+    Z-stretch change does) is drawn; and one that lands after the placement it was for was replaced
+    no longer drops the replacing one's result.
+  - A recolour, opacity or selection change no longer uploads the cells' geometry again: a surface's
+    vertices and triangles are set only when they changed.
+  - The 3D cells keep to their limits: the first chunk, when over the cell cap or the triangle budget
+    by itself, meshes only the cells that fit; chunks over the budget at their coarsest are left out;
+    a chunk not yet built meshes at most the cells the cap leaves it; and the plan is made again as
+    each chunk's real size is learnt. The status says when cells are left out.
+  - The markers are no longer hidden for a dataset's 3D segmentation that is not attached and placed
+    (it could not be opened, has no planes, or the image has region sources of its own): the 3D view
+    hides them only once the set's planes are known, and the controls offer Cell segmentations in 3D
+    only then (`ISpatialControls.getCells3dAvailable$`, new, optional).
+  - The dataset cleared, or another selected that names another region set (or none), while its
+    image is still plotted takes down what the attached set brought to the views: its planes, and its
+    surfaces and cells in 3D (`IVisualizer.releaseDatasetRegionSet`, new, optional). Its regions stay
+    the image's, so the same set asked for again is restored as it was.
+
+- **A selected 3D cell or cell type is no longer hidden by the faded ones in front of it.** A
+  translucent surface draws only its own nearest faces, so a faded cell in front of the selected one
+  in the same chunk hid it. The selected cells are now drawn as an opaque surface of their own per
+  chunk, and a selected cell type's surface opaque (`REGION_MESH_SELECTED_OPACITY`, 1) while the
+  others are ghosted, so the faded surfaces are blended over the selection and it shows through.
+
+- **Zooming in close in 3D no longer blacks out the far part of the scene.** napari-js puts the
+  far plane at four times the camera's distance, so zoomed in on a long section seen at an angle,
+  everything past it was cut away behind a straight edge, and one could not get close to a small
+  part. The spatial 3D and Volume views keep the whole scene within the depth range
+  (`keepSceneInDepth`, the far plane pushed out to the far side of the scene, never nearer than
+  napari-js's), until napari-js takes the scene's extent itself.
+- **3D transcripts by level of detail, with a loading message.** They were read whole at level 0
+  for any view. They are now read at the pyramid level the camera's distance calls for (the
+  markers per screen kept about constant: aggregates far out, every molecule close in on a cell),
+  only the tiles of the part of the section in view, planned again when the camera rests, the tiles
+  cached; "Loading transcripts…" shows on the canvas while they load and draw. "All genes" of a
+  large dataset is drawn this way rather than refused.
+
+- **Building the 3D regions no longer holds the UI.** Placing every class's surface in the world
+  (hundreds of thousands of vertices each, a second and more for a 3D segmentation's 20 cell types)
+  ran on the main thread, and every mesh came back from the worker copied. The vertices are now
+  placed in the cells' worker (`placeInWorker`, op `place`), each surface coming up as its own
+  placement lands; meshes and placements are handed over, not copied; the individual cells are
+  placed there too, and redrawn a few chunks at a time.
+- **Cell types picked on the canvas in spatial 3D.** With the selection tool, a click on a cell
+  type's surface picks its class, as in the Volume view (the Region Editor highlights it, the
+  others fading); spatial 3D had no such picking.
+
+- **The reference volume's checkbox hides it however the 3D view was opened.** A view change while
+  the reference volume was still downloading (as the dataset's region set attaching, or the default
+  boundaries being chosen, makes one) started a second download and added a second volume layer,
+  which the "Reference volume" checkbox never hid. Rebuilds meanwhile now wait for the one load.
+- **The spatial panel's Annotations switch hides every class, its eyes showing it.** Switched off in
+  the spatial views (2D and 3D, or on entering one switched off), every class is hidden as the Region
+  Editor's eyes hide one: its regions in 2D and surfaces in 3D go, and the eyes show it hidden; on
+  again, every class is shown. A class's own eye still works in between.
+
+### Removed
+
+- **The 3D "Show" section's Observations checkbox.** It repeated the Observations section's own
+  checkbox (its header), which shows and hides the same observations.
+
+### Changed
+
+- **Annotations is now Regions, off by default.** The spatial-omics dialog's Annotations section is
+  renamed Regions and moved under the Observations section. Its switch
+  (`SpatialViewState.showAnnotations`, now `false` in `DEFAULT_SPATIAL_VIEW`) starts off. As before,
+  off hides every class in the Region Editor's list (the drawn regions' and the dataset region set's
+  cell types, their surfaces in 3D included), and on shows them all. So in the spatial views they now
+  start hidden until it is switched on. Selecting from the regions still works while they are hidden.
+
+- **Observations: shown as Markers or Cell segmentations, with one colouring for both.** In the
+  spatial-omics dialog the Observations section's header switch shows or hides the observations
+  again. For a dataset with a cell segmentation, a "Show as" toggle picks Markers OR Cell
+  segmentations, and the switch shows the one toggled, or none. The renderers draw no markers while
+  the cells are drawn (2D and 3D), so the two never show at once. Below the toggle, one "Colour by"
+  colours the markers and the cells alike, so they cannot disagree: Group (the groups list that was
+  the Cells section's: grouping picker, each group's colour and switch, and now a group's name
+  selects its observations, as the key's rows did), Gene, Measurement (a numeric column) or Single
+  colour. Each writes `colorBy` and the cells' `cellColorMode` together. `cellColorMode` gains
+  `column` (the cells coloured by the numeric column `colorBy` names), and while `colorBy` is null
+  with `cellColorMode` `single`, the markers take `cellSingleColor` too. A segmented dataset's
+  markers now start coloured by its cells' grouping. The markers' size and opacity, or the cells'
+  boundaries, drawing and opacity, follow for the one shown; the Cells section, its "Cell Color" and
+  the separate colour-by-column and colour-by-gene pickers are gone.
+
+- **The reference volume is a section of the spatial panel in 3D: Volume.** In the Images section's
+  place (Images is 2D's), its header switch shows and hides the volume and its body holds the
+  volume's opacity. The Observations section no longer has a "Reference volume" checkbox and
+  opacity slider.
+
+- **Up to 22 groups without colours of their own get a colour each.** `DEFAULT_CATEGORICAL_PALETTE`
+  keeps its ten colours and gains twelve more after them, so a grouping of 11 to 22 groups (the
+  MERFISH ileum's 20 cell types) no longer repeats colours by name hash; past 22 the hash still
+  applies. Groupings of ten or fewer, and genes in the first ten slots, keep their colours.
+
 ## [0.17.0] — 2026-11-03
 
 ### Added

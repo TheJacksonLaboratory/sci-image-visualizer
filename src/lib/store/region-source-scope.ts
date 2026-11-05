@@ -133,6 +133,17 @@ export class RegionSourceScope {
     return !!image && !!this.images.get(image)?.planes;
   }
 
+  /** The opener of `image`'s source over all its slices (as attached), or null without one. */
+  planesOpener(image: string | undefined): RegionSourceOpener | null {
+    return (image && this.images.get(image)?.planes?.open) || null;
+  }
+
+  /** Whether `image` has any source: one over all its slices, or one of a slice's own. */
+  hasAny(image: string | undefined): boolean {
+    const sources = image ? this.images.get(image) : undefined;
+    return !!sources && (!!sources.planes || sources.perSlice.size > 0);
+  }
+
   /**
    * The source behind `slice` of `image`, opening it if needed. Resolves null when there is
    * none, and rejects when it cannot be opened.

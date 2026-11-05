@@ -379,6 +379,20 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.hiddenClasses = hidden;
         this.changed();
       });
+    this.regionApi
+      .getCellableClasses3d$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((classes) => {
+        this.cellableClasses = classes;
+        this.changed();
+      });
+    this.regionApi
+      .getIndividualClasses3d$?.()
+      ?.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((classes) => {
+        this.individualClasses = classes;
+        this.changed();
+      });
 
     // A surface clicked in the volume view (with the selection tool) picks its class.
     this.regionApi
@@ -578,6 +592,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   }
 
   /** Hide (or show again) these classes' regions, wherever they are drawn. */
+  /** Classes that can be drawn as individual cells in spatial 3D, and those that are. */
+  protected cellableClasses: ReadonlySet<string> = new Set();
+  protected individualClasses: ReadonlySet<string> = new Set();
+
+  protected setClassesIndividual3d(classes: readonly string[], individual: boolean): void {
+    this.regionApi.setClassesIndividual3d?.(classes, individual);
+  }
+
   protected setClassesHidden(classes: readonly string[], hidden: boolean): void {
     this.regionApi.setClassesHidden?.(classes, hidden);
   }

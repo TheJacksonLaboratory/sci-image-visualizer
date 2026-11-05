@@ -78,6 +78,20 @@ describe('RegionStore region sources', () => {
     expect(store.getRegions()).toEqual([]);
   });
 
+  it('draws the source in the overlays unless another layer draws it, listing it either way', async () => {
+    store.attachRegionSource(tableSource([feature('a', 0)]));
+    await new Promise((r) => setTimeout(r));
+    const drawn: (RegionSourceView | null)[] = [];
+    store.getDrawnRegionSourceView$().subscribe((v) => drawn.push(v));
+    expect(drawn[drawn.length - 1]).not.toBeNull();
+    store.setRegionSourceDrawn(false);
+    expect(drawn[drawn.length - 1]).toBeNull();
+    // Still the source of the slice: listed, selectable and exported.
+    expect(store.getRegionSourceView()).not.toBeNull();
+    store.setRegionSourceDrawn(true);
+    expect(drawn[drawn.length - 1]).toBe(store.getRegionSourceView());
+  });
+
   it('takes features into the working set exactly once, with their id and properties', async () => {
     const source = tableSource([feature('a', 0), feature('b', 20)]);
     store.attachRegionSource(source);

@@ -142,6 +142,45 @@ export function filterTranscripts(
   };
 }
 
+/**
+ * The transcripts of a tile whose z lies in `band` (`[lo, hi)`, see `planeBand`), with their
+ * marker sizes: the 2D view of one plane of a 3D assay. An aggregated entry stands for transcripts
+ * at several depths, so a tile of them is kept whole.
+ */
+export function transcriptsInBand(
+  t: SpatialTranscriptTile,
+  px: Float32Array,
+  band: readonly [number, number],
+): { merged: SpatialTranscriptTile; px: Float32Array } {
+  if (t.aggregated) return { merged: t, px };
+  const keep: number[] = [];
+  for (let i = 0; i < t.count; i++) {
+    const z = t.z[i];
+    if (Number.isFinite(z) && z >= band[0] && z < band[1]) keep.push(i);
+  }
+  if (keep.length === t.count) return { merged: t, px };
+  const pick = <T extends Float32Array | Uint32Array | Uint16Array>(a: T): T => {
+    const out = new (a.constructor as new (n: number) => T)(keep.length);
+    keep.forEach((i, k) => {
+      out[k] = a[i];
+    });
+    return out;
+  };
+  return {
+    merged: {
+      count: keep.length,
+      aggregated: false,
+      x: pick(t.x),
+      y: pick(t.y),
+      z: pick(t.z),
+      weight: pick(t.weight),
+      observation: pick(t.observation),
+      gene: pick(t.gene),
+    },
+    px: pick(px),
+  };
+}
+
 /** The median of `v`, from a sample of about 1024 values. */
 export function median(v: Float32Array): number {
   if (!v.length) return 0;

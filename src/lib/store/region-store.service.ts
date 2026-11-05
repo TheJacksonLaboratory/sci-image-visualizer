@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, combineLatest } from 'rxjs';
+import { distinctUntilChanged, map } from 'rxjs/operators';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { Region, Rectangle, Polygon, MultiPolygon, hydrateBounds } from '../models/region';
@@ -201,6 +202,8 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    */
   private readonly sources = new RegionSourceScope();
   private readonly sourceView$ = new BehaviorSubject<RegionSourceView | null>(null);
+  /** Whether the overlays draw the source (see setRegionSourceDrawn). */
+  private readonly sourceDrawn$ = new BehaviorSubject<boolean>(true);
   /** The region look the user chose (overrides the source's hint), field by field. */
   private userStyle: Partial<RegionStyle> = {};
   /** The current source's style hint. */
@@ -883,6 +886,19 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     return this.sources.has(this.scope.activeImage, this.sourceSlice);
   }
 
+  /** Whether the current image has any region source, over all its slices or a slice's own. */
+  hasAnyRegionSource(): boolean {
+    return this.sources.hasAny(this.scope.activeImage);
+  }
+
+  /**
+   * The opener of the current image's source over all its slices, as attached (see
+   * {@link attachRegionSource}), or null without one: tells whose source it still is.
+   */
+  getPlanesSourceOpener(): RegionSourceOpener | null {
+    return this.sources.planesOpener(this.scope.activeImage);
+  }
+
   /** The slice's region source as a source layer draws it; null without one (or until it opens). */
   getRegionSourceView(): RegionSourceView | null {
     return this.sourceView$.value;
@@ -891,6 +907,26 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
   /** {@link getRegionSourceView} and every change of it (slice, taken ids, class colours). */
   getRegionSourceView$(): Observable<RegionSourceView | null> {
     return this.sourceView$.asObservable();
+  }
+
+  /**
+   * The source view the overlays draw: {@link getRegionSourceView$}, or null while the source is
+   * drawn by another layer instead (see {@link setRegionSourceDrawn}). The Region Editor's list
+   * and the source's other uses keep reading the source itself.
+   */
+  getDrawnRegionSourceView$(): Observable<RegionSourceView | null> {
+    return combineLatest([this.sourceView$, this.sourceDrawn$.pipe(distinctUntilChanged())]).pipe(
+      map(([view, drawn]) => (drawn ? view : null)),
+    );
+  }
+
+  /**
+   * Whether the overlays draw the region source (default), or leave it to another layer that draws
+   * the same outlines (the 2D spatial view's cells, from a 3D segmentation's region set), so they
+   * are not drawn twice. Only the drawing: the source stays attached, listed and editable.
+   */
+  setRegionSourceDrawn(drawn: boolean): void {
+    if (drawn !== this.sourceDrawn$.value) this.sourceDrawn$.next(drawn);
   }
 
   /**

@@ -2,9 +2,11 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  EventEmitter,
   Input,
   NgZone,
   OnChanges,
+  Output,
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -35,12 +37,14 @@ import {
 import { Supersede } from '../../util/supersede';
 
 /**
- * The cells' grouping, as Xenium Explorer's Groups section: the group picker (columns under
- * their section heading, a k-means family once, with its k beside it), CSV import of a new
+ * The observations' grouping, as Xenium Explorer's Groups section: the group picker (columns
+ * under their section heading, a k-means family once, with its k beside it), CSV import of a new
  * grouping, and the grouping's categories with their colours (each one's swatch opens a colour
- * picker), cell counts and show/hide switches.
+ * picker), cell counts and show/hide switches. A group's name selects its observations.
  *
- * Writes only through `controls.setViewState` (`cellTypeColumn`, `hiddenGroups`, `groupColors`).
+ * The Observations section's "Colour by" in Group mode: the grouping colours the markers and the
+ * cells alike. Writes only through `controls.setViewState` (`cellTypeColumn` with `colorBy` and
+ * `cellColorMode`, `hiddenGroups`, `groupColors`).
  */
 @Component({
   selector: 'spatial-groups-panel',
@@ -65,6 +69,10 @@ export class SpatialGroupsPanelComponent implements OnChanges {
   @Input() dataset: SpatialDataset | null = null;
   /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
+  /** The category selected (its code in the grouping), for highlighting its row. */
+  @Input() selectedCategory: number | null = null;
+  /** A group's name was clicked: its category's code in the grouping, to select its observations. */
+  @Output() readonly categoryClicked = new EventEmitter<number>();
 
   /**
    * The group picker: categorical columns under their section heading, a family of
@@ -133,8 +141,27 @@ export class SpatialGroupsPanelComponent implements OnChanges {
   }
 
   onCellTypeColumn(name: string | null): void {
-    // Switched-off groups belong to the grouping they were switched off in.
-    this.controls?.setViewState({ cellTypeColumn: name, hiddenGroups: [] });
+    // Switched-off groups belong to the grouping they were switched off in. The grouping colours
+    // the markers (colorBy) and the cells (cellColorMode) alike.
+    this.controls?.setViewState({
+      cellTypeColumn: name,
+      hiddenGroups: [],
+      cellColorMode: 'group',
+      ...(name ? { colorBy: { kind: 'column', name } } : {}),
+    });
+  }
+
+  /** Group `label`'s category code in the active grouping, or -1. */
+  protected codeOf(label: string): number {
+    const name = this.activeCellTypeColumn;
+    const meta = this.dataset?.columns.find((c) => c.name === name);
+    return meta?.kind === 'categorical' ? meta.categories.indexOf(label) : -1;
+  }
+
+  /** Select (or, selected already, clear) group `label`'s observations. */
+  protected onGroupClicked(label: string): void {
+    const code = this.codeOf(label);
+    if (code >= 0) this.categoryClicked.emit(code);
   }
 
   /** {@link SpatialViewState.hiddenGroups} as a set, for the per-row checks. */

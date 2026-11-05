@@ -1,50 +1,29 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  EventEmitter,
-  Input,
-  OnChanges,
-  Output,
-  SimpleChanges,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { CheckboxModule } from 'primeng/checkbox';
 import { InputSwitchModule } from 'primeng/inputswitch';
-import { DropdownModule } from 'primeng/dropdown';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
-import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
+import { DEFAULT_SPATIAL_VIEW, SpatialViewState, Cells3dStatus } from '../../contracts/display-types';
 import { cellsShown, drawnCellSets } from '../../spatial/lod';
-import { PanelOption, densityColorBarCss, tileOptions } from '../../spatial/spatial-panel-model';
-import type { GenePickerModel } from '../spatial-gene-picker';
-import { SpatialGroupsPanelComponent } from '../spatial-groups-panel/spatial-groups-panel.component';
+import { PanelOption, tileOptions } from '../../spatial/spatial-panel-model';
 
 /**
- * The Cells section, as Xenium Explorer's: the outlines' on/off switch, which boundary set
- * is drawn, how cells are coloured (with the gene, the colour, or the colour bar that
- * goes with it), the {@link SpatialGroupsPanelComponent groups}, and how cells are drawn.
+ * The Observations section's "Cell segmentations" part (projected into it), shown while the
+ * observations are shown as cells: which boundary sets are drawn and how the cells are drawn (fill,
+ * outline, opacity), or in 3D, by cell type or each by itself. Their colour is the section's
+ * shared "Colour by", the markers' too.
  *
  * Writes only through `controls.setViewState`.
  */
 @Component({
   selector: 'spatial-cells-panel',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    CheckboxModule,
-    DropdownModule,
-    InputSwitchModule,
-    InputNumberModule,
-    SelectButtonModule,
-    SliderModule,
-    SpatialGroupsPanelComponent,
-  ],
+  imports: [CommonModule, FormsModule, InputSwitchModule, InputNumberModule, SelectButtonModule, SliderModule],
   templateUrl: './spatial-cells-panel.component.html',
   styleUrls: ['./spatial-cells-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -56,20 +35,33 @@ export class SpatialCellsPanelComponent implements OnChanges {
   @Input() dataset: SpatialDataset | null = null;
   /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
-  /** The gene list the "Gene Expression" colouring picks from, shared with the other
-   *  gene dropdowns. */
-  @Input() genes: GenePickerModel | null = null;
-  /** The observations' continuous colour bar, shown for the gene colouring while it has one. */
-  @Input() colorBarCss: string | null = null;
-  /** Whether the section is expanded. */
-  @Input() open = true;
-  /** Asks to open or close it; two-way with `open`. */
-  @Output() readonly openChange = new EventEmitter<boolean>();
+  /**
+   * In the 3D view: the cells are a 3D segmentation's, drawn by cell type or each by itself, and
+   * the 2D boundaries and draw mode do not apply.
+   */
+  @Input() is3d = false;
+  /** The 3D view's individual cells as they stand (null: none drawn). */
+  @Input() cells3dStatus: Cells3dStatus | null = null;
 
-  /** Virtual-scrolled only past this many options: the scroller earns its complexity for
-   *  a few thousand names, and for eight it adds only overhead — a virtual viewport that
-   *  short swallows the clicks it is meant to forward. */
-  protected readonly geneVirtualScrollFrom = 200;
+  /** How the 3D view draws the cells: one surface per cell type, or each cell by itself. */
+  protected readonly cells3dOptions: PanelOption<SpatialViewState['cells3d']>[] = [
+    { label: 'By cell type', value: 'types' },
+    { label: 'Individual cells', value: 'cells' },
+  ];
+
+  protected onCells3d(mode: SpatialViewState['cells3d']): void {
+    this.controls?.setViewState({ cells3d: mode });
+  }
+
+  /** What the 3D cells' status line says, or null. */
+  protected get cells3dHint(): string | null {
+    const s = this.cells3dStatus;
+    if (!s) return null;
+    const n = s.shown.toLocaleString();
+    if (s.building) return s.shown ? `Building cells… ${n} shown so far` : 'Building cells…';
+    if (s.capped) return `${n} cells shown, nearest the centre of the view. Zoom in or move to see the others.`;
+    return `${n} cells shown, each by itself.`;
+  }
 
   protected readonly cellDrawOptions: PanelOption<SpatialViewState['cellDraw']>[] = [
     { label: 'Fill', value: 'fill' },
@@ -89,11 +81,6 @@ export class SpatialCellsPanelComponent implements OnChanges {
    * More sets keep the one-of choice.
    */
   protected boundarySets: { name: string; label: string }[] = [];
-  /** Cell colour modes on offer (Xenium Explorer's "Cell Color"). */
-  protected cellColorOptions: PanelOption<SpatialViewState['cellColorMode']>[] = [];
-  /** The density colour bar, rebuilt only when its colormap changes (a 256-entry LUT). */
-  protected densityColorBarCss = '';
-  private densityBarFor: SpatialViewState['densityColormap'] | undefined = undefined;
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['dataset']) {
@@ -102,11 +89,6 @@ export class SpatialCellsPanelComponent implements OnChanges {
       this.boundarySets = [...(this.dataset?.polygonTiles?.sets ?? [])]
         .sort((a, b) => (a.name === 'cell' ? -1 : b.name === 'cell' ? 1 : 0))
         .map((set) => ({ name: set.name, label: set.label }));
-      this.cellColorOptions = options.cellColorOptions;
-    }
-    if (this.densityBarFor !== this.view.densityColormap || !this.densityColorBarCss) {
-      this.densityBarFor = this.view.densityColormap;
-      this.densityColorBarCss = densityColorBarCss(this.view.densityColormap);
     }
   }
 
@@ -172,17 +154,5 @@ export class SpatialCellsPanelComponent implements OnChanges {
   protected onCellOpacityPercent(v: number | null): void {
     if (v === null || !Number.isFinite(v)) return;
     this.controls?.setViewState({ cellOpacity: Math.min(1, Math.max(0.05, v / 100)) });
-  }
-
-  protected onCellColorMode(mode: SpatialViewState['cellColorMode']): void {
-    this.controls?.setViewState({ cellColorMode: mode });
-  }
-
-  protected onCellColorGene(gene: string | null): void {
-    this.controls?.setViewState({ cellColorGene: gene });
-  }
-
-  protected onCellSingleColor(hex: string): void {
-    this.controls?.setViewState({ cellSingleColor: hex });
   }
 }

@@ -94,7 +94,7 @@
 
     <!-- Stack controls -->
     <toolbar-stack-controls
-      *ngIf="imageInfo?.isStack"
+      *ngIf="imageInfo?.isStack || (planeSlices && showsLiveSliceScrubber)"
       [liveScrubber]="showsLiveSliceScrubber"
       [stackToggle]="!showsLiveSliceScrubber && !isNapariMode && !isSpatialMode"
       [showStack]="!!imageInfo?.showStack"

@@ -82,6 +82,19 @@
           tooltipPosition="bottom"
           (click)="$event.stopPropagation(); toggle3d.emit(c.name)"
         ></i>
+        <i
+          *ngIf="volume && cellable.has(c.name)"
+          class="pi pi-th-large row-3d row-cells"
+          [class.on]="individual.has(c.name)"
+          role="button"
+          [attr.aria-pressed]="individual.has(c.name)"
+          [attr.aria-label]="'Show ' + c.name + ' as individual cells'"
+          [pTooltip]="individual.has(c.name) ? 'Show as one surface' : 'Show each cell by itself'"
+          tooltipPosition="bottom"
+          (click)="
+            $event.stopPropagation(); toggleCells.emit({ classes: [c.name], individual: !individual.has(c.name) })
+          "
+        ></i>
         <button
           pButton
           type="button"

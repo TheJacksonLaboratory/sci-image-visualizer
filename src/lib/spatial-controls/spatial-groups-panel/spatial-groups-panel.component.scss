@@ -22,3 +22,22 @@
     outline-offset: 1px;
   }
 }
+
+// A group's name, as the button that selects its observations (the old key's rows did this).
+.sc-group-select {
+  padding: 0 0.2rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:hover {
+    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  }
+  &.selected {
+    background: var(--highlight-bg, rgba(33, 150, 243, 0.15));
+    font-weight: 600;
+  }
+}

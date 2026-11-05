@@ -3,71 +3,51 @@
      colours them. The lead section for datasets without cell outlines. -->
   <div class="sc-panel" [class.open]="open">
     <div class="sc-panel-head" (click)="openChange.emit(!open)">
+      <!-- Shows or hides the observations, as whichever the toggle below shows them as. -->
       <p-checkbox
         [binary]="true"
-        [ngModel]="view.showPoints"
+        [ngModel]="observationsShown"
         (click)="$event.stopPropagation()"
-        (onChange)="onShowPoints($event.checked)"
+        (onChange)="onShowObservations($event.checked)"
+        pTooltip="Show the observations"
+        tooltipPosition="top"
       ></p-checkbox>
       <span class="sc-panel-title">Observations</span>
       <i class="pi" [class.pi-chevron-down]="open" [class.pi-chevron-right]="!open"></i>
     </div>
     <div class="sc-panel-body" *ngIf="open">
-      <small class="sc-hint" *ngIf="hasCells && !is3d">
-        One circle per cell, at every zoom. Cell outlines are drawn over the circles once cells are big enough on
-        screen to outline.
-      </small>
-      <!-- Colour source. Column and gene are mutually exclusive: picking one
-     clears the other, so what drives the colours is never ambiguous. -->
-      <div class="sc-section">
-        <label class="sc-lbl" for="sc-column">Colour by column</label>
-        <p-dropdown
-          inputId="sc-column"
-          [options]="columnOptions"
+      <!-- With a cell segmentation: shown as the markers OR as the cells' own shapes, one at a time.
+           One colouring for either, below. -->
+      <div class="sc-row sc-show-as" *ngIf="cellsAvailable">
+        <span class="sc-lbl">Show as</span>
+        <p-selectButton
+          [options]="showAsOptions"
           optionLabel="label"
           optionValue="value"
-          [ngModel]="selectedColumn"
-          (ngModelChange)="onColumn($event)"
-          placeholder="None (flat colour)"
-          appendTo="body"
-          styleClass="sc-full"
-        ></p-dropdown>
+          [ngModel]="shownAs"
+          (ngModelChange)="onShownAs($event)"
+          [allowEmpty]="false"
+          styleClass="sc-buttons"
+        ></p-selectButton>
       </div>
 
-      <ng-container *ngIf="genes?.state$ | async as gene">
-        <div class="sc-section" *ngIf="ds.features">
-          <label class="sc-lbl" for="sc-gene">Colour by gene</label>
-          <!-- A filterable dropdown, not a free-text box: the genes are visible before
-       anything is typed, and each keystroke narrows a list the user can see.
-       Virtual-scrolled because a targeted panel runs to a few thousand names. -->
-          <p-dropdown
-            inputId="sc-gene"
-            [options]="gene.options"
-            optionLabel="label"
-            optionValue="value"
-            [ngModel]="selectedGene"
-            (ngModelChange)="onGene($event)"
-            [filter]="true"
-            filterBy="label"
-            [resetFilterOnHide]="true"
-            (onFilter)="genes?.onFilter($event.filter)"
-            (onShow)="genes?.ensureList()"
-            [showClear]="true"
-            [virtualScroll]="gene.options.length > geneVirtualScrollFrom"
-            [virtualScrollItemSize]="30"
-            [emptyFilterMessage]="gene.remote ? 'No match — keep typing' : 'No match'"
-            [emptyMessage]="gene.remote ? 'Type to search genes' : 'No genes'"
-            appendTo="body"
-            placeholder="Search {{ ds.features.count | number }} genes…"
-            styleClass="sc-full"
-          ></p-dropdown>
-          <small class="sc-hint" *ngIf="gene.failed">Gene lookup failed.</small>
-        </div>
+      <spatial-color-by
+        [controls]="controls"
+        [dataset]="ds"
+        [view]="view"
+        [genes]="genes"
+        [legend]="legend"
+        [colorBarCss]="colorBarCss"
+        [selectedCategory]="selectedCategory"
+        [colormapOptions]="colormapOptions"
+        (categoryClicked)="categoryClicked.emit($event)"
+      ></spatial-color-by>
 
+      <ng-container *ngIf="genes?.state$ | async as gene">
         <!-- Which observations are drawn at all, by what they express. Several genes at
-       once, unlike the colour, which reads one: picking genes here hides every
-       observation that expresses none of them (or not all of them), and by default
-       colours (and, in 2D, marks) each drawn one by its gene. -->
+        once, unlike the colour, which reads one: picking genes here hides every
+        observation that expresses none of them (or not all of them), and by default
+        colours (and, in 2D, marks) each drawn one by its gene. -->
         <div class="sc-section" *ngIf="ds.features">
           <label class="sc-lbl" for="sc-show-genes">Show observations expressing</label>
           <p-multiSelect
@@ -137,13 +117,13 @@
               [ngModel]="view.observationGenesColorBy"
               (onChange)="onObservationGenesColorBy($event.checked)"
               label="Colour by these genes"
-              pTooltip="Each observation in the colour (and, in 2D, the icon) of the picked gene it expresses most, relative to that gene's highest value. Off, Colour by column or gene applies."
+              pTooltip="Each observation in the colour (and, in 2D, the icon) of the picked gene it expresses most, relative to that gene's highest value. Off, Colour by applies."
               tooltipPosition="top"
             ></p-checkbox>
           </div>
           <small class="sc-hint" *ngIf="view.observationGenes.length">{{ geneFilterHint }}</small>
           <!-- The filter is never dropped silently: a failed expression read keeps the observations
-               as they were drawn, and says so. -->
+                as they were drawn, and says so. -->
           <small class="sc-hint sc-error" *ngIf="view.observationGenes.length && (geneFilterFailed$ | async)">
             The expression of the picked genes could not be read, so the observations still show the previous
             filter.
@@ -152,42 +132,43 @@
         </div>
       </ng-container>
 
-      <spatial-key
-        [controls]="controls"
-        [dataset]="ds"
-        [view]="view"
-        [legend]="legend"
-        [colorBarCss]="colorBarCss"
-        [selectedCategory]="selectedCategory"
-        [colormapOptions]="colormapOptions"
-        (categoryClicked)="categoryClicked.emit($event)"
-      ></spatial-key>
+      <!-- Markers: how they are drawn. -->
+      <ng-container *ngIf="!cellsAvailable || shownAs === 'markers'">
+        <div class="sc-subhead">Markers</div>
+        <div class="sc-section">
+          <div class="sc-row">
+            <span class="sc-lbl">Point size</span>
+            <p-slider
+              [ngModel]="view.pointScale"
+              [min]="0.25"
+              [max]="5"
+              [step]="0.25"
+              (onChange)="onPointScale($event.value)"
+            ></p-slider>
+            <span class="sc-val">{{ view.pointScale }}×</span>
+          </div>
+          <div class="sc-row">
+            <span class="sc-lbl">Opacity</span>
+            <p-slider
+              [ngModel]="view.opacity"
+              [min]="0.1"
+              [max]="1"
+              [step]="0.05"
+              (onChange)="onOpacity($event.value)"
+            ></p-slider>
+            <span class="sc-val">{{ view.opacity }}</span>
+          </div>
+        </div>
+      </ng-container>
 
-      <!-- Display -->
-      <div class="sc-section">
-        <div class="sc-row">
-          <span class="sc-lbl">Point size</span>
-          <p-slider
-            [ngModel]="view.pointScale"
-            [min]="0.25"
-            [max]="5"
-            [step]="0.25"
-            (onChange)="onPointScale($event.value)"
-          ></p-slider>
-          <span class="sc-val">{{ view.pointScale }}×</span>
-        </div>
-        <div class="sc-row">
-          <span class="sc-lbl">Opacity</span>
-          <p-slider
-            [ngModel]="view.opacity"
-            [min]="0.1"
-            [max]="1"
-            [step]="0.05"
-            (onChange)="onOpacity($event.value)"
-          ></p-slider>
-          <span class="sc-val">{{ view.opacity }}</span>
-        </div>
-      </div>
+      <!-- Cell segmentations: how the cells are drawn, projected by the dialog. -->
+      <ng-container *ngIf="cellsAvailable && shownAs === 'cells'">
+        <ng-content select="spatial-cells-panel"></ng-content>
+      </ng-container>
+
+      <!-- The selected cell's (or cell type's, or region's) observations, by group: through the
+           volume in 3D, on the plane shown in 2D. -->
+      <spatial-selection-observations [controls]="controls" [is3d]="is3d"></spatial-selection-observations>
     </div>
   </div>
 
@@ -281,39 +262,8 @@
      the anatomy alone. -->
   <div class="sc-section" *ngIf="is3d">
     <span class="sc-lbl">Show</span>
-    <div class="sc-row" *ngIf="ds.volume">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="view.showVolume"
-        (onChange)="onShowVolume($event.checked)"
-        label="Reference volume"
-        pTooltip="The registered anatomy the observations sit in"
-        tooltipPosition="top"
-      ></p-checkbox>
-    </div>
-    <!-- The backdrop's own opacity: reading the cloud or a density field
-       through the anatomy means turning the anatomy down, not the data. -->
-    <div class="sc-row" *ngIf="ds.volume && view.showVolume">
-      <span class="sc-lbl">Volume opacity</span>
-      <p-slider
-        [ngModel]="view.volumeOpacity"
-        [min]="0.05"
-        [max]="1"
-        [step]="0.05"
-        (onChange)="onVolumeOpacity($event.value)"
-      ></p-slider>
-      <span class="sc-val">{{ view.volumeOpacity }}</span>
-    </div>
-    <div class="sc-row">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="view.showPoints"
-        (onChange)="onShowPoints($event.checked)"
-        label="Observations"
-        pTooltip="The measured cells. Hide them to read the density volumes underneath"
-        tooltipPosition="top"
-      ></p-checkbox>
-    </div>
+    <!-- The reference volume is the Volume section's, the observations this section's own header
+       checkbox. -->
     <!-- Only for data that really is sectioned; a continuous z has no sections
        to step through. -->
     <div class="sc-row" *ngIf="view.showPoints && isSectioned">

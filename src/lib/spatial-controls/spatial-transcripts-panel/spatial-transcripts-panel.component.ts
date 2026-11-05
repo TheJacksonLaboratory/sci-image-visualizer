@@ -49,6 +49,7 @@ import type { GenePickerModel } from '../spatial-gene-picker';
 import { colormapNodeFor } from '../spatial-key/spatial-key.component';
 import { SpatialGeneTreeComponent } from '../spatial-gene-tree/spatial-gene-tree.component';
 import { SpatialMarkerGenesFormComponent } from '../spatial-marker-genes-form/spatial-marker-genes-form.component';
+import { SpatialSelectionTranscriptsComponent } from '../spatial-selection-transcripts/spatial-selection-transcripts.component';
 import { hasGeneFilter } from '../../spatial/spatial-gene-filter';
 
 /** One item of the gene list's '⋮' menu. */
@@ -87,6 +88,7 @@ export interface GeneMenuItem {
     TreeSelectModule,
     SpatialGeneTreeComponent,
     SpatialMarkerGenesFormComponent,
+    SpatialSelectionTranscriptsComponent,
   ],
   templateUrl: './spatial-transcripts-panel.component.html',
   styleUrls: ['./spatial-transcripts-panel.component.scss'],
@@ -97,6 +99,8 @@ export class SpatialTranscriptsPanelComponent implements OnChanges {
   @Input() controls: ISpatialControls | null = null;
   /** The dataset on offer, or null. */
   @Input() dataset: SpatialDataset | null = null;
+  /** In spatial 3D (the transcripts in selection are then the whole volume's). */
+  @Input() is3d = false;
   /** The current spatial view state: what is drawn, and how. */
   @Input() view: SpatialViewState = DEFAULT_SPATIAL_VIEW;
   /** The gene list the transcript genes are picked from, shared with the other gene dropdowns. */

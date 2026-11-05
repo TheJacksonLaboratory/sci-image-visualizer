@@ -63,3 +63,50 @@ export function hoverText(source: HoverSource | null, index: number): string[] |
   const unit = source.unit ? ` ${source.unit}` : '';
   return [`${formatValue(value)}${unit}`, source.name];
 }
+
+/**
+ * What the 3D view says of a cell under the pointer (a 3D segmentation's, drawn by itself or as
+ * its type's surface): its type (the cell-type column), its id, and a few of its measurements.
+ */
+export interface CellInfo {
+  /** The cell-type column, its categories and each observation's code (null without one). */
+  typeName: string | null;
+  categories: readonly string[];
+  codes: Uint16Array | null;
+  /** Cells per category, by code. */
+  counts: Uint32Array | null;
+  ids?: readonly string[];
+  /** Measurements shown (the dataset's continuous columns, a few). */
+  measures: readonly { name: string; values: Float32Array; unit?: string }[];
+}
+
+/** The tooltip of cell `index`: its type, its id, the colouring's value (when not the type), measurements. */
+export function cellText(info: CellInfo | null, index: number, color: HoverSource | null): string[] | null {
+  if (!info || index < 0) return null;
+  const code = info.codes?.[index];
+  const type = code === undefined ? undefined : info.categories[code];
+  const lines = [
+    type ?? 'Cell',
+    info.ids?.[index] !== undefined ? `Cell ${info.ids[index]}` : `Cell #${index + 1}`,
+  ];
+  if (color && color.name !== info.typeName) {
+    const said = hoverText(color, index);
+    if (said) lines.push(`${said[1]}: ${said[0]}`);
+  }
+  for (const m of info.measures) {
+    if (m.name === color?.name) continue;
+    const v = m.values[index];
+    if (v !== undefined && Number.isFinite(v))
+      lines.push(`${m.name}: ${formatValue(v)}${m.unit ? ` ${m.unit}` : ''}`);
+  }
+  return lines;
+}
+
+/** The tooltip of a cell type's surface: its name (and title), and how many cells it has. */
+export function cellTypeText(info: CellInfo | null, key: string, label?: string): string[] {
+  const lines = [label ?? key];
+  const code = info ? info.categories.indexOf(key) : -1;
+  const n = code >= 0 ? info?.counts?.[code] : undefined;
+  if (n !== undefined) lines.push(`${n.toLocaleString()} cells${info?.typeName ? ` · ${info.typeName}` : ''}`);
+  return lines;
+}

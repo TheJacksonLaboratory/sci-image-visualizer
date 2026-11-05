@@ -19,6 +19,7 @@ import {
   median,
   mergePolygonTiles,
   mergeTranscriptTiles,
+  transcriptsInBand,
 } from './spatial-tile-merge';
 
 const tile = (xs: number[], ys: number[], weight = 1): SpatialTranscriptTile => ({
@@ -103,6 +104,23 @@ describe('filtering hidden groups and genes', () => {
     expect(Array.from(out.merged.x)).toEqual([1, 3]); // hidden cell and hidden gene gone
     expect(Array.from(out.px)).toEqual([10, 30]);
     expect(filterTranscripts(t, px, null, null).merged).toBe(t);
+  });
+
+  it("keeps the transcripts in a plane's z band, with their sizes", () => {
+    const t = tile([1, 2, 3, 4], [0, 0, 0, 0]);
+    t.z = Float32Array.of(0, 5, 9.9, NaN);
+    const px = Float32Array.of(10, 20, 30, 40);
+    const out = transcriptsInBand(t, px, [5, 10]);
+    expect(Array.from(out.merged.x)).toEqual([2, 3]);
+    expect(Array.from(out.px)).toEqual([20, 30]);
+    expect(out.merged.count).toBe(2);
+    expect(transcriptsInBand(t, px, [-Infinity, Infinity]).merged.count).toBe(3); // NaN is on no plane
+  });
+
+  it('keeps a tile of aggregates whole: each stands for several depths', () => {
+    const t = tile([1, 2], [0, 0], 4);
+    t.z = Float32Array.of(0, 50);
+    expect(transcriptsInBand(t, Float32Array.of(1, 2), [40, 60]).merged).toBe(t);
   });
 
   it('names the selected genes switched off with their eye toggle', () => {

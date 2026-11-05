@@ -595,4 +595,21 @@ describe('SpatialDataHttpService', () => {
       expect(ds?.embeddings).toEqual([{ name: 'X_umap', label: 'UMAP', dims: 2 }]);
     });
   });
+
+  it("opens a boundary set's region set beside the datasets, through the host's HttpClient", async () => {
+    const opening = service.openRegionSet('eyJ-id_x');
+    const info = {
+      featureCount: 2,
+      bounds: null,
+      tileSize: 256,
+      levels: 1,
+      planes: [0, 1],
+      classColors: {},
+      sliceZ: [0, 5],
+    };
+    http.expectOne(`${BASE}/regions/eyJ-id_x/info`).flush(JSON.stringify(info));
+    const source = await opening;
+    expect(source.info.sliceZ).toEqual([0, 5]);
+    source.dispose();
+  });
 });
