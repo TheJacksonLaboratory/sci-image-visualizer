@@ -9,6 +9,12 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Observations "Show as" toggle stays on one line.** The Markers / Cell segmentations toggle now
+  sits right after its "Show as" label instead of starting at the panel's centre, where it had too
+  little room and "Cell segmentations" wrapped under "Markers".
+
 ## [0.18.0] — 2026-11-05
 
 ### Added
