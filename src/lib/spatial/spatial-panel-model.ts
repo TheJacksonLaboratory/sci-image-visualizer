@@ -290,7 +290,9 @@ export function withGeneGroups(
 
 /**
  * The patch that adds marker groups: the groups, their genes appended to the selection,
- * transcripts coloured by cluster (as their cells are), and switched on when off.
+ * transcripts coloured by cluster (as their cells are), and switched on when off. "All genes" is
+ * switched off, as an import does: it shows every gene of the dataset in one flat list and ignores
+ * the selection, so the clusters' tree would not be shown.
  */
 export function markerGenesPatch(
   view: Pick<SpatialViewState, 'transcriptGeneGroups' | 'transcriptGenes' | 'transcriptMode'>,
@@ -301,6 +303,7 @@ export function markerGenesPatch(
   return {
     transcriptGeneGroups: withGeneGroups(view, groups),
     transcriptGenes: genes,
+    transcriptAllGenes: false,
     transcriptColorBy: 'cluster',
     ...(view.transcriptMode === 'off' ? { transcriptMode: 'circles' as const } : {}),
   };

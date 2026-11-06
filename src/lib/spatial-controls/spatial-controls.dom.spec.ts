@@ -559,6 +559,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
           { name: 'B', genes: ['Mbp'] },
         ],
         transcriptGenes: ['Ttr', 'Mbp'],
+        transcriptAllGenes: false,
         transcriptColorBy: 'cluster',
         transcriptMode: 'circles',
       });

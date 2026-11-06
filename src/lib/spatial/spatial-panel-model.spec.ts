@@ -251,6 +251,8 @@ describe('spatial-panel-model', () => {
           { name: 'A', genes: ['g1', 'g2'] },
         ],
         transcriptGenes: ['g1', 'x', 'g2'],
+        // "All genes" would show every gene, flat, instead of the clusters' tree.
+        transcriptAllGenes: false,
         transcriptColorBy: 'cluster',
         transcriptMode: 'circles',
       });

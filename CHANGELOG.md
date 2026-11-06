@@ -9,6 +9,13 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Adding marker genes shows them by cluster even with "All genes" on.** "Add marker genes"
+  selected each cluster's genes and grouped them, but left "All genes" on, so the Selected genes
+  tree kept listing every gene of the dataset, flat, instead of a branch per cluster (or cell
+  type). It now switches "All genes" off, as importing gene groups does (`markerGenesPatch`).
+
 ## [0.18.1] — 2026-11-05
 
 ### Fixed
