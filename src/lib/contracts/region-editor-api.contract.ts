@@ -8,6 +8,17 @@ import type { RegionIndexPage, RegionIndexQuery } from '../region-source/region-
 import type { RegionStyle } from '../region-overlay/region-style';
 
 /**
+ * Where the slices of a class's volume are, when they are a region set's planes (see
+ * {@link IRegionEditorApi.getSliceScale$}).
+ */
+export interface SliceScale {
+  /** The planes' mean spacing, in the units of the set's coordinates (the image's pixels). */
+  spacing: number;
+  /** Microns per unit of those coordinates, when the set says. */
+  micronsPerUnit: number | null;
+}
+
+/**
  * Public, implementation-agnostic surface that the Region Editor (an *external*
  * consumer of the visualization package) depends on. It deals only in
  * **annotation** regions — intensity-profile lines (`Region.isProfile()`) are
@@ -70,6 +81,12 @@ export interface IRegionEditorApi {
 
   // ── image metadata (for region areas in µm²) ──────────────────────────
   getImageMeta(): Observable<IImageMetadata[]>;
+  /**
+   * The scale of the slices {@link getClassVolumes} counts when they are planes the image does not
+   * have itself (a spatial dataset's 3D segmentation slicing its image of one plane), so a volume
+   * is µm³ though the image declares no slice spacing; null otherwise.
+   */
+  getSliceScale$?(): Observable<SliceScale | null>;
 
   // ── import / export ────────────────────────────────────────────────────
   importRegions(geoJsonStr: string): Region[];
@@ -173,7 +190,8 @@ export interface IRegionEditorApi {
   ): Promise<void>;
   /**
    * Each class's volume over the whole stack, in px² × slices: its outlines' area on every slice,
-   * one slice thick. Times the pixel size and the slice spacing, µm³.
+   * one slice thick. Times the pixel size and the slice spacing (the image's `mppZ`, else
+   * {@link getSliceScale$}'s), µm³.
    */
   getClassVolumes?(classes: readonly string[]): Promise<Record<string, number>>;
   /** Highlight the surfaces of these group keys in the volume view (none: all as usual). */

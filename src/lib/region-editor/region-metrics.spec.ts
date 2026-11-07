@@ -1,7 +1,7 @@
 import { MultiPolygon, Rectangle, Region } from '../models/region';
 import { makePolygon } from '../models/polygon-factory';
 import { IImageMetadata } from '../contracts/image.contract';
-import { formatArea, formatVolume, pickMpp, regionAreaPx } from './region-metrics';
+import { formatArea, formatVolume, pickMpp, regionAreaPx, withSliceScale } from './region-metrics';
 
 const region = (bounds: Region['bounds']) => Object.assign(new Region(), { bounds });
 const square = (x0: number, w: number) => makePolygon([x0, x0 + w, x0 + w, x0], [0, 0, w, w]);
@@ -37,6 +37,32 @@ describe('region-metrics', () => {
     ).toBe(125);
     expect(regionAreaPx(region(makePolygon([0, 1], [0, 1])))).toBe(0);
     expect(regionAreaPx(region(undefined as unknown as Region['bounds']))).toBe(0);
+  });
+
+  it("withSliceScale: a region set's planes give the slice spacing, and the pixel size the image lacks", () => {
+    // The image's pixel size, the planes' spacing in its units.
+    expect(withSliceScale({ mppX: 0.5, mppY: 0.5 }, { spacing: 4, micronsPerUnit: null })).toEqual({
+      mppX: 0.5,
+      mppY: 0.5,
+      mppZ: 2,
+    });
+    // The set's µm per unit, for an image without a pixel size.
+    expect(withSliceScale({}, { spacing: 3, micronsPerUnit: 0.25 })).toEqual({
+      mppX: 0.25,
+      mppY: 0.25,
+      mppZ: 0.75,
+    });
+    // The planes, not what an image of one plane says of its own z.
+    expect(withSliceScale({ mppX: 1, mppY: 1, mppZ: 9 }, { spacing: 2, micronsPerUnit: 1 })).toEqual({
+      mppX: 1,
+      mppY: 1,
+      mppZ: 2,
+    });
+    // No unit at all: still voxels.
+    expect(formatVolume(10, withSliceScale({}, { spacing: 2, micronsPerUnit: null }))).toBe('10 voxels');
+    // No planes: the image's own.
+    const own = { mppX: 1, mppY: 1, mppZ: 3 };
+    expect(withSliceScale(own, null)).toBe(own);
   });
 
   it('formatVolume: voxels without a slice spacing, µm³ / mm³ with it, blank when empty', () => {

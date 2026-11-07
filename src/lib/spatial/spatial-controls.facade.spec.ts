@@ -269,3 +269,38 @@ describe('SpatialControlsFacade on a new dataset', () => {
     facade.dispose();
   });
 });
+
+describe('SpatialControlsFacade gene heatmap', () => {
+  function controlsFor(port: Partial<SpatialDataPort>) {
+    const dataset$ = new BehaviorSubject<SpatialDataset | null>(dataset);
+    const ctx = {
+      store: new VisualizerStore(),
+      selectionStore: new SpatialSelectionStore(),
+    } as unknown as SpatialControlsContext;
+    const facade = new SpatialControlsFacade(
+      { getDataset$: () => dataset$, ...port } as unknown as SpatialDataPort,
+      ctx,
+    );
+    return { facade, controls: facade.controls };
+  }
+
+  it('passes the port’s gene heatmap through when it serves all of it', async () => {
+    const tile = jest.fn(async () => new Float32Array([1]));
+    const { facade, controls } = controlsFor({
+      getGeneHeatmap: jest.fn(async () => ({ column: 'cluster' }) as never),
+      getGeneHeatmapMeans: jest.fn(),
+      getGeneHeatmapOrder: jest.fn(),
+      getGeneHeatmapTile: tile,
+    });
+    expect(controls.geneHeatmap).toBeDefined();
+    expect(await controls.geneHeatmap!.tile('cluster', 1, 2, 3, 4, 'gene')).toEqual(new Float32Array([1]));
+    expect(tile).toHaveBeenCalledWith('cluster', 1, 2, 3, 4, 'gene');
+    facade.dispose();
+  });
+
+  it('offers none when the port serves only part of it', () => {
+    const { facade, controls } = controlsFor({ getGeneHeatmap: jest.fn() });
+    expect(controls.geneHeatmap).toBeUndefined();
+    facade.dispose();
+  });
+});

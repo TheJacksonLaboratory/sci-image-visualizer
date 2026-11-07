@@ -10,6 +10,8 @@ import {
   SpatialDensityRaster,
   SpatialEmbedding,
   SpatialEmbeddingMeta,
+  SpatialGeneHeatmap,
+  SpatialGeneHeatmapMeans,
   SpatialFeatureMeta,
   SpatialImageRef,
   SpatialObservations,
@@ -74,13 +76,18 @@ import {
  * GET {base}/spatial/{id}/transcript-summary?box=&genes=&cells= -> SpatialTranscriptSummary
  * GET {base}/spatial/{id}/transcript-counts?genes=A,B -> SpatialTranscriptCounts
  * GET {base}/spatial/{id}/markers/{column}?n=  -> SpatialMarkerGenes
+ * GET {base}/spatial/{id}/heatmap/{column}  -> SpatialGeneHeatmap      (geneHeatmap only)
+ * GET {base}/spatial/{id}/heatmap/{column}/means -> f32[G*K] means, f32[G*K] shares
+ * GET {base}/spatial/{id}/heatmap/{column}/order -> u32[N] observation per column
+ * GET {base}/spatial/{id}/heatmap/{column}/tile/{cx}/{gy}/{tx}/{ty}?scale=expression|gene
+ *                                          -> f32 rows x cols, see geneHeatmapTileShape
  * POST {base}/spatial/{id}/groups?name=    (text/csv `cell_id,group`)
  *                                          -> { column: CategoricalColumnMeta, matched }
  * ```
  *
  * The optional routes are advertised in the manifest (`polygons`, `volume`,
  * `polygonTiles`, `transcriptTiles`, `transcriptBins`, `transcriptGeneBins`,
- * `density`); a server without them never sees them requested.
+ * `density`, `geneHeatmap`); a server without them never sees them requested.
  */
 
 /** Bumped when the layout changes incompatibly; the client refuses anything else. */
@@ -112,6 +119,8 @@ export interface SpatialManifest {
   transcriptBins?: SpatialTranscriptBinsMeta;
   transcriptBinsStatus?: SpatialTranscriptBinsStatus;
   transcriptGeneBins?: SpatialTranscriptGeneBinsMeta;
+  /** The `heatmap/{column}` routes are served. */
+  geneHeatmap?: boolean;
 }
 
 /** `GET /spatial/datasets` */
@@ -422,5 +431,50 @@ export function datasetFromManifest(
     ...(manifest.transcriptBins ? { transcriptBins: manifest.transcriptBins } : {}),
     ...(manifest.transcriptGeneBins ? { transcriptGeneBins: manifest.transcriptGeneBins } : {}),
     ...(manifest.transcriptBinsStatus ? { transcriptBinsStatus: manifest.transcriptBinsStatus } : {}),
+    ...(manifest.geneHeatmap ? { geneHeatmap: true } : {}),
   };
+}
+
+/**
+ * `GET /heatmap/{column}/means` → per gene and group, the mean value and the share of the
+ * group's cells expressing the gene: `f32` genes × groups, then the same again.
+ */
+export function decodeGeneHeatmapMeans(buf: ArrayBuffer, genes: number, groups: number): SpatialGeneHeatmapMeans {
+  assertLittleEndian();
+  const n = genes * groups;
+  assertByteLength(buf, n * 8, 'gene heatmap means');
+  return { means: new Float32Array(buf, 0, n), fractions: new Float32Array(buf, n * 4, n) };
+}
+
+/** `GET /heatmap/{column}/order` → the observation index of each column, `u32`. */
+export function decodeGeneHeatmapOrder(buf: ArrayBuffer, cells: number): Uint32Array {
+  assertLittleEndian();
+  assertByteLength(buf, cells * 4, 'gene heatmap order');
+  return new Uint32Array(buf, 0, cells);
+}
+
+/**
+ * The size of tile (`tx`, `ty`) at column level `cx` and gene level `gy` of a gene heatmap:
+ * the level is `ceil(genes / 2^gy)` rows by `ceil(cells / 2^cx)` columns, cut into
+ * `tileSize` squares. Zero when the tile lies past the level.
+ */
+export function geneHeatmapTileShape(
+  info: Pick<SpatialGeneHeatmap, 'cells' | 'genes' | 'tileSize'>,
+  cx: number,
+  gy: number,
+  tx: number,
+  ty: number,
+): { rows: number; cols: number } {
+  const levelRows = Math.ceil(info.genes.length / 2 ** gy);
+  const levelCols = Math.ceil(info.cells / 2 ** cx);
+  const rows = Math.max(0, Math.min(info.tileSize, levelRows - ty * info.tileSize));
+  const cols = Math.max(0, Math.min(info.tileSize, levelCols - tx * info.tileSize));
+  return { rows, cols };
+}
+
+/** `GET /heatmap/{column}/tile/...` → `rows × cols` `f32`, row-major. */
+export function decodeGeneHeatmapTile(buf: ArrayBuffer, rows: number, cols: number): Float32Array {
+  assertLittleEndian();
+  assertByteLength(buf, rows * cols * 4, 'gene heatmap tile');
+  return new Float32Array(buf, 0, rows * cols);
 }

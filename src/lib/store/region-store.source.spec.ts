@@ -628,6 +628,8 @@ describe('RegionStore region sources', () => {
     store.attachRegionSource(source);
     await flush();
     expect(Object.fromEntries(await store.classVolumes(['A', 'B']))).toEqual({ A: 200, B: 100 });
+    // Each slice as thick as its weight (planes not evenly spaced), from the outlines already read.
+    expect(Object.fromEntries(await store.classVolumes(['A', 'B'], () => 1.5))).toEqual({ A: 300, B: 150 });
     await store.reconstructClasses([{ key: 'A', classes: ['A'] }], 1);
     // The surface at full detail reuses the outlines the volume read.
     expect(reads.mock.calls.map(([classes]) => classes)).toEqual([['A'], ['B']]);
@@ -640,6 +642,7 @@ describe('RegionStore region sources', () => {
       }),
     );
     expect((await store.classVolumes(['A', 'B'])).get('A')).toBe(220);
+    expect((await store.classVolumes(['A'], () => 2)).get('A')).toBe(440);
     const [a] = await store.reconstructClasses([{ key: 'A', classes: ['A'] }], 1);
     expect(Math.max(...Array.from(a.mesh.vertices.filter((_, i) => i % 3 === 0)))).toBeGreaterThan(100);
     expect(reads).toHaveBeenCalledTimes(2);

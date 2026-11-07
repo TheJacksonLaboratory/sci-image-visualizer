@@ -418,6 +418,68 @@ export interface SpatialMarkerGenes {
   }[];
 }
 
+/** One group of a {@link SpatialGeneHeatmap}'s columns. */
+export interface SpatialGeneHeatmapGroup {
+  /** The category's name; cells with none form a last group named `Unassigned`. */
+  name: string;
+  /** Cells in the group. */
+  cells: number;
+  /** Its first column: the cells are sorted by group, in the column's category order. */
+  start: number;
+}
+
+/**
+ * Every gene of a dataset against its cells, the cells sorted by the groups of one categorical
+ * column: the gene heatmap's layout, scale and levels. The values come as tiles
+ * ({@link SpatialDataPort.getGeneHeatmapTile}) and, per group, as means
+ * ({@link SpatialDataPort.getGeneHeatmapMeans}).
+ *
+ * Rows are genes ordered by the group where their mean is highest (in group order), most
+ * specific first, so the matrix reads as a diagonal of marker blocks; genes never detected come
+ * last. Columns are cells sorted by group, ties in observation order.
+ */
+export interface SpatialGeneHeatmap {
+  column: string;
+  /** Cells: the columns. */
+  cells: number;
+  /** Gene names, one per row, in row order. */
+  genes: string[];
+  /** The first this many genes have a value above 0 somewhere; the rest are never detected. */
+  expressedGenes: number;
+  /** Per row: the index in {@link groups} of the gene's peak group, or -1 when never detected. */
+  peakGroup: number[];
+  /** Per row: the gene's largest value over the cells (0 when never detected). */
+  geneMax: number[];
+  /** The largest value over every gene and cell. */
+  max: number;
+  /** The groups, in column order. */
+  groups: SpatialGeneHeatmapGroup[];
+  /** `log1p` when the values are the log of raw counts, `none` when used as stored. */
+  transform: 'log1p' | 'none';
+  /** What a value means, when known (`log1p counts`). */
+  unit?: string;
+  /** Tile width and height, in level pixels. */
+  tileSize: number;
+  /** Column levels at or above this are averaged from the server's stored grid. */
+  baseLevel: number;
+  /** The finest column level served: 0 when a column can be a single cell. */
+  finestLevel: number;
+}
+
+/** A {@link SpatialGeneHeatmap}'s values per group: row-major genes × groups. */
+export interface SpatialGeneHeatmapMeans {
+  /** Mean value of each gene in each group. */
+  means: Float32Array;
+  /** Share of each group's cells in which the gene is detected (value above 0). */
+  fractions: Float32Array;
+}
+
+/**
+ * How a gene heatmap tile's values are scaled: as they are (`expression`), or each gene by its
+ * own largest value (`gene`), so every gene spans 0..1.
+ */
+export type SpatialGeneHeatmapScale = 'expression' | 'gene';
+
 /** Transcript totals for an estimate of how many markers a selection would draw. */
 export interface SpatialTranscriptCounts {
   /** Total transcripts per requested gene, over the whole dataset. */
@@ -467,6 +529,8 @@ export interface SpatialDataset {
   transcriptGeneBins?: SpatialTranscriptGeneBinsMeta;
   /** Present while the server is still building {@link transcriptBins}. */
   transcriptBinsStatus?: SpatialTranscriptBinsStatus;
+  /** The data source serves the gene heatmap ({@link SpatialDataPort.getGeneHeatmap}) for it. */
+  geneHeatmap?: boolean;
   /**
    * Microns per observation coordinate unit — what makes a scale bar possible.
    *

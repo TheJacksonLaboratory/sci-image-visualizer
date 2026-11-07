@@ -49,6 +49,7 @@ import {
   embeddingLayout,
 } from '../../implementations/plotly/omics-trace-builders';
 import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
+import { SpatialGeneHeatmapComponent } from './spatial-gene-heatmap/spatial-gene-heatmap.component';
 import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
 import { SpatialChartWindowComponent } from './spatial-chart-window/spatial-chart-window.component';
 
@@ -111,6 +112,7 @@ let chartInstanceSeq = 0;
     SelectButtonModule,
     TooltipModule,
     SpatialHeatmapControlsComponent,
+    SpatialGeneHeatmapComponent,
     SpatialEmbeddingControlsComponent,
     SpatialChartWindowComponent,
   ],
@@ -285,6 +287,20 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private static readonly HEATMAP_MAX_COLUMNS = 40;
   /** Columns the cap dropped from the last render, for the note. */
   private heatmapHidden = 0;
+  /**
+   * The heatmap's rows: the genes picked (a Plotly chart of their means per group), or every
+   * gene against every cell (the zoomable gene heatmap, where the data source serves it).
+   */
+  protected heatmapRows: 'picked' | 'all' = 'picked';
+  protected readonly heatmapRowOptions = [
+    { label: 'Picked genes', value: 'picked' },
+    { label: 'All genes', value: 'all' },
+  ];
+  /** The dataset says its data source serves the gene heatmap. */
+  private datasetHasGeneHeatmap = false;
+  /** Observation ids, for the gene heatmap's cell labels. */
+  protected observationIds: readonly string[] | null = null;
+  private groupColorMap: { grouping: unknown; colors: Record<string, string> } | null = null;
 
   /** What the map is coloured by — the chart's subject. */
   colorBy: SpatialColorBy | null = null;
@@ -349,6 +365,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
         // its own; anything computed or computing for the previous dataset is dropped.
         const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
+        this.observationIds = dataset?.observations.ids ?? null;
+        this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
         const switched = this.data.onDatasetChanged(
           dataset,
           this.controls?.categoricalColumns() ?? [],
@@ -429,6 +447,43 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const first = this.groupOptions.find((o) => o.value)?.value;
     if (!first) return;
     await this.onGroupBy(first);
+  }
+
+  /** The gene heatmap, where the data source serves it for this dataset. */
+  protected get geneHeatmap() {
+    return this.datasetHasGeneHeatmap ? (this.controls?.geneHeatmap ?? null) : null;
+  }
+
+  /** The gene heatmap is the chart on screen. */
+  protected get showsGeneHeatmap(): boolean {
+    return this.kind === 'heatmap' && this.heatmapRows === 'all' && !!this.geneHeatmap;
+  }
+
+  /**
+   * Each group's colour by name, as the map draws it. The same object until the grouping
+   * changes, since it is an input of the gene heatmap and a new one redraws it.
+   */
+  protected get groupColors(): Record<string, string> {
+    const grouping = this.data.snapshot().grouping;
+    if (this.groupColorMap?.grouping !== grouping) {
+      const colors: Record<string, string> = {};
+      grouping?.categories.forEach((name, i) => (colors[name] = grouping.colors[i]));
+      this.groupColorMap = { grouping, colors };
+    }
+    return this.groupColorMap!.colors;
+  }
+
+  protected onHeatmapRows(rows: 'picked' | 'all'): void {
+    this.heatmapRows = rows;
+    void (async () => {
+      await this.ensureHeatmapGrouping();
+      void this.render();
+    })();
+  }
+
+  /** A gene clicked in the gene heatmap: the map is coloured by it. */
+  protected onGeneHeatmapGene(name: string): void {
+    this.controls?.colorByFeature(name);
   }
 
   protected onHeatmapZScore(on: boolean): void {
@@ -737,7 +792,9 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.
     if (this.kind === 'heatmap') {
-      await this.renderHeatmap();
+      // The gene heatmap draws itself; the Plotly chart behind it is freed.
+      if (this.showsGeneHeatmap) this.purgePlot();
+      else await this.renderHeatmap();
       return;
     }
     // Also independent of the active colour source: the coordinates are the dataset's,

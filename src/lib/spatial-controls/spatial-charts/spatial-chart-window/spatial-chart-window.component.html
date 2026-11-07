@@ -24,6 +24,6 @@
   }"
   styleClass="spatial-detached-dialog"
 >
-  <div [id]="divId" class="sx-detached-plot" [class.sx-plot-fixed]="fixedHeight"></div>
+  <div *ngIf="showPlot" [id]="divId" class="sx-detached-plot" [class.sx-plot-fixed]="fixedHeight"></div>
   <ng-content></ng-content>
 </p-dialog>
