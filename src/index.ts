@@ -30,6 +30,8 @@ export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
+// Whether napari-js (WebGPU) can run: override to force the WebGL / OpenSeadragon fallback.
+export { WEBGPU_PROBE, type WebGpuProbe } from './lib/util/webgpu-support';
 
 // ── Spatial-omics data plane ─────────────────────────────────────────────
 // The wire format the bundled example server speaks, plus a ready-made

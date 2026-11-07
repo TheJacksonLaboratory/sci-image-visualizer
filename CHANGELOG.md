@@ -9,6 +9,24 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Spatial omics without WebGPU.** When the browser grants no WebGPU adapter, the 2D spatial view
+  is drawn on OpenSeadragon with a WebGL2 layer for the observation markers and the gene map, with
+  the same colours, gene filter, selection muting, hover tooltip and click-to-select as the napari-js
+  view (`implementations/spatial-webgl/`; the marker colouring is now shared through
+  `spatial-marker-style.ts`). Not drawn by the fallback yet: the level-of-detail cell outlines,
+  transcripts and density, per-gene marker icons, and datasets that register onto no image.
+- **`WEBGPU_PROBE`** token (public API): whether napari-js can run, asked once per page. Override it
+  to force the WebGL / OpenSeadragon fallback.
+
+### Fixed
+
+- **The napari-js plot types no longer fail outright without WebGPU.** napari-js only records the
+  image in `load()`, so a missing WebGPU surfaced in `plot()`, where nothing falls back, and the
+  render failed with "the renderer could not draw the image". The router now checks for an adapter
+  before routing to napari-js: the 2D types fall back to OpenSeadragon, the 3D types to Plotly.
+
 ## [0.18.1] — 2026-11-05
 
 ### Fixed

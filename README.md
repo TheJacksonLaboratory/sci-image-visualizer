@@ -371,6 +371,8 @@ no Angular compiler required:
 
 ## Documentation
 
+- **[docs/vitessce-comparison.md](docs/vitessce-comparison.md)** — SIV and Vitessce compared: what each
+  does, the gaps in both directions, and what that means for SIV.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how `src/lib` is laid out:
   layers, backends, contracts, stores, regions, tools, workers and testing.
 - **Guides** — [host integration](docs/guides/host-integration.md) ·
