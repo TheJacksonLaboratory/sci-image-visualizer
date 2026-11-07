@@ -1,4 +1,4 @@
-import { inBand, observationsOnPlane, planeBand } from './spatial-planes';
+import { inBand, observationsOnPlane, planeBand, planeSpacing, planeWeights } from './spatial-planes';
 import { SpatialObservations } from '../contracts/spatial-dataset.contract';
 
 describe('spatial planes', () => {
@@ -9,6 +9,18 @@ describe('spatial planes', () => {
       y: new Float32Array(z?.length ?? 0),
       ...(z ? { z: Float32Array.from(z) } : {}),
     }) as SpatialObservations;
+
+  it('gives evenly spaced planes their spacing and one slice each, uneven ones their share of the depth', () => {
+    expect(planeSpacing([0, 1.5, 3, 4.5])).toBe(1.5);
+    expect(planeWeights([0, 1.5, 3, 4.5])).toEqual([1, 1, 1, 1]);
+    expect(planeWeights([4.5, 3, 1.5, 0])).toEqual([1, 1, 1, 1]);
+    // 0, 10, 30: mean spacing 15; bands 10 (the gap to its neighbour), 15 and 20.
+    expect(planeSpacing([0, 10, 30])).toBe(15);
+    expect(planeWeights([0, 10, 30])).toEqual([10 / 15, 1, 20 / 15]);
+    expect(planeSpacing([5])).toBeNull();
+    expect(planeSpacing([2, 2])).toBeNull();
+    expect(planeWeights([2, 2])).toBeNull();
+  });
 
   it('bands each plane halfway to its neighbours, open past the ends', () => {
     const planes = [0, 10, 30];

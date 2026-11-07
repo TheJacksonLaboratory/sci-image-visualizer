@@ -16,6 +16,15 @@ file was added.
   in Spatial omics 3D, the 3D cells; surfaces added afterwards (a class shown, cells still loading)
   follow it.
 
+### Fixed
+
+- **Region Editor class volumes in µm³ over a 3D segmentation.** In Spatial omics 3D, the volumes of
+  the classes of a dataset's 3D segmentation were shown in voxels, because the image it is attached
+  to has a pixel size but no slice spacing. The editor now takes the slice spacing from the
+  segmentation's planes (`getSliceScale$`: their spacing from `sliceZ`, and `micronsPerUnit`), so the
+  volumes are in µm³ (or mm³). Planes that are not evenly spaced each count for their share of the
+  depth (`planeWeights`).
+
 ## [0.18.1] — 2026-11-05
 
 ### Fixed
