@@ -89,7 +89,7 @@ export class SurfaceScene implements NapariScene {
       ? surface3dControls(
           this.ctx,
           () => this.gizmo,
-          () => this.layer,
+          () => (this.layer ? [this.layer] : []),
         )
       : null;
   }

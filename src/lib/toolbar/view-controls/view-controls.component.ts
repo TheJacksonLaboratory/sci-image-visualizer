@@ -31,8 +31,8 @@ export class ViewControlsComponent {
   @Input() activeDragMode: string | null = null;
   /** The 3D camera mode (`turntable` / `orbit` / …). */
   @Input() activeSurface3dMode = 'turntable';
-  /** The napari-js surface (shows the wireframe toggle). */
-  @Input() isNapariSurfaceMode = false;
+  /** A view with surfaces to draw as wireframes: napari-js's surface, volume and spatial 3D. */
+  @Input() showsWireframeToggle = false;
   /** A napari-js 3D view (shows the Resolution dropdown). */
   @Input() isNapari3dMode = false;
   /** Whether the view draws the 3D axes gizmo (shows its toggle). */

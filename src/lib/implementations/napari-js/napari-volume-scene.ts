@@ -12,7 +12,7 @@ import { IIsosurfaceControls, ISurface3dControls } from '../../contracts/visuali
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { AssembledVolume } from './napari-tile-client';
 import { TileDescriptor } from '../tile-server';
-import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
+import { Axes3dGizmo, Box3, surface3dControls, surfaceLayers } from './napari-axes-gizmo';
 import {
   SCATTER3D_MAX_POINTS,
   SCATTER3D_MAX_XY,
@@ -90,7 +90,11 @@ export class VolumeScene implements NapariScene {
     private readonly rendering: 'iso' | 'mip',
   ) {
     // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
-    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
+    this.regionMeshes = new VolumeRegionMeshes(
+      ctx.viewer,
+      (v, f) => placeInWorker(v, f),
+      () => ctx.settings.surfaceWireframe,
+    );
     this.slicePlanes = new VolumeSlicePlanes(ctx.viewer, ctx.host, {
       onMove: (axis, value) => ctx.inZone(() => ctx.slicePlaneMoved(axis, value)),
     });
@@ -407,7 +411,14 @@ export class VolumeScene implements NapariScene {
   }
 
   surface3dControls(): ISurface3dControls | null {
-    return this.view ? surface3dControls(this.ctx, () => this.gizmo) : null;
+    // The wireframe is the region classes' surfaces'.
+    return this.view
+      ? surface3dControls(
+          this.ctx,
+          () => this.gizmo,
+          () => surfaceLayers(this.ctx.viewer),
+        )
+      : null;
   }
 
   /** Gives the camera back napari-js's own depth range (see keepSceneInDepth). */

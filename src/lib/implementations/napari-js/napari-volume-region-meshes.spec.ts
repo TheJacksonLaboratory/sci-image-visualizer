@@ -10,6 +10,8 @@ import {
   sliceZ,
   toWorld,
 } from './napari-volume-region-meshes';
+import { surface3dControls, surfaceLayers } from './napari-axes-gizmo';
+import type { SceneContext } from './napari-scene';
 
 /** napari-js's GPU-free viewer, with the surfaces it holds and the ones it was asked to add. */
 function makeViewer() {
@@ -95,6 +97,32 @@ describe('VolumeRegionMeshes on planes', () => {
 });
 
 describe('VolumeRegionMeshes', () => {
+  it('draws its surfaces as wireframes while the toggle is on, and the toggle switches every surface', () => {
+    const { viewer, v, surfaces } = makeViewer();
+    const settings = { surfaceWireframe: false } as SceneContext['settings'];
+    const meshes = new VolumeRegionMeshes(viewer, undefined, () => settings.surfaceWireframe);
+    meshes.setFrame({ size: [100, 50, 10], world: [100, 50, 10] });
+    meshes.set([mesh('CTX')]);
+    expect(surfaces()[0].wireframe).toBe(false);
+
+    const controls = surface3dControls(
+      { viewer, settings } as SceneContext,
+      () => null,
+      () => surfaceLayers(viewer),
+    );
+    controls.setWireframe!(true);
+    expect(settings.surfaceWireframe).toBe(true);
+    expect(surfaces()[0].wireframe).toBe(true);
+    // A surface added later is drawn as the toggle says.
+    meshes.set([mesh('CTX'), mesh('MB')]);
+    expect(surfaces().map((l) => l.wireframe)).toEqual([true, true]);
+    controls.setWireframe!(false);
+    expect(surfaces().map((l) => l.wireframe)).toEqual([false, false]);
+    expect(controls.wireframe!()).toBe(false);
+    // Only surfaces: the viewer's other layers are left alone.
+    expect(surfaceLayers(viewer)).toHaveLength(v.layers.items.length);
+  });
+
   it('waits for the volume frame, then adds one translucent surface per mesh in its colour', () => {
     const { viewer, surfaces } = makeViewer();
     const meshes = new VolumeRegionMeshes(viewer);
