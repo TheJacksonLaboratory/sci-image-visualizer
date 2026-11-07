@@ -517,6 +517,38 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.sampler.clear();
   }
 
+  // ── the spatial WebGL fallback's hooks (see WebGlSpatialLayer) ─────────
+
+  /** The element a layer drawn over the tiles goes in: OpenSeadragon's canvas element, which
+   *  also holds the region overlay's SVG. Null while no viewer is mounted. */
+  getSpatialLayerHost(): HTMLElement | null {
+    return (this.viewer?.canvas as HTMLElement | undefined) ?? null;
+  }
+
+  /** Call `redraw` on every viewport redraw of the mounted viewer (animated frames and resizes
+   *  included), in the same frame as the tiles. Returns the unsubscribe; a no-op without a viewer. */
+  onViewportRedraw(redraw: () => void): () => void {
+    const viewer = this.viewer;
+    if (!viewer) return () => undefined;
+    const handler = () => redraw();
+    viewer.addHandler('update-viewport', handler);
+    return () => viewer.removeHandler('update-viewport', handler);
+  }
+
+  /** Whether a region tool owns the pointer on the mounted viewer. */
+  regionToolActive(): boolean {
+    return !!(this.overlay as { toolActive?: boolean } | null)?.toolActive;
+  }
+
+  /** Turn OpenSeadragon's click-to-zoom on or off for the mounted viewer. Off in the spatial view,
+   *  where a click selects the class under the cursor (as napari-js's `clickZoomFactor: 0`). */
+  setClickToZoom(enabled: boolean): void {
+    // Typed loosely: the bundled typings leave the live gesture settings off `Viewer`.
+    const settings = (this.viewer as unknown as { gestureSettingsMouse?: { clickToZoom?: boolean } } | null)
+      ?.gestureSettingsMouse;
+    if (settings) settings.clickToZoom = enabled;
+  }
+
   /** This backend's region renderer (the SVG overlay), once a plot is mounted. */
   getRegionOverlay(): IRegionOverlay | null {
     return this.overlay;
