@@ -15,7 +15,7 @@ import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { REGION_IO_PORT, RegionIoPort, ServerRegionPick } from '../contracts/ports/region-io.port';
 import { importFile } from '../region-import/region-import';
 import { PresetSet } from '../models/class-preset';
-import { pickMpp } from './region-metrics';
+import { formatVolume, pickMpp } from './region-metrics';
 import { IImageMetadata } from '../contracts/image.contract';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
@@ -1307,6 +1307,17 @@ describe('RegionEditorComponent — coordinate + geometry editing', () => {
   });
 
   // pickMpp itself is covered in region-metrics.spec.ts.
+
+  it("takes the slice spacing of a region set's planes, so class volumes are µm³", () => {
+    // A 3D segmentation's planes 4 units apart slice an image of one plane at 0.5 µm/px.
+    Object.assign(api, {
+      getImageMeta: () => of([{ mppX: 0.5, mppY: 0.5 }] as IImageMetadata[]),
+      getSliceScale$: () => of({ spacing: 4, micronsPerUnit: null }),
+    });
+    component.ngOnInit();
+    expect(component['mpp']).toEqual({ mppX: 0.5, mppY: 0.5, mppZ: 2 });
+    expect(formatVolume(1000, component['mpp'])).toBe('500 µm³');
+  });
 
   it('regionArea uses physical units when calibration is on a non-[0] entry', () => {
     component['mpp'] = pickMpp([{ mppX: 0 }, { mppX: 2, mppY: 2 }] as IImageMetadata[]);
