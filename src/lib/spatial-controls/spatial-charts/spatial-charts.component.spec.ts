@@ -701,6 +701,61 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  describe('heatmap of all genes', () => {
+    const geneHeatmap = {
+      info: jest.fn(),
+      means: jest.fn(),
+      order: jest.fn(),
+      tile: jest.fn(),
+    };
+
+    it('is offered only where the data source serves it', async () => {
+      await build(controls);
+      component['onKind']('heatmap');
+      await flush();
+      expect(component['geneHeatmap']).toBeNull();
+      expect(component['showsGeneHeatmap']).toBe(false);
+    });
+
+    it('is offered only for a dataset that says it is served', async () => {
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      expect(component['geneHeatmap']).toBeNull();
+      dataset$.next({ ...dataset, geneHeatmap: true });
+      await flush();
+      expect(component['geneHeatmap']).toBe(geneHeatmap);
+    });
+
+    it('replaces the picked genes’ chart, grouped by the heatmap’s column, in the map’s colours', async () => {
+      dataset$.next({ ...dataset, geneHeatmap: true });
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      component['onKind']('heatmap');
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+      (Plotly.purge as jest.Mock).mockClear();
+      component['onHeatmapRows']('all');
+      await flush();
+      await flush();
+      expect(component['showsGeneHeatmap']).toBe(true);
+      expect(component['groupBy']).toBe('region');
+      expect(component['groupColors']).toEqual({ A: '#f00', B: '#00f' });
+      // The same object while the grouping stays, so the heatmap is not redrawn for nothing.
+      expect(component['groupColors']).toBe(component['groupColors']);
+      // No Plotly heatmap behind it.
+      expect(Plotly.react).not.toHaveBeenCalled();
+      expect(Plotly.purge).toHaveBeenCalled();
+
+      component['onHeatmapRows']('picked');
+      await flush();
+      expect(component['showsGeneHeatmap']).toBe(false);
+    });
+
+    it('colours the map by the gene clicked', async () => {
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      component['onGeneHeatmapGene']('Ttr');
+      expect(controls.colorByFeature).toHaveBeenCalledWith('Ttr');
+    });
+  });
+
   describe('heatmap (genes x groups)', () => {
     /**
      * Eight cells, four per category — the class view needs more than the

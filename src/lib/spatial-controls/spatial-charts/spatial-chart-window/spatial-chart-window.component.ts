@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { NgIf } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
 
 /**
@@ -12,7 +13,7 @@ import { DialogModule } from 'primeng/dialog';
 @Component({
   selector: 'spatial-chart-window',
   standalone: true,
-  imports: [DialogModule],
+  imports: [NgIf, DialogModule],
   templateUrl: './spatial-chart-window.component.html',
   styleUrls: ['./spatial-chart-window.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -24,6 +25,8 @@ export class SpatialChartWindowComponent {
   @Input() divId = '';
   /** Whether the drawn layout fixed its own height (and so the window scrolls). */
   @Input() fixedHeight = false;
+  /** Whether the window holds the Plotly chart's div; off when its content is projected. */
+  @Input() showPlot = true;
   /** The window was closed: put the chart back. */
   @Output() readonly closed = new EventEmitter<void>();
   /** The window is up and its div exists: the chart can be drawn into it. */

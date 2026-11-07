@@ -97,7 +97,11 @@ export function kindHelp(
         'groups</b> by default, so a colour says "above or below this gene\'s own ' +
         'average", not "highly expressed". Without that one loud gene saturates the ' +
         'scale and the rest of the panel reads as blank. Turning it off compares ' +
-        'genes on their raw scale instead.'
+        'genes on their raw scale instead.<br><br><b>All genes</b> draws every gene of ' +
+        'the dataset against every cell, the cells sorted by group and the genes by the ' +
+        'group where they peak. Zoomed out, a pixel is the mean of a block of cells and ' +
+        'genes; zoom in for single cells and gene names. Its <b>Groups</b> view is each ' +
+        "gene's mean per group."
       );
     case 'embedding':
       return embeddingHelp(embedding);

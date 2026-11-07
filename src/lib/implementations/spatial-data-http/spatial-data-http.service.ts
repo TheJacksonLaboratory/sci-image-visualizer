@@ -13,6 +13,9 @@ import {
   SpatialPolygonTile,
   SpatialPolygons,
   CategoricalColumnMeta,
+  SpatialGeneHeatmap,
+  SpatialGeneHeatmapMeans,
+  SpatialGeneHeatmapScale,
   SpatialMarkerGenes,
   SpatialTranscriptCounts,
   SpatialTranscriptSummary,
@@ -29,6 +32,10 @@ import {
   decodeDensity,
   decodeEmbedding,
   decodeFeatureVector,
+  decodeGeneHeatmapMeans,
+  decodeGeneHeatmapOrder,
+  decodeGeneHeatmapTile,
+  geneHeatmapTileShape,
   decodePolygonTile,
   decodePolygons,
   decodeRadius,
@@ -124,6 +131,9 @@ export class SpatialDataHttpService implements SpatialDataPort {
   private readonly cache = new Map<string, { value: CachedPayload; bytes: number }>();
   private cachedBytes = 0;
   private static readonly CACHE_LIMIT = 32;
+  /** Gene heatmap layouts by dataset and column: small, and every tile is sized from one. */
+  private readonly heatmaps = new Map<string, Promise<SpatialGeneHeatmap>>();
+  private static readonly HEATMAP_LIMIT = 8;
   private cacheBytes = 256 * MiB;
 
   /** In-flight requests, so double-clicking a gene issues one fetch. */
@@ -224,6 +234,7 @@ export class SpatialDataHttpService implements SpatialDataPort {
     this.manifest = null;
     this.cache.clear();
     this.cachedBytes = 0;
+    this.heatmaps.clear();
     this.inFlight.clear();
     this.tileCache.clear();
     this.tileBytes.clear();
@@ -441,6 +452,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
       const columns = current.columns.filter((c) => c.name !== column.name).concat(column);
       this.manifest = { ...this.manifest, columns };
       this.uncache(`column:${column.name}`);
+      // A re-import keeps the name and moves cells: its heatmap is another.
+      this.heatmaps.delete(`${manifest.id}\u0000${column.name}`);
       this.dataset$.next({ ...current, columns });
     }
     return { column, matched: body.matched };
@@ -454,6 +467,67 @@ export class SpatialDataHttpService implements SpatialDataPort {
         `${this.baseUrl}spatial/${encodeURIComponent(manifest.id)}/markers/${encodeURIComponent(column)}?n=${perGroup}`,
       ),
     );
+  }
+
+  /**
+   * The gene heatmap of `column`. No timeout: the first request for a column makes the server
+   * read the whole expression matrix once, as the marker genes do.
+   */
+  getGeneHeatmap(column: string): Promise<SpatialGeneHeatmap> {
+    const manifest = this.requireManifest();
+    const key = `${manifest.id}\u0000${column}`;
+    const hit = this.heatmaps.get(key);
+    if (hit) return hit;
+    const load = firstValueFrom(
+      this.http.get<SpatialGeneHeatmap>(`${this.baseUrl}${this.heatmapPath(manifest.id, column)}`),
+    );
+    // Every tile is sized from it, so it is asked for once; a failure is not kept.
+    load.catch(() => {
+      if (this.heatmaps.get(key) === load) this.heatmaps.delete(key);
+    });
+    this.heatmaps.set(key, load);
+    while (this.heatmaps.size > SpatialDataHttpService.HEATMAP_LIMIT) {
+      this.heatmaps.delete(this.heatmaps.keys().next().value!);
+    }
+    return load;
+  }
+
+  async getGeneHeatmapMeans(column: string): Promise<SpatialGeneHeatmapMeans> {
+    const manifest = this.requireManifest();
+    const info = await this.getGeneHeatmap(column);
+    const buf = await firstValueFrom(
+      this.http.get(`${this.baseUrl}${this.heatmapPath(manifest.id, column)}/means`, {
+        responseType: 'arraybuffer',
+      }),
+    );
+    return decodeGeneHeatmapMeans(buf, info.genes.length, info.groups.length);
+  }
+
+  async getGeneHeatmapOrder(column: string): Promise<Uint32Array> {
+    const manifest = this.requireManifest();
+    const buf = await this.getBinary(`${this.heatmapPath(manifest.id, column)}/order`);
+    return decodeGeneHeatmapOrder(buf, manifest.count);
+  }
+
+  async getGeneHeatmapTile(
+    column: string,
+    cx: number,
+    gy: number,
+    tx: number,
+    ty: number,
+    scale: SpatialGeneHeatmapScale,
+  ): Promise<Float32Array> {
+    const manifest = this.requireManifest();
+    const info = await this.getGeneHeatmap(column);
+    const { rows, cols } = geneHeatmapTileShape(info, cx, gy, tx, ty);
+    const buf = await this.getBinary(
+      `${this.heatmapPath(manifest.id, column)}/tile/${cx}/${gy}/${tx}/${ty}?scale=${scale}`,
+    );
+    return decodeGeneHeatmapTile(buf, rows, cols);
+  }
+
+  private heatmapPath(id: string, column: string): string {
+    return `spatial/${encodeURIComponent(id)}/heatmap/${encodeURIComponent(column)}`;
   }
 
   getTranscriptCounts(genes: string[]): Promise<SpatialTranscriptCounts> {

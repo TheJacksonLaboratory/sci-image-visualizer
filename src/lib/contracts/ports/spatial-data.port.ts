@@ -9,6 +9,9 @@ import {
   SpatialEmbedding,
   SpatialPolygonTile,
   CategoricalColumnMeta,
+  SpatialGeneHeatmap,
+  SpatialGeneHeatmapMeans,
+  SpatialGeneHeatmapScale,
   SpatialMarkerGenes,
   SpatialPolygons,
   SpatialTranscriptCounts,
@@ -168,6 +171,31 @@ export interface SpatialDataPort {
    * slow the first time: the server makes one pass over the expression matrix.
    */
   getMarkerGenes?(column: string, perGroup?: number): Promise<SpatialMarkerGenes>;
+
+  /**
+   * The gene heatmap of categorical `column`: every gene against every cell, the cells sorted by
+   * group. Optional, as are the three below, which a host implements together or not at all.
+   * Possibly slow the first time: the server makes one pass over the expression matrix, then
+   * keeps the result.
+   */
+  getGeneHeatmap?(column: string): Promise<SpatialGeneHeatmap>;
+  /** The heatmap's mean of each gene in each group, and the share of the group expressing it. */
+  getGeneHeatmapMeans?(column: string): Promise<SpatialGeneHeatmapMeans>;
+  /** The observation index of each of the heatmap's columns. */
+  getGeneHeatmapOrder?(column: string): Promise<Uint32Array>;
+  /**
+   * One tile of the heatmap at column level `cx` and gene level `gy` (each pixel the mean of
+   * `2^cx` columns × `2^gy` genes): row-major, `min(tileSize, rows - ty·tileSize)` rows of
+   * `min(tileSize, cols - tx·tileSize)` values.
+   */
+  getGeneHeatmapTile?(
+    column: string,
+    cx: number,
+    gy: number,
+    tx: number,
+    ty: number,
+    scale: SpatialGeneHeatmapScale,
+  ): Promise<Float32Array>;
 
   /**
    * The reference volume's voxels: a uint8 scalar field, x-fastest, of exactly
