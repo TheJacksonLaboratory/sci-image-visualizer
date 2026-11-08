@@ -302,6 +302,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   protected observationIds: readonly string[] | null = null;
   /** The dataset last emitted, for what the gene heatmap is of. */
   private dataset: SpatialDataset | null = null;
+  /** What the gene heatmap is of (see geneHeatmapSource): the dataset's id, the grouping's entry. */
+  private heatmapSource: { id: string | null; entry: unknown; token: object } | null = null;
   private groupColorMap: { grouping: unknown; colors: Record<string, string> } | null = null;
 
   /** What the map is coloured by — the chart's subject. */
@@ -465,13 +467,20 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   }
 
   /**
-   * What the gene heatmap is of: the grouping column's entry in the dataset. The access and
+   * What the gene heatmap is of: the dataset and the grouping column's entry in it. The access and
    * the column's name can stay the same while the data changes: another dataset with a
-   * column of that name, or a grouping imported again under its name (its entry is replaced).
-   * Another dataset emission keeps the entry, so it does not reload the heatmap.
+   * column of that name (even one sharing the same column descriptor), or a grouping imported
+   * again under its name (its entry is replaced). Another emission of the same dataset that keeps
+   * the entry does not reload the heatmap.
    */
   protected get geneHeatmapSource(): unknown {
-    return this.groupingEntry(this.dataset) ?? this.dataset;
+    const id = this.dataset?.id ?? null;
+    const entry = this.groupingEntry(this.dataset) ?? null;
+    const last = this.heatmapSource;
+    // The same object while both stay, so change detection does not reload it; a new one when
+    // either changes: two datasets may share one column descriptor.
+    if (!last || last.id !== id || last.entry !== entry) this.heatmapSource = { id, entry, token: {} };
+    return this.heatmapSource!.token;
   }
 
   /** The grouping column's entry in `dataset`, if it has one. */
@@ -805,11 +814,24 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   private async renderChart(): Promise<void> {
     if (!this.isActive) return;
+    // The gene heatmap draws itself: the Plotly chart behind it is freed, and a Plotly heatmap
+    // still computing must not draw. Before the div guard: its view has removed the div.
+    if (this.showsGeneHeatmap) {
+      this.heatmapRender.cancel();
+      this.purgePlot();
+      return;
+    }
     // Guard on the div the ACTIVE kind will draw into, not always the shared one. While a
     // kind is detached the inline div is removed by its `*ngIf`, so checking that one
     // bailed here and the detached window never got a plot.
+    if (!document.getElementById(this.plotTarget)) {
+      // Leaving the gene heatmap (Picked genes, or another kind): its view removed the div, and
+      // the next change detection puts it back. Wait for that once, then draw.
+      this.changed();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (!this.isActive || this.showsGeneHeatmap || !document.getElementById(this.plotTarget)) return;
+    }
     const target = this.plotTarget;
-    if (!document.getElementById(target)) return;
     // Anything but the embedding inherits a div the embedding may have bound handlers on.
     if (this.kind !== 'embedding') this.plot.unbindSelection(target);
     // A heatmap still computing must not draw over the kind that replaced it.
@@ -818,9 +840,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     // genes distinguish which groups — so it is driven by its own gene list and
     // grouping rather than by whatever the map is coloured by.
     if (this.kind === 'heatmap') {
-      // The gene heatmap draws itself; the Plotly chart behind it is freed.
-      if (this.showsGeneHeatmap) this.purgePlot();
-      else await this.renderHeatmap();
+      await this.renderHeatmap();
       return;
     }
     // Also independent of the active colour source: the coordinates are the dataset's,

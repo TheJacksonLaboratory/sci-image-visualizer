@@ -302,6 +302,31 @@ describe('SpatialChartsComponent (rendered) gene heatmap', () => {
     expect(child.store).not.toBe(store);
   });
 
+  it('loads the new dataset’s heatmap when the two share their column descriptor', async () => {
+    const child = heatmap();
+    const store = child.store;
+    gene = 'NEW_GENE';
+    // A port may reuse one descriptor for every dataset with that column.
+    dataset$.next({ ...datasetOf('b'), columns: dataset$.value!.columns });
+    await settle();
+
+    expect(child.ids[0]).toBe('b0');
+    expect(child.info.genes).toEqual(['NEW_GENE']);
+    expect(access.info).toHaveBeenCalledTimes(2);
+    expect(access.order).toHaveBeenCalledTimes(2);
+    expect(child.store).not.toBe(store);
+  });
+
+  it('draws the picked genes’ chart once its div is back', async () => {
+    const panel = fixture.componentInstance as any;
+    const picked = jest.spyOn(panel, 'renderHeatmap').mockResolvedValue(undefined);
+    expect(fixture.nativeElement.querySelector(`#${panel.chartDiv}`)).toBeNull();
+    panel.onHeatmapRows('picked');
+    await settle();
+    expect(fixture.nativeElement.querySelector(`#${panel.chartDiv}`)).not.toBeNull();
+    expect(picked).toHaveBeenCalled();
+  });
+
   it('drops the old group means too', async () => {
     const child = heatmap();
     child.onView('groups');

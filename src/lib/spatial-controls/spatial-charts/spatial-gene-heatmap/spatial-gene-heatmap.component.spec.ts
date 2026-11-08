@@ -96,6 +96,21 @@ describe('SpatialGeneHeatmapComponent', () => {
     expect(access.tile).toHaveBeenCalledWith('cluster', 0, 0, 0, 0, 'gene');
   });
 
+  it('keeps each row’s height with the undetected genes hidden, clipping the ones below', async () => {
+    await build();
+    // 3 of 4 genes shown over 200 px: a tile of all 4 rows is 4 × 200/3 px tall from the top,
+    // its last row past the plot, where the clip leaves it.
+    expect(c.window).toEqual({ x0: 0, x1: 6, y0: 0, y1: 3 });
+    component.draw();
+    await flush();
+    const ctx = c.canvasRef.nativeElement.getContext('2d');
+    const drawImage = jest.spyOn(ctx, 'drawImage');
+    component.draw();
+    const first = drawImage.mock.calls.find((call) => call[2] === 66);
+    expect(first).toBeTruthy();
+    expect(first![4]).toBeCloseTo((4 * 200) / 3);
+  });
+
   it('names the cell, its group and the value under the pointer', async () => {
     await build();
     component.draw();
