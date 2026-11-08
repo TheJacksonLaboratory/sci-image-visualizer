@@ -67,6 +67,8 @@ export class VolumeRegionMeshes {
   constructor(
     private readonly viewer: Viewer,
     private readonly placer?: RegionPlacer,
+    /** Whether a surface added is drawn as a wireframe (the toggle's state then). */
+    private readonly wireframe: () => boolean = () => false,
   ) {}
 
   /** Show exactly `meshes` (adding, keeping or removing surfaces). */
@@ -224,6 +226,7 @@ export class VolumeRegionMeshes {
       opacity: this.opacityOf(mesh.key),
       blending: 'translucent',
       fit: 'never',
+      wireframe: this.wireframe(),
     });
     layer.visible = !this.hidden.has(mesh.key);
     this.layers.set(mesh.key, { mesh, layer });

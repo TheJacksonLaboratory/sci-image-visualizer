@@ -57,15 +57,21 @@ export function cameraDragMode(mode: string): 'pan' | 'zoom' | 'rotate' {
   return mode === 'pan' ? 'pan' : mode === 'zoom' ? 'zoom' : 'rotate';
 }
 
+/** Every surface the viewer draws (a volume's region classes, spatial 3D's cells and classes). */
+export function surfaceLayers(viewer: Viewer): SurfaceLayer[] {
+  return viewer.layers.items.filter((l): l is SurfaceLayer => (l as { kind?: string }).kind === 'surface');
+}
+
 /**
  * The 3D view controls every 3D image scene offers: camera drag mode and re-framing, the axes
- * gizmo's visibility and the surface's wireframe — both persisted in the viewer settings, so the
- * next mount re-applies them.
+ * gizmo's visibility and the wireframe of its `surfaces` — both persisted in the viewer settings,
+ * so the next mount re-applies them, and a surface added later takes the wireframe as it is (see
+ * `settings.surfaceWireframe`).
  */
 export function surface3dControls(
   ctx: SceneContext,
   gizmo: () => Axes3dGizmo | null,
-  surface: () => SurfaceLayer | null = () => null,
+  surfaces: () => readonly SurfaceLayer[] = () => [],
 ): ISurface3dControls {
   const { viewer, settings } = ctx;
   return {
@@ -80,14 +86,12 @@ export function surface3dControls(
       gizmo()?.setVisible(visible);
     },
     axesVisible: (): boolean => settings.axesVisible,
-    // Surface wireframe (napari-js surface only) — a live layer property, no rebuild needed.
+    // Surface wireframe — a live layer property, no rebuild needed.
     setWireframe: (on: boolean): void => {
       settings.surfaceWireframe = on;
-      const layer = surface();
-      if (layer) {
-        layer.wireframe = on;
-        viewer.requestRender();
-      }
+      const layers = surfaces();
+      for (const layer of layers) layer.wireframe = on;
+      if (layers.length) viewer.requestRender();
     },
     wireframe: (): boolean => settings.surfaceWireframe,
   };

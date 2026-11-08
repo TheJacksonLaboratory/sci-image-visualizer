@@ -66,7 +66,7 @@ async function settled(statuses: (Cells3dStatus | null)[]): Promise<void> {
   }
 }
 
-function setup() {
+function setup(wireframe?: () => boolean) {
   const v = new HeadlessViewer({ canvasRect: { width: 400, height: 300 } });
   const viewer = v as unknown as Viewer;
   const src = source();
@@ -78,6 +78,7 @@ function setup() {
     port,
     beginTask: () => ended,
     status: (s) => statuses.push(s),
+    ...(wireframe ? { wireframe } : {}),
   });
   const surfaces = () => v.layers.items.filter((l) => l.name.startsWith('cells')) as SurfaceLayer[];
   return { v, viewer, cells, src, port, statuses, ended, surfaces };
@@ -112,6 +113,17 @@ describe('Spatial3dCells', () => {
     expect(Math.min(...alphas)).toBeLessThan(0.3);
     // Colours kept: no grey.
     expect(rgba.some((v, i) => i % 4 === 0 && v === 1)).toBe(true);
+    cells.dispose();
+  });
+
+  it('draws its cells as wireframes while the toggle is on', async () => {
+    const { cells, statuses, surfaces } = setup(() => true);
+    cells.setDataset(DATASET);
+    cells.setPlacement(PLANES, 1);
+    cells.setClasses(new Set(['A', 'B']));
+    await settled(statuses);
+    expect(surfaces().length).toBeGreaterThan(0);
+    expect(surfaces().every((l) => l.wireframe)).toBe(true);
     cells.dispose();
   });
 
