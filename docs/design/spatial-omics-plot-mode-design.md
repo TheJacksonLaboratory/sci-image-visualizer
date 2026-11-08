@@ -297,7 +297,12 @@ shaped, and wrong for "one value per cell". Plan:
     outlines (1.8M vertices) on `/polygons`, and `SpatialDataPort.getPolygons()` reads them — but
     nothing draws them, because napari-js has no shapes layer (ask #2 in §3.4). This is the
     clearest case for building it.
-17. Plotly `scattergl` fallback mode so the feature degrades gracefully without WebGPU.
+17. ~~Plotly `scattergl` fallback mode so the feature degrades gracefully without WebGPU.~~
+    **Done, with WebGL2 instead of Plotly:** the markers and the gene map are drawn by
+    `implementations/spatial-webgl/` over OpenSeadragon's tissue image, which keeps the tiled
+    gigapixel image and the region tools that a Plotly scatter would have lost. Marker colouring is
+    shared with napari-js (`spatial-marker-style.ts`). Not drawn yet: the LOD outlines,
+    transcripts and density, per-gene icons, and image-less datasets.
 18. `SPATIAL_OMICS_3D`: elevation ∝ numeric column (Spatial-Live ColumnLayer analog), on the
     existing 3D camera/axes controls (needs napari-js per-point colour in 3D).
 19. Faceted small multiples — one panel per category over a shared muted background.
@@ -347,14 +352,14 @@ independently, so each phase pins a napari-js version the way `0.5.0`/`0.11.1` w
 
 ## 6. Risks
 
-| Risk                                                                                     | Mitigation                                                                                                                                                                                                                          |
-| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The feature bloats the core bundle for hosts that only view images.                      | Consider a secondary entry point (`@jax-data-science/sci-image-visualizer/spatial`). See Q15.                                                                                                                                       |
-| Scale: Visium (~3k spots) proves nothing about Xenium (~10⁵ cells) or transcripts (10⁷). | Pick the _second_ dataset early (Q4) and treat it as the perf gate, rather than tuning against a dataset that can't fail.                                                                                                           |
-| Two-repo coupling — a napari-js API change blocks the library.                           | Keep v1's napari-js asks small (per-point colour/size, lasso). The shapes layer, the big one, is deferred to P6.                                                                                                                    |
-| WebGPU unavailability.                                                                   | **Live gap:** `SPATIAL_OMICS` routes napari-js → OSD → Plotly, and the fallbacks render the tissue image _without_ the observation layer — partial, not degraded. Should-have 17 (Plotly `scattergl` spatial mode) is the real fix. |
-| Coordinate-space drift between spots, image and ROIs.                                    | Single `imageRef` transform in the contract; assert against the existing full-resolution world-coordinate convention the napari backend already uses for ndpi alignment.                                                            |
-| Categorical palettes diverging from the analysts' R/Python figures.                      | Accept authored `colors[]` on `CategoricalColumn` so a palette can be passed in rather than re-derived.                                                                                                                             |
+| Risk                                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The feature bloats the core bundle for hosts that only view images.                      | Consider a secondary entry point (`@jax-data-science/sci-image-visualizer/spatial`). See Q15.                                                                                                                                                                                                                                                   |
+| Scale: Visium (~3k spots) proves nothing about Xenium (~10⁵ cells) or transcripts (10⁷). | Pick the _second_ dataset early (Q4) and treat it as the perf gate, rather than tuning against a dataset that can't fail.                                                                                                                                                                                                                       |
+| Two-repo coupling — a napari-js API change blocks the library.                           | Keep v1's napari-js asks small (per-point colour/size, lasso). The shapes layer, the big one, is deferred to P6.                                                                                                                                                                                                                                |
+| WebGPU unavailability.                                                                   | **Closed for the markers (should-have 17):** the router asks for a WebGPU adapter before routing to napari-js (before, a missing WebGPU failed the render outright, since napari-js only fails in `plot()` and nothing fell back there). `SPATIAL_OMICS` then draws on OSD with the WebGL2 marker layer. The LOD tile layers still need WebGPU. |
+| Coordinate-space drift between spots, image and ROIs.                                    | Single `imageRef` transform in the contract; assert against the existing full-resolution world-coordinate convention the napari backend already uses for ndpi alignment.                                                                                                                                                                        |
+| Categorical palettes diverging from the analysts' R/Python figures.                      | Accept authored `colors[]` on `CategoricalColumn` so a palette can be passed in rather than re-derived.                                                                                                                                                                                                                                         |
 
 ---
 

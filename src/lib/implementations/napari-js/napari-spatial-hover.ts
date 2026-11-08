@@ -27,7 +27,9 @@ export const HOVER_RADIUS_PX = 10;
 export interface SpatialHoverHost {
   /** The orbit view rather than the 2D view (no transcript markers to ask first). */
   readonly is3d: boolean;
-  readonly viewer: Viewer;
+  /** The napari-js viewer the 2D transcript markers are drawn in; null for a scene drawn by another
+   *  renderer (the WebGL fallback), which has no transcript markers to ask. */
+  readonly viewer: Viewer | null;
   readonly port: SpatialDataPort | null;
   readonly selection: SpatialSelectionStore | null;
   /** The dataset on screen, as the spatial subscription last saw it. */
@@ -90,7 +92,11 @@ export class SpatialHover {
    * orbit or a pan moving the camera every frame, and a test per frame re-projected all of a 3.7M
    * cloud each time (≈150 ms a frame); the first move after the drag pays for one.
    */
-  install(el: HTMLElement): void {
+  install(el: HTMLElement, opts: { capture?: boolean } = {}): void {
+    // Capture: for a viewer whose own pointer handling stops the events at its canvas
+    // (OpenSeadragon's MouseTracker, under the WebGL fallback), the listeners on the host would
+    // otherwise never hear them.
+    const capture = !!opts.capture;
     this.dispose();
     this.tooltip = new NapariSpatialTooltip(el);
 
@@ -137,15 +143,15 @@ export class SpatialHover {
     // Outside the zone: a pointermove fires far more often than anything here changes what
     // Angular renders (the tooltip is plain DOM); a selecting click re-enters it.
     this.host.outsideZone(() => {
-      el.addEventListener('pointermove', onMove);
-      el.addEventListener('pointerleave', onLeave);
-      el.addEventListener('pointerdown', onDown);
-      el.addEventListener('pointerup', onUp);
+      el.addEventListener('pointermove', onMove, capture);
+      el.addEventListener('pointerleave', onLeave); // never captured: it would hear every child left
+      el.addEventListener('pointerdown', onDown, capture);
+      el.addEventListener('pointerup', onUp, capture);
     });
-    this.off.push(() => el.removeEventListener('pointermove', onMove));
+    this.off.push(() => el.removeEventListener('pointermove', onMove, capture));
     this.off.push(() => el.removeEventListener('pointerleave', onLeave));
-    this.off.push(() => el.removeEventListener('pointerdown', onDown));
-    this.off.push(() => el.removeEventListener('pointerup', onUp));
+    this.off.push(() => el.removeEventListener('pointerdown', onDown, capture));
+    this.off.push(() => el.removeEventListener('pointerup', onUp, capture));
   }
 
   /** Hide the tooltip (the navigator is being dragged, say). */
@@ -299,8 +305,8 @@ export class SpatialHover {
 
     // Transcript markers sit on top of everything, so they are asked first.
     const tiles = this.host.tiles();
-    if (!this.host.is3d && tiles) {
-      const viewer = this.host.viewer;
+    const viewer = this.host.viewer;
+    if (!this.host.is3d && tiles && viewer) {
       const world = viewer.canvasToWorld(pointer.clientX, pointer.clientY);
       const zoom = viewer.camera.zoom;
       const radius = HOVER_RADIUS_PX / (zoom > 0 ? zoom : 1);

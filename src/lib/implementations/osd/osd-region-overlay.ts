@@ -188,6 +188,12 @@ export class OsdRegionOverlay implements IRegionOverlay {
     this.redraw();
   }
 
+  /** Whether a region tool owns the pointer (a still click then belongs to it — see the napari-js
+   *  overlay's `toolActive`, which the spatial hover reads the same way). */
+  get toolActive(): boolean {
+    return this.mode !== 'none';
+  }
+
   /** Switch drawing/selection mode; toggles OSD navigation accordingly. */
   setMode(mode: RegionToolMode): void {
     this.mode = mode;

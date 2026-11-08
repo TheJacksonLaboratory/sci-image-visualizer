@@ -11,6 +11,16 @@ file was added.
 
 ### Added
 
+- **Spatial omics without WebGPU.** When the browser grants no WebGPU adapter, the 2D spatial view
+  is drawn on OpenSeadragon with a WebGL2 layer for the observation markers and the gene map, with
+  the same colours, gene filter, selection muting, hover tooltip and click-to-select as the napari-js
+  view (`implementations/spatial-webgl/`; the marker colouring is now shared through
+  `spatial-marker-style.ts`). The Images toggle hides the tissue tiles under it (the
+  `WebGlSpatialHost.setImageVisible` hook), and leaving the spatial view gives OpenSeadragon back its
+  click-to-zoom and its tiles. Not drawn by the fallback yet: the level-of-detail cell outlines,
+  transcripts and density, per-gene marker icons, and datasets that register onto no image.
+- **`WEBGPU_PROBE`** token (public API): whether napari-js can run, asked once per page. Override it
+  to force the WebGL / OpenSeadragon fallback.
 - **Heatmap of all genes.** The spatial charts' Heatmap tab has a "Picked genes / All genes" switch
   where the data source serves it (`SpatialDataPort.getGeneHeatmap` and its siblings, advertised by
   the manifest's `geneHeatmap`). All genes draws every gene of the dataset against every cell on a
@@ -25,7 +35,6 @@ file was added.
   detected are left out by default. Works in the detached chart window too. It loads afresh when the
   same column name means other data (`source`): another dataset with a column of that name, or a
   grouping imported again under its name, whose categories and colours the charts then read again.
-
 - **Wireframe toggle in the Volume and Spatial omics 3D views.** The Surface view's "Toggle
   wireframe" button now shows in these views too. It switches the region classes' 3D surfaces and,
   in Spatial omics 3D, the 3D cells; surfaces added afterwards (a class shown, cells still loading)
@@ -34,6 +43,10 @@ file was added.
 
 ### Fixed
 
+- **The napari-js plot types no longer fail outright without WebGPU.** napari-js only records the
+  image in `load()`, so a missing WebGPU surfaced in `plot()`, where nothing falls back, and the
+  render failed with "the renderer could not draw the image". The router now checks for an adapter
+  before routing to napari-js: the 2D types fall back to OpenSeadragon, the 3D types to Plotly.
 - **Region Editor class volumes in µm³ over a 3D segmentation.** In Spatial omics 3D, the volumes of
   the classes of a dataset's 3D segmentation were shown in voxels, because the image it is attached
   to has a pixel size but no slice spacing. The editor now takes the slice spacing from the

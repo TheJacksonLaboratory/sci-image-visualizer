@@ -37,6 +37,21 @@ z-stack):
   (`requiresSpatial3d`): the same observations as a point cloud under an orbit
   camera, inside the dataset's reference volume if it has one.
 
+**Without WebGPU** (Firefox before 141, Safari before 26, a page that is not a secure
+context, a GPU the browser blocklists), **Spatial omics** still draws: OpenSeadragon
+shows the tissue image and a WebGL2 layer draws the markers and the gene map over it,
+coloured, filtered, selected and hovered by the same code as the napari-js view. The
+router asks for a WebGPU adapter once per page (`WEBGPU_PROBE`) before it routes a
+plot to napari-js. What the fallback does not draw yet, because only napari-js does:
+the level-of-detail cell outlines and fills, the transcripts and their density, the
+per-gene marker icons (every marker is a disc), a region set's planes over a
+single-plane image, and a dataset that registers onto no image. **Spatial omics 3D**
+needs WebGPU. To try the fallback on a machine that has WebGPU, override the probe:
+
+```ts
+providers: [{ provide: WEBGPU_PROBE, useValue: () => Promise.resolve(false) }];
+```
+
 **A dataset whose 3D data is one file gets an image made from it.** A registered
 volume (`SpatialDataset.volume` + `SpatialDataPort.getVolume()`) is published _as_
 a grayscale z-stack image — one plane per slice, opened mid-volume — so the whole
