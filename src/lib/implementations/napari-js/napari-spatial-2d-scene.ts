@@ -4,27 +4,18 @@ import type { ImageLayer, PointsLayer, Viewer } from 'napari-js';
 import { IHistogram } from '../../contracts/channel-histogram-api.contract';
 import {
   NO_CATEGORY,
-  SpatialColumn,
   SpatialDataset,
   SpatialImageRef,
   SpatialObservations,
-  isCategoricalColumn,
 } from '../../contracts/spatial-dataset.contract';
 import { SpatialViewState, TranscriptGlyphName } from '../../contracts/display-types';
-import { categoryColorsFor, encodeCategorical, markerDiameters } from '../../spatial/spatial-encoding';
-import {
-  SpatialSelectionMask,
-  emptySelection,
-  maskToIndices,
-  mutedFromSelection,
-} from '../../spatial/spatial-selection';
+import { markerDiameters } from '../../spatial/spatial-encoding';
+import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { framePositions } from '../../spatial/spatial-framing';
 import { PIXEL_WORLD_QUANTUM, worldQuantumForExtent } from '../../spatial/world-grid';
 import { observationsInSlice, volumeImageRef } from '../../spatial/spatial-volume-image';
 import { observationsOnPlane, planeBand } from '../../spatial/spatial-planes';
-import { cellTypeColumnFor } from '../../spatial/spatial-tiles';
 import { cellsShown } from '../../spatial/lod';
-import { observationGeneMask, observationGeneStyle } from '../../spatial/spatial-gene-filter';
 import { ExpressionField, colorExpressionField, fieldContrastWindow } from '../../spatial/spatial-expression';
 import { computeExpressionFieldAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
@@ -38,18 +29,17 @@ import {
   SPATIAL_FALLBACK_RADIUS,
   SPATIAL_MARKER_MIN_SCREEN_PX,
   SPATIAL_NEUTRAL_COLOR,
-  SPATIAL_NEUTRAL_HEX,
   SPATIAL_SLICE_MIN_DIAMETER_PX,
   PointColors,
-  encodeSpatialContinuous,
   gatherColors,
   hideUnshown,
 } from './napari-spatial-encoding';
+import { MarkerStyleDeps, markerContinuousColors, markerFilterMask, markerStyle } from './spatial-marker-style';
 import { SpatialSceneBase, SpatialSession, SpatialTileOwner } from './napari-spatial-scene';
 import type { NapariScene, SceneContext } from './napari-scene';
 
 /** The plane a volume-backed dataset is showing, or one of its region set's planes (see slabAt). */
-interface Slab {
+export interface Slab {
   ref: SpatialImageRef;
   indices: Uint32Array;
   slice: number;
@@ -59,7 +49,7 @@ interface Slab {
 }
 
 /** A region set's planes and the one shown (see {@link Spatial2dScene.setRegionPlane}). */
-interface PlaneView {
+export interface PlaneView {
   planes: readonly number[];
   plane: number;
 }
@@ -664,17 +654,20 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     viewer.requestRender();
   }
 
-  /**
-   * Per-observation colours for the current view state, or a single flat colour when nothing is
-   * selected to colour by. Categorical columns use the column's own palette; continuous columns
-   * and gene vectors go through the active colormap with a percentile-clipped window.
-   */
+  /** The style inputs the shared marker colouring reads (see `spatial-marker-style.ts`). */
+  private styleDeps(): MarkerStyleDeps {
+    return {
+      port: this.session.port,
+      lut: (view) => this.ctx.display.spatialLut(view),
+      windows: this.session.contrastWindows,
+      tag: '[napari-js]',
+    };
+  }
+
   /** The observations the view's gene filter keeps (1 = drawn), or null when it has none.
    *  Rejects when an expression read fails. */
   private filterMask(dataset: SpatialDataset, view: SpatialViewState): Promise<Uint8Array | null> {
-    const port = this.session.port;
-    if (!port) return Promise.resolve(null);
-    return observationGeneMask(view, dataset.observations.count, (g) => port.getFeatureVector(g));
+    return markerFilterMask(this.session.port, dataset, view);
   }
 
   /** The markers' colours (and icons, by gene) before the gene filter hides any of them. */
@@ -683,107 +676,26 @@ export class Spatial2dScene extends SpatialSceneBase implements NapariScene, Spa
     view: SpatialViewState,
     selection: SpatialSelectionMask,
   ): Promise<{ colors: PointColors; symbols: Uint8Array | null }> {
-    const port = this.session.port;
-    const count = dataset.observations.count;
-    // Coloured by gene: each observation in its gene's colour, drawn as its gene's icon. That is
-    // a colour, so a failed read falls back to the view's colour source, as any colour does.
-    const byGene = port
-      ? await observationGeneStyle(view, count, (g) => port.getFeatureVector(g)).catch((err) => {
-          console.warn('[napari-js] colouring by gene failed — falling back to the colour source', err);
-          return null;
-        })
-      : null;
-    const colors = byGene
-      ? encodeCategorical(byGene.codes, {
-          colors: byGene.colors,
-          opacity: view.opacity,
-          muted: mutedFromSelection(selection),
-        })
-      : await this.sourceColors(dataset, view, selection);
-    const symbols = byGene ? glyphSymbols(byGene.codes, byGene.glyphs) : null;
-    return { colors, symbols };
-  }
-
-  /** {@link faceColors} before the gene filter: what the colour source and the selection make of them. */
-  private async sourceColors(
-    dataset: SpatialDataset,
-    view: SpatialViewState,
-    selection: SpatialSelectionMask,
-  ): Promise<PointColors> {
-    const port = this.session.port;
-    const colorBy = view.colorBy;
-    // Everything NOT selected is muted; with nothing selected, nothing is muted
-    // and the whole tissue reads normally (the CosMx highlight-vs-mute rule).
-    const muted = mutedFromSelection(selection);
-
-    // One colour, the cells' too ("Single colour").
-    if (!colorBy && view.cellColorMode === 'single') {
-      return encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [view.cellSingleColor],
-        opacity: view.opacity,
-        muted,
-      });
-    }
-    if (!port || !colorBy) {
-      // Genuinely uniform: one broadcast tuple, so a flat 84k-observation view
-      // does not allocate a colour per point.
-      if (!muted && view.opacity >= 1) return SPATIAL_NEUTRAL_COLOR;
-      // Not uniform — the opacity control or a selection varies the alpha, so it
-      // has to be per-point. Returning the constant tuple here is what made the
-      // Opacity slider do nothing in the default state, which is the state anyone
-      // lands in before picking a colour source.
-      return encodeCategorical(new Uint16Array(dataset.observations.count), {
-        colors: [SPATIAL_NEUTRAL_HEX],
-        opacity: view.opacity,
-        muted,
-      });
-    }
-
-    if (colorBy.kind === 'column') {
-      const column: SpatialColumn = await port.getColumn(colorBy.name);
-      if (isCategoricalColumn(column)) {
-        const rgba = encodeCategorical(column.codes, {
-          colors: categoryColorsFor(colorBy.name, column.meta, view.groupColors),
-          opacity: view.opacity,
-          muted,
-        });
-        // Groups switched off in the Cells panel hide their dots too, when the dots are
-        // coloured by that same grouping.
-        const groupColumn = cellTypeColumnFor(dataset, view);
-        if (view.hiddenGroups?.length && groupColumn === colorBy.name) {
-          const off = new Set(view.hiddenGroups);
-          const hide = column.meta.categories.map((c) => off.has(c));
-          for (let i = 0; i < column.codes.length; i++) {
-            const c = column.codes[i];
-            if (c !== NO_CATEGORY && hide[c]) rgba[4 * i + 3] = 0;
-          }
-        }
-        return rgba;
-      }
-      // A continuous column may carry its own log hint (counts); the view's
-      // toggle wins once the user has set it.
-      return this.encodeContinuous(column.values, view, muted);
-    }
-
-    const values = await port.getFeatureVector(colorBy.name);
-    return this.encodeContinuous(values, view, muted);
+    const style = await markerStyle(this.styleDeps(), dataset, view, selection);
+    return {
+      colors: style.colors,
+      symbols: style.byGene ? glyphSymbols(style.byGene.codes, style.byGene.glyphs) : null,
+    };
   }
 
   /** Continuous values → RGBA through the active colormap and a clipped window. */
   encodeContinuous(values: Float32Array, view: SpatialViewState, muted: Uint8Array | null = null): Float32Array {
-    return encodeSpatialContinuous(
-      values,
-      view,
-      this.ctx.display.spatialLut(view),
-      this.session.contrastWindows,
-      muted,
-    );
+    return markerContinuousColors(this.styleDeps(), values, view, muted);
   }
 }
 
 /** The markers' diameters: each observation's own (or the fallback), at least the slab's floor,
  *  times the view's point scale; one number when every marker is drawn at the same size. */
-function markerSizes(obs: SpatialObservations, view: SpatialViewState, slab: Slab | null): number | Float32Array {
+export function markerSizes(
+  obs: SpatialObservations,
+  view: SpatialViewState,
+  slab: Slab | null,
+): number | Float32Array {
   const base = markerDiameters(obs, SPATIAL_FALLBACK_RADIUS);
   const scale = view.pointScale > 0 ? view.pointScale : 1;
   const floor = slab?.minDiameter ?? 0;
@@ -793,7 +705,7 @@ function markerSizes(obs: SpatialObservations, view: SpatialViewState, slab: Sla
 }
 
 /** Interleaved x,y of the `drawn` observations (undefined: all of them). */
-function observationPositions(obs: SpatialObservations, drawn: Uint32Array | undefined): Float32Array {
+export function observationPositions(obs: SpatialObservations, drawn: Uint32Array | undefined): Float32Array {
   const count = drawn ? drawn.length : obs.count;
   const positions = new Float32Array(count * 2);
   for (let i = 0; i < count; i++) {
@@ -814,7 +726,7 @@ function observationPositions(obs: SpatialObservations, drawn: Uint32Array | und
  * pixels and every observation belongs to the one section) and for one with no volume at all —
  * both of which draw exactly as before.
  */
-function slabAt(dataset: SpatialDataset, slice: number, planes: PlaneView | null): Slab | null {
+export function slabAt(dataset: SpatialDataset, slice: number, planes: PlaneView | null): Slab | null {
   const volume = dataset.volume;
   if (dataset.imageRef) {
     if (!planes) return null;

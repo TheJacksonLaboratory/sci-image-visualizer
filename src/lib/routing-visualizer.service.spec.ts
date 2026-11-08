@@ -16,6 +16,8 @@ import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { Rectangle, Region } from './models/region';
 import { BehaviorSubject } from 'rxjs';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
+import { WEBGPU_PROBE } from './util/webgpu-support';
+import { installFakeWebGl2 } from './testing/fake-webgl2';
 
 /**
  * CHARACTERIZATION TESTS (refactoring plan, Step 0).
@@ -159,6 +161,7 @@ describe('RoutingVisualizerService (characterization)', () => {
         { provide: PlotlyService, useValue: plotly },
         { provide: OpenSeadragonVisualizerService, useValue: osd },
         { provide: NapariVisualizerService, useValue: napari },
+        { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(true) },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
         { provide: IntensityProfileService, useValue: intensity },
       ],
@@ -1428,6 +1431,7 @@ describe('RoutingVisualizerService (characterization)', () => {
           { provide: PlotlyService, useValue: mockBackend() },
           { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
           { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(true) },
           { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
           { provide: IntensityProfileService, useValue: {} },
           { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(dataset) } },
@@ -1476,6 +1480,7 @@ describe('RoutingVisualizerService (characterization)', () => {
           { provide: PlotlyService, useValue: mockBackend() },
           { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
           { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(true) },
           { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
           { provide: IntensityProfileService, useValue: {} },
           { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
@@ -1537,6 +1542,7 @@ describe('RoutingVisualizerService (characterization)', () => {
           { provide: PlotlyService, useValue: mockBackend() },
           { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
           { provide: NapariVisualizerService, useValue: (napari = mockBackend()) },
+          { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(true) },
           { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
           { provide: IntensityProfileService, useValue: {} },
           { provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(null) } },
@@ -1652,6 +1658,7 @@ describe('RoutingVisualizerService — spatial controls', () => {
         { provide: PlotlyService, useValue: mockBackend() },
         { provide: OpenSeadragonVisualizerService, useValue: mockBackend() },
         { provide: NapariVisualizerService, useValue: mockBackend() },
+        { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(true) },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
         { provide: IntensityProfileService, useValue: {} },
         ...(port ? [{ provide: SPATIAL_DATA_PORT, useValue: port }] : []),
@@ -1959,5 +1966,159 @@ describe('RoutingVisualizerService — spatial controls', () => {
         /continuous .* no categories/,
       );
     });
+  });
+});
+
+// ── no WebGPU: the fallback chain, and the WebGL spatial markers over OpenSeadragon ──
+describe('RoutingVisualizerService without WebGPU', () => {
+  let plotly: any;
+  let osd: any;
+  let napari: any;
+  let router: RoutingVisualizerService;
+  let gl: ReturnType<typeof installFakeWebGl2>;
+  const INFO = { fileName: 'slide.tif', isGrayscale: true, imageMeta: [] } as never;
+
+  function setupNoGpu(withPort = true): void {
+    plotly = mockBackend();
+    osd = mockBackend();
+    napari = mockBackend();
+    const host = document.createElement('div');
+    host.appendChild(document.createElement('div'));
+    osd.getSpatialLayerHost = jest.fn().mockReturnValue(host.firstChild);
+    osd.getPlotModeViewport = jest.fn().mockReturnValue({
+      getOverlayContainer: () => null,
+      dataToClient: (x: number, y: number) => ({ x, y }),
+      clientToData: (x: number, y: number) => ({ x, y }),
+      dataLengthToScreen: (len: number) => len,
+      isReady: () => true,
+      frame$: new Subject(),
+      settled$: new Subject(),
+    });
+    osd.onViewportRedraw = jest.fn().mockReturnValue(() => undefined);
+    osd.regionToolActive = jest.fn().mockReturnValue(false);
+    osd.setClickToZoom = jest.fn();
+    osd.setImageVisible = jest.fn();
+    const ds = {
+      id: 'ds',
+      name: 'ds',
+      observations: { count: 1, x: new Float32Array([1]), y: new Float32Array([1]) },
+      columns: [],
+      imageRef: {},
+    };
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        RoutingVisualizerService,
+        VisualizerStore,
+        { provide: PlotlyService, useValue: plotly },
+        { provide: OpenSeadragonVisualizerService, useValue: osd },
+        { provide: NapariVisualizerService, useValue: napari },
+        { provide: WEBGPU_PROBE, useValue: () => Promise.resolve(false) },
+        { provide: VIZ_CONFIG, useValue: { slideCropServer: '' } },
+        { provide: IntensityProfileService, useValue: {} },
+        ...(withPort
+          ? [{ provide: SPATIAL_DATA_PORT, useValue: { getDataset$: () => new BehaviorSubject(ds) } }]
+          : []),
+      ],
+    });
+    router = TestBed.inject(RoutingVisualizerService);
+  }
+
+  beforeEach(() => {
+    gl = installFakeWebGl2();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    router.detach();
+    gl.restore();
+    jest.restoreAllMocks();
+  });
+
+  /** A render cycle as the render session runs it: reset, load, plot. */
+  async function render(type: PlotType): Promise<void> {
+    await router.plot('div', {}, INFO, 600, type);
+    router.reset();
+    const loaded = await router.load(INFO, 0);
+    await router.plot('div', loaded, INFO, 600, type);
+  }
+
+  it('sends the spatial view to OpenSeadragon, never loading it into napari-js', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    expect(napari.load).not.toHaveBeenCalled();
+    expect(osd.load).toHaveBeenCalledWith(INFO, 0, undefined);
+    expect(osd.plot).toHaveBeenLastCalledWith('div', { ok: true }, INFO, 600, PlotType.SPATIAL_OMICS, undefined);
+  });
+
+  it('draws the spatial markers over OpenSeadragon with WebGL, click-to-zoom off', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    expect(osd.getSpatialLayerHost).toHaveBeenCalled();
+    expect(gl.contexts.length).toBe(1);
+    expect(osd.setClickToZoom).toHaveBeenCalledWith(false);
+    expect((osd.getSpatialLayerHost() as HTMLElement).querySelector('canvas')).not.toBeNull();
+  });
+
+  it('takes the markers down for another plot type', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    const layerHost = osd.getSpatialLayerHost() as HTMLElement;
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE);
+    expect(layerHost.querySelector('canvas')).toBeNull();
+  });
+
+  it('gives OpenSeadragon its click-to-zoom and its tiles back when the markers come down', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE, true);
+    expect(osd.setClickToZoom).toHaveBeenLastCalledWith(true);
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('hides the tissue with the Images toggle', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    TestBed.inject(VisualizerStore).setSpatialView({ showImage: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(false);
+    TestBed.inject(VisualizerStore).setSpatialView({ showImage: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('does not put the markers over the image plot that overtook a slow spatial plot', async () => {
+    setupNoGpu();
+    // Spatial on OpenSeadragon (napari-js has fallen back), then an image plot takes it down.
+    await render(PlotType.SPATIAL_OMICS);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE);
+    const contexts = gl.contexts.length;
+    osd.setClickToZoom.mockClear();
+    // A spatial plot that is slow to finish, overtaken by an image plot on the same viewer.
+    let finish!: (ok: boolean) => void;
+    osd.plot.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = r)));
+    const spatial = router.plot('div', {}, INFO, 600, PlotType.SPATIAL_OMICS, true);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE, true);
+    finish(true);
+    await spatial;
+    expect(gl.contexts.length).toBe(contexts);
+    expect(osd.setClickToZoom).not.toHaveBeenCalledWith(false);
+    expect((osd.getSpatialLayerHost() as HTMLElement).querySelector('canvas')).toBeNull();
+  });
+
+  it('draws no markers without a spatial port', async () => {
+    setupNoGpu(false);
+    await render(PlotType.SPATIAL_OMICS);
+    expect(gl.contexts.length).toBe(0);
+    expect(osd.setClickToZoom).not.toHaveBeenCalled();
+  });
+
+  it('sends the 2D napari image to OpenSeadragon and the 3D types to Plotly', async () => {
+    setupNoGpu();
+    await render(PlotType.NAPARI_IMAGE);
+    expect(osd.load).toHaveBeenCalled();
+    expect(napari.load).not.toHaveBeenCalled();
+    await render(PlotType.NAPARI_VOLUME);
+    expect(plotly.load).toHaveBeenCalled();
+    expect(napari.load).not.toHaveBeenCalled();
   });
 });

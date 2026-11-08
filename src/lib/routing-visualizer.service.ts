@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
+import { Inject, Injectable, NgZone, OnDestroy, Optional, inject } from '@angular/core';
 import { EMPTY, Observable, Subject, Subscription, combineLatest, merge, BehaviorSubject } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { Image } from 'image-js';
@@ -61,6 +61,8 @@ import { PlotModeViewport } from './contracts/plot-type-contribution.contract';
 import { IntensityProfileService } from './intensity/intensity-profile.service';
 import { changedClasses, classSignatures } from './store/class-signatures';
 import { VolumeSections } from './visualizer/volume-sections';
+import { WebGlSpatialLayer } from './implementations/spatial-webgl/webgl-spatial-layer';
+import { WEBGPU_PROBE } from './util/webgpu-support';
 import type { SectionAxis, SectionViews } from './contracts/section-view.contract';
 
 /** How long after the last edit the surfaces of the classes it touched are rebuilt (ms). */
@@ -107,6 +109,14 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** napari-js failed for the current render cycle → fall back to OSD (then Plotly).
    *  Reset by reset() at the start of every cycle, like {@link osdFellBack}. */
   private napariFellBack = false;
+  /** Whether this browser can run napari-js; asked before any plot is routed to it. */
+  private readonly webGpu = inject(WEBGPU_PROBE);
+  private readonly zone = inject(NgZone);
+  /** The spatial markers over OpenSeadragon when napari-js cannot draw them (no WebGPU). Built on
+   *  first use, and only when a spatial port is bound. */
+  private webglSpatial: WebGlSpatialLayer | null = null;
+  /** Counts plot() calls: a plot's completion acts only while it is still the latest. */
+  private plotRequest = 0;
   /** The file name of the image last plotted (names a GeoJSON export). */
   private plottedFileName: string | undefined;
   /** The div the backends render into (every backend shares it); '' before the first plot. */
@@ -287,10 +297,10 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** The 2D napari types (image, region-centroid scatter, spatial omics) — a 2D fallback chain
    *  (OSD, then Plotly).
    *
-   *  NOTE for SPATIAL_OMICS: only napari-js draws the observation markers. If it fails (no WebGPU,
-   *  device loss) the fallback renders the tissue image ALONE — the spatial layer is absent, not
-   *  degraded. That is deliberate for now: showing the slide beats showing nothing, and a Plotly
-   *  `scattergl` spatial mode is the planned real fallback (see the plot-mode design doc). */
+   *  SPATIAL_OMICS without WebGPU: OpenSeadragon draws the tissue image and the WebGL fallback
+   *  ({@link WebGlSpatialLayer}) draws the observation markers and the gene map over it — what
+   *  napari-js alone draws (cell outlines, transcripts, density, per-gene icons) is absent. Should
+   *  OSD fail too, Plotly shows the image alone. */
   private isNapariImageType(t: PlotType): boolean {
     return t === PlotType.NAPARI_IMAGE || isNapariScatter(t) || isSpatialOmics(t);
   }
@@ -358,6 +368,9 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     const backend = this.imageBackend();
     if (backend === this.napari) {
       try {
+        // napari-js only records the image in load(); without WebGPU its viewer fails later, in
+        // plot(), where nothing falls back. Asking here sends the render down the fallback chain.
+        if (!(await this.webGpu())) throw new Error('WebGPU is not available in this browser');
         return await this.napari.load(imageInfo, zIndex, signal);
       } catch (err) {
         // Aborted: nobody wants this image any more, so don't go on to load it elsewhere.
@@ -404,6 +417,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     inPlace?: boolean,
   ): Promise<boolean> {
     this.currentPlotType = plotType;
+    const request = ++this.plotRequest;
     this.spatialViewChanged$.next();
     this.plottedFileName = imageInfo?.fileName;
     this.plottedInfo = imageInfo ?? null;
@@ -442,7 +456,18 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       else this.lastRendered.reset();
     }
     this.lastRendered = next;
-    const drawn = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace);
+    // The WebGL spatial markers belong to an OSD viewer showing the spatial type: anything else,
+    // or a new OSD viewer (a non-in-place plot rebuilds it), takes them down; a re-attach follows.
+    const spatialOnOsd = isSpatialOmics(plotType) && next === this.osd;
+    if (!spatialOnOsd || !inPlace) this.detachWebGlSpatial();
+    const drawn = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace).then((ok) => {
+      // Only for the latest plot: a slow spatial plot overtaken by an image plot on the same OSD
+      // viewer must not put the markers over that image.
+      const latest = request === this.plotRequest && isSpatialOmics(this.currentPlotType);
+      if (ok && spatialOnOsd && latest && this.lastRendered === this.osd && !this.webglSpatial?.attached)
+        this.attachWebGlSpatial();
+      return ok;
+    });
     // A dataset's region set is shown in 3D once the cloud's scene is up: its voxel step is the scene's.
     const plotted = this.datasetRegionSet?.planes
       ? drawn.then((ok) => {
@@ -522,6 +547,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // per-image fallback) and tear down whatever's on screen.
     this.osdFellBack = false;
     this.napariFellBack = false;
+    this.detachWebGlSpatial();
     this.renderer().reset();
   }
   relayout(trueImageSize?: number[]): void {
@@ -585,6 +611,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.spatialViewChanged$.next();
     const slice = this.imageSlice(zIndex);
     this.renderer().setZIndex(slice);
+    this.webglSpatial?.setZ();
     if (this.datasetRegionSet?.planes) this.napari.setRegionPlane(zIndex);
     if (this.sliceMounted) {
       this.osd.setZIndex(slice);
@@ -1768,6 +1795,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.importTicket = { id: this.importTicket.id + 1, image: undefined }; // a late import changes nothing
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
+    this.detachWebGlSpatial();
     this.regionUpdates.unsubscribe();
     this.planeCellsSub?.unsubscribe();
     this.sectionSubs.unsubscribe();
@@ -1828,10 +1856,53 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.sections.stop();
     this.sliceMounted = false;
     this.sliceDiv = null;
+    this.detachWebGlSpatial();
     this.plotly.detach();
     this.osd.detach();
     this.napari.detach();
     this.lastRendered = null;
+  }
+
+  /**
+   * Draw the spatial markers over OpenSeadragon with WebGL (the SPATIAL_OMICS fallback when
+   * napari-js cannot run). Click-to-zoom goes off while they are up: a click selects the class
+   * under the cursor, as it does over napari-js.
+   */
+  private attachWebGlSpatial(): void {
+    if (!this.spatialData) return;
+    this.webglSpatial ??= new WebGlSpatialLayer({
+      viewport: this.osd.getPlotModeViewport(),
+      container: () => this.osd.getSpatialLayerHost(),
+      pointerHost: () => (this.plotDiv ? document.getElementById(this.plotDiv) : null),
+      onRedraw: (redraw) => this.osd.onViewportRedraw(redraw),
+      store: this.store,
+      port: this.spatialData,
+      selection: this.selectionStore,
+      imageSize: () => this.osd.getTrueImageSize(),
+      z: () => this.imageSlice(this.currentZIndex),
+      toolActive: () => this.osd.regionToolActive(),
+      setImageVisible: (visible) => this.osd.setImageVisible(visible),
+      outsideZone: (fn) => this.zone.runOutsideAngular(fn),
+      inZone: (fn) => this.zone.run(fn),
+    });
+    if (this.webglSpatial.attach()) {
+      this.osd.setClickToZoom(false);
+      console.warn(
+        '[visualizer] spatial view drawn with WebGL (no WebGPU): cell outlines, transcripts and density need WebGPU.',
+      );
+    }
+  }
+
+  /**
+   * Take the WebGL spatial markers down, giving OpenSeadragon back its click-to-zoom (the viewer
+   * may be reused in place by an ordinary image plot) and its tissue tiles.
+   */
+  private detachWebGlSpatial(): void {
+    const layer = this.webglSpatial;
+    if (!layer) return;
+    const wasAttached = layer.attached;
+    layer.detach();
+    if (wasAttached) this.osd.setClickToZoom(true);
   }
 
   /** @deprecated Use {@link detach}. */
