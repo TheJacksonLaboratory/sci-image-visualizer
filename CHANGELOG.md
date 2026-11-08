@@ -29,7 +29,8 @@ file was added.
 - **Wireframe toggle in the Volume and Spatial omics 3D views.** The Surface view's "Toggle
   wireframe" button now shows in these views too. It switches the region classes' 3D surfaces and,
   in Spatial omics 3D, the 3D cells; surfaces added afterwards (a class shown, cells still loading)
-  follow it.
+  follow it. The button shows the view's own setting, and does nothing until the view is ready (a
+  volume still loading), rather than claiming a wireframe over filled surfaces.
 
 ### Fixed
 

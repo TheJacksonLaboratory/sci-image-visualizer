@@ -153,7 +153,13 @@ describe('ToolbarComponent', () => {
       component.selectedPlotType = t;
       expect(component['showsWireframeToggle']).toBe(true);
     }
-    for (const t of [PlotType.SURFACE, PlotType.NAPARI_IMAGE, PlotType.SPATIAL_OMICS]) {
+    // The isosurface shares the volume's scene but draws no surface layers.
+    for (const t of [
+      PlotType.SURFACE,
+      PlotType.NAPARI_IMAGE,
+      PlotType.NAPARI_ISOSURFACE,
+      PlotType.SPATIAL_OMICS,
+    ]) {
       component.selectedPlotType = t;
       expect(component['showsWireframeToggle']).toBe(false);
     }
