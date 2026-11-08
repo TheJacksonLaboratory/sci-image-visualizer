@@ -1217,11 +1217,23 @@ describe('RoutingVisualizerService (characterization)', () => {
       const weight = volumes.mock.calls[0][1]!;
       expect([0, 1, 2].map(weight)).toEqual([10 / 15, 1, 20 / 15]);
 
+      // Plane ids that are not ordinals: each weight still goes to its own plane.
+      router.releaseDatasetRegionSet(null);
+      const ids = {
+        ...SOURCE,
+        info: { ...SOURCE.info, planes: [10, 20, 30], sliceZ: [0, 10, 30], micronsPerUnit: 0.5 },
+      };
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(ids), 'set-1');
+      await router.getClassVolumes(['B']);
+      const byId = volumes.mock.calls[volumes.mock.calls.length - 1][1]!;
+      expect([10, 20, 30].map(byId)).toEqual([2 / 3, 1, 4 / 3]);
+      expect(byId(0)).toBe(1); // not one of its planes
+
       // Released: no planes, no scale, every slice one thick.
       router.releaseDatasetRegionSet(null);
       expect(scales[scales.length - 1]).toBeNull();
       await router.getClassVolumes(['B']);
-      expect(volumes.mock.calls[1][1]).toBeUndefined();
+      expect(volumes.mock.calls[volumes.mock.calls.length - 1][1]).toBeUndefined();
     });
 
     it('attaches it over every plane, places its planes, offers its classes in 3D and shows each once', async () => {
