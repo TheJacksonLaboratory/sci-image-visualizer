@@ -749,6 +749,32 @@ describe('SpatialChartsComponent', () => {
       expect(component['showsGeneHeatmap']).toBe(false);
     });
 
+    it('loads the grouping again when it is imported again under its name, and only then', async () => {
+      await build(controls);
+      await component['onGroupBy']('region');
+      const view = controls.categoricalView as jest.Mock;
+      const asked = view.mock.calls.length;
+      const before = component['geneHeatmapSource'];
+      // Another grouping imported: the active one's entry is the same object.
+      const current = dataset$.value!;
+      dataset$.next({
+        ...current,
+        columns: [...current.columns, { kind: 'categorical', name: 'other', categories: ['x'] }],
+      });
+      await flush();
+      expect(view.mock.calls.length).toBe(asked);
+      expect(component['geneHeatmapSource']).toBe(before);
+      // The active one imported again: its entry replaced, its categories and colours new.
+      dataset$.next({
+        ...current,
+        columns: [{ kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'] }, current.columns[1]],
+      });
+      await flush();
+      expect(view.mock.calls.length).toBe(asked + 1);
+      expect(view).toHaveBeenLastCalledWith('region');
+      expect(component['geneHeatmapSource']).not.toBe(before);
+    });
+
     it('colours the map by the gene clicked', async () => {
       await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
       component['onGeneHeatmapGene']('Ttr');

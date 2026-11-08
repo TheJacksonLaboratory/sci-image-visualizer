@@ -24,7 +24,7 @@ file was added.
   expression, or over each gene's largest), with the share of the group expressing it. Genes never
   detected are left out by default. Works in the detached chart window too. It loads afresh when the
   same column name means other data (`source`): another dataset with a column of that name, or a
-  grouping imported again under its name.
+  grouping imported again under its name, whose categories and colours the charts then read again.
 
 - **Wireframe toggle in the Volume and Spatial omics 3D views.** The Surface view's "Toggle
   wireframe" button now shows in these views too. It switches the region classes' 3D surfaces and,

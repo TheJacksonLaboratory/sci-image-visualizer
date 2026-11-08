@@ -495,11 +495,8 @@ export class SpatialDataHttpService implements SpatialDataPort {
   async getGeneHeatmapMeans(column: string): Promise<SpatialGeneHeatmapMeans> {
     const manifest = this.requireManifest();
     const info = await this.getGeneHeatmap(column);
-    const buf = await firstValueFrom(
-      this.http.get(`${this.baseUrl}${this.heatmapPath(manifest.id, column)}/means`, {
-        responseType: 'arraybuffer',
-      }),
-    );
+    // Once the layout is there the means are a small read: timed out as the order and tiles are.
+    const buf = await this.getBinary(`${this.heatmapPath(manifest.id, column)}/means`);
     return decodeGeneHeatmapMeans(buf, info.genes.length, info.groups.length);
   }
 

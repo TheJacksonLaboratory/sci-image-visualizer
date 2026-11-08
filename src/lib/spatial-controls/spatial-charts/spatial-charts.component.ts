@@ -368,7 +368,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // its own; anything computed or computing for the previous dataset is dropped.
         const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
         this.observationIds = dataset?.observations.ids ?? null;
+        // The grouping's entry replaced in the same dataset: imported again under its name.
+        const regrouped = this.groupingEntry(this.dataset);
         this.dataset = dataset;
+        const reimported = !!regrouped && regrouped !== this.groupingEntry(dataset);
         this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
         const switched = this.data.onDatasetChanged(
           dataset,
@@ -382,6 +385,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         if (switched) {
           if (this.groupBy) void this.onGroupBy(this.groupBy);
           void this.reload();
+        } else if (reimported && this.groupBy) {
+          // Its categories, codes and colours are new: the charts and the gene heatmap's bar
+          // are drawn from them.
+          void this.onGroupBy(this.groupBy);
         }
         this.changed();
       });
@@ -464,8 +471,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * Another dataset emission keeps the entry, so it does not reload the heatmap.
    */
   protected get geneHeatmapSource(): unknown {
+    return this.groupingEntry(this.dataset) ?? this.dataset;
+  }
+
+  /** The grouping column's entry in `dataset`, if it has one. */
+  private groupingEntry(dataset: SpatialDataset | null): SpatialDataset['columns'][number] | undefined {
     const name = this.groupBy;
-    return this.dataset?.columns.find((c) => c.name === name) ?? this.dataset;
+    return name ? dataset?.columns.find((c) => c.name === name) : undefined;
   }
 
   /** The gene heatmap is the chart on screen. */

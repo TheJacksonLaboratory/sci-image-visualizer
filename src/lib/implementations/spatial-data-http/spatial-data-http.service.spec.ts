@@ -577,6 +577,18 @@ describe('SpatialDataHttpService', () => {
       expect(Array.from(fractions)).toEqual([0.5, 0.25, 1, 0]);
     });
 
+    it('times out the means as it does the order and tiles', async () => {
+      // Configuring forgets the dataset: first, then the dataset.
+      service.configure({ baseUrl: BASE, timeoutMs: 20 });
+      await loadDataset();
+      const promise = service.getGeneHeatmapMeans('cell type');
+      http.expectOne(ROOT).flush(INFO);
+      await flushMicrotasks();
+      const means = http.expectOne(`${ROOT}/means`);
+      await expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(means.cancelled).toBe(true);
+    });
+
     it('decodes the column order', async () => {
       await loadDataset();
       const promise = service.getGeneHeatmapOrder('cell type');
