@@ -103,7 +103,6 @@ function mergeOutlines(parts: readonly SliceOutlines[]): SliceOutlines[] {
 
 /** The region sources' part of a class's volume: its area on each slice, with the outlines. */
 interface SourceVolume {
-  total: number;
   slices: ReadonlyMap<number, { area: number; outlines: SliceOutlines }>;
 }
 
@@ -1080,18 +1079,25 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
    * change it: taking one leaves the volume as it was. The region sources' part is cached until
    * what they hold changes (a feature taken or deleted, another source); only the slices with
    * drawn or taken regions of the class are measured again.
+   *
+   * `weight` is how many slices thick each slice is (by its index): 1 for a stack's evenly spaced
+   * slices, a plane's share of the depth for planes that are not (see `planeWeights`).
    */
-  async classVolumes(classes: readonly string[]): Promise<Map<string, number>> {
+  async classVolumes(
+    classes: readonly string[],
+    weight: (slice: number) => number = () => 1,
+  ): Promise<Map<string, number>> {
     const state = this.sourceStateKey();
     const out = new Map<string, number>();
     await Promise.all(
       [...new Set(classes)].map(async (name) => {
         const source = await this.sourceVolume(state, name);
-        let volume = source.total;
+        let volume = 0;
+        for (const [z, slice] of source.slices) volume += slice.area * weight(z);
         for (const regions of mergeOutlines(this.regionOutlines([name]))) {
           const under = source.slices.get(regions.z);
           const [both] = under ? mergeOutlines([under.outlines, regions]) : [regions];
-          volume += outlinesArea(both.rings, both.ringGroups) - (under?.area ?? 0);
+          volume += (outlinesArea(both.rings, both.ringGroups) - (under?.area ?? 0)) * weight(regions.z);
         }
         out.set(name, volume);
       }),
@@ -1111,13 +1117,10 @@ export class RegionStore implements IRegionStore, IRegionEditApi, IRegionSourceA
     }
     source = this.sourceOutlines([name], 0).then((parts) => {
       const slices = new Map<number, { area: number; outlines: SliceOutlines }>();
-      let total = 0;
       for (const outlines of mergeOutlines(parts)) {
-        const area = outlinesArea(outlines.rings, outlines.ringGroups);
-        slices.set(outlines.z, { area, outlines });
-        total += area;
+        slices.set(outlines.z, { area: outlinesArea(outlines.rings, outlines.ringGroups), outlines });
       }
-      return { total, slices };
+      return { slices };
     });
     this.sourceVolumeCache.set(key, source);
     source.catch(() => this.sourceVolumeCache.delete(key));

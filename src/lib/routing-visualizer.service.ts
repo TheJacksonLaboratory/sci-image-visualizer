@@ -49,7 +49,8 @@ import type { RegionSourceOpener, RegionSourceSlices } from './store/region-sour
 import { SpatialSelectionStore } from './store/spatial-selection.service';
 import { ViewerCapabilities } from './contracts/capabilities.contract';
 import { IRegionOverlay } from './contracts/region-overlay.contract';
-import { IRegionEditorApi } from './contracts/region-editor-api.contract';
+import { IRegionEditorApi, SliceScale } from './contracts/region-editor-api.contract';
+import { planeSpacing, planeWeights } from './spatial/spatial-planes';
 import { IChannelHistogramApi, IChannelState, IHistogram } from './contracts/channel-histogram-api.contract';
 import { autoWindowFromHistogram } from './contracts/intensity';
 import { VisualizerStore } from './store/visualizer-store.service';
@@ -956,7 +957,16 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     }
     if (this.keepsOwnSources(key)) return false;
     // Claimed before the source opens: a second call meanwhile changes nothing.
-    const claim: DatasetRegionSetState = { image, key, planes: null, groups: [], shown3d: false, opener: null };
+    const claim: DatasetRegionSetState = {
+      image,
+      key,
+      planes: null,
+      planeIds: null,
+      micronsPerUnit: null,
+      groups: [],
+      shown3d: false,
+      opener: null,
+    };
     this.datasetRegionSet = claim;
     let first: RegionSource | null;
     try {
@@ -985,7 +995,15 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       this.regionStore.enterStackMode(new Map([[z, this.regionStore.getRegions()]]), z, 'combined');
     }
     this.regionStore.attachRegionSource(reuse, 'planes');
-    const set: DatasetRegionSetState = { ...claim, planes, groups: regionSetGroups(info), opener: reuse };
+    const micronsPerUnit = info.micronsPerUnit && info.micronsPerUnit > 0 ? info.micronsPerUnit : null;
+    const set: DatasetRegionSetState = {
+      ...claim,
+      planes,
+      planeIds: planes ? [...info.planes] : null,
+      micronsPerUnit,
+      groups: regionSetGroups(info),
+      opener: reuse,
+    };
     this.attachedRegionSets.set(image, set);
     this.useDatasetRegionSet(set);
     return true;
@@ -1386,9 +1404,35 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     return `${this.regionStore.getDisplaySlice()}\n${this.plottedFileName ?? ''}`;
   }
 
-  /** Each class's volume over the whole stack, in px² × slices (see RegionStore.classVolumes). */
+  /**
+   * Each class's volume over the whole stack, in px² × slices (see RegionStore.classVolumes). Over
+   * the planes of the dataset's region set, slices of their mean spacing ({@link getSliceScale$}),
+   * each plane weighted by its share of the depth when they are not evenly spaced.
+   */
   async getClassVolumes(classes: readonly string[]): Promise<Record<string, number>> {
-    return Object.fromEntries(await this.regionStore.classVolumes(classes));
+    const planes = this.datasetPlanes$.value;
+    const ids = this.datasetRegionSet?.planeIds;
+    // A slice of the set's source is its plane id (the store binds slice z to plane z), which need
+    // not be its ordinal: `sliceZ[i]` is where plane `planes[i]` is, so each weight goes by its id.
+    const weights = planes && ids?.length === planes.length ? planeWeights(planes) : null;
+    const byPlane = weights && ids ? new Map(ids.map((id, i) => [id, weights[i]])) : null;
+    return Object.fromEntries(
+      await this.regionStore.classVolumes(classes, byPlane ? (z) => byPlane.get(z) ?? 1 : undefined),
+    );
+  }
+
+  /**
+   * While the dataset's region set slices the image (see getDatasetPlanes$), its planes' mean
+   * spacing and µm per unit: what a class volume's slice is, in µm, the image having no slice
+   * spacing of its own. Null otherwise.
+   */
+  getSliceScale$(): Observable<SliceScale | null> {
+    return this.datasetPlanes$.pipe(
+      map((planes) => {
+        const spacing = planes ? planeSpacing(planes) : null;
+        return spacing == null ? null : { spacing, micronsPerUnit: this.datasetRegionSet?.micronsPerUnit ?? null };
+      }),
+    );
   }
 
   getRegionSourceClassCounts(stack?: boolean): Promise<Record<string, number>> {
@@ -1798,7 +1842,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
 
 /**
  * A spatial dataset's region set on an image (see `attachDatasetRegionSet`): the image (its region
- * scope key), the set's key, its planes' z (its `sliceZ`, when it says), its class groups, whether
+ * scope key), the set's key, its planes' z (its `sliceZ`, when it says) and µm per unit, its class groups, whether
  * they were shown in 3D by themselves, and the opener it was attached to the store with (null while
  * it opens): while the store's source over every plane is that one, the set is still attached.
  */
@@ -1806,6 +1850,10 @@ interface DatasetRegionSetState {
   image: string;
   key: string;
   planes: readonly number[] | null;
+  /** The set's plane ids (`RegionSourceInfo.planes`), `planes[i]` being where plane `planeIds[i]` is. */
+  planeIds: readonly number[] | null;
+  /** Microns per unit of the set's coordinates, when it says. */
+  micronsPerUnit: number | null;
   groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;
   shown3d: boolean;
   opener: RegionSourceOpener | null;

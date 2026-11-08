@@ -23,7 +23,7 @@ import { OverlayPanel, OverlayPanelModule } from 'primeng/overlaypanel';
 import { ToolbarModule } from 'primeng/toolbar';
 import { TooltipModule } from 'primeng/tooltip';
 import { saveAs } from 'file-saver';
-import { Subject, Subscription } from 'rxjs';
+import { Subject, Subscription, combineLatest, of } from 'rxjs';
 
 import { Rectangle, Region } from '../models/region';
 import { withRegionPatch } from '../models/region-clone';
@@ -49,7 +49,7 @@ import { SaveMaskDialogComponent } from './save-mask-dialog/save-mask-dialog.com
 import { ManageClassesDialogComponent } from './manage-classes-dialog/manage-classes-dialog.component';
 import { RegionEditorHelpComponent } from './region-editor-help/region-editor-help.component';
 import { MaskExportService, MaskMode } from './mask-export.service';
-import { PixelSize, formatArea, pickMpp, regionAreaPx } from './region-metrics';
+import { PixelSize, formatArea, pickMpp, regionAreaPx, withSliceScale } from './region-metrics';
 
 /**
  * The Region Editor (`<region-editor>`): the table of the active image's
@@ -420,12 +420,12 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
         this.changed();
       });
 
-    // Physical pixel size of the active image (for region areas in µm²/mm²).
-    this.regionApi
-      .getImageMeta()
+    // Physical pixel size of the active image (for region areas in µm²/mm²), with the slice spacing
+    // of a region set's planes when they slice it (for class volumes in µm³).
+    combineLatest([this.regionApi.getImageMeta(), this.regionApi.getSliceScale$?.() ?? of(null)])
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((meta) => {
-        this.mpp = pickMpp(meta);
+      .subscribe(([meta, scale]) => {
+        this.mpp = withSliceScale(pickMpp(meta), scale);
         this.changed();
       });
 

@@ -48,3 +48,32 @@ export function observationsOnPlane(obs: SpatialObservations, planes: readonly n
   }
   return out.subarray(0, n);
 }
+
+/**
+ * The planes' mean spacing, `|last − first| / (n − 1)`, in their units: what one slice of a class's
+ * volume is thick (see {@link planeWeights}). Null for fewer than two planes, or planes all at one z.
+ */
+export function planeSpacing(planes: readonly number[]): number | null {
+  const n = planes.length;
+  if (n < 2) return null;
+  const spacing = Math.abs(planes[n - 1] - planes[0]) / (n - 1);
+  return Number.isFinite(spacing) && spacing > 0 ? spacing : null;
+}
+
+/**
+ * How thick each plane's slab of a volume is, in mean spacings ({@link planeSpacing}): its band
+ * ({@link planeBand}), the first and the last plane as thick as the gap to their one neighbour.
+ * All 1 for evenly spaced planes, so a volume summed over slices (area × weight) is the area times
+ * the spacing either way. Null where {@link planeSpacing} is.
+ */
+export function planeWeights(planes: readonly number[]): number[] | null {
+  const spacing = planeSpacing(planes);
+  if (spacing == null) return null;
+  const n = planes.length;
+  return planes.map((z, k) => {
+    const [lo, hi] = planeBand(planes, k);
+    const gap = Math.abs(k === 0 ? planes[1] - z : planes[n - 2] - z);
+    const thick = Number.isFinite(lo) && Number.isFinite(hi) ? hi - lo : gap;
+    return thick / spacing;
+  });
+}
