@@ -116,6 +116,12 @@ export class SpatialGeneHeatmapComponent implements AfterViewInit, OnChanges, On
   @Input() access: SpatialGeneHeatmapAccess | null = null;
   /** The categorical column the cells are grouped by. */
   @Input() column: string | null = null;
+  /**
+   * What the data is of: changes when the same access and column name now mean other data —
+   * another dataset with a column of that name, or a grouping imported again under its name.
+   * Any value; a new one reloads the heatmap like a new column.
+   */
+  @Input() source: unknown = null;
   /** Display colour of each group, by name, as the map draws it. */
   @Input() colors: Record<string, string> = {};
   /** Observation ids (barcodes, cell ids), by observation index, for labels and the tooltip. */
@@ -186,7 +192,7 @@ export class SpatialGeneHeatmapComponent implements AfterViewInit, OnChanges, On
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['access'] || changes['column']) void this.reload();
+    if (changes['access'] || changes['column'] || changes['source']) void this.reload();
     else if (changes['colors'] || changes['ids']) this.requestDraw();
   }
 

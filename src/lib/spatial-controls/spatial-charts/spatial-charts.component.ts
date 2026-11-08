@@ -21,7 +21,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
-import { SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
@@ -300,6 +300,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private datasetHasGeneHeatmap = false;
   /** Observation ids, for the gene heatmap's cell labels. */
   protected observationIds: readonly string[] | null = null;
+  /** The dataset last emitted, for what the gene heatmap is of. */
+  private dataset: SpatialDataset | null = null;
   private groupColorMap: { grouping: unknown; colors: Record<string, string> } | null = null;
 
   /** What the map is coloured by — the chart's subject. */
@@ -366,6 +368,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // its own; anything computed or computing for the previous dataset is dropped.
         const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
         this.observationIds = dataset?.observations.ids ?? null;
+        this.dataset = dataset;
         this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
         const switched = this.data.onDatasetChanged(
           dataset,
@@ -452,6 +455,17 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   /** The gene heatmap, where the data source serves it for this dataset. */
   protected get geneHeatmap() {
     return this.datasetHasGeneHeatmap ? (this.controls?.geneHeatmap ?? null) : null;
+  }
+
+  /**
+   * What the gene heatmap is of: the grouping column's entry in the dataset. The access and
+   * the column's name can stay the same while the data changes: another dataset with a
+   * column of that name, or a grouping imported again under its name (its entry is replaced).
+   * Another dataset emission keeps the entry, so it does not reload the heatmap.
+   */
+  protected get geneHeatmapSource(): unknown {
+    const name = this.groupBy;
+    return this.dataset?.columns.find((c) => c.name === name) ?? this.dataset;
   }
 
   /** The gene heatmap is the chart on screen. */
