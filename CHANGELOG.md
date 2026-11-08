@@ -28,6 +28,13 @@ file was added.
   image in `load()`, so a missing WebGPU surfaced in `plot()`, where nothing falls back, and the
   render failed with "the renderer could not draw the image". The router now checks for an adapter
   before routing to napari-js: the 2D types fall back to OpenSeadragon, the 3D types to Plotly.
+- **Region Editor class volumes in µm³ over a 3D segmentation.** In Spatial omics 3D, the volumes of
+  the classes of a dataset's 3D segmentation were shown in voxels, because the image it is attached
+  to has a pixel size but no slice spacing. The editor now takes the slice spacing from the
+  segmentation's planes (`getSliceScale$`: their spacing from `sliceZ`, and `micronsPerUnit`), so the
+  volumes are in µm³ (or mm³). Planes that are not evenly spaced each count for their share of the
+  depth (`planeWeights`), each weight going to its plane by id (`planes[i]`), so a set whose plane
+  ids are not 0, 1, 2… is weighted right.
 
 ## [0.18.1] — 2026-11-05
 

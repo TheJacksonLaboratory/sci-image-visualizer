@@ -1,5 +1,6 @@
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
 import { IImageMetadata } from '../contracts/image.contract';
+import type { SliceScale } from '../contracts/region-editor-api.contract';
 
 /** Physical pixel size (µm/pixel); both undefined when the image is unscaled. */
 export interface PixelSize {
@@ -22,6 +23,22 @@ export function pickMpp(meta: IImageMetadata[] | undefined): PixelSize {
   const my = m && (m.mppY ?? 0) > 0 ? (m.mppY as number) : undefined;
   const mz = m && (m.mppZ ?? 0) > 0 ? (m.mppZ as number) : undefined;
   return { mppX: mx, mppY: my ?? mx, mppZ: mz };
+}
+
+/**
+ * The pixel size of a volume whose slices are a region set's planes ({@link SliceScale}), not the
+ * image's: the planes' spacing in µm is the slice spacing, whatever the image says of its own z, and
+ * the set's µm per unit stands in for a pixel size the image does not declare (its coordinates are
+ * the image's pixels). The image's own, unchanged, without one.
+ */
+export function withSliceScale(mpp: PixelSize, scale: SliceScale | null | undefined): PixelSize {
+  if (!scale || !(scale.spacing > 0)) return mpp;
+  const perUnit = scale.micronsPerUnit && scale.micronsPerUnit > 0 ? scale.micronsPerUnit : undefined;
+  const mppX = mpp.mppX ?? perUnit;
+  const mppY = mpp.mppY ?? perUnit;
+  // z is in the coordinates' units: µm per unit is the set's, else the image's pixel size.
+  const zPerUnit = perUnit ?? mppX;
+  return { mppX, mppY, mppZ: zPerUnit ? scale.spacing * zPerUnit : undefined };
 }
 
 /**
