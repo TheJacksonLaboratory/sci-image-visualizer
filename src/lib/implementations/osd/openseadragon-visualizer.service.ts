@@ -549,6 +549,17 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     if (settings) settings.clickToZoom = enabled;
   }
 
+  /**
+   * Show or hide the mounted viewer's tissue tiles: the spatial view's Images toggle, for the WebGL
+   * fallback. Only the drawer's canvas, so what is drawn over the viewer (the markers, the regions,
+   * the scale bar) stays.
+   */
+  setImageVisible(visible: boolean): void {
+    // Typed loosely: the bundled typings leave the drawer's canvas off `Viewer`.
+    const canvas = (this.viewer as unknown as { drawer?: { canvas?: HTMLElement } } | null)?.drawer?.canvas;
+    if (canvas) canvas.style.visibility = visible ? '' : 'hidden';
+  }
+
   /** This backend's region renderer (the SVG overlay), once a plot is mounted. */
   getRegionOverlay(): IRegionOverlay | null {
     return this.overlay;

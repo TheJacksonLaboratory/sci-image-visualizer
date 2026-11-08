@@ -114,6 +114,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   /** The spatial markers over OpenSeadragon when napari-js cannot draw them (no WebGPU). Built on
    *  first use, and only when a spatial port is bound. */
   private webglSpatial: WebGlSpatialLayer | null = null;
+  /** Counts plot() calls: a plot's completion acts only while it is still the latest. */
+  private plotRequest = 0;
   /** The file name of the image last plotted (names a GeoJSON export). */
   private plottedFileName: string | undefined;
   /** The div the backends render into (every backend shares it); '' before the first plot. */
@@ -414,6 +416,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     inPlace?: boolean,
   ): Promise<boolean> {
     this.currentPlotType = plotType;
+    const request = ++this.plotRequest;
     this.spatialViewChanged$.next();
     this.plottedFileName = imageInfo?.fileName;
     this.plottedInfo = imageInfo ?? null;
@@ -455,9 +458,12 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // The WebGL spatial markers belong to an OSD viewer showing the spatial type: anything else,
     // or a new OSD viewer (a non-in-place plot rebuilds it), takes them down; a re-attach follows.
     const spatialOnOsd = isSpatialOmics(plotType) && next === this.osd;
-    if (!spatialOnOsd || !inPlace) this.webglSpatial?.detach();
+    if (!spatialOnOsd || !inPlace) this.detachWebGlSpatial();
     const drawn = next.plot(plotDiv, imageLoaded, imageInfo, screenHeight, plotType, inPlace).then((ok) => {
-      if (ok && spatialOnOsd && this.lastRendered === this.osd && !this.webglSpatial?.attached)
+      // Only for the latest plot: a slow spatial plot overtaken by an image plot on the same OSD
+      // viewer must not put the markers over that image.
+      const latest = request === this.plotRequest && isSpatialOmics(this.currentPlotType);
+      if (ok && spatialOnOsd && latest && this.lastRendered === this.osd && !this.webglSpatial?.attached)
         this.attachWebGlSpatial();
       return ok;
     });
@@ -540,7 +546,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     // per-image fallback) and tear down whatever's on screen.
     this.osdFellBack = false;
     this.napariFellBack = false;
-    this.webglSpatial?.detach();
+    this.detachWebGlSpatial();
     this.renderer().reset();
   }
   relayout(trueImageSize?: number[]): void {
@@ -1745,7 +1751,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.importTicket = { id: this.importTicket.id + 1, image: undefined }; // a late import changes nothing
     this.spatialFacade?.dispose();
     this.spatialFacade = null;
-    this.webglSpatial?.detach();
+    this.detachWebGlSpatial();
     this.regionUpdates.unsubscribe();
     this.planeCellsSub?.unsubscribe();
     this.sectionSubs.unsubscribe();
@@ -1806,7 +1812,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     this.sections.stop();
     this.sliceMounted = false;
     this.sliceDiv = null;
-    this.webglSpatial?.detach();
+    this.detachWebGlSpatial();
     this.plotly.detach();
     this.osd.detach();
     this.napari.detach();
@@ -1831,6 +1837,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       imageSize: () => this.osd.getTrueImageSize(),
       z: () => this.imageSlice(this.currentZIndex),
       toolActive: () => this.osd.regionToolActive(),
+      setImageVisible: (visible) => this.osd.setImageVisible(visible),
       outsideZone: (fn) => this.zone.runOutsideAngular(fn),
       inZone: (fn) => this.zone.run(fn),
     });
@@ -1840,6 +1847,18 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
         '[visualizer] spatial view drawn with WebGL (no WebGPU): cell outlines, transcripts and density need WebGPU.',
       );
     }
+  }
+
+  /**
+   * Take the WebGL spatial markers down, giving OpenSeadragon back its click-to-zoom (the viewer
+   * may be reused in place by an ordinary image plot) and its tissue tiles.
+   */
+  private detachWebGlSpatial(): void {
+    const layer = this.webglSpatial;
+    if (!layer) return;
+    const wasAttached = layer.attached;
+    layer.detach();
+    if (wasAttached) this.osd.setClickToZoom(true);
   }
 
   /** @deprecated Use {@link detach}. */

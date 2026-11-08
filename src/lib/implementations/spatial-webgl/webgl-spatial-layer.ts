@@ -55,6 +55,11 @@ export interface WebGlSpatialHost {
   z(): number;
   /** A region tool owns the pointer: a still click is the tool's, not a class selection. */
   toolActive(): boolean;
+  /**
+   * Show or hide the tissue image under the markers (the view's Images toggle, as napari-js's
+   * `hideForeignImage`). Optional: without it the image stays. Shown again on detach.
+   */
+  setImageVisible?(visible: boolean): void;
   outsideZone<T>(fn: () => T): T;
   inZone<T>(fn: () => T): T;
 }
@@ -174,6 +179,7 @@ export class WebGlSpatialLayer {
       changes.subscribe(([dataset, view, selection, colormap, reverse]) => {
         this.display.record((colormap as ColormapNode) ?? null, !!reverse);
         this.session.latest = [dataset, view, selection];
+        this.host.setImageVisible?.(view.showImage !== false);
         void this.hover.resolveSource(dataset, view);
         void this.rebuild(dataset, view, selection);
       }),
@@ -189,6 +195,8 @@ export class WebGlSpatialLayer {
 
   /** Take the canvas down and stop following anything. */
   detach(): void {
+    // The viewer may show an ordinary image next: its tiles must not stay hidden.
+    if (this.renderer) this.host.setImageVisible?.(true);
     this.subs.unsubscribe();
     this.subs = new Subscription();
     this.rebuilds.cancel();

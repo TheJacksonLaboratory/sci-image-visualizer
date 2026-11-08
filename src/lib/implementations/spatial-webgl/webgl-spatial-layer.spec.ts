@@ -237,4 +237,36 @@ describe('WebGlSpatialLayer', () => {
     expect(ctx().callsTo('texImage2D').length).toBeGreaterThan(0);
     layer.detach();
   });
+
+  it('samples the gene map’s first row at the top of the image', async () => {
+    // The field is row-major from the top; WebGL puts an upload's first row at v = 0, and the quad
+    // gives v = 0 to the image's top edge (y = rect.y). So no flip, on either side.
+    const { layer } = layerFor(port(dataset()));
+    layer.attach();
+    store.setSpatialView({ colorBy: { kind: 'feature', name: 'GENE' }, geneMap: true });
+    await flush();
+    await flush();
+    const g = ctx();
+    const flips = g.callsTo('pixelStorei').filter(([pname, value]) => pname === g.gl.UNPACK_FLIP_Y_WEBGL && value);
+    expect(flips).toEqual([]);
+    const shaders = g.callsTo('shaderSource').map(([, src]) => src as string);
+    const raster = shaders.find((src) => src.includes('u_rect'))!;
+    expect(raster).toContain('vec2 img = u_rect.xy + a_corner * u_rect.zw;');
+    expect(raster).toContain('v_uv = a_corner;');
+    expect(raster).toContain('1.0 - p.y / u_size.y * 2.0');
+    layer.detach();
+  });
+
+  it('hides the tissue with the Images toggle, and shows it again on detach', async () => {
+    const setImageVisible = jest.fn();
+    const { layer } = layerFor(port(dataset()), { setImageVisible });
+    layer.attach();
+    await flush();
+    expect(setImageVisible).toHaveBeenLastCalledWith(true);
+    store.setSpatialView({ showImage: false });
+    await flush();
+    expect(setImageVisible).toHaveBeenLastCalledWith(false);
+    layer.detach();
+    expect(setImageVisible).toHaveBeenLastCalledWith(true);
+  });
 });

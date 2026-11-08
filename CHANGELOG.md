@@ -15,7 +15,9 @@ file was added.
   is drawn on OpenSeadragon with a WebGL2 layer for the observation markers and the gene map, with
   the same colours, gene filter, selection muting, hover tooltip and click-to-select as the napari-js
   view (`implementations/spatial-webgl/`; the marker colouring is now shared through
-  `spatial-marker-style.ts`). Not drawn by the fallback yet: the level-of-detail cell outlines,
+  `spatial-marker-style.ts`). The Images toggle hides the tissue tiles under it (the
+  `WebGlSpatialHost.setImageVisible` hook), and leaving the spatial view gives OpenSeadragon back its
+  click-to-zoom and its tiles. Not drawn by the fallback yet: the level-of-detail cell outlines,
   transcripts and density, per-gene marker icons, and datasets that register onto no image.
 - **`WEBGPU_PROBE`** token (public API): whether napari-js can run, asked once per page. Override it
   to force the WebGL / OpenSeadragon fallback.

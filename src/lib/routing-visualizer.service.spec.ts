@@ -1962,6 +1962,7 @@ describe('RoutingVisualizerService without WebGPU', () => {
     osd.onViewportRedraw = jest.fn().mockReturnValue(() => undefined);
     osd.regionToolActive = jest.fn().mockReturnValue(false);
     osd.setClickToZoom = jest.fn();
+    osd.setImageVisible = jest.fn();
     const ds = {
       id: 'ds',
       name: 'ds',
@@ -2029,6 +2030,44 @@ describe('RoutingVisualizerService without WebGPU', () => {
     const layerHost = osd.getSpatialLayerHost() as HTMLElement;
     await router.plot('div', {}, INFO, 600, PlotType.IMAGE);
     expect(layerHost.querySelector('canvas')).toBeNull();
+  });
+
+  it('gives OpenSeadragon its click-to-zoom and its tiles back when the markers come down', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE, true);
+    expect(osd.setClickToZoom).toHaveBeenLastCalledWith(true);
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('hides the tissue with the Images toggle', async () => {
+    setupNoGpu();
+    await render(PlotType.SPATIAL_OMICS);
+    TestBed.inject(VisualizerStore).setSpatialView({ showImage: false });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(false);
+    TestBed.inject(VisualizerStore).setSpatialView({ showImage: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(osd.setImageVisible).toHaveBeenLastCalledWith(true);
+  });
+
+  it('does not put the markers over the image plot that overtook a slow spatial plot', async () => {
+    setupNoGpu();
+    // Spatial on OpenSeadragon (napari-js has fallen back), then an image plot takes it down.
+    await render(PlotType.SPATIAL_OMICS);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE);
+    const contexts = gl.contexts.length;
+    osd.setClickToZoom.mockClear();
+    // A spatial plot that is slow to finish, overtaken by an image plot on the same viewer.
+    let finish!: (ok: boolean) => void;
+    osd.plot.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = r)));
+    const spatial = router.plot('div', {}, INFO, 600, PlotType.SPATIAL_OMICS, true);
+    await router.plot('div', {}, INFO, 600, PlotType.IMAGE, true);
+    finish(true);
+    await spatial;
+    expect(gl.contexts.length).toBe(contexts);
+    expect(osd.setClickToZoom).not.toHaveBeenCalledWith(false);
+    expect((osd.getSpatialLayerHost() as HTMLElement).querySelector('canvas')).toBeNull();
   });
 
   it('draws no markers without a spatial port', async () => {
