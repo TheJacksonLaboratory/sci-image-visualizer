@@ -1225,6 +1225,28 @@ describe('VisualizerComponent (UI shell)', () => {
       expect(plotService.deleteActiveShape).toHaveBeenCalled();
     });
 
+    it('switches the wireframe through the 3D controls, and not before the view has them', () => {
+      // A volume still loading: no controls, so the button does not claim a wireframe.
+      plotService.getSurface3dControls = jest.fn().mockReturnValue(null);
+      component['toggleWireframe']();
+      expect(component['wireframeActive']).toBe(false);
+
+      let wireframe = false;
+      const controls = {
+        setWireframe: jest.fn((on: boolean) => (wireframe = on)),
+        wireframe: () => wireframe,
+      };
+      plotService.getSurface3dControls.mockReturnValue(controls);
+      component['toggleWireframe']();
+      expect(controls.setWireframe).toHaveBeenCalledWith(true);
+      expect(component['wireframeActive']).toBe(true);
+      // The scene's setting is the truth: the button follows it.
+      wireframe = false;
+      component['toggleWireframe']();
+      expect(controls.setWireframe).toHaveBeenLastCalledWith(true);
+      expect(component['wireframeActive']).toBe(true);
+    });
+
     it('onToggleImageSmoothing flips state and applies it', () => {
       expect(component['imageSmoothingEnabled']).toBe(false);
       component['onToggleImageSmoothing']();

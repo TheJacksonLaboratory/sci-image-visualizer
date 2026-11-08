@@ -1337,10 +1337,18 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.plotService.getSurface3dControls()?.setAxesVisible?.(this.axesVisible);
   }
 
-  /** Toggle the napari surface wireframe (edges vs filled). No-op on backends without a surface. */
+  /**
+   * Toggle the napari surface wireframe (edges vs filled). No-op until the view has its 3D
+   * controls (a volume still loading): the setting lives in the scene's settings, which surfaces
+   * added later take, so flipping only the button would show wireframe on over filled surfaces.
+   * The new state is the inverse of the scene's, which the button then shows.
+   */
   protected toggleWireframe() {
-    this.wireframeActive = !this.wireframeActive;
-    this.plotService.getSurface3dControls()?.setWireframe?.(this.wireframeActive);
+    const controls = this.plotService.getSurface3dControls();
+    if (!controls?.setWireframe) return;
+    const on = !(controls.wireframe?.() ?? this.wireframeActive);
+    controls.setWireframe(on);
+    this.wireframeActive = on;
   }
 
   /** Change the napari 3D decimate factor. Decimation changes the fetched/assembled data, so this

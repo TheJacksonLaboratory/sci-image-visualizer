@@ -136,11 +136,11 @@
       style="width: 1rem"
     />
   </p-button>
-  <!-- Surface wireframe toggle (napari-js WebGPU surface only). -->
+  <!-- Wireframe toggle: the surface, and the volume's and spatial 3D's region classes and cells. -->
   <p-button
     icon="pi pi-share-alt"
     size="small"
-    *ngIf="isNapariSurfaceMode"
+    *ngIf="showsWireframeToggle"
     [text]="!wireframeActive"
     ariaLabel="Toggle wireframe"
     pTooltip="Toggle wireframe"

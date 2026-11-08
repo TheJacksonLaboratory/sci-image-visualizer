@@ -147,12 +147,21 @@ describe('ToolbarComponent', () => {
     expect(slider()).toBeNull();
   });
 
-  it('isNapariSurfaceMode is true only for the napari surface, isNapari3dMode for all napari 3D', () => {
-    component.selectedPlotType = PlotType.NAPARI_SURFACE;
-    expect(component['isNapariSurfaceMode']).toBe(true);
-    for (const t of [PlotType.NAPARI_VOLUME, PlotType.SURFACE, PlotType.NAPARI_IMAGE]) {
+  it('offers the wireframe toggle where surfaces are drawn, isNapari3dMode for all napari 3D', () => {
+    // The surface, the volume's region classes, spatial 3D's cells and region classes.
+    for (const t of [PlotType.NAPARI_SURFACE, PlotType.NAPARI_VOLUME, PlotType.SPATIAL_OMICS_3D]) {
       component.selectedPlotType = t;
-      expect(component['isNapariSurfaceMode']).toBe(false);
+      expect(component['showsWireframeToggle']).toBe(true);
+    }
+    // The isosurface shares the volume's scene but draws no surface layers.
+    for (const t of [
+      PlotType.SURFACE,
+      PlotType.NAPARI_IMAGE,
+      PlotType.NAPARI_ISOSURFACE,
+      PlotType.SPATIAL_OMICS,
+    ]) {
+      component.selectedPlotType = t;
+      expect(component['showsWireframeToggle']).toBe(false);
     }
     // The Resolution control shows for every napari 3D type.
     for (const t of [PlotType.NAPARI_VOLUME, PlotType.NAPARI_ISOSURFACE, PlotType.NAPARI_SURFACE]) {

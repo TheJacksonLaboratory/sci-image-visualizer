@@ -58,6 +58,8 @@ export interface Cells3dHost {
   /** Show the cells loading on the canvas until the returned function is called. */
   beginTask(label: 'Cells'): () => void;
   status(status: Cells3dStatus | null): void;
+  /** Whether a surface added is drawn as a wireframe (the toggle's state then); none: filled. */
+  wireframe?(): boolean;
 }
 
 interface Chunk {
@@ -601,6 +603,7 @@ export class Spatial3dCells {
       blending: 'translucent',
       scale3d: [1, 1, this.zScale],
       fit: 'never',
+      wireframe: this.host.wireframe?.() ?? false,
     });
     this.byLayer.set(added, chunk);
     this.installed.set(added, { world: chunk.world, faces });

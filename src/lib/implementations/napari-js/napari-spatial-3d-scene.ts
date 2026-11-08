@@ -55,7 +55,7 @@ import {
   totalDensityGroup,
 } from './napari-spatial-encoding';
 import { HOVER_RADIUS_PX } from './napari-spatial-hover';
-import { Axes3dGizmo, Box3, surface3dControls } from './napari-axes-gizmo';
+import { Axes3dGizmo, Box3, surface3dControls, surfaceLayers } from './napari-axes-gizmo';
 import { NapariVolumeZHandle } from './napari-volume-z-handle';
 import { Spatial3dTranscripts } from './napari-spatial-3d-transcripts';
 import { Spatial3dCells } from './napari-spatial-3d-cells';
@@ -218,13 +218,18 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
   ) {
     super(ctx, session, true);
     // Placed in the cells' worker: placing every class's vertices here held the UI for seconds.
-    this.regionMeshes = new VolumeRegionMeshes(ctx.viewer, (v, f) => placeInWorker(v, f));
+    this.regionMeshes = new VolumeRegionMeshes(
+      ctx.viewer,
+      (v, f) => placeInWorker(v, f),
+      () => ctx.settings.surfaceWireframe,
+    );
     this.transcripts3d = new Spatial3dTranscripts(ctx.viewer, (message) => ctx.badge.beginTask(message));
     this.cells3d = new Spatial3dCells({
       viewer: ctx.viewer,
       port: session.port,
       beginTask: (label) => ctx.badge.begin(label),
       status: (status) => session.reportCells3d(status),
+      wireframe: () => ctx.settings.surfaceWireframe,
     });
     this.cellLookup = session.port ? new CategoricalLookup(session.port) : null;
   }
@@ -515,7 +520,12 @@ export class Spatial3dScene extends SpatialSceneBase implements NapariScene {
 
   /** The toolbar's 3D controls, as the Volume view's: drag mode, re-framing and the axes. */
   surface3dControls(): ISurface3dControls | null {
-    return surface3dControls(this.ctx, () => this.gizmo);
+    // The wireframe is the cells' and the region classes' surfaces'.
+    return surface3dControls(
+      this.ctx,
+      () => this.gizmo,
+      () => surfaceLayers(this.ctx.viewer),
+    );
   }
 
   /**

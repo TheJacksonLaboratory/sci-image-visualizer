@@ -312,9 +312,13 @@ export class ToolbarComponent {
     return isNapariVolume(type) || isNapariIsosurface(type) || isNapariSurface(type) || isSpatialOmics3d(type);
   }
 
-  /** The napari-js WebGPU surface — shows the wireframe toggle. */
-  protected get isNapariSurfaceMode(): boolean {
-    return isNapariSurface(this.effectivePlotType);
+  /**
+   * The views that draw surfaces a wireframe toggle switches: napari-js's surface, the volume's
+   * region classes, and spatial 3D's cells and region classes.
+   */
+  protected get showsWireframeToggle(): boolean {
+    const type = this.effectivePlotType;
+    return isNapariSurface(type) || isNapariVolume(type) || isSpatialOmics3d(type);
   }
 
   /** Any napari-js WebGPU 3D type (volume/isosurface/surface) — shows the Resolution control. */
