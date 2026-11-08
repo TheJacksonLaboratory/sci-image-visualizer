@@ -701,6 +701,87 @@ describe('SpatialChartsComponent', () => {
     });
   });
 
+  describe('heatmap of all genes', () => {
+    const geneHeatmap = {
+      info: jest.fn(),
+      means: jest.fn(),
+      order: jest.fn(),
+      tile: jest.fn(),
+    };
+
+    it('is offered only where the data source serves it', async () => {
+      await build(controls);
+      component['onKind']('heatmap');
+      await flush();
+      expect(component['geneHeatmap']).toBeNull();
+      expect(component['showsGeneHeatmap']).toBe(false);
+    });
+
+    it('is offered only for a dataset that says it is served', async () => {
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      expect(component['geneHeatmap']).toBeNull();
+      dataset$.next({ ...dataset, geneHeatmap: true });
+      await flush();
+      expect(component['geneHeatmap']).toBe(geneHeatmap);
+    });
+
+    it('replaces the picked genes’ chart, grouped by the heatmap’s column, in the map’s colours', async () => {
+      dataset$.next({ ...dataset, geneHeatmap: true });
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      component['onKind']('heatmap');
+      await flush();
+      (Plotly.react as jest.Mock).mockClear();
+      (Plotly.purge as jest.Mock).mockClear();
+      component['onHeatmapRows']('all');
+      await flush();
+      await flush();
+      expect(component['showsGeneHeatmap']).toBe(true);
+      expect(component['groupBy']).toBe('region');
+      expect(component['groupColors']).toEqual({ A: '#f00', B: '#00f' });
+      // The same object while the grouping stays, so the heatmap is not redrawn for nothing.
+      expect(component['groupColors']).toBe(component['groupColors']);
+      // No Plotly heatmap behind it.
+      expect(Plotly.react).not.toHaveBeenCalled();
+      expect(Plotly.purge).toHaveBeenCalled();
+
+      component['onHeatmapRows']('picked');
+      await flush();
+      expect(component['showsGeneHeatmap']).toBe(false);
+    });
+
+    it('loads the grouping again when it is imported again under its name, and only then', async () => {
+      await build(controls);
+      await component['onGroupBy']('region');
+      const view = controls.categoricalView as jest.Mock;
+      const asked = view.mock.calls.length;
+      const before = component['geneHeatmapSource'];
+      // Another grouping imported: the active one's entry is the same object.
+      const current = dataset$.value!;
+      dataset$.next({
+        ...current,
+        columns: [...current.columns, { kind: 'categorical', name: 'other', categories: ['x'] }],
+      });
+      await flush();
+      expect(view.mock.calls.length).toBe(asked);
+      expect(component['geneHeatmapSource']).toBe(before);
+      // The active one imported again: its entry replaced, its categories and colours new.
+      dataset$.next({
+        ...current,
+        columns: [{ kind: 'categorical', name: 'region', categories: ['A', 'B', 'C'] }, current.columns[1]],
+      });
+      await flush();
+      expect(view.mock.calls.length).toBe(asked + 1);
+      expect(view).toHaveBeenLastCalledWith('region');
+      expect(component['geneHeatmapSource']).not.toBe(before);
+    });
+
+    it('colours the map by the gene clicked', async () => {
+      await build({ ...controls, geneHeatmap } as unknown as ISpatialControls);
+      component['onGeneHeatmapGene']('Ttr');
+      expect(controls.colorByFeature).toHaveBeenCalledWith('Ttr');
+    });
+  });
+
   describe('heatmap (genes x groups)', () => {
     /**
      * Eight cells, four per category — the class view needs more than the

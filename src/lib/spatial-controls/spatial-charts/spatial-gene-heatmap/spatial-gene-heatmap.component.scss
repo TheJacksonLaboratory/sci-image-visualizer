@@ -1,0 +1,78 @@
+@use '../chart-controls';
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sx-gh-search {
+  flex: 1 1 8rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+}
+
+.sx-gh-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+
+.sx-gh-legend-bar {
+  display: inline-block;
+  width: 6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+}
+
+// The canvas fills the frame; the frame takes the panel's remaining height, with a floor
+// so the matrix is never a sliver.
+.sx-gh-frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 20rem;
+  overflow: hidden;
+}
+
+.sx-gh-canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sx-gh-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-color-secondary, #6c757d);
+  pointer-events: none;
+}
+
+.sx-gh-tip {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--surface-overlay, rgba(30, 30, 30, 0.92));
+  color: var(--text-color, #eee);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  b {
+    font-weight: 600;
+    margin-right: 0.35rem;
+  }
+}

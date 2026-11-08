@@ -25,6 +25,9 @@ import {
   CategoricalColumnMeta,
   SpatialDataset,
   SpatialEmbedding,
+  SpatialGeneHeatmap,
+  SpatialGeneHeatmapMeans,
+  SpatialGeneHeatmapScale,
   SpatialMarkerGenes,
   SpatialSelectionMask,
   SpatialTranscriptCounts,
@@ -373,6 +376,24 @@ export type RoiSelectionMode = 'class-volumes' | 'regions';
  * The view state is backend-neutral (it lives in the shared store, like the
  * colormap), so these controls work whichever backend is on screen.
  */
+/**
+ * The gene heatmap of a dataset, as the port serves it ({@link SpatialDataPort.getGeneHeatmap}
+ * and its siblings), for one categorical column at a time.
+ */
+export interface SpatialGeneHeatmapAccess {
+  info(column: string): Promise<SpatialGeneHeatmap>;
+  means(column: string): Promise<SpatialGeneHeatmapMeans>;
+  order(column: string): Promise<Uint32Array>;
+  tile(
+    column: string,
+    cx: number,
+    gy: number,
+    tx: number,
+    ty: number,
+    scale: SpatialGeneHeatmapScale,
+  ): Promise<Float32Array>;
+}
+
 export interface ISpatialControls {
   /** The dataset being visualized, or null. Drives the column/gene pickers and
    *  the legend. */
@@ -428,6 +449,8 @@ export interface ISpatialControls {
   transcriptCounts?(genes: string[]): Promise<SpatialTranscriptCounts>;
   /** Marker genes of each group of a categorical column. Optional (see the port). */
   markerGenes?(column: string, perGroup?: number): Promise<SpatialMarkerGenes>;
+  /** The gene heatmap: every gene against every cell, by group. Optional (see the port). */
+  geneHeatmap?: SpatialGeneHeatmapAccess;
   /** Transcripts of each selected gene in the current view, or null when not known
    *  (all genes at once, transcripts off, or a selection zoomed out on a dataset without the
    *  pyramid's per-gene levels, where clusters are drawn from summed density grids). */

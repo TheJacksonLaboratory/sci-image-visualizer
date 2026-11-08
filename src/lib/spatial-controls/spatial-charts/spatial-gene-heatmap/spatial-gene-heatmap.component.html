@@ -1,0 +1,100 @@
+<div class="sx-controls">
+  <p-selectButton
+    [options]="viewOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="view"
+    (ngModelChange)="onView($event)"
+    styleClass="sx-gh-view"
+    pTooltip="Cells: a column per cell, sorted by group. Groups: each gene's mean in each group"
+    tooltipPosition="top"
+  ></p-selectButton>
+  <p-dropdown
+    *ngIf="view === 'cells'"
+    [options]="cellScaleOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="cellScale"
+    (ngModelChange)="onCellScale($event)"
+    appendTo="body"
+    pTooltip="Expression: one colour scale for every gene. Per gene: each gene over its own largest value"
+    tooltipPosition="top"
+  ></p-dropdown>
+  <p-dropdown
+    *ngIf="view === 'groups'"
+    [options]="groupScaleOptions"
+    optionLabel="label"
+    optionValue="value"
+    [ngModel]="groupScale"
+    (ngModelChange)="onGroupScale($event)"
+    appendTo="body"
+    pTooltip="z-score: each gene across the groups, so a marker stands out whatever its level"
+    tooltipPosition="top"
+  ></p-dropdown>
+  <p-checkbox
+    [binary]="true"
+    [ngModel]="hideUndetected"
+    (onChange)="onHideUndetected($event.checked)"
+    label="Detected genes only"
+    pTooltip="Leave out the genes never detected in any cell"
+    tooltipPosition="top"
+  ></p-checkbox>
+</div>
+<div class="sx-controls">
+  <input
+    pInputText
+    type="search"
+    class="sx-gh-search"
+    placeholder="Find a gene"
+    aria-label="Find a gene"
+    [(ngModel)]="search"
+    (keydown.enter)="findGene()"
+  />
+  <button type="button" class="p-button p-button-sm p-button-text" (click)="findGene()" [disabled]="!info">
+    Find
+  </button>
+  <button type="button" class="p-button p-button-sm p-button-text" (click)="resetZoom()" [disabled]="!info">
+    Reset zoom
+  </button>
+  <div class="sx-gh-legend" *ngIf="legend && info">
+    <span class="sx-gh-legend-label">{{ legend.label }}</span>
+    <span class="sx-gh-legend-bar" [style.background]="legend.gradient"></span>
+    <span class="sx-gh-legend-range">{{ legend.lo | number: '1.0-2' }} – {{ legend.hi | number: '1.0-2' }}</span>
+  </div>
+</div>
+
+<div #frame class="sx-gh-frame">
+  <canvas
+    #canvas
+    class="sx-gh-canvas"
+    (pointerdown)="onPointerDown($event)"
+    (pointermove)="onPointerMove($event)"
+    (pointerup)="onPointerUp($event)"
+    (pointerleave)="onPointerLeave()"
+    (dblclick)="resetZoom()"
+  ></canvas>
+  <div class="sx-gh-state" *ngIf="loading || error || !column">
+    <span *ngIf="!column">Pick a grouping for the columns.</span>
+    <span *ngIf="column && loading"><i class="pi pi-spin pi-spinner"></i> {{ loading }}</span>
+    <span *ngIf="column && !loading && error" class="sx-warn">{{ error }}</span>
+  </div>
+  <!-- Beside the pointer, on whichever side has room: the frame clips anything past its edge. -->
+  <div
+    class="sx-gh-tip"
+    *ngIf="hover"
+    [style.left.px]="hover.x"
+    [style.top.px]="hover.y"
+    [style.transform]="hoverTransform"
+  >
+    <div *ngFor="let line of hover.lines">
+      <b>{{ line.label }}</b> {{ line.value }}
+    </div>
+  </div>
+</div>
+
+<small class="sx-hint" *ngIf="searchNote">{{ searchNote }}</small>
+<small class="sx-hint" *ngIf="info">{{ status }}</small>
+<small class="sx-hint" *ngIf="info">
+  Scroll to zoom (Shift: genes only, Alt: cells only), drag to pan, double-click to reset. Click a gene to colour
+  the map by it.
+</small>
