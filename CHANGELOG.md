@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-08
+
 ### Added
 
 - **Spatial omics without WebGPU.** When the browser grants no WebGPU adapter, the 2D spatial view
@@ -2777,7 +2779,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.16.0...v0.17.0
