@@ -14,6 +14,10 @@ import {
   decodeDensity,
   decodeEmbedding,
   decodeFeatureVector,
+  decodeGeneHeatmapMeans,
+  decodeGeneHeatmapOrder,
+  decodeGeneHeatmapTile,
+  geneHeatmapTileShape,
   decodePolygonTile,
   decodePolygons,
   decodeRadius,
@@ -232,6 +236,34 @@ describe('spatial-wire', () => {
       expect(ds.polygons?.count).toBe(3);
       expect(ds.imageRef?.scale).toEqual([2, 2]);
       expect(ds.observations.ids).toEqual(['a', 'b', 'c']);
+    });
+
+    it('says whether the gene heatmap is served', () => {
+      expect(datasetFromManifest(manifest({ geneHeatmap: true }), coords).geneHeatmap).toBe(true);
+      expect('geneHeatmap' in datasetFromManifest(manifest(), coords)).toBe(false);
+    });
+  });
+
+  describe('gene heatmap', () => {
+    const info = { cells: 600, genes: new Array(300).fill('g'), tileSize: 256 };
+
+    it('sizes a tile from its level, the last ones short', () => {
+      expect(geneHeatmapTileShape(info, 0, 0, 0, 0)).toEqual({ rows: 256, cols: 256 });
+      expect(geneHeatmapTileShape(info, 0, 0, 2, 1)).toEqual({ rows: 44, cols: 88 });
+      // Level (2, 1): 150 columns, 150 rows.
+      expect(geneHeatmapTileShape(info, 2, 1, 0, 0)).toEqual({ rows: 150, cols: 150 });
+      expect(geneHeatmapTileShape(info, 0, 0, 3, 0)).toEqual({ rows: 256, cols: 0 });
+    });
+
+    it('decodes the means, order and tiles, checking their sizes', () => {
+      const means = decodeGeneHeatmapMeans(new Float32Array([1, 2, 3, 4]).buffer, 1, 2);
+      expect(Array.from(means.means)).toEqual([1, 2]);
+      expect(Array.from(means.fractions)).toEqual([3, 4]);
+      expect(() => decodeGeneHeatmapMeans(new Float32Array(3).buffer, 1, 2)).toThrow(/means/);
+      expect(Array.from(decodeGeneHeatmapOrder(new Uint32Array([2, 0, 1]).buffer, 3))).toEqual([2, 0, 1]);
+      expect(() => decodeGeneHeatmapOrder(new Uint32Array(2).buffer, 3)).toThrow(/order/);
+      expect(decodeGeneHeatmapTile(new Float32Array(6).buffer, 2, 3).length).toBe(6);
+      expect(() => decodeGeneHeatmapTile(new Float32Array(5).buffer, 2, 3)).toThrow(/tile/);
     });
   });
 });

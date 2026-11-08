@@ -525,6 +525,97 @@ describe('SpatialDataHttpService', () => {
     });
   });
 
+  describe('gene heatmap', () => {
+    // 2 genes x 3 cells, 2 groups, tiles of 2: level (0, 0) is two tiles across.
+    const INFO = {
+      column: 'cluster',
+      cells: 3,
+      genes: ['Fth1', 'Ttr'],
+      expressedGenes: 2,
+      peakGroup: [0, 1],
+      geneMax: [2, 3],
+      max: 3,
+      groups: [
+        { name: 'Cortex', cells: 2, start: 0 },
+        { name: 'Hippocampus', cells: 1, start: 2 },
+      ],
+      transform: 'log1p',
+      tileSize: 2,
+      baseLevel: 0,
+      finestLevel: 0,
+    };
+    const ROOT = `${BASE}/spatial/visium-brain/heatmap/cell%20type`;
+    const flushMicrotasks = async () => {
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+    };
+
+    it('asks for the layout once per column, and again after a failure', async () => {
+      await loadDataset();
+      const a = service.getGeneHeatmap('cell type');
+      const b = service.getGeneHeatmap('cell type');
+      http.expectOne(ROOT).flush(INFO);
+      expect(await a).toEqual(INFO);
+      expect(await b).toEqual(INFO);
+      expect(await service.getGeneHeatmap('cell type')).toEqual(INFO);
+
+      const failed = service.getGeneHeatmap('other');
+      http.expectOne(`${BASE}/spatial/visium-brain/heatmap/other`).flush('no', { status: 500, statusText: 'x' });
+      await expect(failed).rejects.toBeTruthy();
+      const retry = service.getGeneHeatmap('other');
+      http.expectOne(`${BASE}/spatial/visium-brain/heatmap/other`).flush(INFO);
+      expect(await retry).toEqual(INFO);
+    });
+
+    it('decodes the means and shares per gene and group', async () => {
+      await loadDataset();
+      const promise = service.getGeneHeatmapMeans('cell type');
+      http.expectOne(ROOT).flush(INFO);
+      await flushMicrotasks();
+      http.expectOne(`${ROOT}/means`).flush(f32(1, 2, 3, 4, 0.5, 0.25, 1, 0));
+      const { means, fractions } = await promise;
+      expect(Array.from(means)).toEqual([1, 2, 3, 4]);
+      expect(Array.from(fractions)).toEqual([0.5, 0.25, 1, 0]);
+    });
+
+    it('times out the means as it does the order and tiles', async () => {
+      // Configuring forgets the dataset: first, then the dataset.
+      service.configure({ baseUrl: BASE, timeoutMs: 20 });
+      await loadDataset();
+      const promise = service.getGeneHeatmapMeans('cell type');
+      http.expectOne(ROOT).flush(INFO);
+      await flushMicrotasks();
+      const means = http.expectOne(`${ROOT}/means`);
+      await expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(means.cancelled).toBe(true);
+    });
+
+    it('decodes the column order', async () => {
+      await loadDataset();
+      const promise = service.getGeneHeatmapOrder('cell type');
+      http.expectOne(`${ROOT}/order`).flush(new Uint32Array([2, 0, 1]).buffer);
+      expect(Array.from(await promise)).toEqual([2, 0, 1]);
+    });
+
+    it('asks for a tile at its level and scale, sized from the layout', async () => {
+      await loadDataset();
+      const promise = service.getGeneHeatmapTile('cell type', 0, 0, 1, 0, 'gene');
+      http.expectOne(ROOT).flush(INFO);
+      await flushMicrotasks();
+      // The last column of 3: a tile one column wide.
+      http.expectOne(`${ROOT}/tile/0/0/1/0?scale=gene`).flush(f32(0.5, 1));
+      expect(Array.from(await promise)).toEqual([0.5, 1]);
+    });
+
+    it('rejects a tile of the wrong size', async () => {
+      await loadDataset();
+      const promise = service.getGeneHeatmapTile('cell type', 0, 0, 0, 0, 'expression');
+      http.expectOne(ROOT).flush(INFO);
+      await flushMicrotasks();
+      http.expectOne(`${ROOT}/tile/0/0/0/0?scale=expression`).flush(f32(1, 2, 3));
+      await expect(promise).rejects.toThrow(/gene heatmap tile/);
+    });
+  });
+
   describe('clear', () => {
     it('drops the dataset and the cache, so the next read refetches', async () => {
       await loadDataset();

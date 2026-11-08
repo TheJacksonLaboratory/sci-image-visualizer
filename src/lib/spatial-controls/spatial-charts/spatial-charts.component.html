@@ -47,8 +47,21 @@
     ></i>
   </div>
 
+  <div class="sx-controls" *ngIf="kind === 'heatmap' && geneHeatmap">
+    <p-selectButton
+      [options]="heatmapRowOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="heatmapRows"
+      (ngModelChange)="onHeatmapRows($event)"
+      styleClass="sx-heatmap-rows"
+      pTooltip="Picked genes: the means of a few genes per group. All genes: every gene against every cell, zoomable"
+      tooltipPosition="top"
+    ></p-selectButton>
+  </div>
+
   <spatial-heatmap-controls
-    *ngIf="kind === 'heatmap'"
+    *ngIf="kind === 'heatmap' && !showsGeneHeatmap"
     [geneOptions]="geneOptions"
     [genes]="heatmapGenes"
     [zScore]="heatmapZScore"
@@ -75,7 +88,11 @@
   >
   </spatial-embedding-controls>
 
-  <div [id]="chartDiv" class="sx-plot" *ngIf="!detached"></div>
+  <div [id]="chartDiv" class="sx-plot" *ngIf="!detached && !showsGeneHeatmap"></div>
+
+  <ng-container *ngIf="showsGeneHeatmap && !detached">
+    <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
+  </ng-container>
 
   <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
        leaving a blank panel that looks broken. -->
@@ -96,8 +113,20 @@
   <small class="sx-hint" *ngIf="!notice && selectionCount && kind !== 'histogram' && kind !== 'heatmap'">
     Showing the selection only.
   </small>
-  <small class="sx-hint" *ngIf="!notice && kind === 'heatmap'">{{ heatmapNote }}</small>
+  <small class="sx-hint" *ngIf="!notice && kind === 'heatmap' && !showsGeneHeatmap">{{ heatmapNote }}</small>
   <small class="sx-hint" *ngIf="!notice && kind === 'embedding'">{{ embeddingNote }}</small>
+</ng-template>
+
+<!-- One instance at a time: in the panel, or in the detached window. -->
+<ng-template #geneHeatmapView>
+  <spatial-gene-heatmap
+    [access]="geneHeatmap"
+    [column]="groupBy"
+    [source]="geneHeatmapSource"
+    [colors]="groupColors"
+    [ids]="observationIds"
+    (geneClick)="onGeneHeatmapGene($event)"
+  ></spatial-gene-heatmap>
 </ng-template>
 
 <spatial-chart-window
@@ -108,6 +137,10 @@
   (closed)="toggleDetached()"
   (shown)="onDetachedWindowShown()"
   (resizeEnd)="onDetachedResizeEnd()"
+  [showPlot]="!showsGeneHeatmap"
 >
+  <ng-container *ngIf="showsGeneHeatmap">
+    <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
+  </ng-container>
   <ng-container *ngTemplateOutlet="hints"></ng-container>
 </spatial-chart-window>

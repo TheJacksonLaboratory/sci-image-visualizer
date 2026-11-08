@@ -21,6 +21,20 @@ file was added.
   transcripts and density, per-gene marker icons, and datasets that register onto no image.
 - **`WEBGPU_PROBE`** token (public API): whether napari-js can run, asked once per page. Override it
   to force the WebGL / OpenSeadragon fallback.
+- **Heatmap of all genes.** The spatial charts' Heatmap tab has a "Picked genes / All genes" switch
+  where the data source serves it (`SpatialDataPort.getGeneHeatmap` and its siblings, advertised by
+  the manifest's `geneHeatmap`). All genes draws every gene of the dataset against every cell on a
+  zoomable canvas (`<spatial-gene-heatmap>`): the cells sorted by the groups of the chosen column,
+  with its colour bar on top, and the genes ordered by the group where they peak, so the matrix reads
+  as a diagonal of marker blocks. The server sends it as tiles at levels of detail: zoomed out, a
+  pixel is the mean of a block of cells and genes; zoomed in, a single cell and gene, with their
+  names. Scroll zooms (Shift: genes only, Alt: cells only), dragging pans, a double-click resets, the
+  tooltip names the gene, cell, group and value, "Find a gene" brings a gene into view, and clicking
+  a gene colours the map by it. Its Groups view is each gene's mean per group (z-scored, as
+  expression, or over each gene's largest), with the share of the group expressing it. Genes never
+  detected are left out by default. Works in the detached chart window too. It loads afresh when the
+  same column name means other data (`source`): another dataset with a column of that name, or a
+  grouping imported again under its name, whose categories and colours the charts then read again.
 - **Wireframe toggle in the Volume and Spatial omics 3D views.** The Surface view's "Toggle
   wireframe" button now shows in these views too. It switches the region classes' 3D surfaces and,
   in Spatial omics 3D, the 3D cells; surfaces added afterwards (a class shown, cells still loading)

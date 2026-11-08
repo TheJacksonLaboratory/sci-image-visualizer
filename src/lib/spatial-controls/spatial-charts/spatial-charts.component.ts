@@ -21,7 +21,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
 
 import { VISUALIZER, IVisualizer, ISpatialControls } from '../../contracts/visualizer.contract';
-import { SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialEmbeddingMeta } from '../../contracts/spatial-dataset.contract';
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
@@ -49,6 +49,7 @@ import {
   embeddingLayout,
 } from '../../implementations/plotly/omics-trace-builders';
 import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
+import { SpatialGeneHeatmapComponent } from './spatial-gene-heatmap/spatial-gene-heatmap.component';
 import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
 import { SpatialChartWindowComponent } from './spatial-chart-window/spatial-chart-window.component';
 
@@ -111,6 +112,7 @@ let chartInstanceSeq = 0;
     SelectButtonModule,
     TooltipModule,
     SpatialHeatmapControlsComponent,
+    SpatialGeneHeatmapComponent,
     SpatialEmbeddingControlsComponent,
     SpatialChartWindowComponent,
   ],
@@ -285,6 +287,24 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private static readonly HEATMAP_MAX_COLUMNS = 40;
   /** Columns the cap dropped from the last render, for the note. */
   private heatmapHidden = 0;
+  /**
+   * The heatmap's rows: the genes picked (a Plotly chart of their means per group), or every
+   * gene against every cell (the zoomable gene heatmap, where the data source serves it).
+   */
+  protected heatmapRows: 'picked' | 'all' = 'picked';
+  protected readonly heatmapRowOptions = [
+    { label: 'Picked genes', value: 'picked' },
+    { label: 'All genes', value: 'all' },
+  ];
+  /** The dataset says its data source serves the gene heatmap. */
+  private datasetHasGeneHeatmap = false;
+  /** Observation ids, for the gene heatmap's cell labels. */
+  protected observationIds: readonly string[] | null = null;
+  /** The dataset last emitted, for what the gene heatmap is of. */
+  private dataset: SpatialDataset | null = null;
+  /** What the gene heatmap is of (see geneHeatmapSource): the dataset's id, the grouping's entry. */
+  private heatmapSource: { id: string | null; entry: unknown; token: object } | null = null;
+  private groupColorMap: { grouping: unknown; colors: Record<string, string> } | null = null;
 
   /** What the map is coloured by — the chart's subject. */
   colorBy: SpatialColorBy | null = null;
@@ -349,6 +369,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         // Offer to compute a t-SNE only where the dataset has PCA to embed and no t-SNE of
         // its own; anything computed or computing for the previous dataset is dropped.
         const embeddings = this.compute.setDataset(dataset?.embeddings ?? [], dataset?.observations.count ?? 0);
+        this.observationIds = dataset?.observations.ids ?? null;
+        // The grouping's entry replaced in the same dataset: imported again under its name.
+        const regrouped = this.groupingEntry(this.dataset);
+        this.dataset = dataset;
+        const reimported = !!regrouped && regrouped !== this.groupingEntry(dataset);
+        this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
         const switched = this.data.onDatasetChanged(
           dataset,
           this.controls?.categoricalColumns() ?? [],
@@ -361,6 +387,10 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         if (switched) {
           if (this.groupBy) void this.onGroupBy(this.groupBy);
           void this.reload();
+        } else if (reimported && this.groupBy) {
+          // Its categories, codes and colours are new: the charts and the gene heatmap's bar
+          // are drawn from them.
+          void this.onGroupBy(this.groupBy);
         }
         this.changed();
       });
@@ -429,6 +459,66 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     const first = this.groupOptions.find((o) => o.value)?.value;
     if (!first) return;
     await this.onGroupBy(first);
+  }
+
+  /** The gene heatmap, where the data source serves it for this dataset. */
+  protected get geneHeatmap() {
+    return this.datasetHasGeneHeatmap ? (this.controls?.geneHeatmap ?? null) : null;
+  }
+
+  /**
+   * What the gene heatmap is of: the dataset and the grouping column's entry in it. The access and
+   * the column's name can stay the same while the data changes: another dataset with a
+   * column of that name (even one sharing the same column descriptor), or a grouping imported
+   * again under its name (its entry is replaced). Another emission of the same dataset that keeps
+   * the entry does not reload the heatmap.
+   */
+  protected get geneHeatmapSource(): unknown {
+    const id = this.dataset?.id ?? null;
+    const entry = this.groupingEntry(this.dataset) ?? null;
+    const last = this.heatmapSource;
+    // The same object while both stay, so change detection does not reload it; a new one when
+    // either changes: two datasets may share one column descriptor.
+    if (!last || last.id !== id || last.entry !== entry) this.heatmapSource = { id, entry, token: {} };
+    return this.heatmapSource!.token;
+  }
+
+  /** The grouping column's entry in `dataset`, if it has one. */
+  private groupingEntry(dataset: SpatialDataset | null): SpatialDataset['columns'][number] | undefined {
+    const name = this.groupBy;
+    return name ? dataset?.columns.find((c) => c.name === name) : undefined;
+  }
+
+  /** The gene heatmap is the chart on screen. */
+  protected get showsGeneHeatmap(): boolean {
+    return this.kind === 'heatmap' && this.heatmapRows === 'all' && !!this.geneHeatmap;
+  }
+
+  /**
+   * Each group's colour by name, as the map draws it. The same object until the grouping
+   * changes, since it is an input of the gene heatmap and a new one redraws it.
+   */
+  protected get groupColors(): Record<string, string> {
+    const grouping = this.data.snapshot().grouping;
+    if (this.groupColorMap?.grouping !== grouping) {
+      const colors: Record<string, string> = {};
+      grouping?.categories.forEach((name, i) => (colors[name] = grouping.colors[i]));
+      this.groupColorMap = { grouping, colors };
+    }
+    return this.groupColorMap!.colors;
+  }
+
+  protected onHeatmapRows(rows: 'picked' | 'all'): void {
+    this.heatmapRows = rows;
+    void (async () => {
+      await this.ensureHeatmapGrouping();
+      void this.render();
+    })();
+  }
+
+  /** A gene clicked in the gene heatmap: the map is coloured by it. */
+  protected onGeneHeatmapGene(name: string): void {
+    this.controls?.colorByFeature(name);
   }
 
   protected onHeatmapZScore(on: boolean): void {
@@ -724,11 +814,24 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   private async renderChart(): Promise<void> {
     if (!this.isActive) return;
+    // The gene heatmap draws itself: the Plotly chart behind it is freed, and a Plotly heatmap
+    // still computing must not draw. Before the div guard: its view has removed the div.
+    if (this.showsGeneHeatmap) {
+      this.heatmapRender.cancel();
+      this.purgePlot();
+      return;
+    }
     // Guard on the div the ACTIVE kind will draw into, not always the shared one. While a
     // kind is detached the inline div is removed by its `*ngIf`, so checking that one
     // bailed here and the detached window never got a plot.
+    if (!document.getElementById(this.plotTarget)) {
+      // Leaving the gene heatmap (Picked genes, or another kind): its view removed the div, and
+      // the next change detection puts it back. Wait for that once, then draw.
+      this.changed();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (!this.isActive || this.showsGeneHeatmap || !document.getElementById(this.plotTarget)) return;
+    }
     const target = this.plotTarget;
-    if (!document.getElementById(target)) return;
     // Anything but the embedding inherits a div the embedding may have bound handlers on.
     if (this.kind !== 'embedding') this.plot.unbindSelection(target);
     // A heatmap still computing must not draw over the kind that replaced it.

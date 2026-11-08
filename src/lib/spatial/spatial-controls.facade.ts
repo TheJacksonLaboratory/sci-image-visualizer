@@ -30,6 +30,7 @@ import {
   SpatialObservations,
   SpatialSelectionMask,
   isCategoricalColumn,
+  SpatialGeneHeatmapScale,
 } from '../contracts/spatial-dataset.contract';
 import { ISpatialControls, RoiSelectionMode } from '../contracts/visualizer.contract';
 import { RegionStore } from '../store/region-store.service';
@@ -583,6 +584,23 @@ export class SpatialControlsFacade {
       ...(port.getMarkerGenes
         ? {
             markerGenes: (column: string, perGroup?: number) => port.getMarkerGenes!(column, perGroup),
+          }
+        : {}),
+      ...(port.getGeneHeatmap && port.getGeneHeatmapMeans && port.getGeneHeatmapOrder && port.getGeneHeatmapTile
+        ? {
+            geneHeatmap: {
+              info: (column: string) => port.getGeneHeatmap!(column),
+              means: (column: string) => port.getGeneHeatmapMeans!(column),
+              order: (column: string) => port.getGeneHeatmapOrder!(column),
+              tile: (
+                column: string,
+                cx: number,
+                gy: number,
+                tx: number,
+                ty: number,
+                scale: SpatialGeneHeatmapScale,
+              ) => port.getGeneHeatmapTile!(column, cx, gy, tx, ty, scale),
+            },
           }
         : {}),
       getTranscriptEstimate$: () => this.ctx.napari.transcriptEstimate$.asObservable(),

@@ -12,8 +12,9 @@ import { SpatialChartsComponent } from './spatial-charts.component';
 import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls/spatial-heatmap-controls.component';
 import { SpatialEmbeddingControlsComponent } from './spatial-embedding-controls/spatial-embedding-controls.component';
 import { SpatialChartWindowComponent } from './spatial-chart-window/spatial-chart-window.component';
+import { SpatialGeneHeatmapComponent } from './spatial-gene-heatmap/spatial-gene-heatmap.component';
 import { VISUALIZER, ISpatialControls } from '../../contracts/visualizer.contract';
-import { SpatialDataset } from '../../contracts/spatial-dataset.contract';
+import { SpatialDataset, SpatialGeneHeatmap } from '../../contracts/spatial-dataset.contract';
 import { DEFAULT_SPATIAL_VIEW, SpatialViewState } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection } from '../../spatial/spatial-selection';
 import { accessorOf, fire, one, shallowPanel } from '../../testing/spatial-panel-testing';
@@ -167,5 +168,202 @@ describe('SpatialChartsComponent (rendered)', () => {
     fixture.detectChanges();
     expect(component['detached']).toBe(false);
     expect(root.querySelector('spatial-chart-window')).toBeNull();
+  });
+});
+
+/**
+ * The gene heatmap mounted in the panel, kept mounted while the data under the same access and
+ * column name changes: it must show the new data, not the old layout with the new cell ids.
+ */
+describe('SpatialChartsComponent (rendered) gene heatmap', () => {
+  let fixture: ComponentFixture<SpatialChartsComponent>;
+  let dataset$: BehaviorSubject<SpatialDataset | null>;
+  let access: {
+    info: jest.Mock;
+    means: jest.Mock;
+    order: jest.Mock;
+    tile: jest.Mock;
+  };
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) {
+      await flush();
+      fixture.detectChanges();
+    }
+  };
+  const region = () => ({ kind: 'categorical' as const, name: 'region', categories: ['A', 'B'] });
+  const datasetOf = (id: string): SpatialDataset => ({
+    id,
+    name: id,
+    observations: {
+      count: 4,
+      x: new Float32Array(4),
+      y: new Float32Array(4),
+      ids: [0, 1, 2, 3].map((i) => `${id}${i}`),
+    },
+    columns: [region()],
+    features: { count: 1, names: [] },
+    geneHeatmap: true,
+  });
+  /** The layout of whichever dataset is current: its one gene names it. */
+  const layoutOf = (gene: string): SpatialGeneHeatmap => ({
+    column: 'region',
+    cells: 4,
+    genes: [gene],
+    expressedGenes: 1,
+    peakGroup: [0],
+    geneMax: [1],
+    max: 1,
+    groups: [
+      { name: 'A', cells: 2, start: 0 },
+      { name: 'B', cells: 2, start: 2 },
+    ],
+    transform: 'log1p',
+    tileSize: 4,
+    baseLevel: 0,
+    finestLevel: 0,
+  });
+  let gene = 'Ttr';
+  const heatmap = (): any =>
+    fixture.debugElement.query(By.directive(SpatialGeneHeatmapComponent)).componentInstance;
+
+  beforeEach(async () => {
+    gene = 'Ttr';
+    access = {
+      info: jest.fn(async () => layoutOf(gene)),
+      means: jest.fn(async () => ({ means: new Float32Array([1, 0]), fractions: new Float32Array([1, 0]) })),
+      order: jest.fn(async () => new Uint32Array([0, 1, 2, 3])),
+      tile: jest.fn(async () => new Float32Array(4)),
+    };
+    const view$ = new BehaviorSubject<SpatialViewState>({ ...DEFAULT_SPATIAL_VIEW });
+    const selection$ = new BehaviorSubject<SpatialSelectionMask>(emptySelection());
+    dataset$ = new BehaviorSubject<SpatialDataset | null>(datasetOf('a'));
+    const controls = {
+      getDataset$: () => dataset$,
+      getViewState$: () => view$,
+      getSelection$: () => selection$,
+      continuousValues: jest.fn(async () => new Float32Array(4)),
+      categoricalView: jest.fn(async () => ({
+        name: 'region',
+        categories: ['A', 'B'],
+        colors: ['#f00', '#00f'],
+        codes: new Uint16Array([0, 0, 1, 1]),
+      })),
+      categoricalColumns: jest.fn(() => ['region']),
+      geneHeatmap: access,
+    } as unknown as ISpatialControls;
+    for (const child of [
+      SpatialHeatmapControlsComponent,
+      SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent,
+      SpatialGeneHeatmapComponent,
+    ])
+      shallowPanel(child);
+    shallowPanel(SpatialChartsComponent, [
+      SpatialHeatmapControlsComponent,
+      SpatialEmbeddingControlsComponent,
+      SpatialChartWindowComponent,
+      SpatialGeneHeatmapComponent,
+    ]);
+    await TestBed.configureTestingModule({
+      imports: [SpatialChartsComponent],
+      providers: [{ provide: VISUALIZER, useValue: { getSpatialControls: () => controls } }],
+    }).compileComponents();
+    fixture = TestBed.createComponent(SpatialChartsComponent);
+    fixture.detectChanges();
+    await settle();
+    const panel = fixture.componentInstance as any;
+    panel.onKind('heatmap');
+    panel.onHeatmapRows('all');
+    await settle();
+  });
+
+  afterEach(() => fixture.destroy());
+
+  it('loads the new dataset’s heatmap when it has a column of the same name', async () => {
+    const child = heatmap();
+    expect(child.column).toBe('region');
+    expect(child.info.genes).toEqual(['Ttr']);
+    const store = child.store;
+    expect(store).toBeTruthy();
+    expect(access.order).toHaveBeenCalledTimes(1);
+
+    gene = 'NEW_GENE';
+    dataset$.next(datasetOf('b'));
+    await settle();
+
+    expect(heatmap()).toBe(child); // kept mounted
+    expect(child.ids[0]).toBe('b0');
+    expect(child.info.genes).toEqual(['NEW_GENE']);
+    expect(access.info).toHaveBeenCalledTimes(2);
+    expect(access.order).toHaveBeenCalledTimes(2);
+    // The old tiles are not drawn over the new layout.
+    expect(child.store).not.toBe(store);
+  });
+
+  it('loads the new dataset’s heatmap when the two share their column descriptor', async () => {
+    const child = heatmap();
+    const store = child.store;
+    gene = 'NEW_GENE';
+    // A port may reuse one descriptor for every dataset with that column.
+    dataset$.next({ ...datasetOf('b'), columns: dataset$.value!.columns });
+    await settle();
+
+    expect(child.ids[0]).toBe('b0');
+    expect(child.info.genes).toEqual(['NEW_GENE']);
+    expect(access.info).toHaveBeenCalledTimes(2);
+    expect(access.order).toHaveBeenCalledTimes(2);
+    expect(child.store).not.toBe(store);
+  });
+
+  it('draws the picked genes’ chart once its div is back', async () => {
+    const panel = fixture.componentInstance as any;
+    const picked = jest.spyOn(panel, 'renderHeatmap').mockResolvedValue(undefined);
+    expect(fixture.nativeElement.querySelector(`#${panel.chartDiv}`)).toBeNull();
+    panel.onHeatmapRows('picked');
+    await settle();
+    expect(fixture.nativeElement.querySelector(`#${panel.chartDiv}`)).not.toBeNull();
+    expect(picked).toHaveBeenCalled();
+  });
+
+  it('drops the old group means too', async () => {
+    const child = heatmap();
+    child.onView('groups');
+    await settle();
+    expect(access.means).toHaveBeenCalledTimes(1);
+    const means = child.means;
+    expect(means).toBeTruthy();
+
+    gene = 'NEW_GENE';
+    dataset$.next(datasetOf('b'));
+    await settle();
+
+    expect(access.means).toHaveBeenCalledTimes(2);
+    expect(child.means).not.toBe(means);
+    expect(child.info.genes).toEqual(['NEW_GENE']);
+  });
+
+  it('loads the grouping again when it is imported again under its name', async () => {
+    const child = heatmap();
+    const current = dataset$.value!;
+    gene = 'IMPORTED';
+    // As the HTTP port does on a re-import: the column's entry replaced, everything else kept.
+    dataset$.next({ ...current, columns: [region()] });
+    await settle();
+    expect(access.info).toHaveBeenCalledTimes(2);
+    expect(child.info.genes).toEqual(['IMPORTED']);
+  });
+
+  it('keeps the heatmap when the dataset re-emits with the grouping’s entry unchanged', async () => {
+    const current = dataset$.value!;
+    // Another grouping imported: the active one's entry is the same object.
+    dataset$.next({
+      ...current,
+      columns: [...current.columns, { kind: 'categorical', name: 'imported', categories: ['x'] }],
+    });
+    await settle();
+    expect(access.info).toHaveBeenCalledTimes(1);
+    expect(heatmap().info.genes).toEqual(['Ttr']);
   });
 });
