@@ -961,6 +961,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
       image,
       key,
       planes: null,
+      planeIds: null,
       micronsPerUnit: null,
       groups: [],
       shown3d: false,
@@ -998,6 +999,7 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
     const set: DatasetRegionSetState = {
       ...claim,
       planes,
+      planeIds: planes ? [...info.planes] : null,
       micronsPerUnit,
       groups: regionSetGroups(info),
       opener: reuse,
@@ -1409,9 +1411,13 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
    */
   async getClassVolumes(classes: readonly string[]): Promise<Record<string, number>> {
     const planes = this.datasetPlanes$.value;
-    const weights = planes ? planeWeights(planes) : null;
+    const ids = this.datasetRegionSet?.planeIds;
+    // A slice of the set's source is its plane id (the store binds slice z to plane z), which need
+    // not be its ordinal: `sliceZ[i]` is where plane `planes[i]` is, so each weight goes by its id.
+    const weights = planes && ids?.length === planes.length ? planeWeights(planes) : null;
+    const byPlane = weights && ids ? new Map(ids.map((id, i) => [id, weights[i]])) : null;
     return Object.fromEntries(
-      await this.regionStore.classVolumes(classes, weights ? (z) => weights[z] ?? 1 : undefined),
+      await this.regionStore.classVolumes(classes, byPlane ? (z) => byPlane.get(z) ?? 1 : undefined),
     );
   }
 
@@ -1844,6 +1850,8 @@ interface DatasetRegionSetState {
   image: string;
   key: string;
   planes: readonly number[] | null;
+  /** The set's plane ids (`RegionSourceInfo.planes`), `planes[i]` being where plane `planeIds[i]` is. */
+  planeIds: readonly number[] | null;
   /** Microns per unit of the set's coordinates, when it says. */
   micronsPerUnit: number | null;
   groups: ReadonlyArray<{ key: string; classes: readonly string[]; color: string }>;

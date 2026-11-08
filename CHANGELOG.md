@@ -16,7 +16,8 @@ file was added.
   to has a pixel size but no slice spacing. The editor now takes the slice spacing from the
   segmentation's planes (`getSliceScale$`: their spacing from `sliceZ`, and `micronsPerUnit`), so the
   volumes are in µm³ (or mm³). Planes that are not evenly spaced each count for their share of the
-  depth (`planeWeights`).
+  depth (`planeWeights`), each weight going to its plane by id (`planes[i]`), so a set whose plane
+  ids are not 0, 1, 2… is weighted right.
 
 ## [0.18.1] — 2026-11-05
 
