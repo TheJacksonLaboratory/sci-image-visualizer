@@ -1201,6 +1201,41 @@ describe('RoutingVisualizerService (characterization)', () => {
         .mockImplementation(async (groups) => groups.map((g) => ({ key: g.key, mesh })));
     }
 
+    it("gives its planes' spacing and µm per unit as the class volumes' slice scale, weighting uneven planes", async () => {
+      stubBuilds();
+      const scales: unknown[] = [];
+      router.getSliceScale$().subscribe((s) => scales.push(s));
+      await router.plot('div', {}, PLATE, 600, PlotType.SPATIAL_OMICS_3D);
+      expect(scales[scales.length - 1]).toBeNull();
+
+      // Planes 0, 10, 30: mean spacing 15, the slabs 10, 15 and 20 thick.
+      const uneven = { ...SOURCE, info: { ...SOURCE.info, sliceZ: [0, 10, 30], micronsPerUnit: 0.5 } };
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(uneven), 'set-1');
+      expect(scales[scales.length - 1]).toEqual({ spacing: 15, micronsPerUnit: 0.5 });
+      const volumes = jest.spyOn(regionStore, 'classVolumes').mockResolvedValue(new Map([['B', 1]]));
+      await router.getClassVolumes(['B']);
+      const weight = volumes.mock.calls[0][1]!;
+      expect([0, 1, 2].map(weight)).toEqual([10 / 15, 1, 20 / 15]);
+
+      // Plane ids that are not ordinals: each weight still goes to its own plane.
+      router.releaseDatasetRegionSet(null);
+      const ids = {
+        ...SOURCE,
+        info: { ...SOURCE.info, planes: [10, 20, 30], sliceZ: [0, 10, 30], micronsPerUnit: 0.5 },
+      };
+      await router.attachDatasetRegionSet(jest.fn().mockResolvedValue(ids), 'set-1');
+      await router.getClassVolumes(['B']);
+      const byId = volumes.mock.calls[volumes.mock.calls.length - 1][1]!;
+      expect([10, 20, 30].map(byId)).toEqual([2 / 3, 1, 4 / 3]);
+      expect(byId(0)).toBe(1); // not one of its planes
+
+      // Released: no planes, no scale, every slice one thick.
+      router.releaseDatasetRegionSet(null);
+      expect(scales[scales.length - 1]).toBeNull();
+      await router.getClassVolumes(['B']);
+      expect(volumes.mock.calls[volumes.mock.calls.length - 1][1]).toBeUndefined();
+    });
+
     it('attaches it over every plane, places its planes, offers its classes in 3D and shows each once', async () => {
       const build = stubBuilds();
       const attach = jest.spyOn(regionStore, 'attachRegionSource');
