@@ -18,8 +18,8 @@
  *
  *     { provide: TOOLBAR_TOOLS, useExisting: YoloToolContribution, multi: true }
  *
- * Register nothing and the toolbar has no segmentation tools, the help dialog
- * lists none, and neither model package is in the graph.
+ * Register nothing and the toolbar has no segmentation tools
+ * and neither model package is in the graph.
  *
  * WHY PARAMS ARE DECLARED, NOT RENDERED
  * A contribution describes its parameters ({@link ToolParamSpec}) instead of
@@ -136,7 +136,7 @@ export type ToolIcon = { src: string; pi?: never } | { pi: string; src?: never }
 export interface ToolbarToolContribution {
   /** Stable identity, used for tracking and persisted preferences. */
   id: string;
-  /** Short name, used in the toast and the help dialog heading. */
+  /** Short name, used in the toast. */
   label: string;
   icon: ToolIcon;
 
@@ -177,6 +177,9 @@ export interface ToolbarToolContribution {
   /**
    * Entry for the help dialog's tool list. `body` is rendered as HTML and may
    * reference published assets (e.g. the tool's own icon).
+   *
+   * @deprecated No longer rendered: the Help button now opens the SIV user guide
+   * (`VizConfig.docsUrl`). Document a contributed tool in the host's own guide.
    */
   help?: { body: string };
 
@@ -232,7 +235,12 @@ export interface ToolbarDialogToolContribution {
     /** CSS width of the dialog. Default `'22rem'`. */
     width?: string;
   };
-  /** Entry for the help dialog's tool list, rendered as HTML (trusted content). */
+  /**
+   * Entry for the help dialog's tool list, rendered as HTML (trusted content).
+   *
+   * @deprecated No longer rendered: the Help button now opens the SIV user guide
+   * (`VizConfig.docsUrl`). Document a contributed tool in the host's own guide.
+   */
   help?: { body: string };
   /** Start a session, once the Image view's viewport is ready. */
   activate(ctx: ToolDialogContext): ToolDialogSession | Promise<ToolDialogSession>;

@@ -47,7 +47,8 @@ import type { RegionClassNode, RegionIndexRow } from '../region-source/region-ti
 import { SaveRegionsDialogComponent } from './save-regions-dialog/save-regions-dialog.component';
 import { SaveMaskDialogComponent } from './save-mask-dialog/save-mask-dialog.component';
 import { ManageClassesDialogComponent } from './manage-classes-dialog/manage-classes-dialog.component';
-import { RegionEditorHelpComponent } from './region-editor-help/region-editor-help.component';
+import { VIZ_CONFIG } from '../contracts/viz-config';
+import { sivDocsUrl } from '../contracts/docs-link';
 import { MaskExportService, MaskMode } from './mask-export.service';
 import { PixelSize, formatArea, pickMpp, regionAreaPx, withSliceScale } from './region-metrics';
 
@@ -89,7 +90,6 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
     SaveMaskDialogComponent,
     RegionColorDialogComponent,
     ManageClassesDialogComponent,
-    RegionEditorHelpComponent,
   ],
   templateUrl: './region-editor.component.html',
   styleUrls: ['./region-editor.component.scss'],
@@ -122,7 +122,8 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected showShapeLabel!: boolean;
   protected shapeColor!: string;
   protected fillColor!: string;
-  protected displayHelpDialog = false;
+  /** The Region Editor page of the user guide (`VizConfig.docsUrl`, else the published guide). */
+  protected readonly helpUrl = sivDocsUrl('regionEditor', inject(VIZ_CONFIG, { optional: true }));
   protected showColorDialog = false;
   /** One colour editor per unique class among the selected regions, shown in the
    *  "edit colour of selected regions" dialog. Unclassified regions (no label)
@@ -976,10 +977,6 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
       };
     });
     this.commit();
-  }
-
-  protected showHelp() {
-    this.displayHelpDialog = true;
   }
 
   /** Open the colour dialog for the currently-selected region(s), building one

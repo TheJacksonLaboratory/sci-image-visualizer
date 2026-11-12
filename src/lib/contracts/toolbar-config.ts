@@ -17,7 +17,7 @@ export interface ToolbarToolVisibility {
   /** Region drawing/editing: select, rectangle, polyline, freeform, polygon vertex
    *  editing, wand, vertex eraser, delete, Bézier/polygon conversion. */
   regionTools?: boolean;
-  /** The Help button and its dialog. */
+  /** The Help button, which opens the user guide (`VizConfig.docsUrl`). */
   help?: boolean;
 }
 

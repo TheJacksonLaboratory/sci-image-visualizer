@@ -234,14 +234,17 @@
       tooltipPosition="bottom"
       [disabled]="(!regions || !regions.length) && !hasRegionSource"
     ></p-button>
-    <p-button
+    <a
+      pButton
       icon="pi pi-question"
-      size="small"
-      [text]="true"
-      (click)="showHelp()"
-      pTooltip="Help"
+      class="p-button-text p-button-sm p-button-icon-only"
+      [href]="helpUrl"
+      target="_blank"
+      rel="noopener"
+      aria-label="Help (opens the Region Editor guide in a new tab)"
+      pTooltip="Help — open the Region Editor guide"
       tooltipPosition="bottom"
-    ></p-button>
+    ></a>
   </div>
 </p-toolbar>
 
@@ -390,5 +393,3 @@
   (export)="exportPresets()"
 >
 </region-manage-classes-dialog>
-
-<region-editor-help [(visible)]="displayHelpDialog"></region-editor-help>

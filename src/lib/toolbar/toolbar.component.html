@@ -237,23 +237,18 @@
     <ng-container *ngIf="tools.help">
       <span class="toolbar-separator"></span>
 
-      <!-- Help -->
-      <p-button
+      <!-- Help: the SIV user guide (mkdocs), in a new tab. -->
+      <a
+        pButton
         icon="pi pi-question-circle"
-        size="small"
-        [text]="true"
-        ariaLabel="Help"
-        pTooltip="Help"
+        class="p-button-text p-button-sm p-button-icon-only"
+        [href]="helpUrl"
+        target="_blank"
+        rel="noopener"
+        aria-label="Help (opens the user guide in a new tab)"
+        pTooltip="Help — open the user guide"
         tooltipPosition="bottom"
-        (onClick)="showHelp()"
-      >
-      </p-button>
+      ></a>
     </ng-container>
   </div>
 </p-toolbar>
-<toolbar-help-dialog
-  [(visible)]="displayHelpDialog"
-  [contributedTools]="contributedTools"
-  [dialogTools]="dialogTools"
->
-</toolbar-help-dialog>
