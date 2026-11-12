@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   version="1.1"
+   viewBox="0 0 60 60"
+   id="svg2"
+   sodipodi:docname="sam-box-prompt.svg"
+   width="60"
+   height="60"
+   inkscape:version="1.4.4 (dcaf3e7, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs2" />
+  <sodipodi:namedview
+     id="namedview2"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:current-layer="svg2" />
+  <!-- One object per component, each with an identity rotate() about its own
+       centre. The cells match sam-point-prompt.svg: same absolute radii, and
+       the same position relative to the blob (offsets scaled by the two blobs'
+       size ratio, since this blob is the smaller of the two). Each ring keeps
+       its outer and inner contour in one path — the inner one is its hole. -->
+  <path
+     d="M 9.5,3 H 50.5 A 6.5,6.5 0 0 1 57,9.5 V 50.5 A 6.5,6.5 0 0 1 50.5,57 H 9.5 A 6.5,6.5 0 0 1 3,50.5 V 9.5 A 6.5,6.5 0 0 1 9.5,3 Z M 50.5,6.4 H 9.5 A 3.1,3.1 0 0 0 6.4,9.5 V 50.5 A 3.1,3.1 0 0 0 9.5,53.6 H 50.5 A 3.1,3.1 0 0 0 53.6,50.5 V 9.5 A 3.1,3.1 0 0 0 50.5,6.4 Z"
+     fill-rule="nonzero"
+     transform="rotate(0, 30, 30)"
+     id="frame"
+     inkscape:label="box prompt frame" />
+  <path
+     d="M 47.488,30 C 47.619,32.002 47.456,34.173 46.898,36.15 C 46.339,38.127 45.578,40.506 44.137,41.862 C 42.696,43.219 40.19,43.902 38.252,44.292 C 36.313,44.683 34.346,43.944 32.505,44.205 C 30.663,44.467 29.195,45.503 27.203,45.863 C 25.211,46.223 22.452,47.022 20.553,46.363 C 18.653,45.704 16.873,43.676 15.807,41.909 C 14.741,40.143 14.545,37.751 14.158,35.766 C 13.772,33.781 13.356,31.874 13.488,30 C 13.619,28.126 14.181,26.187 14.948,24.522 C 15.715,22.856 17.041,21.62 18.092,20.008 C 19.142,18.395 19.833,16.395 21.252,14.847 C 22.67,13.3 24.625,11.133 26.601,10.722 C 28.577,10.311 31.282,11.347 33.107,12.379 C 34.932,13.412 36.095,15.639 37.553,16.919 C 39.01,18.198 40.427,18.851 41.853,20.054 C 43.278,21.258 45.169,22.48 46.108,24.137 C 47.047,25.795 47.356,27.998 47.488,30 Z M 42.886,25.31 C 42.135,23.984 40.623,23.006 39.482,22.044 C 38.341,21.081 37.208,20.558 36.042,19.535 C 34.876,18.512 33.946,16.73 32.486,15.904 C 31.025,15.077 28.861,14.249 27.281,14.578 C 25.7,14.907 24.136,16.64 23.001,17.878 C 21.867,19.116 21.314,20.716 20.473,22.006 C 19.633,23.296 18.572,24.285 17.959,25.617 C 17.345,26.95 16.896,28.501 16.79,30 C 16.685,31.499 17.017,33.025 17.327,34.613 C 17.636,36.201 17.793,38.114 18.646,39.527 C 19.498,40.94 20.923,42.564 22.442,43.091 C 23.961,43.618 26.169,42.978 27.762,42.69 C 29.356,42.403 30.531,41.574 32.004,41.364 C 33.477,41.155 35.05,41.746 36.601,41.434 C 38.152,41.121 40.157,40.576 41.31,39.49 C 42.463,38.404 43.071,36.502 43.518,34.92 C 43.965,33.339 44.096,31.602 43.99,30 C 43.885,28.398 43.638,26.636 42.886,25.31 Z"
+     fill-rule="nonzero"
+     transform="rotate(0, 30.497, 28.623)"
+     id="blob"
+     inkscape:label="blob" />
+  <path
+     d="M 33.121,21.58 A 4.177,4.177 0 1 1 24.768,21.58 A 4.177,4.177 0 1 1 33.121,21.58 Z"
+     fill-rule="nonzero"
+     transform="rotate(0, 28.944, 21.58)"
+     id="cell-1"
+     inkscape:label="cell 1" />
+  <path
+     d="M 29.662,33.008 A 4.984,4.984 0 1 1 19.693,33.008 A 4.984,4.984 0 1 1 29.662,33.008 Z"
+     fill-rule="nonzero"
+     transform="rotate(0, 24.677, 33.008)"
+     id="cell-2"
+     inkscape:label="cell 2" />
+  <path
+     d="M 41.815,26.755 A 2.949,2.949 0 1 1 35.917,26.755 A 2.949,2.949 0 1 1 41.815,26.755 Z"
+     fill-rule="nonzero"
+     transform="rotate(0, 38.866, 26.755)"
+     id="cell-3"
+     inkscape:label="cell 3" />
+</svg>

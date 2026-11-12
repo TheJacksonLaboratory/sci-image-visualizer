@@ -4,7 +4,16 @@
   "lib": {
     "entryFile": "src/index.ts"
   },
-  "assets": ["src/lib/assets", "src/lib/styles"],
+  "assets": [
+    "src/lib/assets",
+    "src/lib/styles",
+    {
+      "glob": "**/*",
+      "input": "docs/user-guide",
+      "output": "docs/user-guide",
+      "ignore": ["site/**", "screenshots.json"]
+    }
+  ],
   "allowedNonPeerDependencies": [
     "cellpose-js",
     "fast-png",

@@ -1,0 +1,123 @@
+# SIV user guide — build with `npm run docs:build` (or `mkdocs serve -f docs/user-guide/mkdocs.yml`).
+#
+# Published next to the live demo at
+#   https://thejacksonlaboratory.github.io/sci-image-visualizer/docs/
+# and shipped in the npm package under docs/user-guide, so a host (JIT) can merge
+# it into its own mkdocs site — see docs/integrators.md.
+site_name: SIV user guide
+site_description: >-
+  User guide, tutorials, how-to recipes, feature reference and QA test plan for
+  sci-image-visualizer (SIV), the browser image viewer and annotation tool.
+site_url: https://thejacksonlaboratory.github.io/sci-image-visualizer/docs/
+repo_url: https://github.com/TheJacksonLaboratory/sci-image-visualizer
+repo_name: sci-image-visualizer
+edit_uri: edit/main/docs/user-guide/docs/
+docs_dir: docs
+copyright: The Jackson Laboratory · MIT licence
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.tracking
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - assets/primeicons/primeicons.css
+  - assets/siv-docs.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Tour of the viewer: tutorials/viewer-tour.md
+      - Annotate your first image: tutorials/first-annotation.md
+      - Segment cells with AI: tutorials/ai-segmentation.md
+      - Explore a spatial-omics dataset: tutorials/spatial-omics.md
+  - How-to guides:
+      - how-to/index.md
+      - Viewing and display: how-to/viewing.md
+      - Drawing and editing regions: how-to/regions.md
+      - Annotation classes: how-to/classes.md
+      - Import and export: how-to/import-export.md
+      - AI segmentation: how-to/segmentation.md
+      - Stacks and 3D: how-to/stacks-3d.md
+      - Spatial omics: how-to/spatial-omics.md
+  - Reference:
+      - reference/index.md
+      - Toolbar: reference/toolbar.md
+      - Plot types: reference/plot-types.md
+      - Navigation: reference/navigation.md
+      - Channels & Histogram: reference/channels-histogram.md
+      - Stacks, volumes and 3D: reference/stacks-3d.md
+      - Intensity profile lines: reference/intensity-profiles.md
+      - Region tools: reference/region-tools.md
+      - Region actions (context menu): reference/region-actions.md
+      - Region Editor: reference/region-editor.md
+      - Annotation classes: reference/annotation-classes.md
+      - GeoJSON import and export: reference/geojson.md
+      - AI segmentation: reference/segmentation.md
+      - Spatial omics: reference/spatial-omics.md
+      - Distribution charts: reference/distribution-charts.md
+      - Keyboard shortcuts: reference/keyboard-shortcuts.md
+      - Limits and requirements: reference/limits.md
+  - QA test plan:
+      - qa/index.md
+      - Viewing: qa/viewing.md
+      - Regions: qa/regions.md
+      - Region Editor and classes: qa/region-editor.md
+      - AI segmentation: qa/segmentation.md
+      - Spatial omics: qa/spatial-omics.md
+      - Known issues to confirm: qa/known-issues.md
+  - Troubleshooting: troubleshooting.md
+  - For integrators: integrators.md

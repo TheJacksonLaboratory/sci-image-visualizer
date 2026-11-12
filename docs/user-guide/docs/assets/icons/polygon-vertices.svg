@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Polygon (click-to-place) tool icon: a traced polyline with vertex dots. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44" fill="#000000">
+  <g transform="matrix(1.4740709,0,0,1.4740709,-6.0268793,-6.8086826)">
+    <polyline points="23.877,16.627 14.657,10.767 5.25,21.551 12.757,29.397"
+              fill="none" stroke="#000000" stroke-width="1.6"
+              stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="23.877" cy="16.627" r="1.9"/>
+    <circle cx="14.657" cy="10.767" r="1.9"/>
+    <circle cx="5.25" cy="21.551" r="1.9"/>
+    <circle cx="12.757" cy="29.397" r="1.9"/>
+  </g>
+</svg>

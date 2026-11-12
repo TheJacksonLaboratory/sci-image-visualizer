@@ -371,6 +371,10 @@ no Angular compiler required:
 
 ## Documentation
 
+- **[User guide](https://thejacksonlaboratory.github.io/sci-image-visualizer/docs/)** (sources in
+  [docs/user-guide](docs/user-guide/)) — for people using the viewer: tutorials, how-to recipes,
+  a reference page per feature, and the QA test plan. The toolbar's Help button opens it; a host
+  points it at its own copy with `VizConfig.docsUrl`.
 - **[docs/vitessce-comparison.md](docs/vitessce-comparison.md)** — SIV and Vitessce compared: what each
   does, the gaps in both directions, and what that means for SIV.
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how `src/lib` is laid out:
