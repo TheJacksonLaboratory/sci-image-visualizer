@@ -33,6 +33,20 @@ file was added.
 - `ToolbarToolContribution.help` and `ToolbarDialogToolContribution.help`: no longer rendered, since
   the help dialog that listed them is gone. Document a contributed tool in the host's own guide.
 
+### Fixed
+
+- **Lasso on the embedding chart.** Lassoing points in the UMAP, PCA or t-SNE now selects those
+  observations on the map. The redraw that fades the rest dropped Plotly's lasso outline, Plotly
+  reported that as an empty selection, and the selection was cleared about 50 ms after it was made.
+  `PlotlyChartHost` now ignores an empty selection or a deselect while it is drawing; a selection
+  with points is still applied, so a second lasso made mid-redraw is not lost. The chosen modebar tool
+  (lasso, box, pan) is also kept across that redraw, instead of falling back to zoom.
+- **Selection contrast in the embedding chart.** With a selection, each category is drawn as two
+  traces: its unselected points faded (opacity 0.08, a per-trace value that `scatter3d` honours
+  too), and its selected points at full strength, drawn after every faded trace. A lassoed cluster
+  is no longer buried under the faded points of later categories. The faded points keep their
+  category's colour.
+
 ## [0.19.0] — 2026-11-08
 
 ### Added
