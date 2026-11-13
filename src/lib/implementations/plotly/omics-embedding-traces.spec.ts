@@ -1,6 +1,7 @@
 import {
   EMBEDDING_MAX_LEGEND_CATEGORIES,
   EMBEDDING_MAX_LEGEND_SHOWN,
+  EMBEDDING_MUTED_OPACITY,
   buildEmbeddingTraces,
   embeddingLayout,
 } from './omics-trace-builders';
@@ -131,7 +132,7 @@ describe('buildEmbeddingTraces', () => {
     expect(traces[0].hovertemplate).toContain('c0');
   });
 
-  it('dims unselected points rather than removing them', () => {
+  it('fades unselected points rather than removing them', () => {
     // The shape of the whole embedding is the context that makes a selection legible;
     // dropping it would leave a few dots floating in an empty plane.
     const traces = buildEmbeddingTraces({
@@ -141,11 +142,80 @@ describe('buildEmbeddingTraces', () => {
       categories: cats(['A'], ['#f00'], [0, 0, 0, 0]),
       selection: Uint8Array.from([1, 0, 1, 0]),
     }) as any[];
-    expect(traces[0].x).toHaveLength(4);
-    const op = traces[0].marker.opacity;
-    expect(op[0]).toBe(1);
-    expect(op[1]).toBeLessThan(1);
-    expect(op[2]).toBe(1);
+    expect(traces).toHaveLength(2);
+    const [faded, selected] = traces;
+    expect(faded.x).toEqual([2, 4]);
+    expect(faded.customdata).toEqual([1, 3]);
+    expect(faded.marker.opacity).toBe(EMBEDDING_MUTED_OPACITY);
+    expect(selected.x).toEqual([1, 3]);
+    expect(selected.customdata).toEqual([0, 2]);
+    expect(selected.marker.opacity).toBeUndefined();
+  });
+
+  it('draws every selected point above every faded one', () => {
+    // Plotly draws traces in order. While each category dimmed its own points, a lassoed
+    // cluster of the first category sat under the faded context of every later one, and
+    // a lasso seemed to highlight nothing.
+    const traces = buildEmbeddingTraces({
+      x: f32(1, 2, 3, 4),
+      y: f32(1, 2, 3, 4),
+      label: 'UMAP',
+      categories: cats(['A', 'B'], ['#f00', '#00f'], [0, 1, 0, 1]),
+      selection: Uint8Array.from([1, 0, 0, 1]),
+    }) as any[];
+    expect(traces.map((t) => [t.name, t.marker.opacity === undefined ? 'full' : 'faded'])).toEqual([
+      ['A', 'faded'],
+      ['B', 'faded'],
+      ['A', 'full'],
+      ['B', 'full'],
+    ]);
+  });
+
+  it('keeps one legend entry per category, on its full-strength half', () => {
+    // Both halves share a legend group, so clicking the entry still hides the whole
+    // category; the swatch comes from the half that is not faded.
+    const traces = buildEmbeddingTraces({
+      x: f32(1, 2),
+      y: f32(1, 2),
+      label: 'UMAP',
+      categories: cats(['A'], ['#f00'], [0, 0]),
+      selection: Uint8Array.from([1, 0]),
+    }) as any[];
+    expect(traces.map((t) => t.legendgroup)).toEqual(['c0', 'c0']);
+    expect(traces.map((t) => t.showlegend)).toEqual([false, true]);
+  });
+
+  it('keeps the category colour on faded points', () => {
+    // A faded red and a faded blue must stay distinguishable, or the plot loses its
+    // meaning whenever anything is selected.
+    const traces = buildEmbeddingTraces({
+      x: f32(1, 2),
+      y: f32(1, 2),
+      label: 'UMAP',
+      categories: cats(['A', 'B'], ['#ff0000', '#0000ff'], [0, 1]),
+      selection: Uint8Array.from([0, 0]),
+    }) as any[];
+    expect(traces[0].marker.color).toBe('#ff0000');
+    expect(traces[1].marker.color).toBe('#0000ff');
+  });
+
+  it('splits a single-trace embedding past the legend cap the same way', () => {
+    const n = EMBEDDING_MAX_LEGEND_CATEGORIES + 1;
+    const traces = buildEmbeddingTraces({
+      x: f32(...Array.from({ length: n }, (_, i) => i)),
+      y: f32(...Array.from({ length: n }, (_, i) => i)),
+      label: 'UMAP',
+      categories: cats(
+        Array.from({ length: n }, (_, i) => `c${i}`),
+        Array.from({ length: n }, () => '#123456'),
+        Array.from({ length: n }, (_, i) => i),
+      ),
+      selection: Uint8Array.from({ length: n }, (_, i) => (i === 3 ? 1 : 0)),
+    }) as any[];
+    expect(traces).toHaveLength(2);
+    expect(traces[1].customdata).toEqual([3]);
+    expect(traces[1].text).toEqual(['c3']);
+    expect(traces[0].x).toHaveLength(n - 1);
   });
 
   it('sets no per-point opacity when nothing is selected', () => {
@@ -234,10 +304,10 @@ describe('a 3D embedding', () => {
     expect(l.xaxis).toBeUndefined();
   });
 
-  it('dims by COLOUR in 3D, because opacity arrays are ignored there', () => {
+  it('fades in 3D with a trace-level opacity, the form scatter3d honours', () => {
     // Verified against the bundled Plotly: `scatter3d` collapses a per-point
-    // `marker.opacity` array to a scalar, so the dimming that works in 2D did nothing in
-    // 3D and a selection appeared to highlight nothing. Colour arrays ARE honoured.
+    // `marker.opacity` array to its first value. A scalar per trace works, and a faded
+    // point is then see-through rather than an opaque pale dot in front of the selection.
     const traces = buildEmbeddingTraces({
       x: f32(1, 2),
       y: f32(3, 4),
@@ -246,25 +316,24 @@ describe('a 3D embedding', () => {
       categories: cats(['A'], ['#000000'], [0, 0]),
       selection: Uint8Array.from([1, 0]),
     }) as any[];
-    const colours = traces[0].marker.color;
-    expect(Array.isArray(colours)).toBe(true);
-    // The selected point keeps its colour; the other is mixed toward the paper.
-    expect(colours[0]).toBe('#000000');
-    expect(colours[1]).not.toBe('#000000');
-    // …and no opacity array, which would be silently dropped anyway.
-    expect(traces[0].marker.opacity).toBeUndefined();
+    const [faded, selected] = traces;
+    expect(faded.type).toBe('scatter3d');
+    expect(faded.z).toEqual([6]);
+    expect(faded.marker.opacity).toBe(EMBEDDING_MUTED_OPACITY);
+    expect(faded.marker.color).toBe('#000000');
+    expect(selected.z).toEqual([5]);
+    expect(selected.marker.opacity).toBeUndefined();
   });
 
-  it('still dims by opacity in 2D, where it is honoured and keeps the true colour', () => {
+  it('fades an uncoloured embedding the same way', () => {
     const traces = buildEmbeddingTraces({
       x: f32(1, 2),
       y: f32(3, 4),
       label: 'UMAP',
-      categories: cats(['A'], ['#000000'], [0, 0]),
-      selection: Uint8Array.from([1, 0]),
+      selection: Uint8Array.from([0, 1]),
     }) as any[];
-    expect(traces[0].marker.color).toBe('#000000');
-    expect(traces[0].marker.opacity).toEqual([1, 0.15]);
+    expect(traces.map((t) => t.customdata)).toEqual([[0], [1]]);
+    expect(traces[0].marker.opacity).toBe(EMBEDDING_MUTED_OPACITY);
   });
 
   it('leaves 3D colours flat when nothing is selected', () => {
@@ -277,29 +346,6 @@ describe('a 3D embedding', () => {
       categories: cats(['A'], ['#123456'], [0, 0]),
     }) as any[];
     expect(traces[0].marker.color).toBe('#123456');
-  });
-
-  it('mixes toward the paper rather than to an arbitrary grey', () => {
-    // Dimming must preserve which category a point belongs to — a muted red and a muted
-    // blue have to stay distinguishable, or the plot loses its meaning when anything is
-    // selected.
-    const red = buildEmbeddingTraces({
-      x: f32(1),
-      y: f32(1),
-      z: f32(1),
-      label: 'U',
-      categories: cats(['A'], ['#ff0000'], [0]),
-      selection: Uint8Array.from([0]),
-    }) as any[];
-    const blue = buildEmbeddingTraces({
-      x: f32(1),
-      y: f32(1),
-      z: f32(1),
-      label: 'U',
-      categories: cats(['A'], ['#0000ff'], [0]),
-      selection: Uint8Array.from([0]),
-    }) as any[];
-    expect(red[0].marker.color[0]).not.toBe(blue[0].marker.color[0]);
   });
 
   it('carries a scene camera across the redraw', () => {
@@ -424,6 +470,21 @@ describe('embeddingLayout', () => {
     // Autorange must be off, or Plotly re-fits and the range is ignored.
     expect(l.xaxis.autorange).toBe(false);
     expect(l.yaxis.autorange).toBe(false);
+  });
+
+  it('keeps the modebar tool across the redraw a selection triggers', () => {
+    // Without it every redraw put the modebar back on Zoom, so the drag after a lasso
+    // zoomed instead of selecting.
+    const l = embeddingLayout({
+      x: Float32Array.of(1),
+      y: Float32Array.of(1),
+      label: 'UMAP',
+      view: { dragmode: 'lasso' },
+    }) as any;
+    expect(l.dragmode).toBe('lasso');
+    expect(
+      'dragmode' in (embeddingLayout({ x: Float32Array.of(1), y: Float32Array.of(1), label: 'U' }) as any),
+    ).toBe(false);
   });
 
   it('leaves the axes autoranging when the user has not zoomed', () => {

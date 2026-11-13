@@ -1,5 +1,4 @@
 import { NO_CATEGORY } from '../../contracts/spatial-dataset.contract';
-import { parseCssColor, rgbToHex } from '../../contracts/color';
 
 /**
  * Plotly traces for the 1-D distribution charts over spatial-omics values:
@@ -456,7 +455,7 @@ export interface OmicsEmbeddingInput {
    * the user has actually zoomed — freezing an autoranged axis would stop the plot
    * re-fitting when the data changes.
    */
-  view?: { camera?: unknown; ranges?: { x: unknown; y: unknown } };
+  view?: { camera?: unknown; ranges?: { x: unknown; y: unknown }; dragmode?: string };
 }
 
 /**
@@ -480,26 +479,24 @@ export const EMBEDDING_MAX_LEGEND_CATEGORIES = 40;
  */
 export const EMBEDDING_MAX_LEGEND_SHOWN = 10;
 
-/** Dimming applied to unselected points, matching the map's muted opacity. */
-const EMBEDDING_MUTED_OPACITY = 0.15;
-
 /**
- * Mix a hex colour toward white by `amount`.
+ * Opacity of the unselected points while something is selected.
  *
- * How unselected points are dimmed in 3D. `scatter3d` accepts `marker.opacity` only as a
- * SCALAR — a per-point array is silently collapsed to the first value, verified against
- * the bundled Plotly — so the per-point opacity that dims the 2D plot does nothing there,
- * and a selection appeared to highlight nothing in 3D. Colour arrays ARE honoured, so
- * the same effect is produced by mixing toward the paper instead.
+ * Lower than the map's muted opacity: an embedding packs thousands of cells into the same few
+ * pixels, so at the map's 0.15 the faded points stacked back up into an almost opaque mass and
+ * a lasso seemed to highlight nothing.
  */
-function towardPaper(hex: string, amount: number): string {
-  const rgb = parseCssColor(hex);
-  if (!rgb) return hex;
-  const mix = (c: number): number => Math.round(c + (255 - c) * amount);
-  return rgbToHex([mix(rgb[0]), mix(rgb[1]), mix(rgb[2])]);
-}
+export const EMBEDDING_MUTED_OPACITY = 0.08;
 
 const DEFAULT_EMBEDDING_POINT_SIZE = 4;
+
+/** One population to draw: its observations and how its markers look. */
+interface EmbeddingGroup {
+  /** Observation indices, ascending. */
+  idx: number[];
+  /** Trace properties for the points `sub` of this group (a subset of `idx`). */
+  style(sub: readonly number[]): Record<string, unknown>;
+}
 
 export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
   const { x, y, categories, selection } = input;
@@ -514,112 +511,123 @@ export function buildEmbeddingTraces(input: OmicsEmbeddingInput): unknown[] {
   const markerSize = z
     ? Math.max(1, (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE) - 2)
     : (input.size ?? DEFAULT_EMBEDDING_POINT_SIZE);
-  const opacityFor = (i: number): number => (!selection || selection[i] ? 1 : EMBEDDING_MUTED_OPACITY);
-  const isSelected = (i: number): boolean => !selection || selection[i] === 1;
-  // In 3D the dimming has to be in the COLOUR, since a per-point opacity array is
-  // ignored there. Cached per input colour: 19k lookups of the same few categories.
-  const dimCache = new Map<string, string>();
-  const shade = (hex: string, i: number): string => {
-    if (!z || isSelected(i)) return hex;
-    const hit = dimCache.get(hex);
-    if (hit) return hit;
-    const dimmed = towardPaper(hex, 1 - EMBEDDING_MUTED_OPACITY);
-    dimCache.set(hex, dimmed);
-    return dimmed;
-  };
-  /** Per-point opacity is honoured only by the 2D trace types. */
-  const perPointOpacity = !!selection && !z;
-  /** Every observation's opacity, built once for the single-trace paths. */
-  const allOpacity = (): { opacity?: number[] } =>
-    perPointOpacity ? { opacity: Array.from({ length: n }, (_, i) => opacityFor(i)) } : {};
-  /** The single-trace coordinates. `scattergl` takes the typed arrays as they are; the
-   *  3D trace is handed plain arrays. */
-  const coords = (): Record<string, unknown> =>
-    z
-      ? {
-          x: Array.from(x.subarray(0, n)),
-          y: Array.from(y.subarray(0, n)),
-          z: Array.from(z.subarray(0, n)),
-        }
-      : { x: x.subarray(0, n), y: y.subarray(0, n) };
 
+  /** The coordinates of the points `idx`, and their observation indices. */
+  const pointsAt = (idx: readonly number[]): Record<string, unknown> => ({
+    x: idx.map((i) => x[i]),
+    y: idx.map((i) => y[i]),
+    ...(z ? { z: idx.map((i) => z[i]) } : {}),
+    // The OBSERVATION index per point, carried through so a lasso can be turned back into
+    // a selection. Plotly reports a selected point by its position within its trace, which
+    // is not the observation index once the points are split by category or selection.
+    customdata: idx,
+  });
+
+  const groups: EmbeddingGroup[] = [];
+  let legend = false;
   if (!categories || categories.names.length === 0) {
-    return [
-      {
-        type,
-        mode: 'markers',
-        ...coords(),
-        // The OBSERVATION index per point, carried through so a lasso can be turned back
-        // into a selection. Plotly reports a selected point by its position within its
-        // trace, which is not the observation index once the points are split by category.
-        customdata: Array.from({ length: n }, (_, i) => i),
-        marker: {
-          size: markerSize,
-          // A flat colour normally; per point once a selection has to dim some of them in
-          // 3D, where opacity arrays are ignored.
-          color: selection && z ? Array.from({ length: n }, (_, i) => shade('#4c72b0', i)) : '#4c72b0',
-          ...allOpacity(),
+    if (!selection) {
+      // The common first draw of an uncoloured embedding: the typed arrays go in as they are.
+      return [
+        {
+          type,
+          mode: 'markers',
+          ...(z
+            ? { x: Array.from(x.subarray(0, n)), y: Array.from(y.subarray(0, n)), z: Array.from(z.subarray(0, n)) }
+            : { x: x.subarray(0, n), y: y.subarray(0, n) }),
+          customdata: Array.from({ length: n }, (_, i) => i),
+          marker: { size: markerSize, color: '#4c72b0' },
+          hoverinfo: 'none',
+          showlegend: false,
         },
-        hoverinfo: 'none',
-        showlegend: false,
-      },
-    ];
+      ];
+    }
+    groups.push({
+      idx: Array.from({ length: n }, (_, i) => i),
+      style: () => ({ marker: { size: markerSize, color: '#4c72b0' }, hoverinfo: 'none', showlegend: false }),
+    });
+  } else {
+    const { codes, names, colors } = categories;
+    if (names.length > EMBEDDING_MAX_LEGEND_CATEGORIES) {
+      // One trace, per-point colour. Hover still names the category, which is the part that
+      // matters; the legend is what is lost.
+      groups.push({
+        idx: Array.from({ length: n }, (_, i) => i),
+        style: (sub) => ({
+          marker: { size: markerSize, color: sub.map((i) => colors[codes[i]] ?? '#999999') },
+          text: sub.map((i) => names[codes[i]] ?? 'unassigned'),
+          hovertemplate: '%{text}<extra></extra>',
+          showlegend: false,
+        }),
+      });
+    } else {
+      // One trace per category: the legend entries toggle, so a population can be isolated
+      // by clicking rather than by re-colouring the whole plot.
+      const buckets: number[][] = names.map(() => []);
+      for (let i = 0; i < n; i++) {
+        const c = codes[i];
+        // NO_CATEGORY, or a code past the list, is unassigned — dropped rather than drawn in
+        // a colour that would read as a population of its own.
+        if (c < buckets.length) buckets[c].push(i);
+      }
+      legend = true;
+      buckets.forEach((idx, c) => {
+        if (idx.length === 0) return;
+        groups.push({
+          idx,
+          style: () => ({
+            name: names[c],
+            // Both halves of a split category answer to its one legend entry.
+            legendgroup: `c${c}`,
+            marker: { size: markerSize, color: colors[c] ?? '#999999' },
+            // Split per category regardless, so hover names it; only the legend's
+            // VISIBILITY depends on the count.
+            showlegend: names.length <= EMBEDDING_MAX_LEGEND_SHOWN,
+            hovertemplate: `${names[c]}<extra></extra>`,
+          }),
+        });
+      });
+    }
   }
 
-  const { codes, names, colors } = categories;
-  if (names.length > EMBEDDING_MAX_LEGEND_CATEGORIES) {
-    // One trace, per-point colour. Hover still names the category, which is the part that
-    // matters; the legend is what is lost.
-    return [
-      {
-        type,
-        mode: 'markers',
-        ...coords(),
-        marker: {
-          size: markerSize,
-          color: Array.from({ length: n }, (_, i) => shade(colors[codes[i]] ?? '#999999', i)),
-          ...allOpacity(),
-        },
-        customdata: Array.from({ length: n }, (_, i) => i),
-        text: Array.from({ length: n }, (_, i) => names[codes[i]] ?? 'unassigned'),
-        hovertemplate: '%{text}<extra></extra>',
-        showlegend: false,
-      },
-    ];
-  }
-
-  // One trace per category: the legend entries toggle, so a population can be isolated by
-  // clicking rather than by re-colouring the whole plot.
-  const buckets: number[][] = names.map(() => []);
-  for (let i = 0; i < n; i++) {
-    const c = codes[i];
-    // NO_CATEGORY, or a code past the list, is unassigned — dropped rather than drawn in a
-    // colour that would read as a population of its own.
-    if (c < buckets.length) buckets[c].push(i);
-  }
-  return buckets
-    .map((idx, c) => ({ idx, c }))
-    .filter(({ idx }) => idx.length > 0)
-    .map(({ idx, c }) => ({
+  const trace = (g: EmbeddingGroup, sub: readonly number[], faded: boolean): Record<string, unknown> => {
+    const style = g.style(sub);
+    const marker = style['marker'] as Record<string, unknown>;
+    return {
       type,
       mode: 'markers',
-      name: names[c],
-      x: idx.map((i) => x[i]),
-      y: idx.map((i) => y[i]),
-      ...(z ? { z: idx.map((i) => z[i]) } : {}),
-      // This trace's points ARE a subset, so the observation index has to travel with
-      // them; `pointIndex` alone would address the wrong cell.
-      customdata: idx,
-      marker: {
-        size: markerSize,
-        color: selection && z ? idx.map((i) => shade(colors[c] ?? '#999999', i)) : (colors[c] ?? '#999999'),
-        ...(perPointOpacity ? { opacity: idx.map(opacityFor) } : {}),
-      },
-      // Split per category regardless, so hover names it and a future isolate control
-      // has something to toggle; only the legend's VISIBILITY depends on the count.
-      showlegend: names.length <= EMBEDDING_MAX_LEGEND_SHOWN,
-      hovertemplate: `${names[c]}<extra></extra>`,
-    }));
+      ...pointsAt(sub),
+      ...style,
+      // A SCALAR opacity: the one form both trace types honour. `scatter3d` collapses a
+      // per-point opacity array to its first value, verified against the bundled Plotly.
+      ...(faded ? { marker: { ...marker, opacity: EMBEDDING_MUTED_OPACITY } } : {}),
+      // The legend entry belongs to the full-strength half, so its swatch is not faded.
+      ...(faded && legend ? { showlegend: false } : {}),
+    };
+  };
+
+  if (!selection) return groups.map((g) => trace(g, g.idx, false));
+
+  // A selection splits every group in two: its unselected points, faded, and its selected
+  // points at full strength, drawn AFTER every faded trace. Plotly draws traces in order, so
+  // a lassoed cluster is never buried under another category's context, which happened
+  // while the dimming was a per-point opacity inside each category's trace. The faded points
+  // keep their category's colour, so the shape of each population stays readable.
+  const faded = groups.map((g) =>
+    trace(
+      g,
+      g.idx.filter((i) => !selection[i]),
+      true,
+    ),
+  );
+  const selected = groups.map((g) =>
+    trace(
+      g,
+      g.idx.filter((i) => selection[i]),
+      false,
+    ),
+  );
+  return [...faded, ...selected];
 }
 
 /**
@@ -697,6 +705,9 @@ export function embeddingLayout(input: OmicsEmbeddingInput): unknown {
       scaleratio: 1,
       ...(input.view?.ranges ? { range: input.view.ranges.y, autorange: false } : {}),
     },
+    // The modebar tool the user picked (lasso, box, pan), kept across the redraw a
+    // selection triggers, so a second lasso does not have to re-pick the tool.
+    ...(input.view?.dragmode ? { dragmode: input.view.dragmode } : {}),
     legend: {
       orientation: 'h',
       itemsizing: 'constant',

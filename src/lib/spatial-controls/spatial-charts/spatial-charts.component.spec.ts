@@ -1667,7 +1667,8 @@ describe('SpatialChartsComponent', () => {
         });
         await flush();
         expect(component['embeddingNote']).toContain('Coloured to match the map');
-        expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B']);
+        // Each category drawn twice: its faded rest, then its selected points on top.
+        expect(lastPlot().traces.map((t) => t.name)).toEqual(['A', 'B', 'A', 'B']);
         expect(component['busy']).toBe(false);
       });
     });

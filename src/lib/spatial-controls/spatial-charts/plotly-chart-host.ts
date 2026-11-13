@@ -29,10 +29,14 @@ export interface PlotSelectionHandlers {
   deselected(): void;
 }
 
-/** The view the user has set up on a live plot: a 3D camera, or a zoomed 2D range. */
+/**
+ * The view the user has set up on a live plot: a 3D camera, or a zoomed 2D range, and the
+ * 2D drag tool they picked in the modebar.
+ */
 export interface LivePlotView {
   camera?: unknown;
   ranges?: { x: unknown; y: unknown };
+  dragmode?: string;
 }
 
 /**
@@ -51,6 +55,12 @@ export class PlotlyChartHost {
    */
   private drawnHeight: number | null = null;
 
+  /**
+   * Draws in flight. While one runs, the selection events Plotly emits are its own, not
+   * the user's: see {@link bindSelection}.
+   */
+  private drawing = 0;
+
   /** Whether the plot on screen fixed its own height. */
   get hasFixedHeight(): boolean {
     return this.drawnHeight !== null;
@@ -66,7 +76,12 @@ export class PlotlyChartHost {
   async draw(div: string, traces: unknown, layout: unknown, config: unknown = CHART_CONFIG): Promise<void> {
     const height = (layout as { height?: unknown } | null)?.height;
     this.drawnHeight = typeof height === 'number' ? height : null;
-    await Plotly.react(div, traces as never, layout as never, config as never);
+    this.drawing++;
+    try {
+      await Plotly.react(div, traces as never, layout as never, config as never);
+    } finally {
+      this.drawing--;
+    }
   }
 
   /** Purge `div`, freeing its plot (and WebGL context); a div with no plot is fine. */
@@ -108,6 +123,11 @@ export class PlotlyChartHost {
    * Bound after each draw, and the previous listeners removed first: `Plotly.react`
    * preserves handlers, so re-binding without removing would fire the selection once per
    * redraw the plot had ever had.
+   *
+   * Events that arrive DURING a draw are ignored. A lasso changes the selection, the
+   * selection redraws the plot to dim the rest, and that redraw drops the lasso outline,
+   * which Plotly reports as a `plotly_selected` with no points. Taken as the user's, it
+   * cleared the selection the lasso had just made, about 50 ms later.
    */
   bindSelection(div: string, handlers: PlotSelectionHandlers): void {
     const el = document.getElementById(div) as Plotly.PlotlyHTMLElement | null;
@@ -115,6 +135,7 @@ export class PlotlyChartHost {
     el.removeAllListeners?.('plotly_selected');
     el.removeAllListeners?.('plotly_deselect');
     el.on('plotly_selected', (ev) => {
+      if (this.drawing > 0) return;
       // A lasso that selects nothing arrives as an event with no points; it is a clear,
       // which is what dragging an empty patch looks like it should do.
       const points = (ev as { points?: readonly unknown[] } | undefined)?.points ?? [];
@@ -129,7 +150,10 @@ export class PlotlyChartHost {
       if (indices.length === 0) handlers.deselected();
       else handlers.selected(indices);
     });
-    el.on('plotly_deselect', () => handlers.deselected());
+    el.on('plotly_deselect', () => {
+      if (this.drawing > 0) return;
+      handlers.deselected();
+    });
   }
 
   /**
@@ -150,9 +174,12 @@ export class PlotlyChartHost {
    *
    * `Plotly.react` resets a 3D scene camera and any zoomed 2D range unless the layout
    * carries them, so selecting a category or recolouring would throw away an orientation
-   * that took work to find. Null where nothing is drawn yet, or a 2D plot is not zoomed:
-   * passing an autoranged range back would freeze the axes and stop the plot re-fitting
-   * when the data changes.
+   * that took work to find. A 2D range is returned only once zoomed: passing an autoranged
+   * range back would freeze the axes and stop the plot re-fitting when the data changes.
+   *
+   * The 2D drag tool is carried too. Without it every redraw put the modebar back on Zoom,
+   * so after one lasso the next drag zoomed instead of selecting.
+   * Null where nothing is drawn yet, or there is nothing to carry.
    */
   liveView(div: string): LivePlotView | null {
     const el = document.getElementById(div);
@@ -160,6 +187,7 @@ export class PlotlyChartHost {
       el as {
         _fullLayout?: {
           scene?: { camera?: unknown };
+          dragmode?: unknown;
           xaxis?: { range?: unknown; autorange?: boolean };
           yaxis?: { range?: unknown; autorange?: boolean };
         };
@@ -167,10 +195,12 @@ export class PlotlyChartHost {
     )?._fullLayout;
     if (!full) return null;
     if (full.scene?.camera) return { camera: full.scene.camera };
+    const view: LivePlotView = {};
     const zoomed = full.xaxis?.autorange === false && full.yaxis?.autorange === false;
     if (zoomed && full.xaxis?.range && full.yaxis?.range) {
-      return { ranges: { x: full.xaxis.range, y: full.yaxis.range } };
+      view.ranges = { x: full.xaxis.range, y: full.yaxis.range };
     }
-    return null;
+    if (typeof full.dragmode === 'string') view.dragmode = full.dragmode;
+    return view.ranges || view.dragmode ? view : null;
   }
 }
