@@ -14,7 +14,8 @@ file was added.
 - **Lasso on the embedding chart.** Lassoing points in the UMAP, PCA or t-SNE now selects those
   observations on the map. The redraw that fades the rest dropped Plotly's lasso outline, Plotly
   reported that as an empty selection, and the selection was cleared about 50 ms after it was made.
-  `PlotlyChartHost` now ignores selection events while it is drawing. The chosen modebar tool
+  `PlotlyChartHost` now ignores an empty selection or a deselect while it is drawing; a selection
+  with points is still applied, so a second lasso made mid-redraw is not lost. The chosen modebar tool
   (lasso, box, pan) is also kept across that redraw, instead of falling back to zoom.
 - **Selection contrast in the embedding chart.** With a selection, each category is drawn as two
   traces: its unselected points faded (opacity 0.08, a per-trace value that `scatter3d` honours

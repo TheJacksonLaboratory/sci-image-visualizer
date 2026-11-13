@@ -85,9 +85,32 @@ describe('PlotlyChartHost', () => {
     });
     await host.draw('host-test', [], {});
     expect(deselected).not.toHaveBeenCalled();
+    expect(selected).not.toHaveBeenCalled();
     // Once the draw is over, the user's own events count again.
     listeners['plotly_selected']({ points: [] });
     expect(deselected).toHaveBeenCalledTimes(1);
+  });
+
+  it('still applies a lasso the user finishes while a redraw is in flight', async () => {
+    // A redraw only ever reports an EMPTY selection. One with points mid-draw is the user
+    // lassoing again before a large embedding finished redrawing, and must not be lost.
+    const listeners: Record<string, (ev?: unknown) => void> = {};
+    Object.assign(div, {
+      on: (name: string, fn: (ev?: unknown) => void) => {
+        listeners[name] = fn;
+      },
+      removeAllListeners: jest.fn(),
+    });
+    const selected = jest.fn();
+    const deselected = jest.fn();
+    host.bindSelection('host-test', { selected, deselected });
+    (Plotly.react as jest.Mock).mockImplementationOnce(async () => {
+      listeners['plotly_selected']({ points: [] });
+      listeners['plotly_selected']({ points: [{ customdata: 7 }, { customdata: 2 }] });
+    });
+    await host.draw('host-test', [], {});
+    expect(selected).toHaveBeenCalledWith([7, 2]);
+    expect(deselected).not.toHaveBeenCalled();
   });
 
   it('stops ignoring selection events when a draw fails', async () => {
@@ -98,12 +121,12 @@ describe('PlotlyChartHost', () => {
       },
       removeAllListeners: jest.fn(),
     });
-    const selected = jest.fn();
-    host.bindSelection('host-test', { selected, deselected: jest.fn() });
+    const deselected = jest.fn();
+    host.bindSelection('host-test', { selected: jest.fn(), deselected });
     (Plotly.react as jest.Mock).mockRejectedValueOnce(new Error('webgl lost'));
     await expect(host.draw('host-test', [], {})).rejects.toThrow('webgl lost');
-    listeners['plotly_selected']({ points: [{ customdata: 1 }] });
-    expect(selected).toHaveBeenCalledWith([1]);
+    listeners['plotly_deselect']();
+    expect(deselected).toHaveBeenCalledTimes(1);
   });
 
   it('reads back the 2D drag tool, so a lasso stays armed across a redraw', () => {

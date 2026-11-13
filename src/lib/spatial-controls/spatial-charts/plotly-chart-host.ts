@@ -124,10 +124,14 @@ export class PlotlyChartHost {
    * preserves handlers, so re-binding without removing would fire the selection once per
    * redraw the plot had ever had.
    *
-   * Events that arrive DURING a draw are ignored. A lasso changes the selection, the
-   * selection redraws the plot to dim the rest, and that redraw drops the lasso outline,
+   * While a draw is in flight, only the CLEARS are ignored. A lasso changes the selection,
+   * the selection redraws the plot to dim the rest, and that redraw drops the lasso outline,
    * which Plotly reports as a `plotly_selected` with no points. Taken as the user's, it
-   * cleared the selection the lasso had just made, about 50 ms later.
+   * cleared the selection the lasso had just made, about 50 ms later. A selection WITH
+   * points is still applied mid-draw: a redraw never produces one, so it is the user
+   * lassoing again before a large embedding finished redrawing. The cost is that a clear
+   * the user makes in that window (an empty lasso, a double-click) is lost; nothing is
+   * changed by it, and repeating it once the plot settles works.
    */
   bindSelection(div: string, handlers: PlotSelectionHandlers): void {
     const el = document.getElementById(div) as Plotly.PlotlyHTMLElement | null;
@@ -135,7 +139,6 @@ export class PlotlyChartHost {
     el.removeAllListeners?.('plotly_selected');
     el.removeAllListeners?.('plotly_deselect');
     el.on('plotly_selected', (ev) => {
-      if (this.drawing > 0) return;
       // A lasso that selects nothing arrives as an event with no points; it is a clear,
       // which is what dragging an empty patch looks like it should do.
       const points = (ev as { points?: readonly unknown[] } | undefined)?.points ?? [];
@@ -147,8 +150,8 @@ export class PlotlyChartHost {
         const id = (p as { customdata?: unknown }).customdata;
         if (typeof id === 'number') indices.push(id);
       }
-      if (indices.length === 0) handlers.deselected();
-      else handlers.selected(indices);
+      if (indices.length > 0) handlers.selected(indices);
+      else if (this.drawing === 0) handlers.deselected();
     });
     el.on('plotly_deselect', () => {
       if (this.drawing > 0) return;
