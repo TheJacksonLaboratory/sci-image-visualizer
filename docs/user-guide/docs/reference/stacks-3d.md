@@ -25,8 +25,6 @@ you have visited are kept in memory, so going back is instant, and zoom and posi
 
 ## Heatmap: single image or stack
 
-![Heatmap single-image / stack toggle](../assets/screenshots/stack-heatmap-toggle.png)
-
 In the Heatmap and Contour views a stack can be shown two ways:
 
 | Button | Mode | Behaviour |

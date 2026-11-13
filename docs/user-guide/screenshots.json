@@ -686,25 +686,6 @@
    ]
   },
   {
-   "id": "stack-heatmap-toggle",
-   "file": "stack-heatmap-toggle.png",
-   "section": "How-to guides",
-   "page": "how-to/stacks-3d.md",
-   "usedBy": [
-    "how-to/stacks-3d.md",
-    "reference/stacks-3d.md"
-   ],
-   "title": "Heatmap single-image / stack toggle",
-   "sample": "micro-ct z-stack",
-   "capture": "Viewer area",
-   "steps": [
-    "Load the micro-ct folder as a z-stack.",
-    "Pick 'Heatmap'.",
-    "Click the 'Stack mode' button (two pictures icon) and wait for 'Loading frames...' to finish.",
-    "Capture the viewer area: toolbar toggle and Plotly's 'Z-plane:' slider under the plot."
-   ]
-  },
-  {
    "id": "view-isosurface",
    "file": "view-isosurface.png",
    "section": "How-to guides",

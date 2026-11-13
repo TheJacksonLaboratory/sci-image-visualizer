@@ -26,8 +26,6 @@ going back is instant, and zoom and pan are kept from slice to slice.
    **Cancel** button).
 3. Use the **Z-plane:** slider under the plot. It numbers slices from 1.
 
-![Heatmap in stack mode with the Z-plane slider](../assets/screenshots/stack-heatmap-toggle.png)
-
 Click <i class="pi pi-image"></i> **Single image mode** to go back. In single-image mode, zooming fetches the
 visible area at full resolution.
 
