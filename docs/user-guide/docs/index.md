@@ -1,10 +1,14 @@
 # SIV user guide
 
-**SIV** (sci-image-visualizer) is the image viewer and annotation tool inside JAX Image Tools and other JAX
-applications. It runs entirely in the browser and handles everything from a small PNG to a gigapixel
-whole-slide image, multichannel fluorescence, z-stacks and micro-CT volumes, and spatial-omics datasets. You
-can draw, edit and classify regions on any of them, and segment cells with AI models that run on your own
-machine.
+**SIV** (sci-image-visualizer) is the image viewer and annotation tool inside JAX Image Tools (JIT). It runs
+entirely in the browser and handles everything from a small PNG to a gigapixel whole-slide image, multichannel
+fluorescence, z-stacks and micro-CT volumes, and spatial-omics datasets. You can draw, edit and classify regions
+on any of them, and segment cells with AI models that run on your own machine.
+
+JIT is the only JAX application that uses SIV today. SIV is a standalone Angular library, though, so other
+applications could embed it as well; this guide calls whichever application SIV runs in the *host application*.
+You can also try every feature without installing anything in the
+[live demo](https://thejacksonlaboratory.github.io/sci-image-visualizer/).
 
 ![The SIV viewer: toolbar on top, an image with regions drawn on it, the minimap at the bottom right and the Region Editor open on the right](assets/screenshots/home-overview.png)
 
