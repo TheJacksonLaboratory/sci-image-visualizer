@@ -1,6 +1,8 @@
-# Builds the browser example (examples/browser-image) and publishes it to GitHub
-# Pages, so the running demo is viewable at
-#   https://thejacksonlaboratory.github.io/sci-image-visualizer/
+# Builds the browser example (examples/browser-image) and the user guide
+# (docs/user-guide, mkdocs) and publishes both to GitHub Pages:
+#   https://thejacksonlaboratory.github.io/sci-image-visualizer/        the demo
+#   https://thejacksonlaboratory.github.io/sci-image-visualizer/docs/   the guide
+# The toolbar's Help button links to the guide (SIV_DOCS_URL), so its URL must not move.
 #
 # Requires: Settings → Pages → Source = "GitHub Actions". For an internal/private
 # repo, Pages is only served with GitHub Enterprise Cloud (access-controlled);
@@ -13,6 +15,7 @@ on:
     paths:
       - 'examples/browser-image/**'
       - 'src/**'
+      - 'docs/user-guide/**'
       - '.github/workflows/pages.yaml'
   workflow_dispatch:
 
@@ -48,6 +51,14 @@ jobs:
       - run: npm run build:example
       - run: npx playwright install --with-deps chromium
       - run: node examples/browser-image/smoke.mjs # fails on any runtime error / white page
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/user-guide/requirements.txt
+      - run: pip install -r docs/user-guide/requirements.txt
+      # The guide is served under the demo, at <pages>/docs/.
+      - run: mkdocs build --strict -f docs/user-guide/mkdocs.yml -d "$GITHUB_WORKSPACE/examples/browser-image/dist/docs"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: examples/browser-image/dist

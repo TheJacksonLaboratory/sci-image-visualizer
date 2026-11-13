@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { RippleModule } from 'primeng/ripple';
@@ -22,7 +22,8 @@ import {
 import { ToolbarToolVisibility, ALL_TOOLBAR_TOOLS } from '../contracts/toolbar-config';
 import { ToolbarDialogToolContribution, ToolbarToolContribution } from '../contracts/toolbar-tool.contract';
 import { PlotTypeOption } from '../contracts/plot-type-contribution.contract';
-import { ToolbarHelpDialogComponent } from './toolbar-help-dialog/toolbar-help-dialog.component';
+import { VIZ_CONFIG } from '../contracts/viz-config';
+import { sivDocsUrl } from '../contracts/docs-link';
 import { PlotTypeSelectorComponent } from './plot-type-selector/plot-type-selector.component';
 import { StackControlsComponent } from './stack-controls/stack-controls.component';
 import { ViewControlsComponent } from './view-controls/view-controls.component';
@@ -34,8 +35,8 @@ import { SegmentationToolsComponent } from './segmentation-tools/segmentation-to
  *
  * Renders the plot-type selector, colormap/LUT controls, stack navigation,
  * image actions (download / autoscale / pipeline), viewport zoom/pan, the
- * Surface-3D camera controls, and the region-drawing tools — plus the plotting
- * help dialog. It owns no rendering or visualization state: the host
+ * Surface-3D camera controls, and the region-drawing tools — plus the Help link
+ * to the user guide. It owns no rendering or visualization state: the host
  * (VisualizerComponent) stays the orchestrator, passing state in via `@Input` and
  * handling every action via `@Output`. The same actions are also driven by the
  * diagram's right-click context menu and keyboard shortcuts, so keeping the
@@ -50,7 +51,6 @@ import { SegmentationToolsComponent } from './segmentation-tools/segmentation-to
     RippleModule,
     ToolbarModule,
     TooltipModule,
-    ToolbarHelpDialogComponent,
     PlotTypeSelectorComponent,
     StackControlsComponent,
     ViewControlsComponent,
@@ -237,7 +237,8 @@ export class ToolbarComponent {
   /** The vertex-eraser radius slider moved. */
   @Output() vertexEraserRadiusChange = new EventEmitter<number | undefined>();
 
-  protected displayHelpDialog = false;
+  /** The toolbar page of the user guide (`VizConfig.docsUrl`, else the published guide). */
+  protected readonly helpUrl = sivDocsUrl('toolbar', inject(VIZ_CONFIG, { optional: true }));
 
   /** trackBy for the dialog tools' buttons. */
   protected trackToolById(_index: number, tool: { id: string }): string {
@@ -330,9 +331,5 @@ export class ToolbarComponent {
    *  Image plot types, which show the Intensity tool group. */
   protected get isIntensityCapable(): boolean {
     return this.effectivePlotType === PlotType.HEATMAP || this.effectivePlotType === PlotType.IMAGE;
-  }
-
-  protected showHelp(): void {
-    this.displayHelpDialog = true;
   }
 }

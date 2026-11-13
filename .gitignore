@@ -36,3 +36,6 @@ examples/browser-image/public/
 # Local PR drafts and office templates (not part of the library)
 /PR-*.md
 docs/*.potx
+
+# mkdocs output of the user guide
+docs/user-guide/site/

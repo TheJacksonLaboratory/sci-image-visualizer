@@ -6,6 +6,7 @@ import { ConfirmationService, MessageService } from 'primeng/api';
 
 import { VisualizationModule } from '../visualization.module';
 import { RegionEditorComponent } from './region-editor.component';
+import { SIV_DOCS_URL } from '../contracts/docs-link';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import { REGION_IO_PORT, RegionIoPort } from '../contracts/ports/region-io.port';
 import { RegionStore } from '../store/region-store.service';
@@ -135,7 +136,6 @@ describe('RegionEditorComponent (DOM)', () => {
       'pi pi-palette',
       'pi pi-trash',
       'pi pi-times-circle',
-      'pi pi-question',
     ]);
     const disabled = Array.from(el.querySelectorAll('.region-toolbar p-button button')).map(
       (b) => (b as HTMLButtonElement).disabled,
@@ -155,8 +155,12 @@ describe('RegionEditorComponent (DOM)', () => {
       true,
       true,
       false,
-      false,
     ]);
+    // Help is a link to the Region Editor page of the user guide, opened in a new tab.
+    const help = el.querySelector('.region-toolbar a[pButton]') as HTMLAnchorElement;
+    expect(help.getAttribute('href')).toBe(`${SIV_DOCS_URL}reference/region-editor/`);
+    expect(help.target).toBe('_blank');
+    expect(help.rel).toBe('noopener');
   });
 
   it('lists the classes, most-used first, with their counts', () => {

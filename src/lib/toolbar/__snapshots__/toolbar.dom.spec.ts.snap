@@ -35,7 +35,6 @@ exports[`ToolbarComponent (DOM characterization) 3D spatial cloud with screen-sp
   "menu",
   "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
   "|",
-  "button:pi pi-question-circle "Help"",
 ]
 `;
 
@@ -82,7 +81,6 @@ exports[`ToolbarComponent (DOM characterization) Heatmap, stack in single-image 
   "menu",
   "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
   "|",
-  "button:pi pi-question-circle "Help"",
 ]
 `;
 
@@ -135,7 +133,6 @@ exports[`ToolbarComponent (DOM characterization) Image view, z-stack, brush acti
   "button:pi pi-sliders-h "Parameters"",
   "menu",
   "|",
-  "button:pi pi-question-circle "Help"",
 ]
 `;
 
@@ -159,7 +156,6 @@ exports[`ToolbarComponent (DOM characterization) napari isosurface 3D: iso band,
   "text:Res",
   "dropdown:¼",
   "|",
-  "button:pi pi-question-circle "Help"",
 ]
 `;
 

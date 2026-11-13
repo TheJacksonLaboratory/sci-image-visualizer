@@ -9,6 +9,30 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **User guide (mkdocs).** `docs/user-guide` is a Material for MkDocs site for people using the
+  viewer: tutorials, how-to recipes, a reference page per feature (every toolbar button, slider,
+  menu entry, shortcut, default and limit), and a QA test plan with numbered cases for verifying a
+  release (#91). It is published next to the demo at
+  <https://thejacksonlaboratory.github.io/sci-image-visualizer/docs/>, built with `--strict` in CI, and
+  ships in the package under `docs/user-guide`, so a host can merge the guide matching the SIV it runs
+  into its own site (jit-ui#176). `npm run docs:serve` / `docs:build` preview and build it;
+  `docs/user-guide/screenshots.json` lists every screenshot with the steps to reproduce it.
+- **`VizConfig.docsUrl`**, `SIV_DOCS_URL` and `sivDocsUrl()`: where the Help buttons point. Default:
+  the published guide.
+
+### Changed
+
+- **The Help buttons open the user guide** in a new tab instead of the in-app help dialogs: the
+  toolbar's opens the Toolbar reference, the Region Editor's opens the Region Editor reference. The
+  `toolbar-help-dialog` and `region-editor-help` components are removed (they were not exported).
+
+### Deprecated
+
+- `ToolbarToolContribution.help` and `ToolbarDialogToolContribution.help`: no longer rendered, since
+  the help dialog that listed them is gone. Document a contributed tool in the host's own guide.
+
 ## [0.19.0] — 2026-11-08
 
 ### Added
