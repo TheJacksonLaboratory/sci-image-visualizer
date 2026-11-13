@@ -12,7 +12,19 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crc32 } from 'node:zlib';
+
+// PNG chunk CRC (ISO 3309 / zlib CRC-32), table-driven. Not `node:zlib`'s `crc32`, which
+// only exists from Node 20.15 / 22.2, below the package's `engines` floor (>=20.9.0).
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = (buf) => {
+  let c = 0xffffffff;
+  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
 
 const root = fileURLToPath(new URL('../docs/user-guide/', import.meta.url));
 const shotsDir = join(root, 'docs/assets/screenshots');

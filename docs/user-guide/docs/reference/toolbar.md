@@ -45,7 +45,7 @@ hide whole groups (see [Hidden groups](#hidden-groups)).
 | **Zoom box** | ![](../assets/icons/zoom-box.svg){ .siv-icon } | ++b++ | Drag a box to zoom into it. Stays active until you pick another tool. |
 | **Pan the image** | <i class="pi pi-arrows-alt"></i> | ++p++ | Drag to pan. |
 | **Zoom in** | <i class="pi pi-search-plus"></i> | ++plus++ or ++equal++ | Zooms in one step (×1.3) about the centre. |
-| **Zoom out** | <i class="pi pi-search-minus"></i> | ++minus++ | Zooms out one step. |
+| **Zoom out** | <i class="pi pi-search-minus"></i> | ++minus++ or ++underscore++ | Zooms out one step. |
 
 See [Navigation](navigation.md) for mouse zoom, click-to-zoom, the minimap and the scale bar.
 
