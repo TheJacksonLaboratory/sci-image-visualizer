@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="black" fill-rule="evenodd">
+  <!-- Rectangle outline -->
+  <rect x="2" y="2" width="56" height="56"/>
+  <rect x="9" y="9" width="42" height="42"/>
+  <!-- Magnifying glass ring -->
+  <circle cx="70" cy="70" r="23"/>
+  <circle cx="70" cy="70" r="14"/>
+  <!-- Handle -->
+  <polygon points="81,81 97,97 92,100 77,85"/>
+</svg>

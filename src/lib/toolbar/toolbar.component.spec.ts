@@ -5,6 +5,7 @@ import { Component, NO_ERRORS_SCHEMA } from '@angular/core';
 import { EventEmitter } from '@angular/core';
 
 import { ToolbarComponent } from './toolbar.component';
+import { SIV_DOCS_URL } from '../contracts/docs-link';
 import { PlotType, PlotTypeId } from '../contracts/plot-type';
 import { ToolbarDialogToolContribution } from '../contracts/toolbar-tool.contract';
 
@@ -172,10 +173,8 @@ describe('ToolbarComponent', () => {
     expect(component['isNapari3dMode']).toBe(false);
   });
 
-  it('showHelp opens the help dialog', () => {
-    expect(component['displayHelpDialog']).toBe(false);
-    component['showHelp']();
-    expect(component['displayHelpDialog']).toBe(true);
+  it('Help links to the toolbar page of the published user guide', () => {
+    expect(component['helpUrl']).toBe(`${SIV_DOCS_URL}reference/toolbar/`);
   });
 
   it('exposes the toolbar actions as outputs', () => {

@@ -30,6 +30,14 @@ export interface VizConfig {
    * every ROI file a source, `Infinity` none.
    */
   regionSourceMinChars?: number;
+  /**
+   * Base URL of the user guide the Help buttons open (in a new tab). Default
+   * `SIV_DOCS_URL`, the published guide. A host that bundles the guide into its own
+   * documentation site (the guide ships in the package under `docs/user-guide`)
+   * points this at that copy, e.g. `'/docs/visualization/'`. Hide the toolbar's Help
+   * button with `toolbarTools.help = false`.
+   */
+  docsUrl?: string;
 }
 
 /** DI token for the host's {@link VizConfig}. Required by the router. */

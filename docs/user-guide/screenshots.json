@@ -1,0 +1,1239 @@
+{
+ "conventions": {
+  "app": "https://thejacksonlaboratory.github.io/sci-image-visualizer/",
+  "window": "Browser window about 1440 × 900, zoom 100%, light theme",
+  "format": "PNG. Crop to the area named in \"Capture\"; no browser chrome, no desktop.",
+  "naming": "Save as <id>.png (the file name shown on each card).",
+  "data": "Use the sample named on each card from the demo gallery; no personal or unpublished data."
+ },
+ "shots": [
+  {
+   "id": "home-overview",
+   "file": "home-overview.png",
+   "section": "Home",
+   "page": "index.md",
+   "usedBy": [
+    "index.md"
+   ],
+   "title": "The viewer with regions and the Region Editor",
+   "sample": "WSI CMU-1",
+   "capture": "Viewer area (toolbar + image + Region Editor), no demo gallery",
+   "steps": [
+    "Open the demo and click the WSI tile 'CMU-1 · 1.5 Gpx (CC0)'.",
+    "Zoom in on a piece of tissue (scroll) until a few glands fill the view.",
+    "Draw 3–4 regions: two rectangles (r), one freeform (f), one wand region (w).",
+    "Open the Region Editor (Region Editor button) and give two regions the class 'Tumor' and one 'Stroma' in the Class column.",
+    "Capture the viewer area: toolbar, image with minimap and scale bar, and the Region Editor on the right."
+   ]
+  },
+  {
+   "id": "tut-tour-first-image",
+   "file": "tut-tour-first-image.png",
+   "section": "Tutorials",
+   "page": "tutorials/viewer-tour.md",
+   "usedBy": [
+    "tutorials/viewer-tour.md"
+   ],
+   "title": "The viewer with img01.png just opened",
+   "sample": "img01.png",
+   "capture": "Viewer area (toolbar + image + minimap), no demo gallery",
+   "steps": [
+    "Open the live demo in a 1440×900 window.",
+    "Click the sample 'img01.png' in the gallery and wait until it is sharp.",
+    "Do not zoom or select any tool.",
+    "Capture the viewer area: toolbar on top, the full image, and the minimap at the bottom right."
+   ]
+  },
+  {
+   "id": "nav-minimap-scalebar",
+   "file": "nav-minimap-scalebar.png",
+   "section": "Tutorials",
+   "page": "tutorials/viewer-tour.md",
+   "usedBy": [
+    "tutorials/viewer-tour.md",
+    "reference/navigation.md"
+   ],
+   "title": "Minimap (bottom right) and scale bar (bottom left)",
+   "sample": "WSI CMU-1",
+   "capture": "Viewer area",
+   "steps": [
+    "Open the WSI 'CMU-1 · 1.5 Gpx (CC0)'.",
+    "Zoom in a few steps so the red view rectangle in the minimap is small.",
+    "Capture the viewer area; minimap bottom-right and the µm scale bar bottom-left must both be visible."
+   ]
+  },
+  {
+   "id": "channels-dialog-rgb",
+   "file": "channels-dialog-rgb.png",
+   "section": "Tutorials",
+   "page": "tutorials/viewer-tour.md",
+   "usedBy": [
+    "tutorials/viewer-tour.md",
+    "reference/channels-histogram.md"
+   ],
+   "title": "Channels & Histogram on an RGB image",
+   "sample": "img04.png",
+   "capture": "The dialog",
+   "steps": [
+    "Open 'img04.png'.",
+    "Click the Channels & Histogram button (half-filled drop icon).",
+    "Click the 'Green' row so the histogram shows Green.",
+    "Capture the dialog only."
+   ]
+  },
+  {
+   "id": "view-heatmap",
+   "file": "view-heatmap.png",
+   "section": "Tutorials",
+   "page": "tutorials/viewer-tour.md",
+   "usedBy": [
+    "tutorials/viewer-tour.md",
+    "reference/plot-types.md"
+   ],
+   "title": "Heatmap plot type",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Open 'img01.png'.",
+    "Pick 'Heatmap' in the plot-type dropdown.",
+    "Capture the viewer area (Plotly heatmap with its colour bar)."
+   ]
+  },
+  {
+   "id": "view-volume",
+   "file": "view-volume.png",
+   "section": "Tutorials",
+   "page": "tutorials/viewer-tour.md",
+   "usedBy": [
+    "tutorials/viewer-tour.md",
+    "reference/plot-types.md",
+    "reference/stacks-3d.md"
+   ],
+   "title": "Volume plot type",
+   "sample": "micro-ct z-stack",
+   "capture": "Viewer area",
+   "steps": [
+    "Load the micro-ct folder as a z-stack (right-click a slice).",
+    "Pick 'Volume'. Wait for 'Building … in 3D…' to finish.",
+    "Drag to rotate so the volume is seen at an angle; capture the viewer area, including the 3D toolbar controls."
+   ]
+  },
+  {
+   "id": "tut-annot-first-regions",
+   "file": "tut-annot-first-regions.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md"
+   ],
+   "title": "A rectangle and a freeform region, listed in the Region Editor",
+   "sample": "img01.png",
+   "capture": "Viewer area including the Region Editor",
+   "steps": [
+    "Open 'img01.png'.",
+    "Click 'Open the Region Editor' in the toolbar; leave it docked on the right.",
+    "Press r and drag a rectangle around one muscle fibre.",
+    "Press f and draw a freeform outline around another fibre; release to close it.",
+    "Press s (Selection mode) so no drawing tool is active, and click on empty background to deselect.",
+    "Capture the viewer area: both regions on the image and the two rows (class 'Region', Surface in px²) in the Region Editor."
+   ]
+  },
+  {
+   "id": "region-wand",
+   "file": "region-wand.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md",
+    "reference/region-tools.md"
+   ],
+   "title": "Wand region with its Sens. slider",
+   "sample": "img01.png",
+   "capture": "Viewer area incl. toolbar",
+   "steps": [
+    "Open 'img01.png' and press w.",
+    "Click inside one muscle fibre; adjust 'Sens.' until the region fits the fibre.",
+    "Capture the viewer area including the Sens. slider."
+   ]
+  },
+  {
+   "id": "region-brush",
+   "file": "region-brush.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md",
+    "reference/region-tools.md"
+   ],
+   "title": "Brush with its Size slider",
+   "sample": "img01.png",
+   "capture": "Viewer area incl. toolbar",
+   "steps": [
+    "Open 'img01.png' and click the Brush tool.",
+    "Set Size to about 60.",
+    "Paint a ring around one muscle fibre so the centre stays unpainted (a donut).",
+    "Capture the viewer area with the toolbar (Size slider visible)."
+   ]
+  },
+  {
+   "id": "region-context-menu",
+   "file": "region-context-menu.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md",
+    "reference/region-actions.md"
+   ],
+   "title": "Region actions in the right-click menu, Simplify submenu open",
+   "sample": "img01.png",
+   "capture": "Viewer area with the menu",
+   "steps": [
+    "Draw two freeform regions on 'img01.png'.",
+    "Select both (s, click one, Shift-click the other).",
+    "Right-click on the image and hover 'Simplify'.",
+    "Capture with the menu and submenu open."
+   ]
+  },
+  {
+   "id": "tut-annot-classified",
+   "file": "tut-annot-classified.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md"
+   ],
+   "title": "Regions classified as Necrosis and Fibre, with the Classes panel",
+   "sample": "img01.png",
+   "capture": "Viewer area including the Region Editor",
+   "steps": [
+    "Open 'img01.png' and draw four regions (rectangle, freeform, wand, brush).",
+    "In the Region Editor set the first row's Class to 'Necrosis' from the dropdown.",
+    "Select the other three rows (click, then Ctrl/Cmd-click), click 'Edit class on selected rows' (tags icon), type 'Fibre' in '…or a new class' and press Enter.",
+    "Click on empty background to deselect.",
+    "Capture the viewer area: regions in their class colours and the Classes panel listing Necrosis and Fibre with their counts."
+   ]
+  },
+  {
+   "id": "region-editor-set-class",
+   "file": "region-editor-set-class.png",
+   "section": "Tutorials",
+   "page": "tutorials/first-annotation.md",
+   "usedBy": [
+    "tutorials/first-annotation.md",
+    "reference/region-editor.md"
+   ],
+   "title": "Set class on the selected regions",
+   "sample": "any image with regions",
+   "capture": "Region Editor with the overlay",
+   "steps": [
+    "Select 2–3 rows in the Region Editor.",
+    "Click 'Edit class on selected rows' (tags icon).",
+    "Capture the Region Editor with the 'Set class on N selected region(s)' panel open."
+   ]
+  },
+  {
+   "id": "seg-sam-box",
+   "file": "seg-sam-box.png",
+   "section": "Tutorials",
+   "page": "tutorials/ai-segmentation.md",
+   "usedBy": [
+    "tutorials/ai-segmentation.md",
+    "reference/segmentation.md"
+   ],
+   "title": "SAM box prompt: rectangles replaced by masks",
+   "sample": "img04.png",
+   "capture": "Viewer area, before/after side by side",
+   "steps": [
+    "Open 'img04.png'. Draw three rectangles (r) around three cells.",
+    "Capture (before). Click 'Segment' and wait for 'Added 3 region(s)'.",
+    "Capture (after) and place both side by side."
+   ]
+  },
+  {
+   "id": "seg-sam-points",
+   "file": "seg-sam-points.png",
+   "section": "Tutorials",
+   "page": "tutorials/ai-segmentation.md",
+   "usedBy": [
+    "tutorials/ai-segmentation.md",
+    "reference/segmentation.md"
+   ],
+   "title": "SAM point prompt with an exclude point",
+   "sample": "img04.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Click the SAM point prompts button.",
+    "Click one cell (include), then Shift-click a neighbouring area to exclude it.",
+    "Capture the preview region before pressing Enter."
+   ]
+  },
+  {
+   "id": "seg-tools-group",
+   "file": "seg-tools-group.png",
+   "section": "Tutorials",
+   "page": "tutorials/ai-segmentation.md",
+   "usedBy": [
+    "tutorials/ai-segmentation.md",
+    "reference/segmentation.md"
+   ],
+   "title": "Segmentation tools and the SAM model picker",
+   "sample": "img04.png",
+   "capture": "Toolbar crop with the open model menu",
+   "steps": [
+    "Open 'img04.png'.",
+    "Click the chevron next to the Segment button.",
+    "Hover the ⓘ next to 'micro-sam ViT-B' so its info shows.",
+    "Capture the toolbar segmentation group with the menu and the info."
+   ]
+  },
+  {
+   "id": "seg-cellpose",
+   "file": "seg-cellpose.png",
+   "section": "Tutorials",
+   "page": "tutorials/ai-segmentation.md",
+   "usedBy": [
+    "tutorials/ai-segmentation.md",
+    "reference/segmentation.md"
+   ],
+   "title": "Cellpose result: one region per cell",
+   "sample": "002_img.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Open '002_img.png' and draw one large rectangle over many cells.",
+    "Click 'Cellpose' (cells icon). The first run downloads the model (~588 MB).",
+    "When 'Added N cell region(s)' shows, capture the viewer area."
+   ]
+  },
+  {
+   "id": "tut-seg-review",
+   "file": "tut-seg-review.png",
+   "section": "Tutorials",
+   "page": "tutorials/ai-segmentation.md",
+   "usedBy": [
+    "tutorials/ai-segmentation.md"
+   ],
+   "title": "The Region Editor listing regions from SAM and Cellpose",
+   "sample": "002_img.png",
+   "capture": "Viewer area including the Region Editor",
+   "steps": [
+    "Open '002_img.png'.",
+    "Draw two rectangles around two single cells (r) and click 'Segment with SAM (box prompt)'; wait for 'Added 2 region(s)'.",
+    "Draw one rectangle over 15–30 other cells and click 'Segment cells (cellpose-SAM)'; wait for 'Added N cell region(s)'.",
+    "Open the Region Editor.",
+    "Capture the viewer area: the segmented outlines and the Region Editor whose Classes panel lists 'sam' and 'cell' with their counts."
+   ]
+  },
+  {
+   "id": "spatial-2d-overview",
+   "file": "spatial-2d-overview.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md",
+    "reference/spatial-omics.md"
+   ],
+   "title": "Spatial omics over the tissue image",
+   "sample": "spatial-omics → Adult mouse brain Visium H&E",
+   "capture": "Viewer area with the panel",
+   "steps": [
+    "Open the 'spatial-omics' folder, click 'Adult mouse brain Visium H&E · 2,688 spots'.",
+    "Pick 'Spatial omics' in the plot-type dropdown.",
+    "Open the Spatial omics panel (toolbar button). Colour by → Group → cluster.",
+    "Capture the viewer area with the panel on the left."
+   ]
+  },
+  {
+   "id": "spatial-gene-map",
+   "file": "spatial-gene-map.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md"
+   ],
+   "title": "Gene map (expression field) under the spots",
+   "sample": "Visium H&E",
+   "capture": "Viewer area",
+   "steps": [
+    "Colour by → Gene → 'Ttr'.",
+    "Tick 'Gene map (expression field)', lower the markers' Opacity to 0.3.",
+    "Capture the viewer area."
+   ]
+  },
+  {
+   "id": "spatial-select-rois",
+   "file": "spatial-select-rois.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md"
+   ],
+   "title": "Select from ROIs: selected spots, the rest muted",
+   "sample": "Visium H&E",
+   "capture": "Viewer area with the panel",
+   "steps": [
+    "In the Visium H&E Spatial omics view, draw a freeform region (f) around one brain area.",
+    "Expand 'Regions' in the panel and click 'Select from ROIs'.",
+    "Capture: selected spots bright, others muted, hint 'n of N selected'."
+   ]
+  },
+  {
+   "id": "tut-spatial-counts-selection",
+   "file": "tut-spatial-counts-selection.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md"
+   ],
+   "title": "Counts per cluster with the selection overlaid",
+   "sample": "spatial-omics → Adult mouse brain Visium H&E",
+   "capture": "Spatial omics panel, Distribution section",
+   "steps": [
+    "Open the Visium H&E dataset and pick 'Spatial omics'; open the Spatial omics panel.",
+    "Colour by → Group → cluster.",
+    "Press f and draw a freeform region around the hippocampus.",
+    "Expand Regions and click 'Select from ROIs'.",
+    "Expand 'Distribution' (Counts is shown).",
+    "Capture the Distribution section: 'All' bars with the 'Selected' bars overlaid and the 'n selected' badge."
+   ]
+  },
+  {
+   "id": "dist-embedding",
+   "file": "dist-embedding.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md",
+    "reference/distribution-charts.md"
+   ],
+   "title": "Embedding (UMAP) with a lasso selection",
+   "sample": "seqFISH mouse embryo",
+   "capture": "Viewer area with the panel",
+   "steps": [
+    "Open 'Mouse embryo seqFISH'. Colour by → Group → cell type column.",
+    "Distribution → Embedding (UMAP).",
+    "Lasso a cluster in the chart (lasso tool in the chart's modebar).",
+    "Capture the viewer area: the lassoed cells highlighted on the map and in the chart."
+   ]
+  },
+  {
+   "id": "tut-spatial-atlas-pick",
+   "file": "tut-spatial-atlas-pick.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md"
+   ],
+   "title": "An atlas region picked in the class tree and its cells selected in 3D",
+   "sample": "spatial-omics → Allen Brain Cell Atlas → Whole mouse brain MERFISH · 3D · 1-in-10",
+   "capture": "Viewer area with the Region Editor and the Spatial omics panel",
+   "steps": [
+    "Open 'Whole mouse brain MERFISH · 3D · 1-in-10' and pick 'Spatial omics 3D'.",
+    "In the Region Editor click Import regions (upload icon) and select BOTH files at once: examples/brain-atlas/data/abc_atlas/image_volumes/MERFISH-C57BL6J-638850-CCF/20230630/resampled_annotation.nii.gz and examples/brain-atlas/data/ccf_2017_25um/ontology/structure_graph_1.json (from the brain-atlas download.sh; parts 'core' and 'merfish'). Wait for 'Regions imported'.",
+    "Open the Region Editor; in the class tree expand to a cortical area (e.g. Isocortex) and click it so the header shows 'name · title'.",
+    "Open the Spatial omics panel, expand Regions and click 'Select from ROIs'; wait for the hint 'n of N selected'.",
+    "Orbit so the selected cells are clearly visible against the muted ones.",
+    "Capture the viewer area showing the class tree with the pick, the hint in the Regions section and the selected cells."
+   ]
+  },
+  {
+   "id": "spatial-3d-overview",
+   "file": "spatial-3d-overview.png",
+   "section": "Tutorials",
+   "page": "tutorials/spatial-omics.md",
+   "usedBy": [
+    "tutorials/spatial-omics.md"
+   ],
+   "title": "Spatial omics 3D: the whole-brain MERFISH atlas",
+   "sample": "Allen Brain Cell Atlas 1-in-10",
+   "capture": "Viewer area",
+   "steps": [
+    "Open 'Whole mouse brain MERFISH · 3D · 1-in-10'.",
+    "Pick 'Spatial omics 3D'. Colour by → Group → a cell-class column.",
+    "Orbit so the brain is seen from above and the side; capture the viewer area."
+   ]
+  },
+  {
+   "id": "channels-multichannel",
+   "file": "channels-multichannel.png",
+   "section": "How-to guides",
+   "page": "how-to/viewing.md",
+   "usedBy": [
+    "how-to/viewing.md",
+    "reference/channels-histogram.md"
+   ],
+   "title": "Multichannel fluorescence: per-channel colours and LUT row",
+   "sample": "WSI 2-channel fluorescence",
+   "capture": "Viewer area with the dialog",
+   "steps": [
+    "Open the WSI '2-channel fluorescence · 0.35 Gpx'.",
+    "Open Channels & Histogram, select the second channel, click 'Auto'.",
+    "Capture the viewer area with the dialog open (channel table with swatches, LUT row, histogram, sliders)."
+   ]
+  },
+  {
+   "id": "channels-colormap-applied",
+   "file": "channels-colormap-applied.png",
+   "section": "How-to guides",
+   "page": "how-to/viewing.md",
+   "usedBy": [
+    "how-to/viewing.md",
+    "reference/channels-histogram.md"
+   ],
+   "title": "A grayscale image with the Viridis colormap",
+   "sample": "micro-ct slice",
+   "capture": "Viewer area",
+   "steps": [
+    "Open a micro-ct DCM slice.",
+    "In Channels & Histogram pick colormap 'Viridis' and click 'Auto'.",
+    "Close the dialog and capture the viewer area."
+   ]
+  },
+  {
+   "id": "intensity-profile",
+   "file": "intensity-profile.png",
+   "section": "How-to guides",
+   "page": "how-to/viewing.md",
+   "usedBy": [
+    "how-to/viewing.md",
+    "reference/intensity-profiles.md"
+   ],
+   "title": "Two intensity lines and the Intensity profile inset",
+   "sample": "WSI CMU-1 (or img01.png)",
+   "capture": "Viewer area",
+   "steps": [
+    "Open the WSI 'CMU-1' and zoom in on tissue.",
+    "Click 'Add an intensity line' twice.",
+    "Drag the endpoints of each line across a structure.",
+    "Capture the viewer area with both lines and the 'Intensity profile' inset."
+   ]
+  },
+  {
+   "id": "toolbar-floating",
+   "file": "toolbar-floating.png",
+   "section": "How-to guides",
+   "page": "how-to/viewing.md",
+   "usedBy": [
+    "how-to/viewing.md",
+    "reference/toolbar.md"
+   ],
+   "title": "The toolbar detached as a floating window",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "With 'img01.png' open, press and drag the ≡ handle at the left of the toolbar down into the image.",
+    "Release it so the toolbar floats over the image; the pin (Dock to top) button appears.",
+    "Capture the viewer area showing the floating toolbar over the image."
+   ]
+  },
+  {
+   "id": "region-donut-bezier",
+   "file": "region-donut-bezier.png",
+   "section": "How-to guides",
+   "page": "how-to/regions.md",
+   "usedBy": [
+    "how-to/regions.md",
+    "reference/region-tools.md"
+   ],
+   "title": "A donut region and a Bézier region with handles",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Draw a brush ring (donut) and a polygon on 'img01.png'.",
+    "Select the polygon, right-click → Convert to Bézier.",
+    "Keep the Bézier region selected so its handles show; capture the viewer area."
+   ]
+  },
+  {
+   "id": "howto-region-marquee",
+   "file": "howto-region-marquee.png",
+   "section": "How-to guides",
+   "page": "how-to/regions.md",
+   "usedBy": [
+    "how-to/regions.md"
+   ],
+   "title": "Dragging a selection box over several regions",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Open 'img01.png' and draw four small freeform regions (f) in a row.",
+    "Press s (Selection mode).",
+    "Press on empty background left of the regions and drag a box over three of them.",
+    "Capture while the mouse button is still held (use a delayed screenshot), showing the selection box over the regions."
+   ]
+  },
+  {
+   "id": "manage-classes-dialog",
+   "file": "manage-classes-dialog.png",
+   "section": "How-to guides",
+   "page": "how-to/classes.md",
+   "usedBy": [
+    "how-to/classes.md",
+    "reference/annotation-classes.md"
+   ],
+   "title": "Manage annotation classes",
+   "sample": "any",
+   "capture": "The dialog",
+   "steps": [
+    "In the Region Editor, click 'Manage' (cog) in the Classes header.",
+    "Capture the whole dialog: class rows, fallback palette, auto-add checkbox, label matching, footer buttons."
+   ]
+  },
+  {
+   "id": "classes-panel",
+   "file": "classes-panel.png",
+   "section": "How-to guides",
+   "page": "how-to/classes.md",
+   "usedBy": [
+    "how-to/classes.md",
+    "reference/annotation-classes.md"
+   ],
+   "title": "Classes panel above the region table",
+   "sample": "WSI CMU-1 with classified regions",
+   "capture": "Classes panel crop",
+   "steps": [
+    "With classified regions on an image, capture the 'Classes' panel of the Region Editor (search box, rows with eye, swatch, name, count, trash)."
+   ]
+  },
+  {
+   "id": "region-colour-dialog",
+   "file": "region-colour-dialog.png",
+   "section": "How-to guides",
+   "page": "how-to/classes.md",
+   "usedBy": [
+    "how-to/classes.md",
+    "reference/region-editor.md"
+   ],
+   "title": "The Region colour dialog",
+   "sample": "any image with classified regions",
+   "capture": "The dialog",
+   "steps": [
+    "Select regions of two different classes.",
+    "Click 'Edit colour of selected regions' (palette icon).",
+    "Capture the 'Region colour' dialog."
+   ]
+  },
+  {
+   "id": "class-tree",
+   "file": "class-tree.png",
+   "section": "How-to guides",
+   "page": "how-to/classes.md",
+   "usedBy": [
+    "how-to/classes.md",
+    "reference/region-editor.md"
+   ],
+   "title": "Class tree of an atlas region set",
+   "sample": "spatial-omics → Allen Brain Cell Atlas 1-in-10",
+   "capture": "Region Editor class tree",
+   "steps": [
+    "Open the 'spatial-omics' folder → Allen Brain Cell Atlas → 'Whole mouse brain MERFISH · 3D · 1-in-10'.",
+    "Open the Region Editor.",
+    "In the Region Editor click Import regions (upload icon) and select BOTH files at once: examples/brain-atlas/data/abc_atlas/image_volumes/MERFISH-C57BL6J-638850-CCF/20230630/resampled_annotation.nii.gz and examples/brain-atlas/data/ccf_2017_25um/ontology/structure_graph_1.json (from the brain-atlas download.sh; parts 'core' and 'merfish'). Wait for 'Regions imported'.",
+    "The Classes panel now shows the brain-region tree.",
+    "Expand two levels and click one class so it is picked (header shows 'name · title').",
+    "Capture the class tree."
+   ]
+  },
+  {
+   "id": "region-export-dialog",
+   "file": "region-export-dialog.png",
+   "section": "How-to guides",
+   "page": "how-to/import-export.md",
+   "usedBy": [
+    "how-to/import-export.md",
+    "reference/geojson.md"
+   ],
+   "title": "The Export Regions dialog",
+   "sample": "any image with regions",
+   "capture": "The dialog",
+   "steps": [
+    "In the Region Editor click 'Download regions as geojson file'.",
+    "Capture the 'Export Regions' dialog."
+   ]
+  },
+  {
+   "id": "region-mask-dialog",
+   "file": "region-mask-dialog.png",
+   "section": "How-to guides",
+   "page": "how-to/import-export.md",
+   "usedBy": [
+    "how-to/import-export.md",
+    "reference/geojson.md"
+   ],
+   "title": "The Save Mask dialog",
+   "sample": "any image with regions",
+   "capture": "The dialog",
+   "steps": [
+    "In the Region Editor click 'Download mask of the regions as PNG'.",
+    "Capture the dialog with the two mask-type options."
+   ]
+  },
+  {
+   "id": "stack-slice-slider",
+   "file": "stack-slice-slider.png",
+   "section": "How-to guides",
+   "page": "how-to/stacks-3d.md",
+   "usedBy": [
+    "how-to/stacks-3d.md",
+    "reference/stacks-3d.md"
+   ],
+   "title": "The Slice slider for a z-stack in the Image view",
+   "sample": "TIFF GFPA_IBA1 z-stack",
+   "capture": "Toolbar",
+   "steps": [
+    "Click the TIFF 'GFPA_IBA1_AItestset_singletile_zstack_Series002.tif' and wait for decoding.",
+    "Move the Slice slider to the middle of the stack.",
+    "Capture the toolbar row with the Slice slider and its 'z of max' readout."
+   ]
+  },
+  {
+   "id": "view-isosurface",
+   "file": "view-isosurface.png",
+   "section": "How-to guides",
+   "page": "how-to/stacks-3d.md",
+   "usedBy": [
+    "how-to/stacks-3d.md",
+    "reference/plot-types.md"
+   ],
+   "title": "Isosurface plot type with the Iso band slider",
+   "sample": "micro-ct z-stack",
+   "capture": "Viewer area incl. toolbar",
+   "steps": [
+    "With the micro-ct z-stack open, pick 'Isosurface'.",
+    "Move the 'Iso' band slider in the toolbar to about 80–255.",
+    "Capture the viewer area including the toolbar (Iso slider visible)."
+   ]
+  },
+  {
+   "id": "volume-z-handle",
+   "file": "volume-z-handle.png",
+   "section": "How-to guides",
+   "page": "how-to/stacks-3d.md",
+   "usedBy": [
+    "how-to/stacks-3d.md",
+    "reference/stacks-3d.md"
+   ],
+   "title": "Volume with axes and the Z-height grip",
+   "sample": "micro-ct z-stack, Volume",
+   "capture": "Viewer area",
+   "steps": [
+    "In the Volume view, rotate so the top face of the box is visible.",
+    "Hover the round blue ↕ grip at the centre of the top face (its tooltip shows).",
+    "Capture the viewer area."
+   ]
+  },
+  {
+   "id": "slice-editor",
+   "file": "slice-editor.png",
+   "section": "How-to guides",
+   "page": "how-to/stacks-3d.md",
+   "usedBy": [
+    "how-to/stacks-3d.md",
+    "reference/stacks-3d.md"
+   ],
+   "title": "Slice editor: 3D view, slice and X/Y sections",
+   "sample": "micro-ct z-stack, Volume",
+   "capture": "Viewer area",
+   "steps": [
+    "In the Volume view, click the 'Slice editor' button.",
+    "Draw a freeform region (f) in the top-right slice pane.",
+    "Capture the 2×2 layout: 3D volume with the three planes, Z slice, X and Y sections."
+   ]
+  },
+  {
+   "id": "howto-class-surface-3d",
+   "file": "howto-class-surface-3d.png",
+   "section": "How-to guides",
+   "page": "how-to/stacks-3d.md",
+   "usedBy": [
+    "how-to/stacks-3d.md"
+   ],
+   "title": "A class of regions shown as a 3D surface in the volume",
+   "sample": "micro-ct folder (z-stack)",
+   "capture": "Viewer area including the Region Editor",
+   "steps": [
+    "Right-click a micro-ct slice to load the folder as a z-stack, pick 'Volume'.",
+    "Click 'Slice editor'. In the slice pane draw a freeform region (f) around the same structure on about 6 slices spread over the stack (move with the Slice slider between drawings).",
+    "Open the Region Editor, give these regions the class 'Tumor' (Edit class on selected rows).",
+    "Close the slice editor. In the Classes panel click the box icon 'Show in the volume, in 3D' next to 'Tumor'.",
+    "Rotate so the surface is visible inside the volume and capture the viewer area with the Region Editor."
+   ]
+  },
+  {
+   "id": "howto-spatial-expressing",
+   "file": "howto-spatial-expressing.png",
+   "section": "How-to guides",
+   "page": "how-to/spatial-omics.md",
+   "usedBy": [
+    "how-to/spatial-omics.md"
+   ],
+   "title": "Show observations expressing with two picked genes",
+   "sample": "spatial-omics → Adult mouse brain Visium H&E",
+   "capture": "Spatial omics panel crop",
+   "steps": [
+    "Open the Visium H&E dataset in 'Spatial omics' and open the panel.",
+    "In 'Show observations expressing' pick 'Ttr' and 'Mbp'.",
+    "Choose 'Any gene'; leave 'Colour by these genes' ticked.",
+    "Capture the section: the picked-gene rows with their swatches, the Any/All switch, the checkbox and the hint."
+   ]
+  },
+  {
+   "id": "howto-spatial-selection-summary",
+   "file": "howto-spatial-selection-summary.png",
+   "section": "How-to guides",
+   "page": "how-to/spatial-omics.md",
+   "usedBy": [
+    "how-to/spatial-omics.md"
+   ],
+   "title": "Observations in selection: counts per group",
+   "sample": "spatial-omics → Adult mouse brain Visium H&E",
+   "capture": "Spatial omics panel crop",
+   "steps": [
+    "Open the Visium H&E dataset in 'Spatial omics', open the panel, Colour by → Group → cluster.",
+    "Draw a freeform region over the cortex and click Regions → 'Select from ROIs'.",
+    "In Observations, expand 'Observations in selection'.",
+    "Capture the sub-section: label, observation and group counts, the bars per cluster and the copy button."
+   ]
+  },
+  {
+   "id": "dist-heatmap",
+   "file": "dist-heatmap.png",
+   "section": "How-to guides",
+   "page": "how-to/spatial-omics.md",
+   "usedBy": [
+    "how-to/spatial-omics.md",
+    "reference/distribution-charts.md"
+   ],
+   "title": "Heatmap of picked genes per cluster",
+   "sample": "Visium H&E",
+   "capture": "Distribution section",
+   "steps": [
+    "Distribution → Heatmap; grouping 'cluster'.",
+    "Pick 5–8 genes in 'Pick genes for the rows' (e.g. Ttr, Mbp, Plp1, Nrgn, Hbb-bs).",
+    "Leave z-score on; capture the chart with the controls."
+   ]
+  },
+  {
+   "id": "toolbar-full",
+   "file": "toolbar-full.png",
+   "section": "Reference",
+   "page": "reference/toolbar.md",
+   "usedBy": [
+    "reference/toolbar.md"
+   ],
+   "title": "The full toolbar in the Image view",
+   "sample": "img01.png",
+   "capture": "Toolbar strip only, full width",
+   "steps": [
+    "Click the sample 'img01.png'.",
+    "Make the browser wide enough that the toolbar fits on as few rows as possible.",
+    "Capture only the toolbar strip, from the drag handle (≡) to the Help (?) button."
+   ]
+  },
+  {
+   "id": "plot-type-menu",
+   "file": "plot-type-menu.png",
+   "section": "Reference",
+   "page": "reference/plot-types.md",
+   "usedBy": [
+    "reference/plot-types.md"
+   ],
+   "title": "Plot-type dropdown open on a grayscale z-stack",
+   "sample": "micro-ct folder (z-stack)",
+   "capture": "Toolbar left part with the open dropdown",
+   "steps": [
+    "Open the 'micro-ct' folder in the gallery.",
+    "Right-click any DCM slice to load the whole folder as a z-stack.",
+    "Click the plot-type dropdown (shows 'Image').",
+    "Capture the dropdown with its list open: Image, Heatmap, Contour, Surface, Volume, Isosurface."
+   ]
+  },
+  {
+   "id": "view-contour",
+   "file": "view-contour.png",
+   "section": "Reference",
+   "page": "reference/plot-types.md",
+   "usedBy": [
+    "reference/plot-types.md"
+   ],
+   "title": "Contour plot type",
+   "sample": "micro-ct slice",
+   "capture": "Viewer area",
+   "steps": [
+    "Open the 'micro-ct' folder and click one DCM slice (e.g. case1_040.dcm).",
+    "Pick 'Contour' in the plot-type dropdown.",
+    "Capture the viewer area."
+   ]
+  },
+  {
+   "id": "view-surface",
+   "file": "view-surface.png",
+   "section": "Reference",
+   "page": "reference/plot-types.md",
+   "usedBy": [
+    "reference/plot-types.md"
+   ],
+   "title": "Surface plot type (3D height field)",
+   "sample": "micro-ct slice",
+   "capture": "Viewer area",
+   "steps": [
+    "With a micro-ct slice open, pick 'Surface'.",
+    "Wait for the 3D surface to build (loading badge disappears).",
+    "Orbit a little (drag) so the relief is visible, then capture the viewer area."
+   ]
+  },
+  {
+   "id": "nav-zoom-box",
+   "file": "nav-zoom-box.png",
+   "section": "Reference",
+   "page": "reference/navigation.md",
+   "usedBy": [
+    "reference/navigation.md"
+   ],
+   "title": "Zoom box being dragged",
+   "sample": "WSI CMU-1",
+   "capture": "Viewer area",
+   "steps": [
+    "Open the WSI 'CMU-1'.",
+    "Press b (or click the Zoom box button).",
+    "Press and drag a rectangle over the image and take the screenshot BEFORE releasing (outside is dimmed, box has white corners). Tip: use a delayed screenshot tool."
+   ]
+  },
+  {
+   "id": "nav-context-menu",
+   "file": "nav-context-menu.png",
+   "section": "Reference",
+   "page": "reference/navigation.md",
+   "usedBy": [
+    "reference/navigation.md"
+   ],
+   "title": "Right-click menu on the image",
+   "sample": "img01.png",
+   "capture": "Viewer area with the menu",
+   "steps": [
+    "Open 'img01.png' and draw one rectangle (r, drag).",
+    "Select it (s, then click it).",
+    "Right-click on the image.",
+    "Capture the viewer area with the context menu open (region actions on top, then view and tool entries)."
+   ]
+  },
+  {
+   "id": "channels-dialog-grayscale",
+   "file": "channels-dialog-grayscale.png",
+   "section": "Reference",
+   "page": "reference/channels-histogram.md",
+   "usedBy": [
+    "reference/channels-histogram.md"
+   ],
+   "title": "Channels & Histogram on a grayscale image, colormap list open",
+   "sample": "micro-ct slice",
+   "capture": "The dialog with the colormap list open",
+   "steps": [
+    "Open a micro-ct DCM slice.",
+    "Open Channels & Histogram.",
+    "Click the 'Colormap' selector and expand 'Perceptually Uniform Sequential'.",
+    "Capture the dialog with the colormap list open."
+   ]
+  },
+  {
+   "id": "volume-3d-controls",
+   "file": "volume-3d-controls.png",
+   "section": "Reference",
+   "page": "reference/stacks-3d.md",
+   "usedBy": [
+    "reference/stacks-3d.md"
+   ],
+   "title": "3D camera controls and resolution (toolbar)",
+   "sample": "micro-ct z-stack, Volume",
+   "capture": "Toolbar",
+   "steps": [
+    "Load the micro-ct z-stack and pick 'Volume'.",
+    "Capture the toolbar: Zoom, Pan, Orbital, Turntable, Reset camera, 3D axes, Wireframe, Res dropdown, Slice editor."
+   ]
+  },
+  {
+   "id": "region-tools-group",
+   "file": "region-tools-group.png",
+   "section": "Reference",
+   "page": "reference/region-tools.md",
+   "usedBy": [
+    "reference/region-tools.md"
+   ],
+   "title": "Region tools in the toolbar",
+   "sample": "img01.png",
+   "capture": "Toolbar crop",
+   "steps": [
+    "Open 'img01.png'.",
+    "Capture the part of the toolbar from the Region Editor button to the Delete (trash) button."
+   ]
+  },
+  {
+   "id": "region-shapes",
+   "file": "region-shapes.png",
+   "section": "Reference",
+   "page": "reference/region-tools.md",
+   "usedBy": [
+    "reference/region-tools.md"
+   ],
+   "title": "Rectangle, polyline, freeform and polygon regions",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Open 'img01.png'.",
+    "Draw a rectangle (r), a polyline (l), a freeform region (f) and a polygon (Polygon tool, click vertices, click the first point to close).",
+    "Press s and click the polygon so its vertices show.",
+    "Capture the viewer area."
+   ]
+  },
+  {
+   "id": "region-vertex-eraser",
+   "file": "region-vertex-eraser.png",
+   "section": "Reference",
+   "page": "reference/region-tools.md",
+   "usedBy": [
+    "reference/region-tools.md"
+   ],
+   "title": "Vertex eraser cursor over a region",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Draw a freeform region (f) on 'img01.png'.",
+    "Press e; set Radius to about 40.",
+    "Hover the circle cursor over the region's edge and capture before clicking."
+   ]
+  },
+  {
+   "id": "region-merge",
+   "file": "region-merge.png",
+   "section": "Reference",
+   "page": "reference/region-actions.md",
+   "usedBy": [
+    "reference/region-actions.md"
+   ],
+   "title": "Before and after Merge / group",
+   "sample": "img01.png",
+   "capture": "Two captures side by side, or one after-capture",
+   "steps": [
+    "Draw two touching freeform regions; select both.",
+    "Capture (before), right-click → 'Merge / group', capture again (after: one region).",
+    "Place the two captures side by side in one image."
+   ]
+  },
+  {
+   "id": "region-inverse",
+   "file": "region-inverse.png",
+   "section": "Reference",
+   "page": "reference/region-actions.md",
+   "usedBy": [
+    "reference/region-actions.md"
+   ],
+   "title": "Result of Inverse",
+   "sample": "img01.png",
+   "capture": "Viewer area",
+   "steps": [
+    "Draw two regions on 'img01.png' and select both.",
+    "Right-click → 'Inverse'.",
+    "Capture: the image rectangle selected, with the two regions as holes."
+   ]
+  },
+  {
+   "id": "region-simplify-dialog",
+   "file": "region-simplify-dialog.png",
+   "section": "Reference",
+   "page": "reference/region-actions.md",
+   "usedBy": [
+    "reference/region-actions.md"
+   ],
+   "title": "The Simplify region(s) dialog",
+   "sample": "img01.png",
+   "capture": "The dialog",
+   "steps": [
+    "Select a wand region (many vertices).",
+    "Right-click → Simplify → 'Custom…'.",
+    "Set the threshold to about 6 px and capture the dialog."
+   ]
+  },
+  {
+   "id": "region-editor-dialog",
+   "file": "region-editor-dialog.png",
+   "section": "Reference",
+   "page": "reference/region-editor.md",
+   "usedBy": [
+    "reference/region-editor.md"
+   ],
+   "title": "The Region Editor",
+   "sample": "WSI CMU-1",
+   "capture": "The Region Editor dialog",
+   "steps": [
+    "Open the WSI 'CMU-1', draw 5–6 regions of different shapes.",
+    "Open the Region Editor; classify some as 'Tumor', 'Stroma', 'Necrosis'.",
+    "Select two rows (Ctrl-click).",
+    "Capture the whole Region Editor dialog: toolbar, Classes panel and table."
+   ]
+  },
+  {
+   "id": "region-editor-toolbar",
+   "file": "region-editor-toolbar.png",
+   "section": "Reference",
+   "page": "reference/region-editor.md",
+   "usedBy": [
+    "reference/region-editor.md"
+   ],
+   "title": "The Region Editor toolbar",
+   "sample": "any image with regions",
+   "capture": "Region Editor toolbar crop",
+   "steps": [
+    "With the Region Editor open and at least one region selected, capture only its toolbar (three rows of icons)."
+   ]
+  },
+  {
+   "id": "seg-progress-toast",
+   "file": "seg-progress-toast.png",
+   "section": "Reference",
+   "page": "reference/segmentation.md",
+   "usedBy": [
+    "reference/segmentation.md"
+   ],
+   "title": "Segmentation progress toast",
+   "sample": "img04.png",
+   "capture": "Bottom-right toast",
+   "steps": [
+    "Clear the browser's site data (or use a private window) so the model is not cached.",
+    "Draw a rectangle on 'img04.png' and click Segment.",
+    "Capture the bottom-right 'SAM' toast while it shows the download progress bar."
+   ]
+  },
+  {
+   "id": "spatial-panel",
+   "file": "spatial-panel.png",
+   "section": "Reference",
+   "page": "reference/spatial-omics.md",
+   "usedBy": [
+    "reference/spatial-omics.md"
+   ],
+   "title": "The Spatial omics panel",
+   "sample": "Visium H&E",
+   "capture": "The panel",
+   "steps": [
+    "Same setup as spatial-2d-overview.",
+    "Capture the full panel: header, Images, Observations (expanded), Regions, Distribution, Reset."
+   ]
+  },
+  {
+   "id": "spatial-colour-group",
+   "file": "spatial-colour-group.png",
+   "section": "Reference",
+   "page": "reference/spatial-omics.md",
+   "usedBy": [
+    "reference/spatial-omics.md"
+   ],
+   "title": "Colour by Group: the Groups list",
+   "sample": "Visium H&E",
+   "capture": "Panel crop",
+   "steps": [
+    "Colour by → Group → cluster.",
+    "Untick two groups so they are hidden.",
+    "Capture the Colour by section with the Groups list."
+   ]
+  },
+  {
+   "id": "spatial-colour-gene",
+   "file": "spatial-colour-gene.png",
+   "section": "Reference",
+   "page": "reference/spatial-omics.md",
+   "usedBy": [
+    "reference/spatial-omics.md"
+   ],
+   "title": "Colour by Gene with its key",
+   "sample": "Visium H&E",
+   "capture": "Viewer area with the panel",
+   "steps": [
+    "Colour by → Gene, search and pick 'Ttr' (or another strongly patterned gene).",
+    "Capture the viewer area with the panel: gene dropdown, key with colour bar, Colormap, Log scale and Clip outliers."
+   ]
+  },
+  {
+   "id": "spatial-transcripts",
+   "file": "spatial-transcripts.png",
+   "section": "Reference",
+   "page": "reference/spatial-omics.md",
+   "usedBy": [
+    "reference/spatial-omics.md"
+   ],
+   "title": "Transcripts section (Xenium-type dataset)",
+   "sample": "A dataset with transcripts (e.g. a Xenium dataset in JIT) — not available on the demo server",
+   "capture": "Panel crop",
+   "steps": [
+    "Open a dataset with transcripts (Xenium) in JIT.",
+    "Expand the Transcripts section, pick 3 genes, set 'View transcripts as' to Points.",
+    "Capture the Transcripts section."
+   ]
+  },
+  {
+   "id": "dist-counts",
+   "file": "dist-counts.png",
+   "section": "Reference",
+   "page": "reference/distribution-charts.md",
+   "usedBy": [
+    "reference/distribution-charts.md"
+   ],
+   "title": "Counts chart",
+   "sample": "Visium H&E",
+   "capture": "Distribution section",
+   "steps": [
+    "Colour by → Group → cluster; expand 'Distribution'.",
+    "Capture the Counts chart."
+   ]
+  },
+  {
+   "id": "dist-histogram-selection",
+   "file": "dist-histogram-selection.png",
+   "section": "Reference",
+   "page": "reference/distribution-charts.md",
+   "usedBy": [
+    "reference/distribution-charts.md"
+   ],
+   "title": "Histogram with a selection overlaid",
+   "sample": "Visium H&E",
+   "capture": "Distribution section",
+   "steps": [
+    "Colour by → Measurement → total_counts.",
+    "Select spots with 'Select from ROIs' (draw a region first).",
+    "Distribution → Histogram; capture (All and Selected overlaid)."
+   ]
+  },
+  {
+   "id": "dist-violin",
+   "file": "dist-violin.png",
+   "section": "Reference",
+   "page": "reference/distribution-charts.md",
+   "usedBy": [
+    "reference/distribution-charts.md"
+   ],
+   "title": "Violin split by cluster",
+   "sample": "Visium H&E",
+   "capture": "Distribution section",
+   "steps": [
+    "Colour by → Gene → 'Ttr'.",
+    "Distribution → Violin, grouping 'cluster'.",
+    "Capture the chart."
+   ]
+  },
+  {
+   "id": "dist-detached",
+   "file": "dist-detached.png",
+   "section": "Reference",
+   "page": "reference/distribution-charts.md",
+   "usedBy": [
+    "reference/distribution-charts.md"
+   ],
+   "title": "A chart detached into its own window",
+   "sample": "Visium H&E",
+   "capture": "Viewer area",
+   "steps": [
+    "With any chart showing, click 'Detach'.",
+    "Move the chart window beside the map.",
+    "Capture the viewer area: panel says 'Shown in its own window.' and the chart window."
+   ]
+  }
+ ]
+}

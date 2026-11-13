@@ -1,2 +1,6 @@
 # Historical records are kept as written; the repo-wide prettier run skips them.
 docs/history/
+
+# The mkdocs user guide: prettier un-indents admonition and tab bodies (`!!! note`,
+# `=== "Tab"`), which breaks them. `npm run docs:build` (mkdocs --strict) checks it instead.
+docs/user-guide/

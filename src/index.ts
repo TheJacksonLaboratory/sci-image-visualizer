@@ -19,6 +19,7 @@ export * from './lib/contracts/ports/spatial-data.port';
 export * from './lib/contracts/spatial-dataset.contract';
 export * from './lib/contracts/channel-histogram-api.contract';
 export * from './lib/contracts/viz-config';
+export * from './lib/contracts/docs-link';
 export * from './lib/contracts/image.contract';
 export * from './lib/contracts/plot-type';
 export * from './lib/contracts/toolbar-config';

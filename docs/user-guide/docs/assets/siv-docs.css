@@ -1,0 +1,30 @@
+/* SIV user guide — small additions to the Material theme. */
+
+/* Toolbar icons (SVG assets and primeicons) sit on the text baseline at text size. */
+.md-typeset img.siv-icon {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+}
+[data-md-color-scheme='slate'] .md-typeset img.siv-icon {
+  filter: invert(0.9);
+}
+.md-typeset .pi {
+  font-size: 1em;
+  vertical-align: -0.1em;
+}
+
+/* Screenshots: a thin frame so white UI does not melt into the page. */
+.md-typeset figure img,
+.md-typeset img.screenshot {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+}
+.md-typeset figure figcaption {
+  max-width: 48rem;
+}
+
+/* QA tables: keep the ID column on one line. */
+.md-typeset table td:first-child code {
+  white-space: nowrap;
+}

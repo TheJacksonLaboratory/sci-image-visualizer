@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { EMPTY, NEVER, Subject, of, throwError, BehaviorSubject } from 'rxjs';
 
 import { RegionEditorComponent } from './region-editor.component';
+import { SIV_DOCS_URL } from '../contracts/docs-link';
 import { RoutingVisualizerService } from '../routing-visualizer.service';
 import { REGION_EDITOR_API } from '../contracts/region-editor-api.contract';
 import type { RegionSourceView } from '../region-source/region-source';
@@ -327,10 +328,8 @@ describe('RegionEditorComponent', () => {
     expect(exists).not.toHaveBeenCalled();
   }));
 
-  it('should show help dialog', () => {
-    expect(component['displayHelpDialog']).toBe(false);
-    component['showHelp']();
-    expect(component['displayHelpDialog']).toBe(true);
+  it('Help links to the Region Editor page of the user guide', () => {
+    expect(component['helpUrl']).toBe(`${SIV_DOCS_URL}reference/region-editor/`);
   });
 });
 
