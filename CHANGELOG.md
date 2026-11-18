@@ -9,6 +9,11 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **Channels & Histogram opens on the left.** The dialog now docks to the left edge of the window
+  instead of opening in the middle of the image (still draggable and resizable).
+
 ## [0.20.0] — 2026-11-13
 
 ### Added
