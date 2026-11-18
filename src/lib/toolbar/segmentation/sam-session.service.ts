@@ -1,9 +1,23 @@
-import { Injectable, OnDestroy } from '@angular/core';
+import { Inject, Injectable, OnDestroy, Optional } from '@angular/core';
 
 import type { CachedImageData } from '../wand/wand-tool.service';
 import { frameToRgba } from './sam-prompt';
 import { getSamModel, isSamModelReady } from './sam-model-registry';
 import { ISamSession, SamEmbedding, SamModelDef } from '../../contracts/sam.contract';
+import {
+  MODEL_RESIDENCY,
+  ModelResidency,
+  estimateLoadedSizeMb,
+  modelResidency,
+} from '../../models/model-residency';
+
+/**
+ * Loaded size assumed for a SAM model that does not declare one: a ~180 MB
+ * ViT-B encoder plus its decoder, estimated (not measured). Below the 1 GB
+ * residency threshold, so by default SAM stays warm alongside other models —
+ * but starting it still releases any large model.
+ */
+const DEFAULT_SAM_LOADED_SIZE_MB = estimateLoadedSizeMb(196);
 
 /** Creates an unloaded inference session. */
 export type SamSessionFactory = () => Promise<ISamSession>;
@@ -38,6 +52,10 @@ class SupersededLoad extends Error {}
  * is that a model picked in one viewer is the model of all of them. A host that
  * wants a session per viewer can provide this service at the viewer's component:
  * {@link ngOnDestroy} then disposes that viewer's session (and Worker) with it.
+ *
+ * Takes part in {@link ModelResidency}: {@link ensureSession} releases any other
+ * large model before SAM loads, and the session registers with its
+ * {@link SamModelDef.loadedSizeMb} so it is released in turn if it is large.
  */
 @Injectable({ providedIn: 'root' })
 export class SamSessionService implements OnDestroy {
@@ -55,6 +73,16 @@ export class SamSessionService implements OnDestroy {
   /** Cached encoder embedding + the key (image identity + model) it was computed for. */
   private embedding: SamEmbedding | null = null;
   private embeddingKey: string | null = null;
+  private readonly residency: ModelResidency;
+
+  constructor(@Optional() @Inject(MODEL_RESIDENCY) residency: ModelResidency | null = null) {
+    this.residency = residency ?? modelResidency;
+  }
+
+  /** The current model's id in the {@link ModelResidency} registry. */
+  residencyId(): string {
+    return `sam:${this.model.id}`;
+  }
 
   /** The model the next run uses. */
   getModel(): SamModelDef {
@@ -70,6 +98,7 @@ export class SamSessionService implements OnDestroy {
   setModel(id: string): void {
     const next = getSamModel(id);
     if (next.id === this.model.id) return;
+    this.residency.unregister(this.residencyId());
     this.model = next;
     this.generation++;
     this.loading = null;
@@ -100,6 +129,8 @@ export class SamSessionService implements OnDestroy {
    */
   async ensureSession(onProgress?: (fraction: number) => void): Promise<ISamSession> {
     if (this.destroyed) throw new Error('The SAM session was disposed with its viewer.');
+    // Using SAM releases any other large model first — warm or not.
+    await this.residency.activate(this.residencyId());
     if (this.session) return this.session;
     if (!isSamModelReady(this.model)) {
       throw new Error(
@@ -137,11 +168,14 @@ export class SamSessionService implements OnDestroy {
     if (this.embedding && this.embeddingKey === fullKey) return this.embedding;
     onEncode?.();
     const generation = this.generation;
-    const embedding = await session.embed({
-      data: frameToRgba(cached, frameIndex),
-      width: cached.width,
-      height: cached.height,
-    });
+    // The encoder is the expensive run: a model switch waits for it to finish.
+    const embedding = await this.residency.use(this.residencyId(), () =>
+      session.embed({
+        data: frameToRgba(cached, frameIndex),
+        width: cached.width,
+        height: cached.height,
+      }),
+    );
     if (generation === this.generation) {
       this.embedding = embedding;
       this.embeddingKey = fullKey;
@@ -156,6 +190,7 @@ export class SamSessionService implements OnDestroy {
    * provides its own.
    */
   ngOnDestroy(): void {
+    this.residency.unregister(this.residencyId());
     this.destroyed = true;
     this.generation++; // an in-flight load disposes its session when it lands
     this.loading = null;
@@ -180,6 +215,11 @@ export class SamSessionService implements OnDestroy {
         throw new SupersededLoad();
       }
       this.session = session;
+      this.residency.register({
+        id: `sam:${model.id}`,
+        loadedSizeMb: model.loadedSizeMb ?? DEFAULT_SAM_LOADED_SIZE_MB,
+        release: () => this.release(session),
+      });
       return session;
     })();
     load
@@ -188,5 +228,13 @@ export class SamSessionService implements OnDestroy {
         if (this.loading === load) this.loading = null;
       });
     return load;
+  }
+
+  /** Residency release: drop the session so the next use rebuilds it. */
+  private release(session: ISamSession): void {
+    if (this.session !== session) return; // already replaced (model switch)
+    this.session = null;
+    this.invalidateEmbedding();
+    session.dispose();
   }
 }
