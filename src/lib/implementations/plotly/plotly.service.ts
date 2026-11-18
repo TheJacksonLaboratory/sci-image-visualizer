@@ -785,15 +785,13 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public setSurfaceDragMode(mode: string) {
-    if (this.plotDiv) {
-      Plotly.relayout(this.plotDiv, { 'scene.dragmode': mode } as any);
-    }
+    const gd = this.liveGd();
+    if (gd) Plotly.relayout(gd, { 'scene.dragmode': mode } as any);
   }
 
   public resetSurfaceCamera() {
-    if (this.plotDiv) {
-      Plotly.relayout(this.plotDiv, { 'scene.camera': {} } as any);
-    }
+    const gd = this.liveGd();
+    if (gd) Plotly.relayout(gd, { 'scene.camera': {} } as any);
   }
 
   /** Re-render a high-def zoom crop in the plot type on screen. Without this the
@@ -879,6 +877,15 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.shapeProjection.syncFromStore();
   }
 
+  /** The plot div, when it is in the document. {@link plotDiv} is the id of the last
+   *  div plotted into, and this service is a root singleton: the visualizer that owned
+   *  it may since have been destroyed (its replacement has a new `viz-plot-<n>` id) or
+   *  not be attached yet, and Plotly.newPlot/purge with the id of a div that is not
+   *  there throw "No DOM element with id '…' exists on the page". */
+  private plotElement(): HTMLElement | null {
+    return this.plotDiv ? document.getElementById(this.plotDiv) : null;
+  }
+
   /** The plot div while it hosts a live Plotly graph, else null. `plotDiv`
    *  stays set after purgePlot() hands the div to another backend (OSD,
    *  napari-js), and Plotly.relayout/restyle throw on a non-Plotly div. */
@@ -941,9 +948,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     this.renderGen++;
     this.recolor.clear();
     this.intensity.supersede();
-    if (this.plotDiv) {
-      Plotly.newPlot(this.plotDiv, [], this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
-    }
+    // Nothing on screen to blank when the div is gone (see plotElement); the next plot finds its own.
+    const el = this.plotElement();
+    if (el) Plotly.newPlot(el, [], this.getHeatmapLayout([0, 100], [100, 0]), CONFIG as any);
   }
 
   /**
@@ -954,9 +961,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public purgePlot() {
     this.renderGen++;
     this.recolor.clear();
-    if (this.plotDiv) {
-      Plotly.purge(this.plotDiv);
-    }
+    const el = this.plotElement();
+    if (el) Plotly.purge(el);
   }
 
   /** Export the heatmap as a PNG (the rendered plot already reflects the active
@@ -966,9 +972,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
 
   public downloadImage() {
-    if (this.plotDiv) {
-      void Plotly.downloadImage(this.plotDiv, { format: 'png', filename: this.fileName || 'image' });
-    }
+    const gd = this.liveGd();
+    if (gd) void Plotly.downloadImage(gd, { format: 'png', filename: this.fileName || 'image' });
   }
 
   public resetAxes() {
@@ -1029,7 +1034,8 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     }
     if (this.imageInfo) this.imageInfo.showStack = showstack;
     this.loader.stackLoading$.next(showstack);
-    Plotly.relayout(this.plotDiv, { showstack: showstack } as any);
+    const gd = this.liveGd();
+    if (gd) Plotly.relayout(gd, { showstack: showstack } as any);
   }
 
   getAutoscaleEvent() {

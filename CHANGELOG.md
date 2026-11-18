@@ -9,6 +9,24 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **Channels & Histogram opens on the left.** The dialog now docks to the left edge of the window
+  instead of opening in the middle of the image (still draggable and resizable).
+
+### Fixed
+
+- **"Attempt to draw tile cache … with unsupported type 'rasterBlob'" on opening an image.** A
+  recolour invalidation that arrived while tiles were in their first load (the viewer's own on
+  `open`, or the channel states an image publishes as it opens) outdated those loads, and
+  OpenSeadragon 6.0–6.1 ends an outdated first load without preparing the tile for the drawer.
+  The recolour handlers are now attached before the viewer opens its source, and an invalidation
+  waits (at most 750 ms) for first loads to settle; those loads already use the current display.
+- **Plotly "No DOM element with id 'viz-plot-0' exists on the page".** The Plotly service, a root
+  singleton, reset and purged the last plot div by id even when the visualizer that owned it had
+  been destroyed or was not attached yet. It now leaves a div that is not on the page alone, and
+  relayouts and downloads only a live Plotly graph.
+
 ## [0.20.0] — 2026-11-13
 
 ### Added

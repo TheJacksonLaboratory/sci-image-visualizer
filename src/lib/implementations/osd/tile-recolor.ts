@@ -25,9 +25,16 @@ export interface TileRecolorHost {
 
 /** The tile-invalidated event's pixel accessors (OSD 5+/6), as used here. */
 interface TileEvent {
-  tile?: { getUrl?: () => string; url?: string };
+  /** `loading` stays true until the tile's first load (this event included) has finished. */
+  tile?: { getUrl?: () => string; url?: string; loading?: boolean };
   getData(type: string): Promise<unknown>;
   setData(data: unknown, type: string): Promise<unknown>;
+}
+
+/** The tile-loaded event, as used here: `promise` resolves once the tile is marked loaded. */
+interface TileLoadedEvent {
+  tile?: object;
+  promise?: PromiseLike<unknown>;
 }
 
 type TilePixels = { ctx: CanvasRenderingContext2D; img: ImageData };
@@ -75,6 +82,12 @@ export class OsdTileRecolorer {
   /** Pending coalesced invalidation (see {@link scheduleInvalidate}). */
   private invalidateHandle: number | null = null;
   private sub: Subscription | null = null;
+  /** Tiles whose first load is being processed (see {@link invalidateDisplay}). */
+  private readonly firstLoads = new Set<object>();
+  /** An invalidation held back until {@link firstLoads} is empty. */
+  private deferred = false;
+  /** Runs a held-back invalidation anyway after {@link MAX_DEFER_MS}. */
+  private deferTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly host: TileRecolorHost,
@@ -133,6 +146,12 @@ export class OsdTileRecolorer {
   unsubscribe(): void {
     this.sub?.unsubscribe();
     this.sub = null;
+    this.deferred = false;
+    this.firstLoads.clear();
+    if (this.deferTimer !== null) {
+      clearTimeout(this.deferTimer);
+      this.deferTimer = null;
+    }
     if (this.invalidateHandle !== null) {
       if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(this.invalidateHandle);
       else clearTimeout(this.invalidateHandle as unknown as ReturnType<typeof setTimeout>);
@@ -155,16 +174,66 @@ export class OsdTileRecolorer {
   }
 
   /**
-   * Hook a freshly opened viewer (and its navigator, a separate mini-viewer with
+   * Hook a newly created viewer (and its navigator, a separate mini-viewer with
    * its own tiles that doesn't receive the main viewer's events) into the pixel
-   * pipeline, and paint what is already loaded when there is anything to apply.
+   * pipeline. Call it before the viewer opens its source, so every tile is
+   * recoloured by its own first load and none needs a second pass.
+   *
+   * It used to be called on `open`, by which time tiles were already loading, and
+   * so invalidated the whole world to repaint them. That request outdated the
+   * load runs still in flight, and OpenSeadragon (6.0–6.1) ends an outdated first
+   * load without preparing the tile for the drawer: the next frame drew a raw
+   * `rasterBlob` and logged "Attempt to draw tile cache … with unsupported type
+   * 'rasterBlob' for the target drawer!" (then prepared it), on every image open.
    */
   attach(viewer: OpenSeadragon.Viewer): void {
-    // The handler runs per tile on load (and on requestInvalidate); recoloring
-    // is a no-op for RGB images at default display or before the LUT resolves.
-    viewer.addHandler('tile-invalidated', (event) => this.recolorTile(event as unknown as TileEvent));
-    viewer.navigator?.addHandler('tile-invalidated', (event) => this.recolorTile(event as unknown as TileEvent));
-    if ((this.host.isGrayscale() && this.colorLut) || this.host.isMultiChannel()) this.invalidateWorld();
+    this.firstLoads.clear(); // a new viewer: the last one's tiles are gone
+    const settled = (event: unknown) => this.firstLoadSettled((event as { tile?: object })?.tile);
+    for (const v of [viewer, viewer.navigator].filter(Boolean) as OpenSeadragon.Viewer[]) {
+      // The handler runs per tile on load (and on requestInvalidate); recoloring
+      // is a no-op for RGB images at default display or before the LUT resolves.
+      v.addHandler('tile-invalidated', (event) => this.recolorTile(event as unknown as TileEvent));
+      // A first load ends in one of these. A failed or unloaded tile is done at once.
+      v.addHandler('tile-load-failed', settled);
+      v.addHandler('tile-unloaded', settled);
+      // A loaded one is not yet, when `tile-loaded` is raised: OpenSeadragon awaits its
+      // handlers BEFORE it marks the tile loaded (`loading` false, `loaded` true), and its
+      // invalidation skips a tile that is neither loaded nor processing. A held repaint run
+      // from here skipped the last tile, which then kept the display it loaded with (a
+      // channel's old tint or window) until the next change. Settle on the event's
+      // `promise`, resolved once the tile is marked loaded; never await it here, since
+      // OpenSeadragon resolves it only after this handler returns.
+      v.addHandler('tile-loaded', (event) => this.whenLoaded(event as unknown as TileLoadedEvent));
+    }
+  }
+
+  /** Settle a `tile-loaded` tile once OpenSeadragon has marked it loaded (see attach). */
+  private whenLoaded(event: TileLoadedEvent): void {
+    const tile = event?.tile;
+    const done = event?.promise;
+    if (done && typeof done.then === 'function') {
+      void done.then(
+        () => this.firstLoadSettled(tile),
+        () => this.firstLoadSettled(tile),
+      );
+    } else {
+      this.firstLoadSettled(tile); // an OpenSeadragon without the promise: as before
+    }
+  }
+
+  /** A tile's first load ended: run an invalidation held back for it, if it was the last. */
+  private firstLoadSettled(tile: object | undefined): void {
+    if (tile) this.firstLoads.delete(tile);
+    if (this.deferred && this.firstLoads.size === 0) this.runDeferred();
+  }
+
+  private runDeferred(): void {
+    this.deferred = false;
+    if (this.deferTimer !== null) {
+      clearTimeout(this.deferTimer);
+      this.deferTimer = null;
+    }
+    this.invalidateDisplay();
   }
 
   /** Collapse a burst of display-state changes into ONE invalidation on the next
@@ -192,9 +261,31 @@ export class OsdTileRecolorer {
    *  lazily when revealed. Composite/grayscale invalidate the world; serverless
    *  multichannel re-composites its cached planes. */
   invalidateDisplay(): void {
+    const viewer = this.host.viewer();
+    // Not while tiles are in their first load (opening an image publishes its channel
+    // states, so this comes right as its first tiles arrive). OpenSeadragon 6.0–6.1 ends a
+    // first load that an invalidation outdated without preparing the tile for the drawer, so
+    // the next frame drew a raw blob: "Attempt to draw tile cache … with unsupported type
+    // 'rasterBlob' for the target drawer!". Those loads are recoloured with the display state
+    // as it is now anyway (recolorTile reads it when it runs, and the token is not bumped);
+    // the held-back invalidation repaints the tiles that loaded before, once they have all
+    // settled, or after MAX_DEFER_MS when loading never pauses (a long pan). Serverless
+    // multichannel re-composites its own planes, no OpenSeadragon invalidation: not held.
+    if (viewer && this.firstLoads.size > 0 && !this.host.isSimpleMultichannel()) {
+      this.deferred = true;
+      this.deferTimer ??= setTimeout(() => {
+        this.deferTimer = null;
+        if (this.deferred) {
+          this.firstLoads.clear(); // whatever is still loading gets the next round
+          this.runDeferred();
+        }
+      }, MAX_DEFER_MS);
+      return;
+    }
+    this.deferred = false;
     // Supersede any in-flight recolor round before restarting one (see displayToken).
     this.displayToken++;
-    if (!this.host.viewer()) return;
+    if (!viewer) return;
     if (this.host.isSimpleMultichannel()) {
       this.host.recomposite(this.displayToken);
       return;
@@ -221,6 +312,8 @@ export class OsdTileRecolorer {
    * built. Handler is async — OSD awaits it (raiseEventAwaiting).
    */
   async recolorTile(event: TileEvent): Promise<void> {
+    // A first load (see invalidateDisplay); tile-loaded (attach) takes it off again.
+    if (event?.tile?.loading) this.firstLoads.add(event.tile);
     if (this.host.isMultiChannel()) {
       await this.recolorChannelTile(event);
       return;
@@ -345,6 +438,9 @@ export class OsdTileRecolorer {
     }
   }
 }
+
+/** Longest an invalidation waits for first loads to settle (see invalidateDisplay). */
+export const MAX_DEFER_MS = 750;
 
 /** True if any pixel in the RGBA buffer is non-transparent. */
 function hasOpaque(d: Uint8ClampedArray): boolean {
