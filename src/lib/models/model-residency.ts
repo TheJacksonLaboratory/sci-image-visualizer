@@ -48,12 +48,16 @@ export const DEFAULT_MODEL_RESIDENCY_THRESHOLD_MB = 1024;
  * model stayed loaded for the life of the app.
  *
  * HOW OWNERS PARTICIPATE
- * - Wrap each use (load + run) in {@link use}: it releases the others first
+ * - Wrap each use — loading as well as running — in {@link use} (or hold a
+ *   {@link begin} lease across several steps): it releases the others first
  *   and records the use as in flight, so a later switch waits for it.
  * - Call {@link register} once the model is built, and {@link unregister} when
  *   the owner disposes it for its own reasons (model URL changed, teardown).
- * - Do not nest a `use()` of one model inside a `use()` of another: the inner
- *   switch would wait for the outer use and never finish.
+ * - A use or activation of a model that is already in use joins it directly,
+ *   without queueing behind a pending switch — so an owner's `getModel()` can
+ *   be called from inside that owner's own `use()` without deadlocking.
+ * - Do not nest a use of one model inside a use of a *different* model: the
+ *   inner switch would wait for the outer use and never finish.
  *
  * One instance per page ({@link modelResidency}), shared by every package
  * (SIV, jit-extensions, the host app) through {@link MODEL_RESIDENCY}.
@@ -100,28 +104,51 @@ export class ModelResidency {
    * and runs it. The returned promise is `fn`'s.
    */
   async use<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    let finish!: () => void;
-    const done = new Promise<void>((resolve) => (finish = resolve));
-    // The use is recorded INSIDE the serialised switch, so the next switch is
-    // guaranteed to see it — even before this model has registered.
-    await this.serialise(async () => {
-      await this.releaseOthers(id);
-      this.addInFlight(id, done);
-    });
+    const end = await this.begin(id);
     try {
       return await fn();
     } finally {
-      finish();
-      this.removeInFlight(id, done);
+      end();
     }
   }
 
   /**
-   * Release every other large resident model, without recording a use. For
-   * owners whose entry point loads a model that the caller then runs itself
-   * (e.g. a `getModel()` handed to a pipeline engine) — prefer {@link use}.
+   * Start a use of model `id` that spans several steps (e.g. acquire a session,
+   * encode, then decode repeatedly); call the returned function once, when the
+   * last step is done. Same switch semantics as {@link use}.
+   */
+  async begin(id: string): Promise<() => void> {
+    let finish!: () => void;
+    const done = new Promise<void>((resolve) => (finish = resolve));
+    if (this.inFlight.has(id)) {
+      // Already in use, so the switch to it has happened: join directly. A
+      // pending switch away from it drains every use (this one included)
+      // before releasing it.
+      this.addInFlight(id, done);
+    } else {
+      // Recorded INSIDE the serialised switch, so the next switch is
+      // guaranteed to see it — even before this model has registered.
+      await this.serialise(async () => {
+        await this.releaseOthers(id);
+        this.addInFlight(id, done);
+      });
+    }
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      finish();
+      this.removeInFlight(id, done);
+    };
+  }
+
+  /**
+   * Release every other large resident model, without recording a use. Prefer
+   * {@link use}: the load that usually follows an activation is untracked, so
+   * a concurrent switch cannot wait for it. A no-op while `id` is in use.
    */
   activate(id: string): Promise<void> {
+    if (this.inFlight.has(id)) return Promise.resolve();
     return this.serialise(() => this.releaseOthers(id));
   }
 
@@ -134,15 +161,17 @@ export class ModelResidency {
   private async releaseOthers(id: string): Promise<void> {
     // A model still being used but not yet registered has an unknown size:
     // wait for that use, then judge it once it has (or has not) registered.
-    for (const [otherId, uses] of [...this.inFlight]) {
+    for (const otherId of [...this.inFlight.keys()]) {
       if (otherId === id || this.resident.has(otherId)) continue;
-      await Promise.allSettled([...uses]);
+      await this.drain(otherId);
     }
     for (const [otherId, model] of [...this.resident]) {
       if (otherId === id || model.loadedSizeMb < this.thresholdMb) continue;
-      // Let a running use of the old model finish; never cancel it.
-      await Promise.allSettled([...(this.inFlight.get(otherId) ?? [])]);
-      // Its owner may have disposed or replaced it while we waited.
+      // Let every running use of the old model finish — including ones that
+      // joined while we waited; never cancel them.
+      await this.drain(otherId);
+      // Its owner may have disposed or replaced it while we waited. From here
+      // to the delete there is no await, so no use can slip in between.
       if (this.resident.get(otherId) !== model) continue;
       this.resident.delete(otherId);
       try {
@@ -150,6 +179,13 @@ export class ModelResidency {
       } catch (err) {
         console.warn(`[model-residency] releasing ${otherId} failed`, err);
       }
+    }
+  }
+
+  /** Wait until model `id` has no use in flight. */
+  private async drain(id: string): Promise<void> {
+    for (let uses = this.inFlight.get(id); uses?.size; uses = this.inFlight.get(id)) {
+      await Promise.allSettled([...uses]);
     }
   }
 

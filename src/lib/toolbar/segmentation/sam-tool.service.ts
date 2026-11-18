@@ -76,53 +76,59 @@ export class SamToolService {
     // Busy from here on — including the model download, so a second press
     // can't start a second download/encode (which can freeze the tab on a heavy
     // WebGPU ViT-B).
-    const added = await this.state.run(async () => {
-      let session: ISamSession;
-      try {
-        session = await this.sessions.ensureSession((f) => this.progress$.next(f));
-      } catch (err) {
-        this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
-        return 0;
-      }
-      try {
-        // Encode once per image; reuse the embedding across all boxes.
-        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join('|');
-        const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
-          this.status$.next('Encoding image…'),
-        );
-
-        const masks: Region[] = [];
-        const consumed: Region[] = []; // prompt rectangles that produced a mask
-        for (let i = 0; i < rects.length; i++) {
-          this.status$.next(`Segmenting ${i + 1}/${rects.length}…`);
-          const b = rects[i].bounds as Rectangle;
-          // Rectangle is in data coords → convert to image (matrix) coords.
-          const box = {
-            x0: frame.toMatrixX(b.x),
-            y0: frame.toMatrixY(b.y),
-            x1: frame.toMatrixX(b.x + b.width),
-            y1: frame.toMatrixY(b.y + b.height),
-          };
-          const res = await session.decode(embedding, { box });
-          // Keep the largest connected piece (maskToPolygons returns largest-first).
-          const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
-          if (!poly) continue;
-          // Inherit the prompt rectangle's colour.
-          masks.push(makeSamRegion(poly, frame, rects[i].color || host.getShapeColor()));
-          consumed.push(rects[i]);
+    // One model-residency use from acquiring the session through the last
+    // decode, so a switch to another model cannot dispose it mid-run.
+    const added = await this.state.run(() =>
+      this.sessions.withSession(async (acquire) => {
+        let session: ISamSession;
+        try {
+          session = await acquire((f) => this.progress$.next(f));
+        } catch (err) {
+          this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
+          return 0;
         }
+        try {
+          // Encode once per image; reuse the embedding across all boxes.
+          const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join(
+            '|',
+          );
+          const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
+            this.status$.next('Encoding image…'),
+          );
 
-        // Commit against the regions as they are NOW: the user may have drawn,
-        // edited or deleted regions during the (possibly minutes-long) run.
-        // Prompts that produced a mask are replaced; the rest stay for a retry.
-        host.setRegions(withoutRegions(host.getRegions(), consumed).concat(masks));
-        this.status$.next(masks.length > 0 ? `Added ${masks.length} region(s).` : 'No masks found.');
-        return masks.length;
-      } catch (err) {
-        this.status$.next(err instanceof Error ? err.message : 'Segmentation failed.');
-        return 0;
-      }
-    });
+          const masks: Region[] = [];
+          const consumed: Region[] = []; // prompt rectangles that produced a mask
+          for (let i = 0; i < rects.length; i++) {
+            this.status$.next(`Segmenting ${i + 1}/${rects.length}…`);
+            const b = rects[i].bounds as Rectangle;
+            // Rectangle is in data coords → convert to image (matrix) coords.
+            const box = {
+              x0: frame.toMatrixX(b.x),
+              y0: frame.toMatrixY(b.y),
+              x1: frame.toMatrixX(b.x + b.width),
+              y1: frame.toMatrixY(b.y + b.height),
+            };
+            const res = await session.decode(embedding, { box });
+            // Keep the largest connected piece (maskToPolygons returns largest-first).
+            const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
+            if (!poly) continue;
+            // Inherit the prompt rectangle's colour.
+            masks.push(makeSamRegion(poly, frame, rects[i].color || host.getShapeColor()));
+            consumed.push(rects[i]);
+          }
+
+          // Commit against the regions as they are NOW: the user may have drawn,
+          // edited or deleted regions during the (possibly minutes-long) run.
+          // Prompts that produced a mask are replaced; the rest stay for a retry.
+          host.setRegions(withoutRegions(host.getRegions(), consumed).concat(masks));
+          this.status$.next(masks.length > 0 ? `Added ${masks.length} region(s).` : 'No masks found.');
+          return masks.length;
+        } catch (err) {
+          this.status$.next(err instanceof Error ? err.message : 'Segmentation failed.');
+          return 0;
+        }
+      }),
+    );
     return added ?? 0;
   }
 }

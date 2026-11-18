@@ -18,11 +18,15 @@ file was added.
   (any other model id), every other loaded model whose loaded size (tab RAM + GPU) is at least
   **1 GB** is released, before the new one loads, and after any run of it in progress finishes.
   The next use rebuilds it from the IndexedDB download cache, so nothing is downloaded again.
-  Owners wrap each use in `residency.use(id, fn)` and `register()` the model once it is built.
+  Owners wrap each use — loading as well as running — in `residency.use(id, fn)` (or hold a
+  `residency.begin(id)` lease across several steps) and `register()` the model once it is built.
+  A use of a model already in use joins it directly, so an owner's nested load never deadlocks
+  behind a pending switch.
   The threshold is configurable with `setModelResidencyThresholdMb()`, and
   `estimateLoadedSizeMb()` estimates loaded size from download size for unmeasured models.
 - `SamSessionService` is now exported, and `SamModelDef.loadedSizeMb` declares a SAM model's
-  loaded size.
+  loaded size. `SamSessionService.withSession(fn)` holds SAM from acquiring the session through
+  every encode and decode; the box and point tools use it.
 
 ### Changed
 

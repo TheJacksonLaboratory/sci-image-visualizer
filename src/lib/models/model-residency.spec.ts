@@ -134,6 +134,59 @@ describe('ModelResidency', () => {
     await samRun;
   });
 
+  it('joins a nested use of the model already in use instead of deadlocking behind a switch', async () => {
+    r.register(model('a', 2000, log));
+    const gate = deferred();
+    const outer = r.use('a', async () => {
+      await gate.promise; // meanwhile a switch to b queues and waits for this use
+      return r.use('a', async () => 'inner ran'); // owner's own nested load/run
+    });
+    await Promise.resolve();
+    const switching = r.use('b', async () => void log.push('b runs'));
+    await Promise.resolve();
+
+    gate.resolve();
+    await expect(outer).resolves.toBe('inner ran');
+    await switching;
+    expect(log).toEqual(['release a', 'b runs']);
+  });
+
+  it('a switch drains uses that joined while it waited before releasing', async () => {
+    r.register(model('a', 2000, log));
+    const first = deferred();
+    const second = deferred();
+    const run1 = r.use('a', () => first.promise);
+    await Promise.resolve();
+    const switching = r.use('b', async () => void log.push('b runs'));
+    await Promise.resolve();
+    const run2 = r.use('a', async () => {
+      await second.promise;
+      log.push('late a done');
+    });
+
+    first.resolve();
+    await run1;
+    await new Promise((res) => setTimeout(res, 0));
+    expect(log).toEqual([]); // still draining the late use
+
+    second.resolve();
+    await Promise.all([run2, switching]);
+    expect(log).toEqual(['late a done', 'release a', 'b runs']);
+  });
+
+  it('begin() holds a model across several steps until ended', async () => {
+    r.register(model('a', 2000, log));
+    const end = await r.begin('a');
+    const switching = r.use('b', async () => undefined);
+    await new Promise((res) => setTimeout(res, 0));
+    expect(log).toEqual([]);
+
+    end();
+    end(); // idempotent
+    await switching;
+    expect(log).toEqual(['release a']);
+  });
+
   it('keeps going when one release fails', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     r.register({ id: 'bad', loadedSizeMb: 2000, release: () => Promise.reject(new Error('boom')) });

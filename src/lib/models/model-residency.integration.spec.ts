@@ -45,6 +45,7 @@ function fakeSam(): ISamSession {
 }
 
 const image = { data: new Uint8ClampedArray(16), width: 2, height: 2 };
+const tick = () => new Promise((res) => setTimeout(res, 0));
 
 describe('Cellpose under the model-residency rule', () => {
   let r: ModelResidency;
@@ -111,6 +112,44 @@ describe('Cellpose under the model-residency rule', () => {
     expect(cp.dispose).toHaveBeenCalled();
   });
 
+  it('does not deadlock when another model starts while segmentCells is loading', async () => {
+    // Before: segmentCells held a use of Cellpose, its nested getModel() queued an
+    // activation behind the other model's switch, and that switch waited for the
+    // Cellpose use — neither could finish.
+    let finishLoad!: (cp: unknown) => void;
+    fromPretrained.mockImplementation(() => new Promise((res) => (finishLoad = res)));
+    const segmenting = svc.segmentCells(image);
+    await tick();
+    const other = r.use('yolo:opticnerve', async () => 'yolo ran');
+    await tick();
+
+    finishLoad(fakeCellpose());
+
+    await expect(segmenting).resolves.toMatchObject({ count: 1 });
+    await expect(other).resolves.toBe('yolo ran');
+  });
+
+  it('tracks a getModel() load, so a model started meanwhile never loads alongside it', async () => {
+    let finishLoad!: (cp: unknown) => void;
+    const cp = fakeCellpose();
+    fromPretrained.mockImplementation(() => new Promise((res) => (finishLoad = res)));
+    const loading = svc.getModel();
+    await tick();
+
+    const log: string[] = [];
+    const retinal = r.use('retinal:vnet', async () => {
+      log.push(`retinal loads; cellpose resident=${svc.isLoaded()}`);
+      r.register({ id: 'retinal:vnet', loadedSizeMb: 6000, release: jest.fn() });
+    });
+    await tick();
+    expect(log).toEqual([]); // waiting for the Cellpose load
+
+    finishLoad(cp);
+    await Promise.all([loading, retinal]);
+    expect(cp.dispose).toHaveBeenCalled();
+    expect(log).toEqual(['retinal loads; cellpose resident=false']);
+  });
+
   it('forgets the registration when the model URL changes', async () => {
     fromPretrained.mockResolvedValue(fakeCellpose());
     await svc.getModel();
@@ -141,7 +180,7 @@ describe('SAM under the model-residency rule', () => {
 
     expect(releaseVnet).toHaveBeenCalled();
     const [sam] = r.residentModels();
-    expect(sam.id).toBe('sam:microsam-vit-b-lm');
+    expect(sam.id).toBe(svc.residencyId());
     expect(sam.loadedSizeMb).toBeLessThan(r.getThresholdMb());
 
     // Below the threshold: using another model leaves SAM loaded.
@@ -161,10 +200,68 @@ describe('SAM under the model-residency rule', () => {
 
   it('forgets the registration on a model switch', async () => {
     await svc.ensureSession();
+    const oldId = svc.residencyId();
     setSamModelUrls('microsam-vit-t-lm', 'enc-t', 'dec-t');
 
     svc.setModel('microsam-vit-t-lm');
 
-    expect(r.isResident('sam:microsam-vit-b-lm')).toBe(false);
+    expect(r.isResident(oldId)).toBe(false);
+  });
+
+  it('holds SAM from acquisition through decode: a switch waits for the whole run', async () => {
+    r.setThresholdMb(100); // make SAM "large" so a switch would release it
+    let finishDecode!: () => void;
+    const decoded = new Promise<void>((res) => (finishDecode = res));
+    let session!: ISamSession;
+    const run = svc.withSession(async (acquire) => {
+      session = await acquire();
+      await decoded; // stands in for embed + decode
+      return session.isLoaded();
+    });
+    await tick();
+
+    const switching = r.use('retinal:vnet', async () => undefined);
+    await tick();
+    expect(session.dispose).not.toHaveBeenCalled();
+
+    finishDecode();
+    await expect(run).resolves.toBe(true);
+    await switching;
+    expect(session.dispose).toHaveBeenCalled();
+  });
+
+  it('does not start a load when the viewer is destroyed while the switch waits', async () => {
+    const factory = jest.fn(async () => fakeSam());
+    svc.useSessionFactory(factory);
+    // Another large model is mid-run, so SAM's switch has to wait for it.
+    r.register({ id: 'retinal:vnet', loadedSizeMb: 6000, release: jest.fn() });
+    let finishRetinal!: () => void;
+    const retinalRun = r.use('retinal:vnet', () => new Promise<void>((res) => (finishRetinal = res)));
+    await tick();
+
+    const loading = svc.ensureSession();
+    await tick();
+    svc.ngOnDestroy();
+    finishRetinal();
+    await retinalRun;
+
+    await expect(loading).rejects.toThrow(/disposed with its viewer/);
+    expect(factory).not.toHaveBeenCalled();
+    expect(r.residentModels().filter((m) => m.id.startsWith('sam:'))).toEqual([]);
+  });
+
+  it('gives independently owned services distinct residency ids', async () => {
+    const other = new SamSessionService(r);
+    other.setModel('microsam-vit-b-lm');
+    other.useSessionFactory(async () => fakeSam());
+    await svc.ensureSession();
+    await other.ensureSession();
+
+    expect(svc.residencyId()).not.toBe(other.residencyId());
+    expect(r.residentModels()).toHaveLength(2);
+
+    // Destroying one viewer's session leaves the other's registration alone.
+    other.ngOnDestroy();
+    expect(r.isResident(svc.residencyId())).toBe(true);
   });
 });

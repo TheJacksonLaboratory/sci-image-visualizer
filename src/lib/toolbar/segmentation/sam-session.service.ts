@@ -74,14 +74,21 @@ export class SamSessionService implements OnDestroy {
   private embedding: SamEmbedding | null = null;
   private embeddingKey: string | null = null;
   private readonly residency: ModelResidency;
+  /**
+   * Distinguishes independently owned instances (one per viewer when a host
+   * provides the service at the component), so two sessions of the same
+   * checkpoint are two resident models rather than one id overwriting the other.
+   */
+  private static instances = 0;
+  private readonly instance = ++SamSessionService.instances;
 
   constructor(@Optional() @Inject(MODEL_RESIDENCY) residency: ModelResidency | null = null) {
     this.residency = residency ?? modelResidency;
   }
 
-  /** The current model's id in the {@link ModelResidency} registry. */
-  residencyId(): string {
-    return `sam:${this.model.id}`;
+  /** The current model's id in the {@link ModelResidency} registry (unique per service instance). */
+  residencyId(model: SamModelDef = this.model): string {
+    return `sam:${model.id}#${this.instance}`;
   }
 
   /** The model the next run uses. */
@@ -126,29 +133,53 @@ export class SamSessionService implements OnDestroy {
   /**
    * The loaded session for the current model, loading it if needed.
    * `onProgress` receives the download fraction while this call waits.
+   *
+   * The load is a tracked {@link ModelResidency} use: any other large model is
+   * released first, and a switch away from SAM waits for the load. To keep SAM
+   * held while the session is then used, prefer {@link withSession}.
    */
   async ensureSession(onProgress?: (fraction: number) => void): Promise<ISamSession> {
     if (this.destroyed) throw new Error('The SAM session was disposed with its viewer.');
-    // Using SAM releases any other large model first — warm or not.
-    await this.residency.activate(this.residencyId());
-    if (this.session) return this.session;
-    if (!isSamModelReady(this.model)) {
-      throw new Error(
-        `SAM model "${this.model.id}" is not configured yet (no ONNX URLs). ` +
-          'Host it and call setSamModelUrls(), then retry.',
-      );
-    }
-    if (onProgress) {
-      this.progressListeners.add(onProgress);
-      onProgress(0);
-    }
-    try {
-      return await (this.loading ??= this.load());
-    } catch (err) {
-      if (err instanceof SupersededLoad) return this.ensureSession(onProgress);
-      throw err;
-    } finally {
-      if (onProgress) this.progressListeners.delete(onProgress);
+    return this.residency.use(this.residencyId(), () => this.acquire(onProgress));
+  }
+
+  /**
+   * Run `fn` as ONE {@link ModelResidency} use of SAM — from acquiring the
+   * session through every encode and decode — so a switch to another model
+   * cannot dispose the session mid-run. `fn` gets `acquire`, which loads the
+   * session (reporting progress) without opening a second use.
+   */
+  withSession<T>(
+    fn: (acquire: (onProgress?: (fraction: number) => void) => Promise<ISamSession>) => Promise<T>,
+  ): Promise<T> {
+    return this.residency.use(this.residencyId(), () => fn((onProgress) => this.acquire(onProgress)));
+  }
+
+  /** Load (or reuse) the session. Callers hold a residency use around it. */
+  private async acquire(onProgress?: (fraction: number) => void): Promise<ISamSession> {
+    for (;;) {
+      // Checked again here, after the residency switch: the viewer may have
+      // been destroyed while it waited, and must not start a fresh load.
+      if (this.destroyed) throw new Error('The SAM session was disposed with its viewer.');
+      if (this.session) return this.session;
+      if (!isSamModelReady(this.model)) {
+        throw new Error(
+          `SAM model "${this.model.id}" is not configured yet (no ONNX URLs). ` +
+            'Host it and call setSamModelUrls(), then retry.',
+        );
+      }
+      if (onProgress) {
+        this.progressListeners.add(onProgress);
+        onProgress(0);
+      }
+      try {
+        return await (this.loading ??= this.load());
+      } catch (err) {
+        // Superseded by a model switch (or teardown): go round again.
+        if (!(err instanceof SupersededLoad)) throw err;
+      } finally {
+        if (onProgress) this.progressListeners.delete(onProgress);
+      }
     }
   }
 
@@ -168,14 +199,13 @@ export class SamSessionService implements OnDestroy {
     if (this.embedding && this.embeddingKey === fullKey) return this.embedding;
     onEncode?.();
     const generation = this.generation;
-    // The encoder is the expensive run: a model switch waits for it to finish.
-    const embedding = await this.residency.use(this.residencyId(), () =>
-      session.embed({
-        data: frameToRgba(cached, frameIndex),
-        width: cached.width,
-        height: cached.height,
-      }),
-    );
+    // Not a residency use of its own: callers hold one across the whole run
+    // (see withSession), so the session cannot be released mid-encode.
+    const embedding = await session.embed({
+      data: frameToRgba(cached, frameIndex),
+      width: cached.width,
+      height: cached.height,
+    });
     if (generation === this.generation) {
       this.embedding = embedding;
       this.embeddingKey = fullKey;
@@ -216,7 +246,7 @@ export class SamSessionService implements OnDestroy {
       }
       this.session = session;
       this.residency.register({
-        id: `sam:${model.id}`,
+        id: this.residencyId(model),
         loadedSizeMb: model.loadedSizeMb ?? DEFAULT_SAM_LOADED_SIZE_MB,
         release: () => this.release(session),
       });

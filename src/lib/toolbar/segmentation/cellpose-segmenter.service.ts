@@ -92,7 +92,9 @@ export class CellposeSegmenterService implements ICellSegmenter {
     progress?: CellSegmentProgress,
   ): Promise<CellSegmentation> {
     let announcedDownload = false;
-    const cp = await this.getModel(
+    // Already inside this model's use(): load directly rather than through
+    // getModel(), which would open a second use of the same model.
+    const cp = await this.loadModel(
       (loaded, total) => {
         if (total) progress?.onProgress?.(loaded / total);
         if (loaded > 0 && !announcedDownload) {
@@ -126,13 +128,18 @@ export class CellposeSegmenterService implements ICellSegmenter {
    * reports raw downloaded/total bytes (`total` is null when unknown); `onStatus`
    * reports worker-init phase strings.
    *
-   * Using the model releases any other large model first ({@link ModelResidency}).
+   * Using the model releases any other large model first, and the load is a
+   * tracked use ({@link ModelResidency}): a switch to another model waits for
+   * it, so two large models never load side by side. A caller that then runs
+   * the returned instance should wrap that run in
+   * `residency.use(svc.residencyId(), …)` too — calling `getModel()` from
+   * inside that use is fine.
    */
   getModel(
     onProgress?: (loaded: number, total: number | null) => void,
     onStatus?: (status: string) => void,
   ): Promise<Cellpose> {
-    return this.residency.activate(this.residencyId()).then(() => this.loadModel(onProgress, onStatus));
+    return this.residency.use(this.residencyId(), () => this.loadModel(onProgress, onStatus));
   }
 
   private loadModel(
