@@ -159,3 +159,88 @@ describe('OsdTileRecolorer.invalidateDisplay while tiles first load', () => {
     expect(world.requestInvalidate).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('OsdTileRecolorer: a channel change during a first load', () => {
+  it('repaints the last tile once OpenSeadragon has marked it loaded, so it shows the new channel colour', async () => {
+    // OpenSeadragon's order: the tile's first tile-invalidated run (it decodes, then writes),
+    // then tile-loaded, awaited while the tile is still `loading`, then the tile is marked
+    // loaded and the event's promise resolves. Its invalidation skips a tile that is neither
+    // loaded nor processing, as World.requestTileInvalidateEvent does.
+    const handlers: Record<string, ((e: unknown) => unknown)[]> = {};
+    const viewer = {
+      world: { requestInvalidate: jest.fn() },
+      navigator: null,
+      addHandler: (name: string, fn: (e: unknown) => unknown) => {
+        (handlers[name] ??= []).push(fn);
+      },
+    };
+    const tile = { loading: true, loaded: false, processing: false, getUrl: () => '/tile?channel=0' };
+    const original = [100, 100, 100, 255];
+    let shown = [...original];
+    let releaseDecode: () => void = () => undefined;
+    const decoded = new Promise<void>((resolve) => (releaseDecode = resolve));
+    const event = (firstLoad: boolean) => {
+      const img = { data: new Uint8ClampedArray(original) };
+      const ctx = { canvas: { width: 1, height: 1 }, getImageData: () => img, putImageData: jest.fn() };
+      return {
+        tile,
+        getData: jest.fn(async () => {
+          if (firstLoad) await decoded;
+          return ctx;
+        }),
+        setData: jest.fn(async () => {
+          shown = Array.from(img.data);
+        }),
+      };
+    };
+    const repaints: Promise<void>[] = [];
+    const host: TileRecolorHost = {
+      viewer: () => viewer as never,
+      isGrayscale: () => false,
+      isMultiChannel: () => true,
+      isSimpleMultichannel: () => false,
+      currentZ: () => 0,
+      revealChannelSlice: () => undefined,
+      invalidateChannelDisplay: () => {
+        if (!tile.loaded && !tile.processing) return; // the engine's gate
+        repaints.push(r.recolorTile(event(false)));
+      },
+      recomposite: () => undefined,
+    };
+    const r = new OsdTileRecolorer(host, new VisualizerStore());
+    const channel = (color: string): IChannelState => ({
+      index: 0,
+      name: 'c0',
+      color,
+      min: 0,
+      max: 255,
+      gamma: 1,
+      visible: true,
+    });
+    r.channelStates = [channel('#ff0000')];
+    r.attach(viewer as never);
+
+    const firstPass = r.recolorTile(event(true)); // starts with red, waits on the decode
+    r.channelStates = [channel('#00ff00')]; // the user picks green meanwhile
+    r.invalidateDisplay(); // held: the tile is in its first load
+    releaseDecode();
+    await firstPass;
+    expect(shown[0]).toBeGreaterThan(0); // the first pass painted the old colour
+    expect(shown[1]).toBe(0);
+
+    let markLoaded: () => void = () => undefined;
+    const promise = new Promise<void>((resolve) => (markLoaded = resolve));
+    for (const h of handlers['tile-loaded'] ?? []) await h({ tile, promise }); // still loading here
+    expect(repaints).toHaveLength(0);
+    tile.loading = false;
+    tile.loaded = true;
+    markLoaded();
+    await promise;
+    await Promise.resolve();
+    await Promise.all(repaints);
+
+    expect(repaints).toHaveLength(1);
+    expect(shown[0]).toBe(0);
+    expect(shown[1]).toBeGreaterThan(0);
+  });
+});

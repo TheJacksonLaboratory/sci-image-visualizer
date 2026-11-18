@@ -31,6 +31,12 @@ interface TileEvent {
   setData(data: unknown, type: string): Promise<unknown>;
 }
 
+/** The tile-loaded event, as used here: `promise` resolves once the tile is marked loaded. */
+interface TileLoadedEvent {
+  tile?: object;
+  promise?: PromiseLike<unknown>;
+}
+
 type TilePixels = { ctx: CanvasRenderingContext2D; img: ImageData };
 
 /**
@@ -187,10 +193,31 @@ export class OsdTileRecolorer {
       // The handler runs per tile on load (and on requestInvalidate); recoloring
       // is a no-op for RGB images at default display or before the LUT resolves.
       v.addHandler('tile-invalidated', (event) => this.recolorTile(event as unknown as TileEvent));
-      // A first load ends in one of these (tile-loaded once it is ready to draw).
-      v.addHandler('tile-loaded', settled);
+      // A first load ends in one of these. A failed or unloaded tile is done at once.
       v.addHandler('tile-load-failed', settled);
       v.addHandler('tile-unloaded', settled);
+      // A loaded one is not yet, when `tile-loaded` is raised: OpenSeadragon awaits its
+      // handlers BEFORE it marks the tile loaded (`loading` false, `loaded` true), and its
+      // invalidation skips a tile that is neither loaded nor processing. A held repaint run
+      // from here skipped the last tile, which then kept the display it loaded with (a
+      // channel's old tint or window) until the next change. Settle on the event's
+      // `promise`, resolved once the tile is marked loaded; never await it here, since
+      // OpenSeadragon resolves it only after this handler returns.
+      v.addHandler('tile-loaded', (event) => this.whenLoaded(event as unknown as TileLoadedEvent));
+    }
+  }
+
+  /** Settle a `tile-loaded` tile once OpenSeadragon has marked it loaded (see attach). */
+  private whenLoaded(event: TileLoadedEvent): void {
+    const tile = event?.tile;
+    const done = event?.promise;
+    if (done && typeof done.then === 'function') {
+      void done.then(
+        () => this.firstLoadSettled(tile),
+        () => this.firstLoadSettled(tile),
+      );
+    } else {
+      this.firstLoadSettled(tile); // an OpenSeadragon without the promise: as before
     }
   }
 
