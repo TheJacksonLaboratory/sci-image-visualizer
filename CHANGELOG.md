@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-11-17
+
 ### Changed
 
 - **Channels & Histogram opens on the left.** The dialog now docks to the left edge of the window
@@ -2837,7 +2839,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.0...v0.18.1
