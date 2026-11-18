@@ -507,7 +507,30 @@ describe('PlotlyService viewport + stack-state methods', () => {
 
   it('purgePlot purges the plot div', () => {
     service.purgePlot();
-    expect(purge).toHaveBeenCalledWith('plot');
+    expect(purge).toHaveBeenCalledWith(document.getElementById('plot'));
+  });
+
+  it('reset and purgePlot leave a plot div that is no longer on the page alone', () => {
+    // A root singleton outlives the visualizer it last plotted into: jit-ui re-creating the
+    // viewer left the old viewer's id here, and Plotly threw "No DOM element with id
+    // 'viz-plot-0' exists on the page" from the next image's reset.
+    const newPlot = jest.spyOn(Plotly, 'newPlot').mockResolvedValue({} as any);
+    (service as unknown as { plotDiv: string }).plotDiv = 'viz-plot-0';
+    expect(() => service.reset()).not.toThrow();
+    expect(() => service.purgePlot()).not.toThrow();
+    expect(newPlot).not.toHaveBeenCalled();
+    expect(purge).not.toHaveBeenCalled();
+  });
+
+  it('reset blanks the plot div while it is on the page', () => {
+    const newPlot = jest.spyOn(Plotly, 'newPlot').mockResolvedValue({} as any);
+    service.reset();
+    expect(newPlot).toHaveBeenCalledWith(
+      document.getElementById('plot'),
+      [],
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('setColormap restyles the colorscale of a live Plotly graph and writes the store', () => {
@@ -533,9 +556,17 @@ describe('PlotlyService viewport + stack-state methods', () => {
   });
 
   it('setShowStack(false) resets the slice index and relayouts', () => {
+    const gd = document.getElementById('plot') as any;
+    gd._fullLayout = {};
     service.setShowStack(false);
     expect((service as any).imageInfo.showStack).toBe(false);
-    expect(relayout).toHaveBeenCalledWith('plot', { showstack: false });
+    expect(relayout).toHaveBeenCalledWith(gd, { showstack: false });
+  });
+
+  it('setShowStack does not relayout a div with no live Plotly graph', () => {
+    service.setShowStack(false);
+    expect((service as any).imageInfo.showStack).toBe(false);
+    expect(relayout).not.toHaveBeenCalled();
   });
 
   it('stack-loading flags round-trip through their subjects', () => {

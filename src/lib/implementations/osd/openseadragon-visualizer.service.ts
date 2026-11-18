@@ -428,6 +428,9 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
       channelImages: this.isMultiChannel ? (d.channels ?? 1) : 1,
     });
     this.viewer = createViewer(options);
+    // Recolor every tile (main viewer and navigator) through the display pipeline,
+    // hooked before the source opens so each tile is recoloured as it first loads.
+    this.recolor.attach(this.viewer);
     return openViewer(this.viewer, tileSource, (v) => this.onViewerOpened(v, d, simple, plotDiv));
   }
 
@@ -459,8 +462,6 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     viewer.addHandler('viewport-change', () => {
       this.viewportPixels = null;
     });
-    // Recolor every tile (main viewer and navigator) through the display pipeline.
-    this.recolor.attach(viewer);
     // Prefetch adjacent z-slices once the view settles (and on each settle,
     // so it tracks the current viewport as the user pans/zooms). Simple mode
     // has a single frame, so there's nothing to prefetch.
