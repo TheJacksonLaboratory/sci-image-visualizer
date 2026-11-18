@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.20.2] — 2026-11-18
+
 ### Added
 
 - **One large in-browser model per tab (`ModelResidency`, #101).** A page-wide registry
@@ -2864,7 +2866,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.2...HEAD
+[0.20.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.18.1...v0.19.0
