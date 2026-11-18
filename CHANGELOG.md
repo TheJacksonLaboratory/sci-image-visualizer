@@ -9,6 +9,31 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **One large in-browser model per tab (`ModelResidency`, #101).** A page-wide registry
+  (`modelResidency`, injectable as `MODEL_RESIDENCY`) that every browser model registers with:
+  SIV's Cellpose and SAM here, and jit-extensions' and the host's models through the exported
+  API. A model stays warm while it is the one being used. Before a **different** model is used
+  (any other model id), every other loaded model whose loaded size (tab RAM + GPU) is at least
+  **1 GB** is released, before the new one loads, and after any run of it in progress finishes.
+  The next use rebuilds it from the IndexedDB download cache, so nothing is downloaded again.
+  Owners wrap each use — loading as well as running — in `residency.use(id, fn)` (or hold a
+  `residency.begin(id)` lease across several steps) and `register()` the model once it is built.
+  A use of a model already in use joins it directly, so an owner's nested load never deadlocks
+  behind a pending switch.
+  The threshold is configurable with `setModelResidencyThresholdMb()`, and
+  `estimateLoadedSizeMb()` estimates loaded size from download size for unmeasured models.
+- `SamSessionService` is now exported, and `SamModelDef.loadedSizeMb` declares a SAM model's
+  loaded size. `SamSessionService.withSession(fn)` holds SAM from acquiring the session through
+  every encode and decode; the box and point tools use it.
+
+### Changed
+
+- **Cellpose and SAM release other large models before they load.** Cellpose (~2.4 GB loaded,
+  estimated) is released in turn when another model is used. SAM models (estimated under 1 GB)
+  stay warm.
+
 ## [0.20.1] — 2026-11-17
 
 ### Changed

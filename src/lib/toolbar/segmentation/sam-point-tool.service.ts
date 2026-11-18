@@ -176,28 +176,36 @@ export class SamPointTool implements ICanvasTool<void> {
 
     // Busy from here on — including the model download (~14–172 MB on the
     // first click), the longest wait — so the UI shows the run at once.
-    await this.state.run(async () => {
-      try {
-        this.status$.next('Loading SAM model…');
-        const session = await this.sessions.ensureSession((f) => this.state.progress$.next(f));
-        const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join('|');
-        const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
-          this.status$.next('Encoding image…'),
-        );
-        this.status$.next('Segmenting…');
-        const prompt: SamPrompt = { points: this.points.slice() };
-        const res = await session.decode(embedding, prompt);
-        const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
-        if (!poly) {
-          this.status$.next('No mask for these points.');
-          return;
+    // One model-residency use from acquiring the session through the decode,
+    // so a switch to another model cannot dispose it mid-run.
+    await this.state.run(() =>
+      this.sessions.withSession(async (acquire) => {
+        try {
+          this.status$.next('Loading SAM model…');
+          const session = await acquire((f) => this.state.progress$.next(f));
+          const key = [host.getFileName() ?? '', frameIdx, `${cached.width}x${cached.height}`, frame.sig].join(
+            '|',
+          );
+          const embedding = await this.sessions.embed(session, cached, frameIdx, key, () =>
+            this.status$.next('Encoding image…'),
+          );
+          this.status$.next('Segmenting…');
+          const prompt: SamPrompt = { points: this.points.slice() };
+          const res = await session.decode(embedding, prompt);
+          const poly = maskToPolygons(res.mask, res.width, res.height, 0, 0)[0];
+          if (!poly) {
+            this.status$.next('No mask for these points.');
+            return;
+          }
+          this.upsertPreview(host, poly, frame);
+          this.status$.next(
+            'Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.',
+          );
+        } catch (err) {
+          this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
         }
-        this.upsertPreview(host, poly, frame);
-        this.status$.next('Segmented — click another fiber for a new region, Shift-click to refine, Esc to undo.');
-      } catch (err) {
-        this.status$.next(err instanceof Error ? err.message : 'SAM model unavailable.');
-      }
-    });
+      }),
+    );
   }
 
   /** Replace (or insert) the in-progress preview region in the shared store,

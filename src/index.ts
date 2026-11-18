@@ -31,6 +31,9 @@ export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
+export { SamSessionService } from './lib/toolbar/segmentation/sam-session.service';
+// One large in-browser model loaded per tab: shared by SIV, jit-extensions and the host (#101).
+export * from './lib/models/model-residency';
 // Whether napari-js (WebGPU) can run: override to force the WebGL / OpenSeadragon fallback.
 export { WEBGPU_PROBE, type WebGpuProbe } from './lib/util/webgpu-support';
 

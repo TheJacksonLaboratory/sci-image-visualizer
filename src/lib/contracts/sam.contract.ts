@@ -44,6 +44,13 @@ export interface SamModelDef {
    *  off-thread benefit. WebGPU models ignore this (they must stay in the
    *  worker to avoid freezing the tab). */
   inProcess?: boolean;
+  /**
+   * Loaded size in MB (tab RAM + GPU) once the session is built, for the
+   * model-residency rule: a model at or above the threshold (1 GB by default)
+   * is released when another model is used. Defaults to an estimate from the
+   * typical SAM ViT-B download when absent.
+   */
+  loadedSizeMb?: number;
 }
 
 /** Cached encoder output for one image (reused across every prompt on it). */

@@ -1,5 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Inject, Injectable, Optional } from '@angular/core';
 import { getOrtWasmBase } from './ort-runtime-config';
+import {
+  MODEL_RESIDENCY,
+  ModelResidency,
+  estimateLoadedSizeMb,
+  modelResidency,
+} from '../../models/model-residency';
 
 import type {
   ICellSegmenter,
@@ -10,6 +16,14 @@ import type { Cellpose } from 'cellpose-js';
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
 const DEFAULT_MODEL_URL = 'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
+
+/**
+ * Loaded size (tab RAM + GPU) of the ~588 MB CPSAM graph. Estimated, not yet
+ * measured: well above the 1 GB residency threshold either way, so Cellpose is
+ * released when another model is used and rebuilt (from the IndexedDB cache)
+ * on its next run.
+ */
+const CELLPOSE_LOADED_SIZE_MB = estimateLoadedSizeMb(588);
 
 /**
  * Default in-library {@link ICellSegmenter} backed by cellpose-js (WebGPU/WASM
@@ -23,6 +37,11 @@ const DEFAULT_MODEL_URL = 'https://huggingface.co/jax-image-tools/cellpose-sam-o
  * Owns a single shared {@link Cellpose} instance (one model load, one WebGPU
  * session, one worker). {@link getModel} exposes that instance so a host's
  * processing pipeline can reuse it instead of loading the ~588 MB model twice.
+ *
+ * Takes part in {@link ModelResidency}: the model stays warm across Cellpose
+ * runs, and is released when a different model is used. A host that runs the
+ * instance from {@link getModel} itself should wrap that run in
+ * `residency.use(svc.residencyId(), …)` so a switch waits for it.
  */
 @Injectable({ providedIn: 'root' })
 export class CellposeSegmenterService implements ICellSegmenter {
@@ -34,6 +53,16 @@ export class CellposeSegmenterService implements ICellSegmenter {
   /** Every in-flight caller's callbacks: one shared load reports to all of them. */
   private readonly progressListeners = new Set<(loaded: number, total: number | null) => void>();
   private readonly statusListeners = new Set<(status: string) => void>();
+  private readonly residency: ModelResidency;
+
+  constructor(@Optional() @Inject(MODEL_RESIDENCY) residency: ModelResidency | null = null) {
+    this.residency = residency ?? modelResidency;
+  }
+
+  /** This model's id in the {@link ModelResidency} registry. */
+  residencyId(): string {
+    return `cellpose:${this.modelUrl}`;
+  }
 
   /**
    * Point the segmenter at a different hosted CPSAM ONNX. Changing the URL after
@@ -42,6 +71,7 @@ export class CellposeSegmenterService implements ICellSegmenter {
    */
   setModelUrl(url: string): void {
     if (url === this.modelUrl) return;
+    this.residency.unregister(this.residencyId());
     this.modelUrl = url;
     this.generation++;
     this.loading = null;
@@ -50,12 +80,21 @@ export class CellposeSegmenterService implements ICellSegmenter {
     old?.dispose().catch((err) => console.warn('Cellpose: disposing the previous model failed', err));
   }
 
-  async segmentCells(
+  segmentCells(
+    image: { data: Uint8ClampedArray; width: number; height: number },
+    progress?: CellSegmentProgress,
+  ): Promise<CellSegmentation> {
+    return this.residency.use(this.residencyId(), () => this.runSegmentCells(image, progress));
+  }
+
+  private async runSegmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
     progress?: CellSegmentProgress,
   ): Promise<CellSegmentation> {
     let announcedDownload = false;
-    const cp = await this.getModel(
+    // Already inside this model's use(): load directly rather than through
+    // getModel(), which would open a second use of the same model.
+    const cp = await this.loadModel(
       (loaded, total) => {
         if (total) progress?.onProgress?.(loaded / total);
         if (loaded > 0 && !announcedDownload) {
@@ -88,8 +127,22 @@ export class CellposeSegmenterService implements ICellSegmenter {
    * engine can run richer `segment()` options on the same instance. `onProgress`
    * reports raw downloaded/total bytes (`total` is null when unknown); `onStatus`
    * reports worker-init phase strings.
+   *
+   * Using the model releases any other large model first, and the load is a
+   * tracked use ({@link ModelResidency}): a switch to another model waits for
+   * it, so two large models never load side by side. A caller that then runs
+   * the returned instance should wrap that run in
+   * `residency.use(svc.residencyId(), …)` too — calling `getModel()` from
+   * inside that use is fine.
    */
   getModel(
+    onProgress?: (loaded: number, total: number | null) => void,
+    onStatus?: (status: string) => void,
+  ): Promise<Cellpose> {
+    return this.residency.use(this.residencyId(), () => this.loadModel(onProgress, onStatus));
+  }
+
+  private loadModel(
     onProgress?: (loaded: number, total: number | null) => void,
     onStatus?: (status: string) => void,
   ): Promise<Cellpose> {
@@ -111,9 +164,15 @@ export class CellposeSegmenterService implements ICellSegmenter {
         if (generation !== this.generation) {
           // The URL changed while this loaded: drop it and load the current one.
           cp.dispose().catch(() => undefined);
-          return this.getModel();
+          return this.loadModel();
         }
         this.instance = cp;
+        const id = `cellpose:${url}`;
+        this.residency.register({
+          id,
+          loadedSizeMb: CELLPOSE_LOADED_SIZE_MB,
+          release: () => this.release(cp),
+        });
         return cp;
       })();
       this.loading = load;
@@ -134,5 +193,12 @@ export class CellposeSegmenterService implements ICellSegmenter {
   /** Whether the shared model is already loaded (warm). */
   isLoaded(): boolean {
     return this.instance !== null;
+  }
+
+  /** Residency release: drop the instance so the next run rebuilds it. */
+  private async release(cp: Cellpose): Promise<void> {
+    if (this.instance !== cp) return; // already replaced (URL change)
+    this.instance = null;
+    await cp.dispose();
   }
 }
