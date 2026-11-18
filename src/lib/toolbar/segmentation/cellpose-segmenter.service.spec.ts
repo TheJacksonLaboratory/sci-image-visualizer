@@ -57,4 +57,47 @@ describe('CellposeSegmenterService.getModel', () => {
     await expect(svc.getModel()).resolves.toBe(second);
     expect(fromPretrained.mock.calls[1][0]).toBe('https://example.org/other.onnx');
   });
+
+  it("unsubscribes a caller's progress/status listeners once its load settles", async () => {
+    // Each listener is removed in the load's finally (success or failure), so a
+    // later load never reports to a caller that already returned.
+    const progressOf =
+      (calls: number) =>
+      (_url: string, opts: { onProgress: (p: unknown) => void; onStatus: (s: string) => void }) => {
+        opts.onProgress({ loaded: calls, total: 10 });
+        opts.onStatus(`load ${calls}`);
+      };
+    fromPretrained
+      .mockImplementationOnce(async (url: string, opts: never) => {
+        progressOf(1)(url, opts);
+        throw new Error('network');
+      })
+      .mockImplementationOnce(async (url: string, opts: never) => {
+        progressOf(2)(url, opts);
+        return { dispose: async () => undefined };
+      })
+      .mockImplementationOnce(async (url: string, opts: never) => {
+        progressOf(3)(url, opts);
+        return { dispose: async () => undefined };
+      });
+    const svc = new CellposeSegmenterService();
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+
+    await expect(
+      svc.getModel(
+        (l) => first.push(l),
+        (s) => first.push(s),
+      ),
+    ).rejects.toThrow('network');
+    await svc.getModel(
+      (l) => second.push(l),
+      (s) => second.push(s),
+    );
+    svc.setModelUrl('https://example.org/other.onnx');
+    await svc.getModel();
+
+    expect(first).toEqual([1, 'load 1']); // failed load: unsubscribed, never hears load 2 or 3
+    expect(second).toEqual([2, 'load 2']); // successful load: unsubscribed, never hears load 3
+  });
 });

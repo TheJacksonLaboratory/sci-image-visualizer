@@ -132,9 +132,7 @@ export class CellposeSegmenterService implements ICellSegmenter {
     onProgress?: (loaded: number, total: number | null) => void,
     onStatus?: (status: string) => void,
   ): Promise<Cellpose> {
-    return this.residency
-      .activate(this.residencyId())
-      .then(() => this.loadModel(onProgress, onStatus));
+    return this.residency.activate(this.residencyId()).then(() => this.loadModel(onProgress, onStatus));
   }
 
   private loadModel(

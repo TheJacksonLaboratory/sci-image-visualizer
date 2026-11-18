@@ -33,15 +33,13 @@ function fakeSam(): ISamSession {
     loadModel: jest.fn(async () => undefined),
     isLoaded: () => true,
     dispose: jest.fn(),
-    embed: jest.fn(
-      async (): Promise<SamEmbedding> => ({
-        data: new Float32Array(1),
-        dims: [1],
-        scale: 1,
-        imageWidth: 2,
-        imageHeight: 2,
-      }),
-    ),
+    embed: jest.fn(async (): Promise<SamEmbedding> => ({
+      data: new Float32Array(1),
+      dims: [1],
+      scale: 1,
+      imageWidth: 2,
+      imageHeight: 2,
+    })),
     decode: jest.fn(),
   };
 }
