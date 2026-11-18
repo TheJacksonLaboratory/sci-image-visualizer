@@ -250,6 +250,28 @@ describe('SAM under the model-residency rule', () => {
     expect(r.residentModels().filter((m) => m.id.startsWith('sam:'))).toEqual([]);
   });
 
+  it("unsubscribes a caller's progress listener once its load settles", async () => {
+    let loads = 0;
+    svc.useSessionFactory(async () => ({
+      ...fakeSam(),
+      // Each load reports progress while it runs: 0.1 for the first, 0.2 for the second.
+      loadModel: jest.fn(async (_m: unknown, onProgress?: (f: number) => void) => {
+        onProgress?.(++loads / 10);
+      }),
+    }));
+    const first: number[] = [];
+    await svc.ensureSession((f) => first.push(f));
+
+    // A later load (after a model switch) reports only to its own caller.
+    setSamModelUrls('microsam-vit-t-lm', 'enc-t', 'dec-t');
+    svc.setModel('microsam-vit-t-lm');
+    const second: number[] = [];
+    await svc.ensureSession((f) => second.push(f));
+
+    expect(first).toEqual([0, 0.1]); // never hears the second load
+    expect(second).toEqual([0, 0.2]);
+  });
+
   it('gives independently owned services distinct residency ids', async () => {
     const other = new SamSessionService(r);
     other.setModel('microsam-vit-b-lm');
