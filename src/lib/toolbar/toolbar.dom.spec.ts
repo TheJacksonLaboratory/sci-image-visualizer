@@ -192,6 +192,20 @@ describe('ToolbarComponent (DOM characterization)', () => {
     ).toMatchSnapshot();
   });
 
+  it('hides only the intensity line button with intensityLines: false', async () => {
+    const intensityButton = (): Element | null =>
+      (fixture.nativeElement as HTMLElement).querySelector('[aria-label="Add an intensity line"]');
+    await render({ imageInfo: image({}), plotTypeOptions, selectedPlotType: PlotType.HEATMAP });
+    expect(intensityButton()).not.toBeNull();
+
+    await render({ tools: { ...ALL_TOOLBAR_TOOLS, intensityLines: false } });
+    expect(intensityButton()).toBeNull();
+    // The rest of the special tools stay: the plot-type selector among them.
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('toolbar-plot-type-selector p-dropdown'),
+    ).not.toBeNull();
+  });
+
   it('pipeline subset: zoom and region tools only', async () => {
     expect(
       await render({

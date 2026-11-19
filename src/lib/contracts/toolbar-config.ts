@@ -12,6 +12,10 @@ export interface ToolbarToolVisibility {
   /** Plot-type selector, intensity-profile line, Channels & Histogram, download,
    *  and fit-to-view (autoscale) — everything that isn't a zoom or region tool. */
   specialTools?: boolean;
+  /** The "Add an intensity line" button (Heatmap and Image plot types), on its own:
+   *  `false` hides it and leaves the rest of {@link specialTools} shown. It shows only
+   *  when `specialTools` does too. */
+  intensityLines?: boolean;
   /** Zoom drag, zoom box, pan, zoom in, zoom out. */
   zoomTools?: boolean;
   /** Region drawing/editing: select, rectangle, polyline, freeform, polygon vertex
@@ -24,6 +28,7 @@ export interface ToolbarToolVisibility {
 /** Full toolbar — the default when no `toolbarTools` is supplied. */
 export const ALL_TOOLBAR_TOOLS: Required<ToolbarToolVisibility> = {
   specialTools: true,
+  intensityLines: true,
   zoomTools: true,
   regionTools: true,
   help: true,
