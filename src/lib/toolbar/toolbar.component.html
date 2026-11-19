@@ -37,7 +37,7 @@
       [selected]="selectedPlotType"
       [isosurface]="isIsosurfaceMode"
       [isoRange]="isoRange"
-      [intensityLines]="isIntensityCapable"
+      [intensityLines]="isIntensityCapable && tools.intensityLines"
       (selectPlotType)="selectPlotType.emit($event)"
       (isoRangeChange)="isoRangeChange.emit($event)"
       (addProfileLine)="addProfileLine.emit()"

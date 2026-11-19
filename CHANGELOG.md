@@ -9,6 +9,15 @@ file was added.
 
 ## [Unreleased]
 
+## [0.20.3] — 2026-11-19
+
+### Added
+
+- **`ToolbarToolVisibility.intensityLines`.** Hides the toolbar's "Add an intensity line" button on
+  its own, leaving the rest of `specialTools` (plot-type selector, Channels & Histogram, download,
+  fit to view) shown. Defaults to `true`, so the toolbar is unchanged unless a host sets it; JIT
+  shows the button only in its test mode.
+
 ## [0.20.2] — 2026-11-18
 
 ### Added
@@ -2866,7 +2875,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.2...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.3...HEAD
+[0.20.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.19.0...v0.20.0
