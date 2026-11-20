@@ -41,7 +41,8 @@ cells to that size for the model, and traces their outlines back at full resolut
 does not change. Set the diameter close to the real size: a diameter twice too large halves the detail
 the model sees.
 
-1. Click <i class="pi pi-sliders-h"></i> **Parameters** next to Cellpose-SAM.
+1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, point to **Cellpose-SAM** and click
+   <i class="pi pi-sliders-h"></i> **Set cell diameter…**.
 2. Set **Cell diameter (µm)** to the typical size of the cells or nuclei (10 µm by default). It is used
    when the image reports its pixel size.
 3. For an image without a pixel size, set **Cell diameter (px)** in full-resolution pixels instead.
@@ -101,7 +102,7 @@ regions) and follow [Relabel many regions at once](classes.md#relabel-many-regio
 ## Run a contributed tool
 
 Applications can add their own tools (for example detection models in JAX Image Tools). They appear in the
-segmentation group after Cellpose-SAM, with the same run button, model picker
-<i class="pi pi-chevron-down"></i> and <i class="pi pi-sliders-h"></i> **Parameters**. Like Cellpose-SAM,
+segmentation group after Cellpose-SAM, with a run button, a model picker
+<i class="pi pi-chevron-down"></i> and, for most, <i class="pi pi-sliders-h"></i> **Parameters**. Like Cellpose-SAM,
 many of them process the whole current view, so there is nothing to draw first. Their documentation is part of the host application's
 guide.

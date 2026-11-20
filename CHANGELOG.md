@@ -45,8 +45,10 @@ file was added.
 
 ### Changed
 
-- **The Cellpose button is a split button like the contributed tools:** run, model
-  (Cellpose-SAM, with its description) and parameters. It is listed through the run-tool list
+- **The Cellpose button is a split button like the contributed tools:** run, and a model menu
+  (Cellpose-SAM, with its description) whose entry opens a **Set cell diameter…** submenu, in
+  place of a parameters button (`ToolbarToolContribution.paramsInModelMenu`, new and optional;
+  the run tools' model menus are now PrimeNG tiered menus). It is listed through the run-tool list
   (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
   toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
   lost its frame.

@@ -81,7 +81,7 @@
      outside this template, so `command` still fires and the whole row stays
      clickable — which is also why the info icon has to stop propagation, or
      reading about a model would switch to it. -->
-<ng-template #modelMenuItem let-item>
+<ng-template #modelMenuItem let-item let-hasSubmenu="hasSubmenu">
   <a class="p-menuitem-link model-menu-item">
     <span class="p-menuitem-icon" [ngClass]="item.icon"></span>
     <span class="p-menuitem-text">{{ item.label }}</span>
@@ -116,6 +116,8 @@
       (keydown.enter)="$event.stopPropagation()"
       (keydown.space)="$event.stopPropagation()"
     ></button>
+    <!-- A custom item template replaces the tiered menu's own submenu arrow. -->
+    <span *ngIf="hasSubmenu" class="pi pi-angle-right model-menu-submenu-icon" aria-hidden="true"></span>
   </a>
 </ng-template>
 <!-- Run tools: the library's own Cellpose, then the contributed ones
@@ -158,8 +160,9 @@
       (onClick)="toolMenu.toggle($event)"
     >
     </p-button>
+    <!-- No button when the parameters open from the model menu (Cellpose-SAM). -->
     <p-button
-      *ngIf="tool.params.length"
+      *ngIf="tool.params.length && !tool.paramsInModelMenu"
       icon="pi pi-sliders-h"
       size="small"
       [text]="true"
@@ -170,12 +173,21 @@
     >
     </p-button>
   </span>
-  <p-menu #toolMenu styleClass="model-menu" [model]="toolMenuItems[tool.id] || []" [popup]="true" appendTo="body">
-    <ng-template pTemplate="item" let-item>
+  <!-- A tiered menu, so a checkpoint can carry a parameters submenu
+       (`paramsInModelMenu`, Cellpose-SAM → Set cell diameter…); without one it
+       reads as the flat menu the SAM picker uses. -->
+  <p-tieredMenu
+    #toolMenu
+    styleClass="model-menu"
+    [model]="toolMenuItems[tool.id] || []"
+    [popup]="true"
+    appendTo="body"
+  >
+    <ng-template pTemplate="item" let-item let-hasSubmenu="hasSubmenu">
       <ng-container
         [ngTemplateOutlet]="modelMenuItem"
-        [ngTemplateOutletContext]="{ $implicit: item }"
+        [ngTemplateOutletContext]="{ $implicit: item, hasSubmenu: hasSubmenu }"
       ></ng-container>
     </ng-template>
-  </p-menu>
+  </p-tieredMenu>
 </ng-container>

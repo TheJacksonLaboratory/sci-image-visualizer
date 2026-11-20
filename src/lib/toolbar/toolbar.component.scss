@@ -23,7 +23,8 @@
 // to have, so at that width a long name either wraps mid-token or pushes the icon
 // outside the menu box. Size these three menus to their content instead, keeping
 // 12.5rem as the floor so short lists look exactly as before.
-::ng-deep .p-menu.model-menu {
+::ng-deep .p-menu.model-menu,
+::ng-deep .p-tieredmenu.model-menu {
   width: auto;
   min-width: 12.5rem;
 }
@@ -32,6 +33,11 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+
+  .model-menu-submenu-icon {
+    margin-left: auto;
+    font-size: 0.75rem;
+  }
 
   .p-menuitem-text {
     flex: 1 1 auto;

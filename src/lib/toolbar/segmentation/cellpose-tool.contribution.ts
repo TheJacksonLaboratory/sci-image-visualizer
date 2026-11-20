@@ -20,7 +20,7 @@ const CPSAM_MODEL: ToolModelOption = {
   info:
     '<b>Cellpose-SAM</b> (CPSAM, fp16)<br>Generalist cell and nucleus segmentation, ~588&nbsp;MB, ' +
     'GPU-accelerated (WebGPU). Segments best with cells about 30&nbsp;px across: set the cell ' +
-    'diameter in <i class="pi pi-sliders-h"></i> Parameters.',
+    'diameter with <b>Set cell diameter…</b> in this menu.',
 };
 
 const PARAMS: ToolParamSpec[] = [
@@ -65,9 +65,11 @@ export class CellposeToolContribution implements ToolbarToolContribution {
   readonly icon = { src: 'assets/plotting/cells.svg' };
   readonly runTooltip =
     'Segment cells (Cellpose-SAM) across the whole view, or inside each drawn rectangle if there are any. ' +
-    'Runs at the resolution set by the cell diameter in Parameters; your zoom does not change.';
-  readonly modelTooltip = 'About the Cellpose-SAM model';
+    'Runs at the resolution set by the cell diameter (▾ → Set cell diameter…); your zoom does not change.';
+  readonly modelTooltip = 'Cellpose-SAM model and cell diameter';
   readonly paramsTooltip = 'Cellpose-SAM parameters (cell diameter)';
+  /** The diameter opens from the model menu: Cellpose-SAM → Set cell diameter… */
+  readonly paramsInModelMenu = 'Set cell diameter…';
   /** After the SAM tools, before the contributed ones (100+). */
   readonly order = 50;
   readonly params = PARAMS;

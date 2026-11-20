@@ -167,6 +167,13 @@ export interface ToolbarToolContribution {
   /** Parameter fields, in dialog order. Empty hides the parameters button. */
   params: ToolParamSpec[];
   /**
+   * Open the parameters from the checkpoint menu instead of a toolbar button: each
+   * checkpoint gets a submenu with one entry of this label (e.g. "Set cell
+   * diameter…"), and the parameters button is not shown. For a tool with one or two
+   * parameters, which do not earn a button of their own.
+   */
+  paramsInModelMenu?: string;
+  /**
    * Baseline parameter values for a checkpoint. Called on first use and again
    * on "Reset to model defaults", so it must be pure and must return every key
    * the tool reads — a parameter the dialog shows but this omits renders as

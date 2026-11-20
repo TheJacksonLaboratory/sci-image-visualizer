@@ -11,6 +11,7 @@ import { CommonModule } from '@angular/common';
 import { MenuItem, SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
+import { TieredMenuModule } from 'primeng/tieredmenu';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { ToolbarToolContribution } from '../../contracts/toolbar-tool.contract';
@@ -25,7 +26,7 @@ import { MODEL_INFO } from '../model-info';
 @Component({
   selector: 'toolbar-segmentation-tools',
   standalone: true,
-  imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TooltipModule],
+  imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TieredMenuModule, TooltipModule],
   templateUrl: './segmentation-tools.component.html',
   styleUrls: ['./segmentation-tools.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -94,12 +95,27 @@ export class SegmentationToolsComponent implements OnChanges {
       this.toolMenuItems = {};
       for (const tool of this.contributedTools) {
         const active = this.toolModelIds[tool.id] ?? tool.defaultModelId();
+        const paramsLabel = tool.params.length ? tool.paramsInModelMenu : undefined;
         this.toolMenuItems[tool.id] = tool.models().map((m) => ({
           label: m.label,
           icon: m.id === active ? 'pi pi-check' : 'pi pi-fw',
           tooltip: m.info,
           infoLabel: this.infoLabel(m.label, m.info),
           command: () => this.toolModelChange.emit({ toolId: tool.id, modelId: m.id }),
+          // The parameters, under the checkpoint (`paramsInModelMenu`). Picking the entry
+          // selects that checkpoint first, so the dialog edits its values.
+          items: paramsLabel
+            ? [
+                {
+                  label: paramsLabel,
+                  icon: 'pi pi-sliders-h',
+                  command: () => {
+                    if (m.id !== active) this.toolModelChange.emit({ toolId: tool.id, modelId: m.id });
+                    this.openToolParams.emit(tool.id);
+                  },
+                },
+              ]
+            : undefined,
         }));
       }
     }

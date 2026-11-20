@@ -128,7 +128,6 @@ exports[`ToolbarComponent (DOM characterization) Image view, z-stack, brush acti
   "button:pi pi-search "Detect things"",
   "button:pi pi-chevron-down "Pick the model"",
   "button:pi pi-sliders-h "Parameters"",
-  "menu",
   "|",
 ]
 `;
