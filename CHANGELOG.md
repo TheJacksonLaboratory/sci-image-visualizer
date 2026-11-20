@@ -56,7 +56,9 @@ file was added.
   diameter fields explain how the diameter sets the resolution.
 - **The Set cell diameter dialog shows one field:** **Cell diameter (µm)** when the image reports its
   pixel size (its help quotes it), else **Cell diameter (px)**. A run tool picks the fields for the
-  image on screen with the new optional `ToolbarToolContribution.paramsFor(viz)`. It is listed through the run-tool list
+  image on screen with the new optional `ToolbarToolContribution.paramsFor(viz)`.
+- **The SAM point-prompt icon is larger:** its viewBox is cropped to the artwork, so it fills the
+  toolbar button like the box-prompt icon. It is listed through the run-tool list
   (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
   toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
   lost its frame.
