@@ -42,11 +42,16 @@ does not change. Set the diameter close to the real size: a diameter twice too l
 the model sees.
 
 1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, then **Set cell diameter…**.
+
+    ![The Cellpose-SAM menu with Set cell diameter…](../assets/screenshots/seg-cellpose-diameter-menu.png){ width="360" }
+
 2. Set the typical size of the cells or nuclei. The dialog asks for the unit the image supports:
     - **Cell diameter (µm)** (10 µm by default) when the image reports its pixel size;
     - **Cell diameter (px)** (30 px by default), in full-resolution pixels, when it does not.
 
     Hover <i class="pi pi-info-circle"></i> beside the field for details, including the image's pixel size.
+
+    ![The cell diameter dialog in µm, with its help showing the image's pixel size](../assets/screenshots/seg-cellpose-diameter-dialog.png){ width="480" }
 
 Set the diameter to 0 to segment the pixels as displayed.
 

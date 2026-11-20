@@ -96,6 +96,8 @@ field, in the unit the image supports:
 | **Cell diameter (µm)** | 10 | When the image reports its pixel size. |
 | **Cell diameter (px)** | 30 | Otherwise; in full-resolution pixels. |
 
+![The cell diameter dialog in µm, with its help showing the image's pixel size](../assets/screenshots/seg-cellpose-diameter-dialog.png){ width="480" }
+
 A diameter of 0 segments the pixels as displayed. The Cellpose-SAM model is large (about 588 MB) and
 downloads on first use.
 
