@@ -322,3 +322,32 @@ kbd {
 :host ::ng-deep .sam-progress .p-progressbar-value {
   transition: none;
 }
+
+// The parameters dialog: a field's label with its info icon (ToolParamSpec.tooltip).
+::ng-deep .param-label {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.5rem;
+
+  label {
+    margin-bottom: 0;
+  }
+}
+
+::ng-deep .param-info-icon {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  opacity: 0.55;
+  cursor: help;
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+
+  &:hover,
+  &:focus-visible {
+    opacity: 1;
+  }
+}

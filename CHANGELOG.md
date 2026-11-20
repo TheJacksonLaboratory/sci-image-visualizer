@@ -49,7 +49,11 @@ file was added.
   Cellpose-SAM in the displayed view, or in drawn rectangles") and a menu holding **Set cell diameter…**, in place of a parameters button
   (`ToolbarToolContribution.paramsInModelMenu`, new and optional: with one checkpoint the menu is
   just that entry, with several each checkpoint gets it as a submenu; the run tools' model menus
-  are now PrimeNG tiered menus). It is listed through the run-tool list
+  are now PrimeNG tiered menus).
+- **Parameter help behind an info icon.** In the tool parameters dialog, a field's help
+  (`ToolParamSpec.tooltip`) is now shown by an ⓘ button beside its label (hover or keyboard focus,
+  and announced to screen readers) instead of a hidden hover on the label. Cellpose-SAM's cell
+  diameter fields explain how the diameter sets the resolution. It is listed through the run-tool list
   (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
   toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
   lost its frame.

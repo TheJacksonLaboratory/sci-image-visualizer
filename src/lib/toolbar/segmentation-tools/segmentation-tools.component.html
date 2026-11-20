@@ -83,7 +83,7 @@
      reading about a model would switch to it. -->
 <ng-template #modelMenuItem let-item let-hasSubmenu="hasSubmenu">
   <a class="p-menuitem-link model-menu-item">
-    <span class="p-menuitem-icon" [ngClass]="item.icon"></span>
+    <span *ngIf="item.icon" class="p-menuitem-icon" [ngClass]="item.icon"></span>
     <span class="p-menuitem-text">{{ item.label }}</span>
     <!-- `bottom` like every other tooltip in this toolbar, and for room:
          these menus open under buttons that can sit near the right edge,

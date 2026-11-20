@@ -99,7 +99,6 @@ export class SegmentationToolsComponent implements OnChanges {
         const models = tool.models();
         const paramsEntry = (modelId: string): MenuItem => ({
           label: paramsLabel,
-          icon: 'pi pi-sliders-h',
           command: () => {
             // Under another checkpoint: select it first, so the dialog edits its values.
             if (modelId !== active) this.toolModelChange.emit({ toolId: tool.id, modelId });

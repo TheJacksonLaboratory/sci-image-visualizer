@@ -69,7 +69,7 @@ export interface NumberParamSpec {
   step?: number;
   /** Decimal places to show. Omit for integers. */
   fractionDigits?: number;
-  /** Hover help. Plain text; it is not rendered as HTML. */
+  /** Help shown by an info icon beside the label. Plain text; it is not rendered as HTML. */
   tooltip?: string;
 }
 

@@ -367,7 +367,13 @@
     <ng-container *ngFor="let f of open.fields">
       <div class="field" [ngClass]="f.spec.type === 'boolean' ? 'col-12' : 'col-6'">
         <ng-container *ngIf="f.number as n">
-          <label class="text-sm" [pTooltip]="n.tooltip || ''">{{ n.label }}</label>
+          <div class="param-label">
+            <label class="text-sm">{{ n.label }}</label>
+            <ng-container
+              [ngTemplateOutlet]="paramInfo"
+              [ngTemplateOutletContext]="{ $implicit: n }"
+            ></ng-container>
+          </div>
           <p-inputNumber
             [ngModel]="open.values[n.id]"
             (ngModelChange)="open.values[n.id] = $event"
@@ -380,7 +386,13 @@
         </ng-container>
 
         <ng-container *ngIf="f.select as sel">
-          <label class="text-sm" [pTooltip]="sel.tooltip || ''">{{ sel.label }}</label>
+          <div class="param-label">
+            <label class="text-sm">{{ sel.label }}</label>
+            <ng-container
+              [ngTemplateOutlet]="paramInfo"
+              [ngTemplateOutletContext]="{ $implicit: sel }"
+            ></ng-container>
+          </div>
           <p-dropdown
             [options]="sel.options"
             optionLabel="label"
@@ -400,13 +412,30 @@
             [binary]="true"
             [inputId]="open.tool.id + '-' + f.spec.id"
           ></p-checkbox>
-          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0" [pTooltip]="f.spec.tooltip || ''">{{
-            f.spec.label
-          }}</label>
+          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0">{{ f.spec.label }}</label>
+          <ng-container
+            [ngTemplateOutlet]="paramInfo"
+            [ngTemplateOutletContext]="{ $implicit: f.spec }"
+          ></ng-container>
         </div>
       </div>
     </ng-container>
   </div>
+  <!-- A field's help (`ToolParamSpec.tooltip`) behind an info icon beside its label. A
+       focusable button, so the tooltip also shows on keyboard focus, and the text is on
+       its aria-label for screen readers (the tooltip is rendered into body on demand). -->
+  <ng-template #paramInfo let-spec>
+    <button
+      *ngIf="spec.tooltip"
+      type="button"
+      class="pi pi-info-circle param-info-icon"
+      [attr.aria-label]="'About ' + spec.label + ': ' + spec.tooltip"
+      [pTooltip]="spec.tooltip"
+      tooltipPosition="top"
+      appendTo="body"
+      tooltipStyleClass="model-info-tooltip"
+    ></button>
+  </ng-template>
   <ng-template pTemplate="footer">
     <p-button
       label="Reset to model defaults"

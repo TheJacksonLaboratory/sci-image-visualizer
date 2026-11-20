@@ -33,8 +33,13 @@ const PARAMS: ToolParamSpec[] = [
     step: 1,
     fractionDigits: 1,
     tooltip:
-      'Typical cell diameter. With the image pixel size it sets the resolution Cellpose segments at, ' +
-      'whatever the zoom: cells are brought to about 30 px. 0 segments the pixels as displayed.',
+      'The typical diameter of the cells or nuclei to segment, in micrometres. Cellpose-SAM ' +
+      'finds cells best when they are about 30 pixels across, so it uses this diameter and the ' +
+      "image's pixel size to choose the resolution it reads the image at, whatever your zoom " +
+      '(10 µm cells at 0.25 µm per pixel are 40 pixels, so they are scaled by 0.75). ' +
+      'Too large a value merges small cells or misses them; too small a value splits cells. ' +
+      'Used when the image reports its pixel size; otherwise Cell diameter (px) is used. ' +
+      '0 segments the pixels as displayed.',
   },
   {
     id: 'cellDiameterPx',
@@ -44,8 +49,10 @@ const PARAMS: ToolParamSpec[] = [
     max: 2000,
     step: 1,
     tooltip:
-      'Used when the image reports no pixel size: typical cell diameter in full-resolution pixels. ' +
-      '0 segments the pixels as displayed.',
+      'The typical diameter of the cells or nuclei, in full-resolution image pixels (measure ' +
+      'one with a line at full zoom). Used instead of Cell diameter (µm) when the image ' +
+      'does not report its pixel size. Cellpose-SAM scales the image so cells are about 30 ' +
+      'pixels across. 0 segments the pixels as displayed.',
   },
 ];
 

@@ -120,7 +120,7 @@ describe('SegmentationToolsComponent — parameters in the model menu', () => {
     tools.toolModelChange.subscribe((e) => picked.push(e.modelId));
 
     const [a, b] = tools['toolMenuItems']['detect']!;
-    expect(a.items).toEqual([expect.objectContaining({ label: 'Set cell diameter…', icon: 'pi pi-sliders-h' })]);
+    expect(a.items).toEqual([expect.objectContaining({ label: 'Set cell diameter…' })]);
     // The active checkpoint's entry only opens the dialog…
     a.items![0].command!({});
     expect(opened).toEqual(['detect']);
@@ -145,8 +145,9 @@ describe('SegmentationToolsComponent — parameters in the model menu', () => {
     tools.openToolParams.subscribe((id) => opened.push(id));
 
     const items = tools['toolMenuItems']['detect']!;
-    expect(items).toEqual([expect.objectContaining({ label: 'Set cell diameter…', icon: 'pi pi-sliders-h' })]);
+    expect(items).toEqual([expect.objectContaining({ label: 'Set cell diameter…' })]);
     expect(items[0].items).toBeUndefined();
+    expect(items[0].icon).toBeUndefined(); // no icon, so no blank icon slot either
     items[0].command!({});
     expect(opened).toEqual(['detect']);
   });
