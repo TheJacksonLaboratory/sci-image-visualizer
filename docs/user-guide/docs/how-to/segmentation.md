@@ -41,8 +41,8 @@ cells to that size for the model, and traces their outlines back at full resolut
 does not change. Set the diameter close to the real size: a diameter twice too large halves the detail
 the model sees.
 
-1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, point to **Cellpose-SAM** and click
-   <i class="pi pi-sliders-h"></i> **Set cell diameter…**.
+1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, then <i class="pi pi-sliders-h"></i>
+   **Set cell diameter…**.
 2. Set **Cell diameter (µm)** to the typical size of the cells or nuclei (10 µm by default). It is used
    when the image reports its pixel size.
 3. For an image without a pixel size, set **Cell diameter (px)** in full-resolution pixels instead.

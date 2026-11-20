@@ -131,6 +131,26 @@ describe('SegmentationToolsComponent — parameters in the model menu', () => {
     expect(opened).toEqual(['detect', 'detect']);
   });
 
+  it('makes the menu just the parameters entry when there is one checkpoint', () => {
+    const tools = new SegmentationToolsComponent();
+    tools.contributedTools = [
+      {
+        ...cellposeLike(),
+        models: () => [{ id: 'cpsam', label: 'Cellpose-SAM', info: 'x' }],
+        defaultModelId: () => 'cpsam',
+      },
+    ];
+    tools.ngOnChanges({ contributedTools: {} as never });
+    const opened: string[] = [];
+    tools.openToolParams.subscribe((id) => opened.push(id));
+
+    const items = tools['toolMenuItems']['detect']!;
+    expect(items).toEqual([expect.objectContaining({ label: 'Set cell diameter…', icon: 'pi pi-sliders-h' })]);
+    expect(items[0].items).toBeUndefined();
+    items[0].command!({});
+    expect(opened).toEqual(['detect']);
+  });
+
   it('gives a tool without it no submenu', () => {
     const tools = new SegmentationToolsComponent();
     tools.contributedTools = [{ ...contributedTool(), params: [{ id: 'x', label: 'X', type: 'number' }] }];

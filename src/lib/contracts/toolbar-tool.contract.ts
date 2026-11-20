@@ -167,10 +167,11 @@ export interface ToolbarToolContribution {
   /** Parameter fields, in dialog order. Empty hides the parameters button. */
   params: ToolParamSpec[];
   /**
-   * Open the parameters from the checkpoint menu instead of a toolbar button: each
-   * checkpoint gets a submenu with one entry of this label (e.g. "Set cell
-   * diameter…"), and the parameters button is not shown. For a tool with one or two
-   * parameters, which do not earn a button of their own.
+   * Open the parameters from the checkpoint menu instead of a toolbar button, with an
+   * entry of this label (e.g. "Set cell diameter…"); the parameters button is not
+   * shown. With one checkpoint the menu is just that entry; with several, each
+   * checkpoint gets it as a submenu. For a tool with one or two parameters, which do
+   * not earn a button of their own.
    */
   paramsInModelMenu?: string;
   /**

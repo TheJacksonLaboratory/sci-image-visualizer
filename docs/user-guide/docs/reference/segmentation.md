@@ -88,8 +88,8 @@ tiles; a cell on a seam between tiles is kept once. Views up to about 6000 × 60
 keep full detail; beyond that, or when very small cells over a large view would need more than the model's
 budget, the view is segmented below the cells' best scale and the result says so.
 
-Its model menu <i class="pi pi-chevron-down"></i> → **Cellpose-SAM** → <i class="pi pi-sliders-h"></i>
-**Set cell diameter…** sets the cell size:
+<i class="pi pi-chevron-down"></i> → <i class="pi pi-sliders-h"></i> **Set cell diameter…** next to it sets
+the cell size:
 
 | Parameter | Default | Used |
 | --- | --- | --- |

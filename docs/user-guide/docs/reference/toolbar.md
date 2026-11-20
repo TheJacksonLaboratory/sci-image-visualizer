@@ -100,7 +100,7 @@ Undo, Redo and Delete are shown. Selection then picks class surfaces in 3D.
 | **SAM point prompts** | ![](../assets/icons/sam-point-prompt.svg){ .siv-icon } | Click an object to segment it; ++shift++/++alt++-click excludes; ++enter++ commits; ++esc++ undoes. |
 | **Pick the SAM model** | <i class="pi pi-chevron-down"></i> | Chooses the SAM model used by both SAM tools; <i class="pi pi-info-circle"></i> shows each model's size, speed and domain. |
 | **Cellpose-SAM** | ![](../assets/icons/cells.svg){ .siv-icon } | Segments every cell in the view, or inside each drawn rectangle if there are any. |
-| **Cellpose-SAM model and cell diameter** | <i class="pi pi-chevron-down"></i> | Lists the one model, **Cellpose-SAM**; <i class="pi pi-info-circle"></i> shows its size and domain. Its submenu **Set cell diameter…** sets the cell diameter, in µm or in pixels, which sets the resolution Cellpose-SAM segments at. |
+| **Set cell diameter** | <i class="pi pi-chevron-down"></i> | Opens **Set cell diameter…**: the cell diameter, in µm or in pixels, which sets the resolution Cellpose-SAM segments at. |
 
 The host application may add its own tools here (for example detection models), each with a model picker
 <i class="pi pi-chevron-down"></i> and a parameters button <i class="pi pi-sliders-h"></i>. See

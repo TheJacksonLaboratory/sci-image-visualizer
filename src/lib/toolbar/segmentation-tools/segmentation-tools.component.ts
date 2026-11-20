@@ -96,26 +96,30 @@ export class SegmentationToolsComponent implements OnChanges {
       for (const tool of this.contributedTools) {
         const active = this.toolModelIds[tool.id] ?? tool.defaultModelId();
         const paramsLabel = tool.params.length ? tool.paramsInModelMenu : undefined;
-        this.toolMenuItems[tool.id] = tool.models().map((m) => ({
+        const models = tool.models();
+        const paramsEntry = (modelId: string): MenuItem => ({
+          label: paramsLabel,
+          icon: 'pi pi-sliders-h',
+          command: () => {
+            // Under another checkpoint: select it first, so the dialog edits its values.
+            if (modelId !== active) this.toolModelChange.emit({ toolId: tool.id, modelId });
+            this.openToolParams.emit(tool.id);
+          },
+        });
+        // One checkpoint and the parameters in the menu: nothing to pick, so the menu is
+        // just the parameters entry (Cellpose-SAM: "Set cell diameter…").
+        if (paramsLabel && models.length === 1) {
+          this.toolMenuItems[tool.id] = [paramsEntry(models[0].id)];
+          continue;
+        }
+        this.toolMenuItems[tool.id] = models.map((m) => ({
           label: m.label,
           icon: m.id === active ? 'pi pi-check' : 'pi pi-fw',
           tooltip: m.info,
           infoLabel: this.infoLabel(m.label, m.info),
           command: () => this.toolModelChange.emit({ toolId: tool.id, modelId: m.id }),
-          // The parameters, under the checkpoint (`paramsInModelMenu`). Picking the entry
-          // selects that checkpoint first, so the dialog edits its values.
-          items: paramsLabel
-            ? [
-                {
-                  label: paramsLabel,
-                  icon: 'pi pi-sliders-h',
-                  command: () => {
-                    if (m.id !== active) this.toolModelChange.emit({ toolId: tool.id, modelId: m.id });
-                    this.openToolParams.emit(tool.id);
-                  },
-                },
-              ]
-            : undefined,
+          // The parameters, under each checkpoint (`paramsInModelMenu`).
+          items: paramsLabel ? [paramsEntry(m.id)] : undefined,
         }));
       }
     }
