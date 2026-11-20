@@ -266,3 +266,51 @@ describe('CellSegmentToolService.segmentView (#97)', () => {
     expect(sizes).toEqual([[20, 20, 30]]);
   });
 });
+
+describe('CellSegmentToolService — image or slice changed mid-run (#105 review)', () => {
+  it('discards a whole-view result when the slice changed during inference', async () => {
+    const tool = new CellSegmentToolService();
+    let slice = 0;
+    let regs: Region[] = [];
+    const data = new Uint8ClampedArray(40 * 40 * 4).fill(120);
+    const viz = {
+      getDisplayedPixelData: () => ({ width: 40, height: 40, channels: 4, data }),
+      getDisplayedSourceRect: () => ({ x: 0, y: 0, width: 40, height: 40 }),
+      getTrueImageSize: () => ({ width: 40, height: 40 }),
+      getRegions: () => regs,
+      setRegions: (r: Region[]) => {
+        regs = r;
+      },
+    };
+    const inner = fakeSegmenter();
+    const seg: ICellSegmenter = {
+      segmentCells: async (img, p) => {
+        slice = 1; // the user moves to the next slice while the model runs
+        return inner.segmentCells(img, p);
+      },
+    };
+    const slice1Cell = rectRegion(10, 10, 4, 4);
+    slice1Cell.source = CELLPOSE_REGION_SOURCE;
+    regs = [slice1Cell];
+
+    expect(await tool.segmentView(viz as any, seg, { context: () => `img|${slice}` })).toBe(0);
+    expect(regs).toEqual([slice1Cell]); // slice 1's cells are untouched
+    expect(tool.status$.value).toMatch(/changed during the run/);
+  });
+
+  it('discards a rectangle result when the slice changed during inference', async () => {
+    const tool = new CellSegmentToolService();
+    let slice = 0;
+    const inner = fakeSegmenter();
+    const seg: ICellSegmenter = {
+      segmentCells: async (img, p) => {
+        slice = 1;
+        return inner.segmentCells(img, p);
+      },
+    };
+    const { host, get } = makeHost([rectRegion(8, 8, 24, 24)]);
+    const before = get();
+    expect(await tool.segmentBoxes(host, seg, { context: () => `img|${slice}` })).toBe(0);
+    expect(get()).toBe(before);
+  });
+});

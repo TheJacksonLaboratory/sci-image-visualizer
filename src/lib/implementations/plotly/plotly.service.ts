@@ -725,7 +725,23 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   }
   public segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
     if (!this.cellSegmenter) return Promise.resolve(0);
-    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter, opts);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter, {
+      ...opts,
+      context: () => this.segmentContext(),
+    });
+  }
+  public segmentViewCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    if (!this.cellSegmenter) return Promise.resolve(0);
+    return this.cellSegmentTool.segmentView(this, this.cellSegmenter, {
+      ...opts,
+      tileAccess: this.tiles,
+      zIndex: this.zIndex.value || 0,
+      context: () => this.segmentContext(),
+    });
+  }
+  /** The image and slice a segmentation run belongs to (see CellSegmentRunOptions.context). */
+  private segmentContext(): string {
+    return `${this.fileName ?? ''}|${this.activeFrameIndex()}`;
   }
   public setSamModel(id: string): void {
     this.samTool.setModel(id);

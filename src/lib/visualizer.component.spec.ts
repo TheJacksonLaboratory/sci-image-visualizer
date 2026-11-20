@@ -85,6 +85,7 @@ function mockPlotService(): any {
     setVertexEraserRadius: jest.fn(),
     segmentRectangles: jest.fn().mockResolvedValue(0),
     segmentRectanglesCellpose: jest.fn().mockResolvedValue(0),
+    segmentViewCellpose: jest.fn().mockResolvedValue(0),
     setSamModel: jest.fn(),
     setSamPointMode: jest.fn(),
     commitSamPoints: jest.fn(),

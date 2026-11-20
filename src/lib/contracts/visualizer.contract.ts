@@ -294,6 +294,10 @@ export interface IToolController {
    *  `diameterPx`: typical cell diameter in full-resolution image pixels, so each crop
    *  is rescaled to the size the segmenter works best at; omitted, crops go as they are. */
   segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number>;
+  /** Cellpose over the whole view (sci-image-visualizer#97): every cell in the view of the
+   *  backend regions are edited on (the slice pane while the volume view is split), read
+   *  at the scale `diameterPx` asks for rather than the zoom's (#98). Returns regions added. */
+  segmentViewCellpose(opts?: { diameterPx?: number | null }): Promise<number>;
   /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
   setSamModel(id: string): void;
   /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -).

@@ -1,7 +1,5 @@
-import { Inject, Injectable, Optional } from '@angular/core';
+import { Injectable } from '@angular/core';
 
-import { CELL_SEGMENTER, ICellSegmenter } from '../../contracts/cell-segmenter.contract';
-import { TILE_ACCESS_PORT, TileAccessPort } from '../../contracts/ports/tile-access.port';
 import type {
   ToolModelOption,
   ToolParamSpec,
@@ -74,11 +72,7 @@ export class CellposeToolContribution implements ToolbarToolContribution {
   readonly order = 50;
   readonly params = PARAMS;
 
-  constructor(
-    private readonly tool: CellSegmentToolService,
-    @Inject(CELL_SEGMENTER) private readonly segmenter: ICellSegmenter,
-    @Optional() @Inject(TILE_ACCESS_PORT) private readonly tileAccess: TileAccessPort | null = null,
-  ) {}
+  constructor(private readonly tool: CellSegmentToolService) {}
 
   get progress() {
     return this.tool;
@@ -100,8 +94,9 @@ export class CellposeToolContribution implements ToolbarToolContribution {
   run(viz: IVisualizer, params: Record<string, unknown>): Promise<number> {
     const diameterPx = cellDiameterPx(params, currentMicronsPerPixel(viz));
     const hasBoxes = (viz.getRegions() ?? []).some((r) => r.bounds instanceof Rectangle);
-    if (hasBoxes) return viz.segmentRectanglesCellpose({ diameterPx });
-    return this.tool.segmentView(viz, this.segmenter, { diameterPx, tileAccess: this.tileAccess });
+    // Both go through the visualizer, which picks the backend regions are edited on — the
+    // slice pane while the volume view is split — with its own pixels, slice and tiles.
+    return hasBoxes ? viz.segmentRectanglesCellpose({ diameterPx }) : viz.segmentViewCellpose({ diameterPx });
   }
 }
 

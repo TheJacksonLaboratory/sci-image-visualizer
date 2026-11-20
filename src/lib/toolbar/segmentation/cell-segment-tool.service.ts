@@ -12,7 +12,7 @@ import { labelsToPolygons } from '../../geometry/contour';
 import { MatrixFrame } from '../tool-kit/matrix-frame';
 import { AsyncToolStatus } from '../tool-kit/async-tool-status';
 import { withoutRegions } from './segmentation-commit';
-import { ImageRect, currentSliceCount, sampleViewAtScale } from './view-at-scale';
+import { ImageRect, ViewSource, sampleViewAtScale } from './view-at-scale';
 
 /** Marks the regions Cellpose produced, so a re-run over the same area replaces them. */
 export const CELLPOSE_REGION_SOURCE = 'cellpose';
@@ -28,15 +28,30 @@ export interface CellSegmentRunOptions {
    * {@link CELLPOSE_TARGET_DIAMETER_PX}. Omitted or 0: the pixels as displayed.
    */
   diameterPx?: number | null;
+  /**
+   * Identity of what is being segmented — the image and slice on screen. Read at the
+   * start of the run and again before its cells are committed: a different value
+   * means the user moved to another image or slice meanwhile, and the result,
+   * which belongs to the old one, is discarded rather than written into the new
+   * one's regions.
+   */
+  context?: () => string;
 }
 
 /** Options of a whole-view Cellpose run. */
 export interface CellSegmentViewOptions extends CellSegmentRunOptions {
   /** Server-side crop, so a zoomed-out view is segmented at the cells' scale. */
   tileAccess?: TileAccessPort | null;
+  /** Slice of a stack the server crop is taken from: the one on screen. */
+  zIndex?: number;
   /** Pixel cap of the segmented image. Default 2048². */
   maxPixels?: number;
 }
+
+/** What a whole-view run reads and writes: a backend's view pixels and its regions. */
+export type CellViewTarget = ViewSource & Pick<IVisualizer, 'getRegions' | 'setRegions'>;
+
+const STALE_STATUS = 'The image or slice changed during the run: nothing was added.';
 
 /** Yield to the event loop (a macrotask) so the toast can repaint the latest
  *  status / animate the spinner before the next main-thread-blocking step. */
@@ -89,6 +104,7 @@ export class CellSegmentToolService {
 
     const frame = MatrixFrame.from(cached);
     const frameIdx = host.getActiveFrameIndex();
+    const startContext = opts.context?.();
     // The crop is in readback pixels, `frame.rx` image pixels each: the diameter in them.
     const diameter = opts.diameterPx && opts.diameterPx > 0 ? opts.diameterPx / frame.rx : undefined;
 
@@ -126,6 +142,10 @@ export class CellSegmentToolService {
           }
           consumed.push(rects[i]);
         }
+        if (opts.context && opts.context() !== startContext) {
+          this.status$.next(STALE_STATUS);
+          return 0;
+        }
         // Commit against the regions as they are NOW (the run takes a while and
         // the user may have edited meanwhile): drop the consumed prompts by id.
         host.setRegions(withoutRegions(host.getRegions(), consumed).concat(cells));
@@ -150,15 +170,16 @@ export class CellSegmentToolService {
    * Returns the number of regions added; 0 (ignored) while a run is going.
    */
   async segmentView(
-    viz: IVisualizer,
+    viz: CellViewTarget,
     segmenter: ICellSegmenter,
     opts: CellSegmentViewOptions = {},
   ): Promise<number> {
     if (this.state.busy) return 0;
-    if (!viz.getDisplayedPixelData()) {
+    if (!viz.getDisplayedPixelData?.()) {
       this.status$.next('No image on screen to segment.');
       return 0;
     }
+    const startContext = opts.context?.();
     const added = await this.state.run(async () => {
       try {
         const diameterPx = opts.diameterPx && opts.diameterPx > 0 ? opts.diameterPx : null;
@@ -170,9 +191,8 @@ export class CellSegmentToolService {
         const sample = await sampleViewAtScale(viz, {
           targetFactor,
           maxPixels: opts.maxPixels,
-          // The server crop takes a slice index the visualizer does not expose: a stack is
-          // segmented from its displayed pixels instead of from the wrong slice.
-          tileAccess: currentSliceCount(viz) > 1 ? null : opts.tileAccess,
+          tileAccess: opts.tileAccess,
+          zIndex: opts.zIndex,
           onStatus: (s) => this.status$.next(s),
         });
         if (!sample) {
@@ -205,6 +225,10 @@ export class CellSegmentToolService {
           : '';
         if (cells.length === 0) {
           this.status$.next('No cells found.' + hint);
+          return 0;
+        }
+        if (opts.context && opts.context() !== startContext) {
+          this.status$.next(STALE_STATUS);
           return 0;
         }
         // Commit against the regions as they are NOW: the run takes a while.

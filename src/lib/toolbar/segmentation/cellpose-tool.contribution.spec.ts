@@ -9,21 +9,17 @@ function vizWith(regions: Region[], mppX?: number) {
     getRegions: () => regions,
     getImageMeta: () => new BehaviorSubject([{ mppX }]),
     segmentRectanglesCellpose: jest.fn().mockResolvedValue(3),
+    segmentViewCellpose: jest.fn().mockResolvedValue(5),
   } as any;
 }
 
 describe('CellposeToolContribution', () => {
-  const tool = { segmentView: jest.fn().mockResolvedValue(5) } as any;
-  const segmenter = {} as any;
-  const tiles = {} as any;
-  const contribution = new CellposeToolContribution(tool, segmenter, tiles);
-
-  beforeEach(() => tool.segmentView.mockClear());
+  const contribution = new CellposeToolContribution({} as any);
 
   it('segments the whole view when no rectangle is drawn, at the µm diameter', async () => {
     const viz = vizWith([], 0.25);
     expect(await contribution.run(viz, { cellDiameterUm: 10, cellDiameterPx: 30 })).toBe(5);
-    expect(tool.segmentView).toHaveBeenCalledWith(viz, segmenter, { diameterPx: 40, tileAccess: tiles });
+    expect(viz.segmentViewCellpose).toHaveBeenCalledWith({ diameterPx: 40 });
     expect(viz.segmentRectanglesCellpose).not.toHaveBeenCalled();
   });
 
@@ -33,7 +29,7 @@ describe('CellposeToolContribution', () => {
     const viz = vizWith([box]);
     expect(await contribution.run(viz, { cellDiameterUm: 10, cellDiameterPx: 25 })).toBe(3);
     expect(viz.segmentRectanglesCellpose).toHaveBeenCalledWith({ diameterPx: 25 });
-    expect(tool.segmentView).not.toHaveBeenCalled();
+    expect(viz.segmentViewCellpose).not.toHaveBeenCalled();
   });
 
   it('shows with its one model and the diameter parameters', () => {

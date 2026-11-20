@@ -1632,6 +1632,11 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
     return this.regionBackend().segmentRectanglesCellpose(opts);
   }
+  /** Through the region backend, like the rectangles: with the slice pane open the view to
+   *  segment is the slice the regions belong to, not the volume on screen. */
+  segmentViewCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    return this.regionBackend().segmentViewCellpose(opts);
+  }
   setSamModel(id: string): void {
     this.regionBackend().setSamModel(id);
   }

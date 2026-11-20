@@ -109,6 +109,7 @@ function mockBackend(): any {
     setBrushOptions: jest.fn(),
     segmentRectangles: jest.fn().mockResolvedValue(0),
     segmentRectanglesCellpose: jest.fn().mockResolvedValue(0),
+    segmentViewCellpose: jest.fn().mockResolvedValue(0),
     setSamModel: jest.fn(),
     setSamPointMode: jest.fn(),
     commitSamPoints: jest.fn(),
@@ -453,6 +454,17 @@ describe('RoutingVisualizerService (characterization)', () => {
 
     await router.setSliceEditor(null);
     expect(views[views.length - 1]).toEqual({ x: null, y: null });
+  });
+
+  it('segments the slice pane, not the volume, with Cellpose over the whole view (#105 review)', async () => {
+    await router.plot('div', {}, STACK, 600, PlotType.NAPARI_VOLUME);
+    await router.setSliceEditor('div-slice');
+
+    await router.segmentViewCellpose({ diameterPx: 40 });
+
+    // The regions being edited are the slice's, so its pixels are the ones to segment.
+    expect(osd.segmentViewCellpose).toHaveBeenCalledWith({ diameterPx: 40 });
+    expect(napari.segmentViewCellpose).not.toHaveBeenCalled();
   });
 
   it('takes the slice pane down for another plot type and brings it back with the volume view', async () => {
@@ -885,6 +897,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['setBrushOptions', [{ size: 40 }]],
     ['segmentRectangles', []],
     ['segmentRectanglesCellpose', [{ diameterPx: 40 }]],
+    ['segmentViewCellpose', [{ diameterPx: 40 }]],
     ['setSamModel', ['microsam-vit-b-lm']],
     ['setSamPointMode', [true]],
     ['commitSamPoints', []],

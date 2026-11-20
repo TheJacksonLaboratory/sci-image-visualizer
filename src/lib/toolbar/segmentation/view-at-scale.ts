@@ -109,7 +109,7 @@ export async function sampleViewAtScale(
     width: cw / sx,
     height: ch / sy,
   };
-  const screen = cropRgba(pixels.data, pixels.width, px0, py0, cw, ch);
+  const screen = cropRgba(toRgba(pixels), pixels.width, px0, py0, cw, ch);
   const screenFactor = rect.width / cw;
 
   // The output size the target asks for, then the cap.
@@ -175,6 +175,39 @@ export function currentSliceCount(viz: Pick<IVisualizer, 'getImageMeta'>): numbe
   });
   sub?.unsubscribe();
   return z;
+}
+
+/**
+ * A readback as RGBA. Backends return 1 channel (Plotly's grayscale heatmap trace),
+ * 3 (Plotly's RGB image trace) or 4 (OSD and napari canvases): grayscale is
+ * replicated across R, G and B, and RGB gets an opaque alpha.
+ */
+export function toRgba(pixels: {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+  channels: number;
+}): Uint8ClampedArray {
+  const n = pixels.width * pixels.height;
+  const ch = pixels.channels || Math.round(pixels.data.length / Math.max(1, n)) || 4;
+  if (ch === 4) return pixels.data;
+  const out = new Uint8ClampedArray(n * 4);
+  const src = pixels.data;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    if (ch >= 3) {
+      out[o] = src[i * ch];
+      out[o + 1] = src[i * ch + 1];
+      out[o + 2] = src[i * ch + 2];
+    } else {
+      const v = src[i * ch];
+      out[o] = v;
+      out[o + 1] = v;
+      out[o + 2] = v;
+    }
+    out[o + 3] = 255;
+  }
+  return out;
 }
 
 /** Copy a `w`×`h` window at (x0, y0) out of an RGBA buffer `srcW` wide. */

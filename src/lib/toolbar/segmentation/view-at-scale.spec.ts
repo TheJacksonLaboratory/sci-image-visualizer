@@ -1,6 +1,7 @@
 import { BehaviorSubject, of } from 'rxjs';
 
-import { currentMicronsPerPixel, downsampleRgba, sampleViewAtScale, ViewSource } from './view-at-scale';
+import { tracePixels } from '../../implementations/plotly/plotly-readback';
+import { currentMicronsPerPixel, downsampleRgba, sampleViewAtScale, toRgba, ViewSource } from './view-at-scale';
 
 /** A view whose screen shows `rect` of a `imgW`×`imgH` image as `w`×`h` pixels (value = x). */
 function view(
@@ -99,5 +100,45 @@ describe('currentMicronsPerPixel', () => {
       0.25,
     );
     expect(currentMicronsPerPixel({ getImageMeta: () => new BehaviorSubject([{} as any]) })).toBeNull();
+  });
+});
+
+describe('sampleViewAtScale — channels (#105 review)', () => {
+  const plotlyView = (px: ReturnType<typeof tracePixels>): ViewSource => ({
+    getDisplayedPixelData: () => px,
+    getDisplayedSourceRect: () => ({ x: 0, y: 0, width: 2, height: 2 }),
+    getTrueImageSize: () => ({ width: 2, height: 2 }),
+  });
+
+  it('turns a grayscale heatmap trace into opaque gray RGBA', async () => {
+    const px = tracePixels({
+      type: 'heatmap',
+      z: [
+        [10, 20],
+        [30, 40],
+      ],
+    });
+    const s = await sampleViewAtScale(plotlyView(px));
+    expect(Array.from(s!.data)).toEqual([10, 10, 10, 255, 20, 20, 20, 255, 30, 30, 30, 255, 40, 40, 40, 255]);
+  });
+
+  it('adds an opaque alpha to an RGB image trace', async () => {
+    const z = [
+      [
+        [1, 2, 3],
+        [4, 5, 6],
+      ],
+      [
+        [7, 8, 9],
+        [10, 11, 12],
+      ],
+    ];
+    const s = await sampleViewAtScale(plotlyView(tracePixels({ type: 'image', z })));
+    expect(Array.from(s!.data)).toEqual([1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]);
+  });
+
+  it('keeps RGBA as it is', () => {
+    const data = new Uint8ClampedArray([1, 2, 3, 4]);
+    expect(toRgba({ data, width: 1, height: 1, channels: 4 })).toBe(data);
   });
 });

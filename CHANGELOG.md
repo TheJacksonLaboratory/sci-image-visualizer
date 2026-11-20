@@ -23,8 +23,21 @@ file was added.
   viewer's zoom does not change. Output is capped at 2048² px; a capped run tells the user to zoom in.
 - **`sampleViewAtScale()`**, the view-sampling helper behind it, exported for run tools that want
   the view at a model's scale (with `currentMicronsPerPixel()`). `ICellSegmenter.segmentCells`
-  takes an optional third `CellSegmentOptions` argument (`diameter`, in input pixels), and
-  `IVisualizer.segmentRectanglesCellpose` an optional `{ diameterPx }`.
+  takes an optional third `CellSegmentOptions` argument (`diameter`, in input pixels),
+  `IVisualizer.segmentRectanglesCellpose` an optional `{ diameterPx }`, and the new
+  `IVisualizer.segmentViewCellpose({ diameterPx })` runs the whole-view mode on the backend regions
+  are edited on (the slice pane while the volume view is split), crop-fetching the slice on screen.
+
+### Fixed
+
+- **napari `getDisplayedSourceRect()` covered less than `getDisplayedPixelData()`.** It returned the
+  camera rect clamped to the image while the readback is the whole canvas, so a consumer pairing
+  the two (the pipeline's "use current view", the run tools) mapped canvas margins onto the image
+  when zoomed out. It now returns the rect captured with the readback, unclamped, as the contract
+  and OSD already do.
+- **A Cellpose run no longer writes into another image or slice.** A run whose image or slice changed
+  before it finished (rectangles or whole view) is discarded instead of committed into the regions
+  now on screen.
 
 ### Changed
 
