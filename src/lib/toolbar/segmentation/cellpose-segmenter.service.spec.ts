@@ -101,3 +101,25 @@ describe('CellposeSegmenterService.getModel', () => {
     expect(second).toEqual([2, 'load 2']); // successful load: unsubscribed, never hears load 3
   });
 });
+
+describe('CellposeSegmenterService.segmentCells — options', () => {
+  beforeEach(() => fromPretrained.mockReset());
+
+  it('rescales by the diameter and runs the dynamics back at the input resolution', async () => {
+    const segment = jest.fn(async (img: { width: number; height: number }) => ({
+      masks: new Uint32Array(img.width * img.height),
+      count: 0,
+      width: img.width,
+      height: img.height,
+    }));
+    fromPretrained.mockResolvedValue({ segment, dispose: jest.fn(async () => undefined) });
+    const svc = new CellposeSegmenterService();
+    const image = { data: new Uint8ClampedArray(64 * 64 * 4), width: 64, height: 64 };
+
+    await svc.segmentCells(image, undefined, { diameter: 60 });
+    expect((segment.mock.calls[0] as unknown[])[1]).toMatchObject({ diameter: 60, resample: true });
+
+    await svc.segmentCells(image);
+    expect((segment.mock.calls[1] as unknown[])[1]).toMatchObject({ diameter: undefined, resample: false });
+  });
+});

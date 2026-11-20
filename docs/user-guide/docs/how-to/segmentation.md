@@ -36,8 +36,10 @@ each rectangle and replaces it with its cells. Rectangles with no cells found st
 ### Set the cell size
 
 Cellpose-SAM works best when cells are about 30 pixels across, so it does not segment the pixels at your
-zoom level: it reads the view at the resolution that brings cells to that size, fetching more detail
-when you are zoomed out. Your view does not change.
+zoom level. It reads the view at full resolution, fetching more detail when you are zoomed out, brings the
+cells to that size for the model, and traces their outlines back at full resolution, smoothed. Your view
+does not change. Set the diameter close to the real size: a diameter twice too large halves the detail
+the model sees.
 
 1. Click <i class="pi pi-sliders-h"></i> **Parameters** next to Cellpose-SAM.
 2. Set **Cell diameter (µm)** to the typical size of the cells or nuclei (10 µm by default). It is used
@@ -47,7 +49,8 @@ when you are zoomed out. Your view does not change.
 Set a diameter to 0 to segment the pixels as displayed.
 
 !!! tip
-    A large view is segmented at up to about 2048 × 2048 pixels. If the result says to zoom in, the
+    A large view is segmented in tiles ("Tile 3/8: …" in the progress message), so it takes longer, but
+    keeps full detail up to about 6000 × 6000 full-resolution pixels. If the result says to zoom in, the
     view was too large to read at the cells' best scale: zoom in, or draw rectangles. A run can be undone
     in one step with ++ctrl+z++.
 

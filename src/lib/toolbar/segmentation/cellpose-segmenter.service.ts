@@ -123,11 +123,16 @@ export class CellposeSegmenterService implements ICellSegmenter {
       (status) => progress?.onStatus?.(status),
     );
     progress?.onStatus?.('Preprocessing image…');
+    const diameter = cellposeDiameter(options?.diameter, image.width, image.height);
     const out = await cp.segment(
       { data: image.data, width: image.width, height: image.height, channels: 4 },
       {
         // cellpose-js rescales the image so cells are ~30 px, the size CPSAM was trained on.
-        diameter: cellposeDiameter(options?.diameter, image.width, image.height),
+        diameter,
+        // With a rescale, run the flow dynamics back at the input's resolution (upstream
+        // Cellpose's default): mask edges follow the flows at full detail instead of a
+        // nearest-neighbour upscale of the network-resolution masks.
+        resample: diameter !== undefined,
         // cellpose-js runs inference in its worker (these fire between tiles) and
         // averaging/dynamics on the main thread; surface both so the toast shows
         // real progress instead of looking stuck.

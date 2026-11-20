@@ -18,9 +18,13 @@ file was added.
 - **Cellpose-SAM picks its own resolution (#98).** A new **Cell diameter (µm)** parameter (default
   10 µm), turned into pixels with the image's pixel size, or **Cell diameter (px)** for an image
   without one, sets the resolution Cellpose-SAM works at: cells are brought to ~30 px, its training
-  size. A zoomed-out view is re-cropped on the server at that scale (`TILE_ACCESS_PORT`), a
-  zoomed-in one is averaged down to it, and drawn rectangles are rescaled by cellpose-js. The
-  viewer's zoom does not change. Output is capped at 2048² px; a capped run tells the user to zoom in.
+  size. The view is read at full resolution (re-cropped on the server when zoomed out,
+  `TILE_ACCESS_PORT`; averaged down when zoomed in), and cellpose-js brings cells to 30 px for the
+  network and runs the flow dynamics back at full resolution (`resample`), so masks are full
+  resolution. Large views are segmented in overlapping tiles (cells on seams kept once), up to
+  ~36 MP of full-resolution area and ~40 MP for the network; past that the run reads coarser and
+  says to zoom in. Traced outlines are smoothed off their pixel staircase (`smoothPixelRing`), for
+  drawn rectangles too. The viewer's zoom does not change.
 - **`sampleViewAtScale()`**, the view-sampling helper behind it, exported for run tools that want
   the view at a model's scale (with `currentMicronsPerPixel()`). `ICellSegmenter.segmentCells`
   takes an optional third `CellSegmentOptions` argument (`diameter`, in input pixels),

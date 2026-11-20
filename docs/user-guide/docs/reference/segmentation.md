@@ -80,11 +80,13 @@ switching model or image downloads and encodes once. The choice is not remembere
 With rectangles drawn, it segments inside each rectangle instead. Rectangles that produced cells are
 removed; the others stay.
 
-The model works best when cells are about 30 pixels across, so Cellpose-SAM reads the view at the
-resolution that brings them to that size: it fetches more detail from the server when you are zoomed out,
-and averages the screen pixels down when you are zoomed in. Your zoom does not change. The view is read at
-up to about 2048 × 2048 pixels; a larger view is segmented below the cells' best scale, and the result says
-so.
+The model works best when cells are about 30 pixels across. Cellpose-SAM reads the view at full
+resolution (fetching more detail from the server when you are zoomed out, averaging the screen pixels down
+when you are zoomed in), brings the cells to that size for the model, and traces the masks back at full
+resolution with smoothed outlines. Your zoom does not change. A large view is processed in overlapping
+tiles; a cell on a seam between tiles is kept once. Views up to about 6000 × 6000 full-resolution pixels
+keep full detail; beyond that, or when very small cells over a large view would need more than the model's
+budget, the view is segmented below the cells' best scale and the result says so.
 
 <i class="pi pi-sliders-h"></i> **Parameters** next to it sets the cell size:
 

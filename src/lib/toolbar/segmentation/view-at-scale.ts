@@ -59,6 +59,124 @@ export const DEFAULT_VIEW_SAMPLE_MAX_PIXELS = 2048 * 2048;
 /** Within this ratio of the target the screen pixels are used as they are. */
 const SCALE_TOLERANCE = 0.02;
 
+/** The view on screen, read once: its pixels (RGBA) over the image area they cover. */
+export interface ViewCapture {
+  /** RGBA screen pixels of the view, clipped to the image. */
+  screen: Uint8ClampedArray;
+  width: number;
+  height: number;
+  /** The image area the screen pixels cover (full-resolution image pixels). */
+  rect: ImageRect;
+}
+
+/**
+ * Read the view on screen, clipped to the image so the margins of a zoomed-out view
+ * are dropped (the window is whole screen pixels, so the mapping stays exact). Null
+ * when nothing is on screen or the view does not overlap the image.
+ */
+export function captureView(viz: ViewSource): ViewCapture | null {
+  const pixels = viz.getDisplayedPixelData?.();
+  if (!pixels || pixels.width <= 0 || pixels.height <= 0) return null;
+  const view = viz.getDisplayedSourceRect?.() ?? wholeImage(viz) ?? { x: 0, y: 0, ...size(pixels) };
+  if (!(view.width > 0) || !(view.height > 0)) return null;
+  const sx = pixels.width / view.width;
+  const sy = pixels.height / view.height;
+  const image = viz.getTrueImageSize?.() ?? null;
+  const ix0 = image ? Math.max(0, view.x) : view.x;
+  const iy0 = image ? Math.max(0, view.y) : view.y;
+  const ix1 = image ? Math.min(image.width, view.x + view.width) : view.x + view.width;
+  const iy1 = image ? Math.min(image.height, view.y + view.height) : view.y + view.height;
+  const px0 = clamp(Math.floor((ix0 - view.x) * sx), 0, pixels.width);
+  const py0 = clamp(Math.floor((iy0 - view.y) * sy), 0, pixels.height);
+  const px1 = clamp(Math.ceil((ix1 - view.x) * sx), 0, pixels.width);
+  const py1 = clamp(Math.ceil((iy1 - view.y) * sy), 0, pixels.height);
+  const cw = px1 - px0;
+  const ch = py1 - py0;
+  if (cw <= 0 || ch <= 0) return null;
+  return {
+    screen: cropRgba(toRgba(pixels), pixels.width, px0, py0, cw, ch),
+    width: cw,
+    height: ch,
+    rect: { x: view.x + px0 / sx, y: view.y + py0 / sy, width: cw / sx, height: ch / sy },
+  };
+}
+
+/** Options of {@link sampleCaptureRect}. */
+export interface SampleRectOptions {
+  /** Server-side crop, used when the screen is coarser than the scale asked for. */
+  tileAccess?: TileAccessPort | null;
+  /** Slice of a stack to crop from. Default 0. */
+  zIndex?: number;
+  /** Status line while the server crop is fetched. */
+  onStatus?: (status: string) => void;
+}
+
+/**
+ * Part of a captured view (`rect`, inside `capture.rect`) at `factor` image pixels per
+ * output pixel: re-cropped on the server when the screen is coarser (when a tile access
+ * port is given and the crop succeeds; else the screen pixels, flagged `coarse`), area-
+ * averaged down when the screen is finer, else the screen pixels as they are.
+ */
+export async function sampleCaptureRect(
+  capture: ViewCapture,
+  rect: ImageRect,
+  factor: number,
+  opts: SampleRectOptions = {},
+): Promise<ViewSample> {
+  const c = capture.rect;
+  const sx = capture.width / c.width;
+  const sy = capture.height / c.height;
+  // The screen window over `rect`, in whole screen pixels.
+  const px0 = clamp(Math.floor((rect.x - c.x) * sx), 0, capture.width);
+  const py0 = clamp(Math.floor((rect.y - c.y) * sy), 0, capture.height);
+  const px1 = clamp(Math.ceil((rect.x + rect.width - c.x) * sx), px0 + 1, capture.width);
+  const py1 = clamp(Math.ceil((rect.y + rect.height - c.y) * sy), py0 + 1, capture.height);
+  const cw = Math.max(1, px1 - px0);
+  const ch = Math.max(1, py1 - py0);
+  const screenRect: ImageRect = { x: c.x + px0 / sx, y: c.y + py0 / sy, width: cw / sx, height: ch / sy };
+  const screenFactor = c.width / capture.width;
+  const crop = () =>
+    px0 === 0 && py0 === 0 && cw === capture.width && ch === capture.height
+      ? capture.screen
+      : cropRgba(capture.screen, capture.width, px0, py0, cw, ch);
+
+  const sample = (
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    at: ImageRect,
+    origin: ViewSample['origin'],
+  ): ViewSample => ({
+    data,
+    width,
+    height,
+    rect: at,
+    factorX: at.width / width,
+    factorY: at.height / height,
+    origin,
+    coarse: at.width / width > factor * (1 + SCALE_TOLERANCE),
+  });
+
+  if (factor < screenFactor * (1 - SCALE_TOLERANCE)) {
+    // Zoomed out past the scale asked for: the detail is on the server, not on screen.
+    if (opts.tileAccess) {
+      opts.onStatus?.('Fetching the view at model resolution…');
+      const w = Math.max(1, Math.round(rect.width / factor));
+      const h = Math.max(1, Math.round(rect.height / factor));
+      const hi = await fetchCrop(opts.tileAccess, rect, w, h, opts.zIndex ?? 0);
+      if (hi) return sample(hi.data, hi.width, hi.height, rect, 'fetched');
+    }
+    return sample(crop(), cw, ch, screenRect, 'displayed');
+  }
+  if (factor > screenFactor * (1 + SCALE_TOLERANCE)) {
+    // Zoomed in past it: average the screen down.
+    const w = Math.max(1, Math.round(screenRect.width / factor));
+    const h = Math.max(1, Math.round(screenRect.height / factor));
+    return sample(downsampleRgba(crop(), cw, ch, w, h), w, h, screenRect, 'resampled');
+  }
+  return sample(crop(), cw, ch, screenRect, 'displayed');
+}
+
 /**
  * The current view as pixels at the scale a model wants (sci-image-visualizer#98).
  *
@@ -83,35 +201,10 @@ export async function sampleViewAtScale(
   viz: ViewSource,
   opts: ViewSampleOptions = {},
 ): Promise<ViewSample | null> {
-  const pixels = viz.getDisplayedPixelData?.();
-  if (!pixels || pixels.width <= 0 || pixels.height <= 0) return null;
-  const view = viz.getDisplayedSourceRect?.() ?? wholeImage(viz) ?? { x: 0, y: 0, ...size(pixels) };
-  if (!(view.width > 0) || !(view.height > 0)) return null;
-
-  // The screen window over the image: whole screen pixels, so the mapping stays exact.
-  const sx = pixels.width / view.width;
-  const sy = pixels.height / view.height;
-  const image = viz.getTrueImageSize?.() ?? null;
-  const ix0 = image ? Math.max(0, view.x) : view.x;
-  const iy0 = image ? Math.max(0, view.y) : view.y;
-  const ix1 = image ? Math.min(image.width, view.x + view.width) : view.x + view.width;
-  const iy1 = image ? Math.min(image.height, view.y + view.height) : view.y + view.height;
-  const px0 = clamp(Math.floor((ix0 - view.x) * sx), 0, pixels.width);
-  const py0 = clamp(Math.floor((iy0 - view.y) * sy), 0, pixels.height);
-  const px1 = clamp(Math.ceil((ix1 - view.x) * sx), 0, pixels.width);
-  const py1 = clamp(Math.ceil((iy1 - view.y) * sy), 0, pixels.height);
-  const cw = px1 - px0;
-  const ch = py1 - py0;
-  if (cw <= 0 || ch <= 0) return null;
-  const rect: ImageRect = {
-    x: view.x + px0 / sx,
-    y: view.y + py0 / sy,
-    width: cw / sx,
-    height: ch / sy,
-  };
-  const screen = cropRgba(toRgba(pixels), pixels.width, px0, py0, cw, ch);
-  const screenFactor = rect.width / cw;
-
+  const capture = captureView(viz);
+  if (!capture) return null;
+  const rect = capture.rect;
+  const screenFactor = rect.width / capture.width;
   // The output size the target asks for, then the cap.
   const requested = opts.targetFactor && opts.targetFactor > 0 ? opts.targetFactor : screenFactor;
   let w = Math.max(1, Math.round(rect.width / requested));
@@ -122,33 +215,8 @@ export async function sampleViewAtScale(
     w = Math.max(1, Math.floor(w * k));
     h = Math.max(1, Math.floor(h * k));
   }
-  const factor = rect.width / w;
-
-  const sample = (data: Uint8ClampedArray, width: number, height: number, origin: ViewSample['origin']) => ({
-    data,
-    width,
-    height,
-    rect,
-    factorX: rect.width / width,
-    factorY: rect.height / height,
-    origin,
-    coarse: rect.width / width > requested * (1 + SCALE_TOLERANCE),
-  });
-
-  if (factor < screenFactor * (1 - SCALE_TOLERANCE)) {
-    // Zoomed out past the target: the detail is on the server, not on screen.
-    if (opts.tileAccess) {
-      opts.onStatus?.('Fetching the view at model resolution…');
-      const hi = await fetchCrop(opts.tileAccess, rect, w, h, opts.zIndex ?? 0);
-      if (hi) return sample(hi.data, hi.width, hi.height, 'fetched');
-    }
-    return sample(screen, cw, ch, 'displayed');
-  }
-  if (factor > screenFactor * (1 + SCALE_TOLERANCE)) {
-    // Zoomed in past the target: average the screen down to it.
-    return sample(downsampleRgba(screen, cw, ch, w, h), w, h, 'resampled');
-  }
-  return sample(screen, cw, ch, 'displayed');
+  const sample = await sampleCaptureRect(capture, rect, rect.width / w, opts);
+  return { ...sample, coarse: sample.factorX > requested * (1 + SCALE_TOLERANCE) };
 }
 
 /**
