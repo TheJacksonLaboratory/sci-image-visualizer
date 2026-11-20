@@ -76,4 +76,5 @@ A fallback lasts for the current image only. WebGPU availability is checked once
     when the host supports it). The dropdown then shows every renderer explicitly, such as "Image (OSD)",
     "Heatmap (Plotly)" and "Volume (napari · WebGPU)". It also adds test-only types: Scatter 2D (Plotly),
     Surface (Plotly), Scatter 3D (Plotly), Isosurface (Plotly), Image (napari · WebGPU),
-    Scatter 2D (napari · WebGPU) and Scatter 3D (napari · WebGPU).
+    Scatter 2D (napari · WebGPU) and Scatter 3D (napari · WebGPU). The toolbar also shows **Add an intensity
+    line**, which is hidden outside test mode.

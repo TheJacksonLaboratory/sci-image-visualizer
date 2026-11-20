@@ -9,6 +9,13 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **The demo shows "Add an intensity line" only in test mode, as JIT does.** Open it with `?test=1`
+  to show the button; without the parameter, or with `?test=0`, it is hidden. The user guide's
+  intensity-line pages, QA cases and capture steps say so. The library's default is unchanged
+  (`ToolbarToolVisibility.intensityLines` is `true`).
+
 ## [0.20.3] — 2026-11-19
 
 ### Added
