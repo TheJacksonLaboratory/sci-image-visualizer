@@ -735,13 +735,22 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
     return this.cellSegmentTool.segmentView(this, this.cellSegmenter, {
       ...opts,
       tileAccess: this.tiles,
-      zIndex: this.zIndex.value || 0,
+      zIndex: this.displayedSlice(),
       context: () => this.segmentContext(),
     });
   }
   /** The image and slice a segmentation run belongs to (see CellSegmentRunOptions.context). */
   private segmentContext(): string {
-    return `${this.fileName ?? ''}|${this.activeFrameIndex()}`;
+    return `${this.fileName ?? ''}|${this.displayedSlice()}`;
+  }
+  /**
+   * The source slice on screen. `activeFrameIndex()` indexes the cached frames, which is 0
+   * whenever one slice is loaded on its own (`showStack` off), so it can't tell z=0 from z=1;
+   * then the slice is `zIndex`. With the whole stack cached, frame i is slice i.
+   */
+  private displayedSlice(): number {
+    if (this.cachedImageFrames && this.cachedImageFrames.length > 1) return this.activeFrameIndex();
+    return this.zIndex.value || 0;
   }
   public setSamModel(id: string): void {
     this.samTool.setModel(id);

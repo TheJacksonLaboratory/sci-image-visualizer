@@ -22,6 +22,7 @@ import { MatrixFrame } from '../../toolbar/tool-kit/matrix-frame';
 import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLayout } from './plotly-layouts';
 import { buildHeatmapTraces, buildRgbImageTraces, buildSurfaceTraces } from './plotly-trace-builders';
 import { CONFIG, CONFIG_SURFACE } from '../../plot.utilities';
+import { CELL_SEGMENTER, CellSegmentation, ICellSegmenter } from '../../contracts/cell-segmenter.contract';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
@@ -1163,5 +1164,63 @@ describe('PlotlyService dedicated renderers (characterization)', () => {
     expect(draws).toEqual([['newPlot', 'plot', traces, internals().getHeatmapLayout([1, 4], [4, 2]), CONFIG]]);
     expect(reapplyRange).toBe(true);
     expect(state()).toEqual(['plot', 1, ['a.png', 'b.png'], 600]);
+  });
+});
+
+describe('PlotlyService — Cellpose run on a stack slice loaded alone (#105 re-review)', () => {
+  // With showStack off the cache holds one frame, so activeFrameIndex() is 0 on every slice:
+  // the run's image|slice key must come from zIndex, or a slice switch goes unnoticed.
+  const setup = (onSegment: (s: PlotlyService) => void) => {
+    const ref: { service?: PlotlyService } = {};
+    const segmenter: ICellSegmenter = {
+      segmentCells: async (img): Promise<CellSegmentation> => {
+        onSegment(ref.service!);
+        const labels = new Uint32Array(img.width * img.height);
+        for (let y = 2; y < img.height - 2; y++)
+          for (let x = 2; x < img.width - 2; x++) labels[y * img.width + x] = 1;
+        return { labels, width: img.width, height: img.height, count: 1 };
+      },
+    };
+    TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        { provide: CELL_SEGMENTER, useValue: segmenter },
+      ],
+    });
+    const service = TestBed.inject(PlotlyService);
+    ref.service = service;
+    const s = service as any;
+    s.fileName = 'stack.tif';
+    s.cachedImageFrames = [Array.from({ length: 40 }, () => new Array(40).fill(120))]; // one slice
+    const data = new Uint8ClampedArray(40 * 40 * 4).fill(120);
+    jest
+      .spyOn(service, 'getDisplayedPixelData')
+      .mockReturnValue({ width: 40, height: 40, channels: 4, data } as any);
+    jest.spyOn(service, 'getDisplayedSourceRect').mockReturnValue({ x: 0, y: 0, width: 40, height: 40 });
+    jest.spyOn(service, 'getTrueImageSize').mockReturnValue({ width: 40, height: 40 } as any);
+    let regions: Region[] = [];
+    jest.spyOn(service, 'getRegions').mockImplementation(() => regions);
+    jest.spyOn(service, 'setRegions').mockImplementation((r: Region[]) => {
+      regions = r;
+    });
+    return { service, regions: () => regions };
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('discards the result when the user moves to another slice during the run', async () => {
+    const { service, regions } = setup((s) => s.setZIndex(1));
+    expect(await service.segmentViewCellpose()).toBe(0);
+    expect(regions()).toEqual([]);
+  });
+
+  it('commits the result when the slice stays the same', async () => {
+    const { service, regions } = setup(() => undefined);
+    service.setZIndex(1);
+    expect(await service.segmentViewCellpose()).toBe(1);
+    expect(regions().length).toBe(1);
   });
 });
