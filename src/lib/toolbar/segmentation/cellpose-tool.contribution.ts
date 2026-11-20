@@ -63,7 +63,7 @@ export class CellposeToolContribution implements ToolbarToolContribution {
   readonly id = CELLPOSE_TOOL_ID;
   readonly label = 'Cellpose-SAM';
   readonly icon = { src: 'assets/plotting/cells.svg' };
-  readonly runTooltip = 'Segment cells with Cellpose-SAM';
+  readonly runTooltip = 'Segment cells with Cellpose-SAM in the displayed view, or in drawn rectangles';
   readonly modelTooltip = 'Set cell diameter';
   readonly paramsTooltip = 'Cellpose-SAM parameters (cell diameter)';
   /** The model menu is just this entry (one checkpoint): ▾ → Set cell diameter… */

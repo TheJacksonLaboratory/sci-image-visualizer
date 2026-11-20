@@ -46,7 +46,7 @@ file was added.
 ### Changed
 
 - **The Cellpose button is a split button like the contributed tools:** run ("Segment cells with
-  Cellpose-SAM") and a menu holding **Set cell diameter…**, in place of a parameters button
+  Cellpose-SAM in the displayed view, or in drawn rectangles") and a menu holding **Set cell diameter…**, in place of a parameters button
   (`ToolbarToolContribution.paramsInModelMenu`, new and optional: with one checkpoint the menu is
   just that entry, with several each checkpoint gets it as a submenu; the run tools' model menus
   are now PrimeNG tiered menus). It is listed through the run-tool list
