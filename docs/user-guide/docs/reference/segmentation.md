@@ -8,15 +8,18 @@ later runs start quickly, even offline.
 
 There are two kinds of tool:
 
-- **Prompted** tools act on what you show them: **Segment** and **Cellpose** use the rectangles you draw;
-  **SAM point prompts** uses your clicks.
-- **No-prompt** tools, when your application adds them (for example a detection model in JAX Image Tools),
-  sweep the whole current view, so there is nothing to draw first.
+- **Prompted** tools act on what you show them: **Segment** uses the rectangles you draw; **SAM point
+  prompts** uses your clicks.
+- **No-prompt** tools sweep the whole current view, so there is nothing to draw first: **Cellpose-SAM**
+  (which segments inside your rectangles instead if you draw some), and the tools your application may add
+  (for example a detection model in JAX Image Tools).
 
 !!! info "What the models see"
     In the Image view, the models read the pixels **as displayed**: the visible part of the image, with
     your brightness, contrast and colours. Only the on-screen part of a rectangle is segmented. Zoom so
     the objects are clearly visible and fill a good part of the view, and set the contrast first.
+    Cellpose-SAM with no rectangles is the exception: it reads the view at the resolution its cell
+    diameter sets (see [Cellpose-SAM](#cellpose-sam)).
 
 ## Segment (SAM box prompt)
 
@@ -63,33 +66,53 @@ All are Segment Anything models fine-tuned for biomedical images. They differ in
 heavy step, done once per image) and the training domain; prompting works the same. The first run after
 switching model or image downloads and encodes once. The choice is not remembered after a reload.
 
-## Cellpose
+## Cellpose-SAM
 
-![Cellpose result: one region per cell](../assets/screenshots/seg-cellpose.png)
+![Cellpose-SAM result: one region per cell](../assets/screenshots/seg-cellpose.png)
 
-![](../assets/icons/cells.svg){ .siv-icon } **Segment cells (cellpose-SAM)** finds every cell in each drawn
-rectangle:
+![](../assets/icons/cells.svg){ .siv-icon } **Cellpose-SAM** finds every cell in the view:
 
-1. Draw one or more rectangles over areas with cells.
-2. Click **Cellpose**.
-3. Each cell becomes a region with the class **cell**. Rectangles that produced cells are removed.
+1. Pan and zoom so the view shows the area to segment.
+2. Click **Cellpose-SAM**.
+3. Each cell becomes a region with the class **cell**. Cells from an earlier run whose centre lies in the
+   segmented area are replaced; cells elsewhere stay.
 
-The Cellpose-SAM model is large (about 588 MB) and downloads on first use.
+With rectangles drawn, it segments inside each rectangle instead. Rectangles that produced cells are
+removed; the others stay.
+
+The model works best when cells are about 30 pixels across, so Cellpose-SAM reads the view at the
+resolution that brings them to that size: it fetches more detail from the server when you are zoomed out,
+and averages the screen pixels down when you are zoomed in. Your zoom does not change. The view is read at
+up to about 2048 × 2048 pixels; a larger view is segmented below the cells' best scale, and the result says
+so.
+
+<i class="pi pi-sliders-h"></i> **Parameters** next to it sets the cell size:
+
+| Parameter | Default | Used |
+| --- | --- | --- |
+| **Cell diameter (µm)** | 10 | When the image reports its pixel size. |
+| **Cell diameter (px)** | 30 | Otherwise; in full-resolution pixels. |
+
+A diameter of 0 segments the pixels as displayed. The <i class="pi pi-chevron-down"></i> next to it lists
+the one model, **Cellpose-SAM**; hover <i class="pi pi-info-circle"></i> for its details. The model is
+large (about 588 MB) and downloads on first use.
 
 ## Progress and results
 
 ![Segmentation progress toast](../assets/screenshots/seg-progress-toast.png){ width="360" }
 
-A toast at the bottom right (titled **SAM**, **Cellpose**, **SAM point segmentation** or the tool's name)
+A toast at the bottom right (titled **SAM**, **Cellpose-SAM**, **SAM point segmentation** or the tool's name)
 shows what is happening: the download progress, then steps such as "Encoding image…", "Segmenting 2/3…",
-"Running inference (tile 1/4)…", "Tracing cells…". When it finishes, a result toast says how many regions
+"Reading the view…", "Running inference (tile 1/4)…", "Tracing cells…". When it finishes, a result toast says how many regions
 were added ("Added 3 region(s).", "Added 42 cell region(s).") or that nothing was found ("No masks found.",
 "No cells found.").
 
 | Message | What to do |
 | --- | --- |
-| Draw one or more rectangles, then press Segment. / …then run Cellpose. | Draw rectangles first. |
-| No masks found. / No mask for these points. / No cells found. | Zoom in, adjust contrast, or redraw the boxes tighter. |
+| Draw one or more rectangles, then press Segment. | Draw rectangles first. |
+| No masks found. / No mask for these points. / No cells found. | Zoom in, adjust contrast, or redraw the boxes tighter. For Cellpose-SAM, check the cell diameter. |
+| The view does not overlap the image. | Pan or zoom so the image is in view. |
+| …Zoom in for finer detail: the view was segmented below the cells' best scale. | The view was too large to read at the cells' best scale: zoom in, or draw rectangles, and run again. |
 | SAM model unavailable. | The model could not be loaded (network, or the application has not configured it). |
 | Segmentation failed. / Cellpose segmentation failed. | Retry; see [Troubleshooting](../troubleshooting.md). |
 

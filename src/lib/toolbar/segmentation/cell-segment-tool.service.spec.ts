@@ -1,4 +1,6 @@
-import { CellSegmentToolService } from './cell-segment-tool.service';
+import { BehaviorSubject } from 'rxjs';
+
+import { CELLPOSE_REGION_SOURCE, CellSegmentToolService } from './cell-segment-tool.service';
 import { CachedImageData, CanvasToolHost } from '../tool-kit/canvas-tool';
 import { ICellSegmenter, CellSegmentation } from '../../contracts/cell-segmenter.contract';
 import { Region, Rectangle, Polygon } from '../../models/region';
@@ -180,5 +182,87 @@ describe('CellSegmentToolService — async commit (RT-6, RT-14)', () => {
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(16);
     expect(Math.max(...ys)).toBeLessThanOrEqual(64);
     expect(Math.max(...ys)).toBeGreaterThan(40);
+  });
+});
+
+describe('CellSegmentToolService — box diameter (#98)', () => {
+  it('hands the segmenter the cell diameter in crop pixels', async () => {
+    const tool = new CellSegmentToolService();
+    const seen: (number | undefined)[] = [];
+    const inner = fakeSegmenter();
+    const seg: ICellSegmenter = {
+      segmentCells: (img, p, o) => {
+        seen.push(o?.diameter);
+        return inner.segmentCells(img, p);
+      },
+    };
+    const { host } = makeHost([rectRegion(8, 8, 24, 24)]);
+    host.getCachedImageData()!.ratios = [4]; // each readback pixel is 4 image pixels
+    await tool.segmentBoxes(host, seg, { diameterPx: 40 });
+    expect(seen).toEqual([10]);
+  });
+});
+
+describe('CellSegmentToolService.segmentView (#97)', () => {
+  /** A viewer showing image px 100..140 x 200..240 as 40×40 screen pixels. */
+  function makeViz(regions: Region[] = []) {
+    let regs = regions;
+    const data = new Uint8ClampedArray(40 * 40 * 4).fill(120);
+    const viz = {
+      getDisplayedPixelData: () => ({ width: 40, height: 40, channels: 4, data }),
+      getDisplayedSourceRect: () => ({ x: 100, y: 200, width: 40, height: 40 }),
+      getTrueImageSize: () => ({ width: 1000, height: 1000 }),
+      getImageMeta: () => new BehaviorSubject([{ z: 1 }]),
+      getRegions: () => regs,
+      setRegions: (r: Region[]) => {
+        regs = r;
+      },
+    };
+    return { viz: viz as any, get: () => regs };
+  }
+
+  it('segments the whole view with no rectangle and maps cells onto the image', async () => {
+    const tool = new CellSegmentToolService();
+    const { viz, get } = makeViz();
+    expect(await tool.segmentView(viz, fakeSegmenter())).toBe(2);
+    const regs = get();
+    expect(regs.every((r) => r.label === 'cell' && r.source === CELLPOSE_REGION_SOURCE)).toBe(true);
+    const xs = regs.flatMap((r) => (r.bounds as Polygon).xpoints);
+    const ys = regs.flatMap((r) => (r.bounds as Polygon).ypoints);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(100);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(140);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(200);
+    expect(Math.max(...ys)).toBeLessThanOrEqual(240);
+  });
+
+  it('replaces its earlier cells in the area and keeps everything else', async () => {
+    const tool = new CellSegmentToolService();
+    const old = rectRegion(110, 210, 4, 4);
+    old.source = CELLPOSE_REGION_SOURCE;
+    const elsewhere = rectRegion(500, 500, 4, 4);
+    elsewhere.source = CELLPOSE_REGION_SOURCE;
+    const drawn = rectRegion(115, 215, 4, 4); // hand-drawn: no source
+    const { viz, get } = makeViz([old, elsewhere, drawn]);
+    await tool.segmentView(viz, fakeSegmenter());
+    expect(get()).not.toContain(old);
+    expect(get()).toContain(elsewhere);
+    expect(get()).toContain(drawn);
+    expect(get()).toHaveLength(4);
+  });
+
+  it('samples at the diameter scale and passes the diameter in sample pixels', async () => {
+    const tool = new CellSegmentToolService();
+    const sizes: [number, number, number | undefined][] = [];
+    const inner = fakeSegmenter();
+    const seg: ICellSegmenter = {
+      segmentCells: (img, p, o) => {
+        sizes.push([img.width, img.height, o?.diameter]);
+        return inner.segmentCells(img, p);
+      },
+    };
+    const { viz } = makeViz();
+    // 60-px cells: half resolution brings them to 30 px; the 40-px view becomes 20 px.
+    await tool.segmentView(viz, seg, { diameterPx: 60 });
+    expect(sizes).toEqual([[20, 20, 30]]);
   });
 });

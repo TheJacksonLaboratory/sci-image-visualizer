@@ -723,9 +723,9 @@ export class PlotlyService extends BaseStoreVisualizer implements IViewerBackend
   public segmentRectangles(): Promise<number> {
     return this.samTool.segmentBoxes(this.toolHost);
   }
-  public segmentRectanglesCellpose(): Promise<number> {
+  public segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
     if (!this.cellSegmenter) return Promise.resolve(0);
-    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter, opts);
   }
   public setSamModel(id: string): void {
     this.samTool.setModel(id);

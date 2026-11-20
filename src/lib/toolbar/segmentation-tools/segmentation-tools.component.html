@@ -118,26 +118,15 @@
     ></button>
   </a>
 </ng-template>
-<p-button
-  size="small"
-  [text]="true"
-  ariaLabel="Segment cells (cellpose-SAM)"
-  pTooltip="Auto-segment cells inside each drawn rectangle (cellpose-SAM)"
-  tooltipPosition="bottom"
-  (onClick)="segmentCellpose.emit()"
->
-  <img src="assets/plotting/cells.svg" class="toolbar-icon-dark" style="width: 1rem" />
-</p-button>
+<!-- Run tools: the library's own Cellpose, then the contributed ones
+     (TOOLBAR_TOOLS). Unlike the SAM tools these need no prompt — they sweep
+     the whole current view (Cellpose also takes drawn rectangles) — so there
+     is nothing to draw first. Each renders the same split button: run, pick
+     checkpoint, open parameters.
 
-<!-- Contributed no-prompt tools (TOOLBAR_TOOLS). Unlike the SAM and
-     cellpose tools these take no prompt — they sweep the whole current
-     view rather than being pointed at something — so there is nothing to
-     draw first. Each renders the same split button: run, pick checkpoint,
-     open parameters.
-
-     Nothing here names a specific tool. The library ships none; a host
-     registers them, which is what lets this package be published without
-     the closed model dependencies. -->
+     Nothing here names a specific tool. The library ships only Cellpose; a
+     host registers the rest, which is what lets this package be published
+     without the closed model dependencies. -->
 <ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
   <span class="p-buttonset segment-split">
     <p-button

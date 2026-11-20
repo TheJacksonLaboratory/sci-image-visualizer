@@ -16,7 +16,7 @@ page already describes, unless it changed.
 | [Viewing](viewing.md)                         | `VIEW-001` …        | Toolbar, plot types, navigation, Channels & Histogram, stacks, 3D, slice editor, profiles, export |
 | [Regions](regions.md)                         | `REG-001` …         | Drawing and editing tools, selection, undo/redo, context-menu region actions, shortcuts           |
 | [Region Editor and classes](region-editor.md) | `RED-001` …         | Region Editor table and toolbar, classes and presets, GeoJSON/mask import and export, 3D classes  |
-| [AI segmentation](segmentation.md)            | `SEG-001` …         | SAM box and point prompts, model picker, Cellpose, progress toasts, model caching                 |
+| [AI segmentation](segmentation.md)            | `SEG-001` …         | SAM box and point prompts, model picker, Cellpose-SAM, progress toasts, model caching             |
 | [Spatial omics](spatial-omics.md)             | `SPA-001` …         | Spatial omics 2D/3D, panel, colouring, selection, distribution charts, transcripts, fallbacks     |
 | [Known issues to confirm](known-issues.md)    | `KI-01` …           | Suspected defects and documentation drift, with source references                                |
 
@@ -108,8 +108,8 @@ gallery of samples on the left and the viewer on the right. The whole-slide (**W
 | ------------------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `img01.png`                                      | Small 8-bit image (muscle section, grey)      | Region tools, wand, brush, region actions, Heatmap, intensity profiles                        |
 | `img03.png`, `052_img.png`, `024_img.png`         | Small fluorescence / cell images              | Wand on bright objects, SAM point prompts                                                     |
-| `img04.png`                                      | RGB fluorescence (blue nuclei, green cells)   | RGB channels, Channels & Histogram, SAM box prompt, Cellpose                                  |
-| `002_img.png`                                    | RGB, many cells                               | Cellpose, many-region performance                                                             |
+| `img04.png`                                      | RGB fluorescence (blue nuclei, green cells)   | RGB channels, Channels & Histogram, SAM box prompt, Cellpose-SAM                              |
+| `002_img.png`                                    | RGB, many cells                               | Cellpose-SAM, many-region performance                                                         |
 | `031_img.png`, `034_img.png`                     | RGB, green structures                         | Wand, Contour availability on RGB (must not be offered)                                       |
 | `BF-FL_composite.png`                            | Large PNG composite (~12 MB)                  | Serverless large image, zoom, smoothing                                                       |
 | TIFF `B16-69_O7_CFP-1_hyper.tif`                 | TIFF decoded in the browser                   | Client-side TIFF, multichannel or hyperstack handling                                          |
@@ -140,7 +140,7 @@ The smoke test is every **P1** case. In order:
 1. Viewing: all P1 `VIEW-` cases (open each sample type, plot types, navigation, channels, stack, 3D).
 2. Regions: all P1 `REG-` cases (draw with each tool, select, move, delete, undo/redo).
 3. Region Editor: all P1 `RED-` cases (table, classes, GeoJSON export and re-import).
-4. Segmentation: all P1 `SEG-` cases (SAM box, SAM point, Cellpose once each).
+4. Segmentation: all P1 `SEG-` cases (SAM box, SAM point, Cellpose-SAM once each).
 5. Spatial omics: all P1 `SPA-` cases (open a dataset, colour it, select from a region, show a chart).
 
 Run the smoke test in the primary browser and, for the WebGPU-dependent P1 cases, once with WebGPU off.

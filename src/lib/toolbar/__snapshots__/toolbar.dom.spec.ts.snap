@@ -33,7 +33,6 @@ exports[`ToolbarComponent (DOM characterization) 3D spatial cloud with screen-sp
   "button:sam-box-prompt.svg "Segment the drawn rectangles with SAM (box prompt)"",
   "button:sam-point-prompt.svg "SAM point prompts: click a fiber to segment it as a new region; Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."",
   "menu",
-  "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
   "|",
 ]
 `;
@@ -79,7 +78,6 @@ exports[`ToolbarComponent (DOM characterization) Heatmap, stack in single-image 
   "button:sam-box-prompt.svg "Segment the drawn rectangles with SAM (box prompt)"",
   "button:sam-point-prompt.svg "SAM point prompts: click a fiber to segment it as a new region; Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."",
   "menu",
-  "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
   "|",
 ]
 `;
@@ -127,7 +125,6 @@ exports[`ToolbarComponent (DOM characterization) Image view, z-stack, brush acti
   "button:sam-point-prompt.svg "SAM point prompts: click a fiber to segment it as a new region; Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."",
   "button:pi pi-chevron-down "Pick the SAM model (used by both segment tools)"",
   "menu",
-  "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
   "button:pi pi-search "Detect things"",
   "button:pi pi-chevron-down "Pick the model"",
   "button:pi pi-sliders-h "Parameters"",
@@ -185,6 +182,5 @@ exports[`ToolbarComponent (DOM characterization) pipeline subset: zoom and regio
   "button:sam-box-prompt.svg "Segment the drawn rectangles with SAM (box prompt)"",
   "button:sam-point-prompt.svg "SAM point prompts: click a fiber to segment it as a new region; Shift/Alt-click to refine (exclude) the current one.<br>Esc undoes it."",
   "menu",
-  "button:cells.svg "Auto-segment cells inside each drawn rectangle (cellpose-SAM)"",
 ]
 `;

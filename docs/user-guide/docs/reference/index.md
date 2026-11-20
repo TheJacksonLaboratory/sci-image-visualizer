@@ -24,7 +24,7 @@ see [How-to guides](../how-to/index.md).
 | [Region Editor](region-editor.md) | The region table, class tree, bulk edits, 3D class surfaces |
 | [Annotation classes](annotation-classes.md) | Class colours, presets, Manage dialog, persistence |
 | [GeoJSON import and export](geojson.md) | File format, import sources, export, masks |
-| [AI segmentation](segmentation.md) | SAM box and point prompts, model choice, Cellpose |
+| [AI segmentation](segmentation.md) | SAM box and point prompts, model choice, Cellpose-SAM |
 
 ## Spatial omics
 

@@ -9,6 +9,31 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Cellpose-SAM on the whole view (#97).** Run with no rectangle drawn, Cellpose-SAM segments
+  every cell in the view, clipped to the image. With rectangles drawn it segments inside them, as
+  before. A re-run replaces the cells it found earlier in the same area (`region.source` is now
+  `'cellpose'`); cells elsewhere stay.
+- **Cellpose-SAM picks its own resolution (#98).** A new **Cell diameter (µm)** parameter (default
+  10 µm), turned into pixels with the image's pixel size, or **Cell diameter (px)** for an image
+  without one, sets the resolution Cellpose-SAM works at: cells are brought to ~30 px, its training
+  size. A zoomed-out view is re-cropped on the server at that scale (`TILE_ACCESS_PORT`), a
+  zoomed-in one is averaged down to it, and drawn rectangles are rescaled by cellpose-js. The
+  viewer's zoom does not change. Output is capped at 2048² px; a capped run tells the user to zoom in.
+- **`sampleViewAtScale()`**, the view-sampling helper behind it, exported for run tools that want
+  the view at a model's scale (with `currentMicronsPerPixel()`). `ICellSegmenter.segmentCells`
+  takes an optional third `CellSegmentOptions` argument (`diameter`, in input pixels), and
+  `IVisualizer.segmentRectanglesCellpose` an optional `{ diameterPx }`.
+
+### Changed
+
+- **The Cellpose button is a split button like the contributed tools:** run, model
+  (Cellpose-SAM, with its description) and parameters. It is listed through the run-tool list
+  (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
+  toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
+  lost its frame.
+
 ## [0.20.3] — 2026-11-19
 
 ### Added

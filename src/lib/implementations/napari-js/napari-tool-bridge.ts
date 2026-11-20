@@ -408,11 +408,11 @@ export class NapariToolBridge {
   }
 
   /** Cellpose over the drawn rectangles (see {@link segmentRectangles}). */
-  async segmentRectanglesCellpose(): Promise<number> {
+  async segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
     const segmenter = this.deps.cellSegmenter;
     if (!this.host.viewer() || !this.coordTransform || !segmenter) return 0;
     await this.runReadback();
     this.cachedImageSource = null;
-    return this.deps.cellSegmentTool.segmentBoxes(this.toolHost, segmenter);
+    return this.deps.cellSegmentTool.segmentBoxes(this.toolHost, segmenter, opts);
   }
 }

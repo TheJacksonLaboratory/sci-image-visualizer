@@ -295,12 +295,12 @@
     "tutorials/ai-segmentation.md",
     "reference/segmentation.md"
    ],
-   "title": "Cellpose result: one region per cell",
+   "title": "Cellpose-SAM result: one region per cell",
    "sample": "002_img.png",
    "capture": "Viewer area",
    "steps": [
-    "Open '002_img.png' and draw one large rectangle over many cells.",
-    "Click 'Cellpose' (cells icon). The first run downloads the model (~588 MB).",
+    "Open '002_img.png' and leave the whole image in view (no rectangles).",
+    "Click 'Cellpose-SAM' (cells icon). The first run downloads the model (~588 MB).",
     "When 'Added N cell region(s)' shows, capture the viewer area."
    ]
   },
@@ -312,13 +312,13 @@
    "usedBy": [
     "tutorials/ai-segmentation.md"
    ],
-   "title": "The Region Editor listing regions from SAM and Cellpose",
+   "title": "The Region Editor listing regions from SAM and Cellpose-SAM",
    "sample": "002_img.png",
    "capture": "Viewer area including the Region Editor",
    "steps": [
     "Open '002_img.png'.",
     "Draw two rectangles around two single cells (r) and click 'Segment with SAM (box prompt)'; wait for 'Added 2 region(s)'.",
-    "Draw one rectangle over 15–30 other cells and click 'Segment cells (cellpose-SAM)'; wait for 'Added N cell region(s)'.",
+    "Draw one rectangle over 15–30 other cells and click 'Cellpose-SAM'; wait for 'Added N cell region(s)'.",
     "Open the Region Editor.",
     "Capture the viewer area: the segmented outlines and the Region Editor whose Classes panel lists 'sam' and 'cell' with their counts."
    ]

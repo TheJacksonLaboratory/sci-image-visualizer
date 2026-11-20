@@ -290,8 +290,10 @@ export interface IToolController {
    *  Returns the number of mask regions added. (jit-ui#90) */
   segmentRectangles(): Promise<number>;
   /** Cellpose-on-crop: client slide-crop each rectangle and segment cells in it
-   *  (cellpose-SAM via the host's CELL_SEGMENTER). Returns regions added. */
-  segmentRectanglesCellpose(): Promise<number>;
+   *  (cellpose-SAM via the host's CELL_SEGMENTER). Returns regions added.
+   *  `diameterPx`: typical cell diameter in full-resolution image pixels, so each crop
+   *  is rescaled to the size the segmenter works best at; omitted, crops go as they are. */
+  segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number>;
   /** Choose the registered SAM model the segment tools use (jit-ui#90 P1). */
   setSamModel(id: string): void;
   /** Toggle the interactive SAM point-prompt tool (click = +point, Shift = -).

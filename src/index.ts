@@ -31,6 +31,22 @@ export * from './lib/contracts/display-types';
 export * from './lib/contracts/sam.contract';
 export * from './lib/contracts/cell-segmenter.contract';
 export { CellposeSegmenterService } from './lib/toolbar/segmentation/cellpose-segmenter.service';
+export {
+  CellposeToolContribution,
+  CELLPOSE_TOOL_ID,
+  cellDiameterPx,
+} from './lib/toolbar/segmentation/cellpose-tool.contribution';
+export {
+  CELLPOSE_REGION_SOURCE,
+  CELLPOSE_TARGET_DIAMETER_PX,
+} from './lib/toolbar/segmentation/cell-segment-tool.service';
+export {
+  sampleViewAtScale,
+  currentMicronsPerPixel,
+  currentSliceCount,
+  DEFAULT_VIEW_SAMPLE_MAX_PIXELS,
+} from './lib/toolbar/segmentation/view-at-scale';
+export type { ViewSample, ViewSampleOptions, ImageRect } from './lib/toolbar/segmentation/view-at-scale';
 export { SamSessionService } from './lib/toolbar/segmentation/sam-session.service';
 // One large in-browser model loaded per tab: shared by SIV, jit-extensions and the host (#101).
 export * from './lib/models/model-residency';

@@ -767,8 +767,8 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   segmentRectangles(): Promise<number> {
     return this.tools.segmentRectangles();
   }
-  segmentRectanglesCellpose(): Promise<number> {
-    return this.tools.segmentRectanglesCellpose();
+  segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    return this.tools.segmentRectanglesCellpose(opts);
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);

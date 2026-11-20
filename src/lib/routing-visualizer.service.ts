@@ -1629,8 +1629,8 @@ export class RoutingVisualizerService implements IVisualizer, IRegionEditorApi, 
   segmentRectangles(): Promise<number> {
     return this.regionBackend().segmentRectangles();
   }
-  segmentRectanglesCellpose(): Promise<number> {
-    return this.regionBackend().segmentRectanglesCellpose();
+  segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    return this.regionBackend().segmentRectanglesCellpose(opts);
   }
   setSamModel(id: string): void {
     this.regionBackend().setSamModel(id);

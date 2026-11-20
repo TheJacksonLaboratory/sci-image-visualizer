@@ -22,17 +22,34 @@ others stay, so you can adjust them and run again. New regions are in the class 
 
 Click the button again, or press ++s++, to stop.
 
-## Segment every cell in an area with Cellpose
+## Segment every cell with Cellpose-SAM
 
-1. Draw one or more rectangles (++r++) over the areas to segment.
-2. Click ![](../assets/icons/cells.svg){ .siv-icon } **Segment cells (cellpose-SAM)**.
+1. Pan and zoom so the view shows the area to segment.
+2. Click ![](../assets/icons/cells.svg){ .siv-icon } **Cellpose-SAM**.
 
-Each rectangle is replaced by one region per detected cell, in the class **cell**. Rectangles with no
-cells found stay in place.
+Every cell in the view becomes a region in the class **cell**. Running it again over the same area
+replaces the cells it found there before; cells elsewhere stay.
+
+To segment only some areas, draw rectangles (++r++) over them first: Cellpose-SAM then segments inside
+each rectangle and replaces it with its cells. Rectangles with no cells found stay in place.
+
+### Set the cell size
+
+Cellpose-SAM works best when cells are about 30 pixels across, so it does not segment the pixels at your
+zoom level: it reads the view at the resolution that brings cells to that size, fetching more detail
+when you are zoomed out. Your view does not change.
+
+1. Click <i class="pi pi-sliders-h"></i> **Parameters** next to Cellpose-SAM.
+2. Set **Cell diameter (µm)** to the typical size of the cells or nuclei (10 µm by default). It is used
+   when the image reports its pixel size.
+3. For an image without a pixel size, set **Cell diameter (px)** in full-resolution pixels instead.
+
+Set a diameter to 0 to segment the pixels as displayed.
 
 !!! tip
-    Cellpose processes the rectangle in tiles. Several medium rectangles are easier to review than one huge
-    one, and a run can be undone in one step with ++ctrl+z++.
+    A large view is segmented at up to about 2048 × 2048 pixels. If the result says to zoom in, the
+    view was too large to read at the cells' best scale: zoom in, or draw rectangles. A run can be undone
+    in one step with ++ctrl+z++.
 
 ## Pick the right SAM model
 
@@ -60,7 +77,7 @@ The choice applies to both SAM tools. It is not remembered after a reload.
 ## Prepare for working offline or on a slow network
 
 Run each model you need once while you have a good connection: open any image, draw a rectangle and run
-**Segment** with each model, and **Cellpose** once. The models stay in the browser cache. Clearing the
+**Segment** with each model, and **Cellpose-SAM** once. The models stay in the browser cache. Clearing the
 browser's site data removes them.
 
 ## Get better results
@@ -81,7 +98,7 @@ regions) and follow [Relabel many regions at once](classes.md#relabel-many-regio
 ## Run a contributed tool
 
 Applications can add their own tools (for example detection models in JAX Image Tools). They appear in the
-segmentation group with a run button, a model picker <i class="pi pi-chevron-down"></i> and
-<i class="pi pi-sliders-h"></i> **Parameters**. Unlike SAM and Cellpose, many of them process the whole
-current view, so there is nothing to draw first. Their documentation is part of the host application's
+segmentation group after Cellpose-SAM, with the same run button, model picker
+<i class="pi pi-chevron-down"></i> and <i class="pi pi-sliders-h"></i> **Parameters**. Like Cellpose-SAM,
+many of them process the whole current view, so there is nothing to draw first. Their documentation is part of the host application's
 guide.

@@ -18,8 +18,9 @@ import { MODEL_INFO } from '../model-info';
 
 /**
  * The toolbar's segmentation group: SAM box prompt, SAM point prompts and the
- * shared SAM model picker, cellpose, and the contributed no-prompt tools (run,
- * pick checkpoint, parameters). Presentational: the host runs every action.
+ * shared SAM model picker, then the run tools — the built-in Cellpose and the
+ * contributed ones — each with run, pick checkpoint and parameters.
+ * Presentational: the host runs every action.
  */
 @Component({
   selector: 'toolbar-segmentation-tools',
@@ -36,15 +37,13 @@ export class SegmentationToolsComponent implements OnChanges {
   @Input() samModels: { id: string; label: string }[] = [];
   /** The selected SAM model id. */
   @Input() samModelId = '';
-  /** Contributed no-prompt tools, already filtered and sorted by the host. */
+  /** Run tools (the built-in Cellpose and the contributed ones), already filtered and sorted by the host. */
   @Input() contributedTools: ToolbarToolContribution[] = [];
   /** Active checkpoint per contributed tool, keyed by tool id. */
   @Input() toolModelIds: Record<string, string> = {};
 
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
-  /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
-  @Output() segmentCellpose = new EventEmitter<void>();
   /** The SAM point tool's toggle ('samPoint'). */
   @Output() toggleDragMode = new EventEmitter<string>();
   /** A SAM model was picked from the model menu (its id). */

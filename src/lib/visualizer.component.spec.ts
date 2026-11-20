@@ -116,7 +116,7 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
         busy$: new BehaviorSubject(false),
         progress$: new BehaviorSubject(-1),
       } as any,
-      // CellSegmentToolService
+      // CellposeToolContribution (a stand-in without models(): not listed)
       {
         status$: new BehaviorSubject(''),
         busy$: new BehaviorSubject(false),

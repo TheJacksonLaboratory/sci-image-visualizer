@@ -2,11 +2,11 @@
 
 SIV can segment objects with AI models that run in your browser: nothing is sent to a server. In this
 tutorial you use **Segment Anything** (SAM) with box and point prompts to outline individual cells, then
-**Cellpose** to outline every cell in an area at once.
+**Cellpose-SAM** to outline every cell in an area at once.
 
 **Time:** about 15 minutes, plus model downloads the first time. **You need:** the
 [live demo](https://thejacksonlaboratory.github.io/sci-image-visualizer/) and a good connection. The first
-run of each model downloads it (14 MB for the default SAM model, about 588 MB for Cellpose); after that it
+run of each model downloads it (14 MB for the default SAM model, about 588 MB for Cellpose-SAM); after that it
 is cached by the browser.
 
 ## 1. Segment with box prompts
@@ -64,22 +64,27 @@ The choice applies to both the box and the point tool. For this tutorial keep **
 
 ![The SAM model menu with a model's information](../assets/screenshots/seg-tools-group.png)
 
-## 4. Segment every cell in an area with Cellpose
+## 4. Segment every cell with Cellpose-SAM
 
 1. Open the sample **002_img.png**.
-2. Press ++r++ and draw one large rectangle over a group of 20 to 50 cells.
-3. Click ![](../assets/icons/cells.svg){ .siv-icon } **Segment cells (cellpose-SAM)**.
+2. Click ![](../assets/icons/cells.svg){ .siv-icon } **Cellpose-SAM**. There is nothing to draw: it
+   segments the whole view.
 
-**What you should see:** a **Cellpose** toast showing "Downloading Cellpose-SAM model…" the first time, then
-"Running inference…", "Computing flow dynamics…" and "Tracing cells…". It ends with "Added *N* cell
-region(s)". The rectangle is replaced by one region per cell.
+**What you should see:** a **Cellpose-SAM** toast showing "Reading the view…", then "Downloading
+Cellpose-SAM model…" the first time, "Running inference…", "Computing flow dynamics…" and "Tracing
+cells…". It ends with "Added *N* cell region(s)". Every cell in the view is now a region. Your zoom does not
+change.
 
-![Cellpose result: one region per cell inside the rectangle](../assets/screenshots/seg-cellpose.png)
+![Cellpose-SAM result: one region per cell](../assets/screenshots/seg-cellpose.png)
+
+To segment only part of an image, press ++r++ and draw rectangles over it first: Cellpose-SAM then segments
+inside each rectangle and replaces it with its cells. Running it again over the same area replaces the
+cells it found there before.
 
 ## 5. Review the results
 
-1. Open the Region Editor. Regions from SAM have the class **sam** and regions from Cellpose the class
-   **cell**. Both classes appear in the **Classes** panel, each drawn in its class's colour.
+1. Open the Region Editor. Regions from SAM have the class **sam** and regions from Cellpose-SAM the
+   class **cell**. Both classes appear in the **Classes** panel, each drawn in its class's colour.
 2. Delete wrong detections: select them and press ++delete++ (or ++d++).
 3. Fix outlines with the vertex tools or the brush, as in [Annotate your first image](first-annotation.md).
 4. Give the good ones a meaningful class with <i class="pi pi-tags"></i> **Edit class on selected rows**.
@@ -93,7 +98,7 @@ Every segmentation run is a single step in the undo history, so ++ctrl+z++ remov
 - Box prompts: draw rectangles, then **Segment**.
 - Point prompts: click to add an object, ++shift++-click to exclude, ++enter++ to keep, ++esc++ to discard.
 - How to pick a SAM model for your kind of images.
-- Cellpose: draw a rectangle, get one region per cell.
+- Cellpose-SAM: one click gives one region per cell in the view, or in each rectangle you draw.
 
 ## Next
 

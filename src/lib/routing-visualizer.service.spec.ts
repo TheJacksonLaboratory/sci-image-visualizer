@@ -884,7 +884,7 @@ describe('RoutingVisualizerService (characterization)', () => {
     ['setBrushMode', [true, { size: 40 }]],
     ['setBrushOptions', [{ size: 40 }]],
     ['segmentRectangles', []],
-    ['segmentRectanglesCellpose', []],
+    ['segmentRectanglesCellpose', [{ diameterPx: 40 }]],
     ['setSamModel', ['microsam-vit-b-lm']],
     ['setSamPointMode', [true]],
     ['commitSamPoints', []],
