@@ -1262,7 +1262,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.toolParams.setModel(e.toolId, e.modelId);
   }
   protected openToolParams(toolId: string): void {
-    this.toolParams.open(toolId);
+    this.toolParams.open(toolId, this.plotService);
   }
   protected closeToolParams(): void {
     this.toolParams.close();

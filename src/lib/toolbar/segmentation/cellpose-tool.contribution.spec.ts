@@ -39,6 +39,23 @@ describe('CellposeToolContribution', () => {
   });
 });
 
+describe('CellposeToolContribution.paramsFor', () => {
+  const contribution = new CellposeToolContribution({} as any);
+
+  it('shows only the µm diameter when the image has a pixel size, with its scale in the help', () => {
+    const fields = contribution.paramsFor(vizWith([], 0.25));
+    expect(fields.map((f) => f.id)).toEqual(['cellDiameterUm']);
+    expect(fields[0].tooltip).toContain('0.25 µm per pixel');
+    expect(fields[0].tooltip).toContain('40 pixels');
+  });
+
+  it('shows only the pixel diameter when the image has none', () => {
+    const fields = contribution.paramsFor(vizWith([]));
+    expect(fields.map((f) => f.id)).toEqual(['cellDiameterPx']);
+    expect(fields[0].tooltip).toContain('reports no pixel size');
+  });
+});
+
 describe('cellDiameterPx', () => {
   it('converts µm with an mpp, else uses px; 0 means as displayed', () => {
     expect(cellDiameterPx({ cellDiameterUm: 12, cellDiameterPx: 30 }, 0.5)).toBe(24);

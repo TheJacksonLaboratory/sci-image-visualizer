@@ -23,38 +23,56 @@ const CPSAM_MODEL: ToolModelOption = {
     'diameter with <b>Set cell diameter…</b>.',
 };
 
+const UM_PARAM = {
+  id: 'cellDiameterUm',
+  label: 'Cell diameter (µm)',
+  type: 'number',
+  min: 0,
+  max: 1000,
+  step: 1,
+  fractionDigits: 1,
+} as const;
+
+const PX_PARAM = {
+  id: 'cellDiameterPx',
+  label: 'Cell diameter (px)',
+  type: 'number',
+  min: 0,
+  max: 2000,
+  step: 1,
+} as const;
+
+/** Help for the µm field; `mpp` is the image's pixel size when known. */
+function umHelp(mpp: number | null): string {
+  const example = mpp
+    ? `This image has ${formatMpp(mpp)} µm per pixel, so 10 µm cells are ${Math.round(10 / mpp)} pixels across.`
+    : '(10 µm cells at 0.25 µm per pixel are 40 pixels across.)';
+  return (
+    'The typical diameter of the cells or nuclei to segment, in micrometres. Cellpose-SAM ' +
+    'finds cells best when they are about 30 pixels across, so it uses this diameter and the ' +
+    "image's pixel size to choose the resolution it reads the image at, whatever your zoom. " +
+    example +
+    ' Too large a value merges small cells or misses them; too small a value splits cells. ' +
+    '0 segments the pixels as displayed.'
+  );
+}
+
+const PX_HELP =
+  'This image reports no pixel size, so the cell diameter is in pixels: the typical diameter ' +
+  'of the cells or nuclei, in full-resolution image pixels (measure one with a line at full ' +
+  'zoom). Cellpose-SAM scales the image so cells are about 30 pixels across, whatever your ' +
+  'zoom. Too large a value merges small cells or misses them; too small a value splits cells. ' +
+  '0 segments the pixels as displayed.';
+
+/** Both fields, for the parameter defaults and reset; the dialog shows one (see paramsFor). */
 const PARAMS: ToolParamSpec[] = [
-  {
-    id: 'cellDiameterUm',
-    label: 'Cell diameter (µm)',
-    type: 'number',
-    min: 0,
-    max: 1000,
-    step: 1,
-    fractionDigits: 1,
-    tooltip:
-      'The typical diameter of the cells or nuclei to segment, in micrometres. Cellpose-SAM ' +
-      'finds cells best when they are about 30 pixels across, so it uses this diameter and the ' +
-      "image's pixel size to choose the resolution it reads the image at, whatever your zoom " +
-      '(10 µm cells at 0.25 µm per pixel are 40 pixels, so they are scaled by 0.75). ' +
-      'Too large a value merges small cells or misses them; too small a value splits cells. ' +
-      'Used when the image reports its pixel size; otherwise Cell diameter (px) is used. ' +
-      '0 segments the pixels as displayed.',
-  },
-  {
-    id: 'cellDiameterPx',
-    label: 'Cell diameter (px)',
-    type: 'number',
-    min: 0,
-    max: 2000,
-    step: 1,
-    tooltip:
-      'The typical diameter of the cells or nuclei, in full-resolution image pixels (measure ' +
-      'one with a line at full zoom). Used instead of Cell diameter (µm) when the image ' +
-      'does not report its pixel size. Cellpose-SAM scales the image so cells are about 30 ' +
-      'pixels across. 0 segments the pixels as displayed.',
-  },
+  { ...UM_PARAM, tooltip: umHelp(null) },
+  { ...PX_PARAM, tooltip: PX_HELP },
 ];
+
+function formatMpp(mpp: number): string {
+  return mpp >= 1 ? mpp.toFixed(2) : mpp.toPrecision(2);
+}
 
 /**
  * The library's own Cellpose tool, shown like a contributed tool: run, checkpoint
@@ -87,6 +105,12 @@ export class CellposeToolContribution implements ToolbarToolContribution {
 
   models(): ToolModelOption[] {
     return [CPSAM_MODEL];
+  }
+
+  /** One field: µm when the image reports its pixel size (the run uses it then), else px. */
+  paramsFor(viz: IVisualizer): ToolParamSpec[] {
+    const mpp = currentMicronsPerPixel(viz);
+    return mpp ? [{ ...UM_PARAM, tooltip: umHelp(mpp) }] : [{ ...PX_PARAM, tooltip: PX_HELP }];
   }
 
   defaultModelId(): string {

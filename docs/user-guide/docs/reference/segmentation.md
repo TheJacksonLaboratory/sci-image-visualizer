@@ -88,17 +88,16 @@ tiles; a cell on a seam between tiles is kept once. Views up to about 6000 × 60
 keep full detail; beyond that, or when very small cells over a large view would need more than the model's
 budget, the view is segmented below the cells' best scale and the result says so.
 
-<i class="pi pi-chevron-down"></i> → <i class="pi pi-sliders-h"></i> **Set cell diameter…** next to it sets
-the cell size:
+<i class="pi pi-chevron-down"></i> → **Set cell diameter…** next to it sets the cell size. The dialog shows one
+field, in the unit the image supports:
 
-| Parameter | Default | Used |
+| Field | Default | Shown |
 | --- | --- | --- |
 | **Cell diameter (µm)** | 10 | When the image reports its pixel size. |
 | **Cell diameter (px)** | 30 | Otherwise; in full-resolution pixels. |
 
-A diameter of 0 segments the pixels as displayed. The <i class="pi pi-chevron-down"></i> next to it lists
-the one model, **Cellpose-SAM**; hover <i class="pi pi-info-circle"></i> for its details. The model is
-large (about 588 MB) and downloads on first use.
+A diameter of 0 segments the pixels as displayed. The Cellpose-SAM model is large (about 588 MB) and
+downloads on first use.
 
 ## Progress and results
 

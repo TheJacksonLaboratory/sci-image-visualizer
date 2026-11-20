@@ -1,3 +1,4 @@
+import type { IVisualizer } from '../contracts/visualizer.contract';
 import {
   NumberParamSpec,
   SelectParamSpec,
@@ -66,13 +67,15 @@ export class ToolParamsModel {
     this.rebind(toolId);
   }
 
-  open(toolId: string): void {
+  /** Open the dialog; `viz` lets a tool show the fields that apply to the image on screen. */
+  open(toolId: string, viz?: IVisualizer): void {
     const tool = this.find(toolId);
     if (!tool) return;
+    const specs = (viz && tool.paramsFor?.(viz)) || tool.params;
     this.openParams = {
       tool,
       values: this.paramsFor(toolId),
-      fields: tool.params.map((spec) => ({
+      fields: specs.map((spec) => ({
         spec,
         number: spec.type === 'number' ? spec : null,
         select: spec.type === 'select' ? spec : null,

@@ -53,7 +53,10 @@ file was added.
 - **Parameter help behind an info icon.** In the tool parameters dialog, a field's help
   (`ToolParamSpec.tooltip`) is now shown by an ⓘ button beside its label (hover or keyboard focus,
   and announced to screen readers) instead of a hidden hover on the label. Cellpose-SAM's cell
-  diameter fields explain how the diameter sets the resolution. It is listed through the run-tool list
+  diameter fields explain how the diameter sets the resolution.
+- **The Set cell diameter dialog shows one field:** **Cell diameter (µm)** when the image reports its
+  pixel size (its help quotes it), else **Cell diameter (px)**. A run tool picks the fields for the
+  image on screen with the new optional `ToolbarToolContribution.paramsFor(viz)`. It is listed through the run-tool list
   (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
   toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
   lost its frame.

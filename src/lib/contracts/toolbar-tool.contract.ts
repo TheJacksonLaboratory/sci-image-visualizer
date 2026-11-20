@@ -167,6 +167,13 @@ export interface ToolbarToolContribution {
   /** Parameter fields, in dialog order. Empty hides the parameters button. */
   params: ToolParamSpec[];
   /**
+   * The fields the dialog shows for the image on screen, when they depend on it — a
+   * subset of {@link params}, possibly with help text about this image. Called each time
+   * the dialog opens; omitted, the dialog shows {@link params}. Hidden fields keep their
+   * values and still reach `run`.
+   */
+  paramsFor?(viz: IVisualizer): ToolParamSpec[];
+  /**
    * Open the parameters from the checkpoint menu instead of a toolbar button, with an
    * entry of this label (e.g. "Set cell diameter…"); the parameters button is not
    * shown. With one checkpoint the menu is just that entry; with several, each

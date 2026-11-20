@@ -41,13 +41,14 @@ cells to that size for the model, and traces their outlines back at full resolut
 does not change. Set the diameter close to the real size: a diameter twice too large halves the detail
 the model sees.
 
-1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, then <i class="pi pi-sliders-h"></i>
-   **Set cell diameter…**.
-2. Set **Cell diameter (µm)** to the typical size of the cells or nuclei (10 µm by default). It is used
-   when the image reports its pixel size.
-3. For an image without a pixel size, set **Cell diameter (px)** in full-resolution pixels instead.
+1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, then **Set cell diameter…**.
+2. Set the typical size of the cells or nuclei. The dialog asks for the unit the image supports:
+    - **Cell diameter (µm)** (10 µm by default) when the image reports its pixel size;
+    - **Cell diameter (px)** (30 px by default), in full-resolution pixels, when it does not.
 
-Set a diameter to 0 to segment the pixels as displayed.
+    Hover <i class="pi pi-info-circle"></i> beside the field for details, including the image's pixel size.
+
+Set the diameter to 0 to segment the pixels as displayed.
 
 !!! tip
     A large view is segmented in tiles ("Tile 3/8: …" in the progress message), so it takes longer, but
