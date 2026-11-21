@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.20.4] — 2026-11-20
+
 ### Added
 
 - **Cellpose-SAM on the whole view (#97).** Run with no rectangle drawn, Cellpose-SAM segments
@@ -2933,7 +2935,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.3...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.4...HEAD
+[0.20.4]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.0...v0.20.1
