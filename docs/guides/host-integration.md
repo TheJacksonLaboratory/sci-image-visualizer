@@ -1,6 +1,6 @@
 # Host integration
 
-Everything an Angular 17 app has to provide to run the viewer. The working
+Everything an Angular 21 app has to provide to run the viewer. The working
 reference is the serverless example: [`examples/browser-image/main.ts`](../../examples/browser-image/main.ts)
 (app providers and CSS) and [`app.component.ts`](../../examples/browser-image/app.component.ts)
 (ports).
@@ -9,7 +9,7 @@ reference is the serverless example: [`examples/browser-image/main.ts`](../../ex
 
 ```bash
 npm install @jax-data-science/sci-image-visualizer
-npm install @angular/animations @angular/router primeng primeicons primeflex \
+npm install @angular/cdk @angular/router primeng @primeuix/themes primeicons primeflex \
   image-js file-saver buffer onnxruntime-web
 ```
 
@@ -20,26 +20,39 @@ listed in the [README](../../README.md#peer-dependencies).
 ## 2. App-level providers
 
 ```ts
+import { provideZoneChangeDetection } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { provideAnimations } from '@angular/platform-browser/animations';
 import { provideHttpClient } from '@angular/common/http';
 import { MessageService, ConfirmationService } from 'primeng/api';
+import { providePrimeNG } from 'primeng/config';
+import Lara from '@primeuix/themes/lara';
 
 bootstrapApplication(AppComponent, {
-  providers: [provideHttpClient(), provideAnimations(), MessageService, ConfirmationService],
+  providers: [
+    provideZoneChangeDetection(),
+    provideHttpClient(),
+    providePrimeNG({ theme: { preset: Lara } }),
+    MessageService,
+    ConfirmationService,
+  ],
 });
 ```
 
 - `provideHttpClient()`: the backends and stores inject `HttpClient`, and asset
   fetches go through it so your interceptors apply.
-- `provideAnimations()`: PrimeNG's dialog, table, toast, menu and context menu
-  need it. (`@angular/router` is a peer for the same reason. The library does
-  not route.)
+- `provideZoneChangeDetection()`: the library runs with zone.js change
+  detection. Angular 21 apps are zoneless by default, so add it (and keep
+  `zone.js` in the polyfills).
+- `providePrimeNG()`: PrimeNG 18 and later ship no theme CSS; the theme is a
+  preset (Aura, Lara, Nora, Material, or your own `definePreset()` of one).
+  The library's styles use its design tokens (`--p-primary-color`,
+  `--p-content-border-color`, ...), so they follow the preset and its dark mode.
+  (`@angular/router` and `@angular/cdk` are peers because PrimeNG needs them.
+  The library does not route.)
 - `MessageService` and `ConfirmationService`: the toolbar, the region editor
   and the toasts inject them, and the library does not provide them.
 
-An NgModule app puts the same providers in its root module and imports
-`BrowserAnimationsModule` instead of `provideAnimations()`. It can keep importing
+An NgModule app puts the same providers in its root module. It can keep importing
 `VisualizationModule`, which is deprecated and re-exports the standalone components.
 
 ## 3. Styles
@@ -47,13 +60,14 @@ An NgModule app puts the same providers in its root module and imports
 ```ts
 // main.ts, or the "styles" array in angular.json
 import 'primeicons/primeicons.css';
-import 'primeng/resources/primeng.min.css';
 import 'primeflex/primeflex.css';
-import 'primeng/resources/themes/saga-blue/theme.css'; // or your PrimeNG theme
 ```
 
 The templates use `pi pi-*` icons and PrimeFlex utility classes, so the viewer
-renders unstyled without them.
+renders unstyled without them. PrimeNG's own styles come from the preset. Its
+presets set no font (PrimeNG 17's theme files set one on `:root`), so set yours
+on `:root` or `body`, or menus and select lists appended to `<body>` use the
+browser's default.
 
 The toolbar and context-menu icon classes (`.wand-icon`, `.brush-icon`, … and the
 highlighted context-menu entry) have to be global, because PrimeNG appends those
