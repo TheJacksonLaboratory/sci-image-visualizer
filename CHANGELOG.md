@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-11-21
+
 ### Changed
 
 - **Breaking: Angular 21 and PrimeNG 21 (#90).** The peer dependencies are Angular `^21.0.0`,
@@ -25,7 +27,6 @@ file was added.
 - Toasts are typed with PrimeNG's `ToastMessageOptions`, the new name of `Message` in
   `primeng/api` (same shape).
 - The example app's theme is Lara with a blue primary, the closest preset to saga-blue.
-
 - **The user guide documents only what production users see.** It no longer mentions test mode
   (`?test=1`) or the tools it adds: the intensity profile lines (the "Intensity profile lines" reference
   page, the how-to section, their QA cases and screenshot are removed) and the test-only plot types.
@@ -2976,7 +2977,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.4...v0.21.0
 [0.20.4]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.2...v0.20.3
