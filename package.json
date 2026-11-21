@@ -1,6 +1,6 @@
 {
   "name": "@jax-data-science/sci-image-visualizer",
-  "version": "0.20.3",
+  "version": "0.20.4",
   "engines": {
     "node": ">=20.9.0"
   },
