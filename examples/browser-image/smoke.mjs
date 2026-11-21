@@ -80,9 +80,9 @@ try {
   // (catches missing PrimeNG CSS / broken overlays that render blank).
   let overlayOpts = 0;
   try {
-    await page.locator('p-dropdown').first().click({ timeout: 5000 });
-    await page.waitForSelector('.p-dropdown-panel', { timeout: 5000 });
-    overlayOpts = await page.locator('.p-dropdown-item').count();
+    await page.locator('p-select').first().click({ timeout: 5000 });
+    await page.waitForSelector('.p-select-overlay', { timeout: 5000 });
+    overlayOpts = await page.locator('.p-select-option').count();
   } catch {}
   // Splitter: dragging the divider right must widen the gallery (and, since the
   // viewer flexes, shrink the canvas). Verifies the resize wiring end-to-end.
