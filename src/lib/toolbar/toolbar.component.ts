@@ -218,8 +218,6 @@ export class ToolbarComponent {
   @Output() redoRegion = new EventEmitter<void>();
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
-  /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
-  @Output() segmentCellpose = new EventEmitter<void>();
   /** Run a contributed tool over the current view, by tool id. */
   @Output() runTool = new EventEmitter<string>();
   /** A dialog tool's button was clicked: open its dialog, or close it if open. */

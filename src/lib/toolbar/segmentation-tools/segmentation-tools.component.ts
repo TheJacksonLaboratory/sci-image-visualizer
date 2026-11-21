@@ -11,6 +11,7 @@ import { CommonModule } from '@angular/common';
 import { MenuItem, SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { MenuModule } from 'primeng/menu';
+import { TieredMenuModule } from 'primeng/tieredmenu';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { ToolbarToolContribution } from '../../contracts/toolbar-tool.contract';
@@ -18,13 +19,14 @@ import { MODEL_INFO } from '../model-info';
 
 /**
  * The toolbar's segmentation group: SAM box prompt, SAM point prompts and the
- * shared SAM model picker, cellpose, and the contributed no-prompt tools (run,
- * pick checkpoint, parameters). Presentational: the host runs every action.
+ * shared SAM model picker, then the run tools — the built-in Cellpose and the
+ * contributed ones — each with run, pick checkpoint and parameters.
+ * Presentational: the host runs every action.
  */
 @Component({
   selector: 'toolbar-segmentation-tools',
   standalone: true,
-  imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TooltipModule],
+  imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TieredMenuModule, TooltipModule],
   templateUrl: './segmentation-tools.component.html',
   styleUrls: ['./segmentation-tools.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -36,15 +38,13 @@ export class SegmentationToolsComponent implements OnChanges {
   @Input() samModels: { id: string; label: string }[] = [];
   /** The selected SAM model id. */
   @Input() samModelId = '';
-  /** Contributed no-prompt tools, already filtered and sorted by the host. */
+  /** Run tools (the built-in Cellpose and the contributed ones), already filtered and sorted by the host. */
   @Input() contributedTools: ToolbarToolContribution[] = [];
   /** Active checkpoint per contributed tool, keyed by tool id. */
   @Input() toolModelIds: Record<string, string> = {};
 
   /** Run box-prompted SAM segmentation on the drawn rectangles (jit-ui#90). */
   @Output() segmentRegions = new EventEmitter<void>();
-  /** Run cellpose-SAM (auto) inside each drawn rectangle's crop (jit-ui#90). */
-  @Output() segmentCellpose = new EventEmitter<void>();
   /** The SAM point tool's toggle ('samPoint'). */
   @Output() toggleDragMode = new EventEmitter<string>();
   /** A SAM model was picked from the model menu (its id). */
@@ -95,12 +95,30 @@ export class SegmentationToolsComponent implements OnChanges {
       this.toolMenuItems = {};
       for (const tool of this.contributedTools) {
         const active = this.toolModelIds[tool.id] ?? tool.defaultModelId();
-        this.toolMenuItems[tool.id] = tool.models().map((m) => ({
+        const paramsLabel = tool.params.length ? tool.paramsInModelMenu : undefined;
+        const models = tool.models();
+        const paramsEntry = (modelId: string): MenuItem => ({
+          label: paramsLabel,
+          command: () => {
+            // Under another checkpoint: select it first, so the dialog edits its values.
+            if (modelId !== active) this.toolModelChange.emit({ toolId: tool.id, modelId });
+            this.openToolParams.emit(tool.id);
+          },
+        });
+        // One checkpoint and the parameters in the menu: nothing to pick, so the menu is
+        // just the parameters entry (Cellpose-SAM: "Set cell diameter…").
+        if (paramsLabel && models.length === 1) {
+          this.toolMenuItems[tool.id] = [paramsEntry(models[0].id)];
+          continue;
+        }
+        this.toolMenuItems[tool.id] = models.map((m) => ({
           label: m.label,
           icon: m.id === active ? 'pi pi-check' : 'pi pi-fw',
           tooltip: m.info,
           infoLabel: this.infoLabel(m.label, m.info),
           command: () => this.toolModelChange.emit({ toolId: tool.id, modelId: m.id }),
+          // The parameters, under each checkpoint (`paramsInModelMenu`).
+          items: paramsLabel ? [paramsEntry(m.id)] : undefined,
         }));
       }
     }

@@ -561,6 +561,16 @@ describe('NapariVisualizerService', () => {
     expect(url).toMatch(/&_=\d+$/);
   });
 
+  it('reports the unclamped rect of the readback as the displayed source rect (#105 review)', () => {
+    // A zoomed-out canvas over image coords -50..150: the readback includes the margins, so
+    // the rect must too, or a consumer maps margin pixels onto the image.
+    type Internals = { viewer: unknown; tools: { lastPixelsRect: unknown } };
+    const internals = service as unknown as Internals;
+    internals.viewer = { visibleWorldRect: () => ({ x: 0, y: 0, width: 1, height: 1 }) };
+    internals.tools.lastPixelsRect = { x: -50, y: -50, width: 200, height: 200 };
+    expect(service.getDisplayedSourceRect()).toEqual({ x: -50, y: -50, width: 200, height: 200 });
+  });
+
   it('hands the pixel tools the readback as a packed frame, without per-pixel arrays (NAPARI-SVC-23)', () => {
     // A 2560×1440 readback: the old path built 3.7 M [r,g,b] arrays from it.
     const px = { width: 2560, height: 1440, channels: 4, data: new Uint8ClampedArray(2560 * 1440 * 4) };

@@ -121,4 +121,4 @@ Remove the ones you do not want with their trash icon.
 ## Which class do new regions get?
 
 Newly drawn regions always start in the class **Region**. AI segmentation adds regions in the class **sam**
-(SAM) or **cell** (Cellpose). Classify them afterwards with the steps above.
+(SAM) or **cell** (Cellpose-SAM). Classify them afterwards with the steps above.

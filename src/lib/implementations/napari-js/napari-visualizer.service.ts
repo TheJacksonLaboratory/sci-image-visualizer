@@ -196,14 +196,14 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   }>();
 
   constructor(
-    @Inject(TILE_ACCESS_PORT) tiles: TileAccessPort,
+    @Inject(TILE_ACCESS_PORT) private readonly tiles: TileAccessPort,
     store: VisualizerStore,
     regionStore: RegionStore,
     wandService: WandService,
     private readonly samTool: SamToolService,
     private readonly samPointTool: SamPointToolService,
-    cellSegmentTool: CellSegmentToolService,
-    @Optional() @Inject(CELL_SEGMENTER) cellSegmenter: ICellSegmenter | null,
+    private readonly cellSegmentTool: CellSegmentToolService,
+    @Optional() @Inject(CELL_SEGMENTER) private readonly cellSegmenter: ICellSegmenter | null,
     private readonly simpleStack: SimpleSliceAccessService,
     @Inject(VIZ_CONFIG) config: VizConfig,
     // Optional: only a host that serves spatial-omics data provides it, and
@@ -653,19 +653,12 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
     return this.tools.lastPixels;
   }
 
+  /** The image rect {@link getDisplayedPixelData}'s readback covers: the one captured with it
+   *  (so a pan since does not skew the pairing), unclamped like OSD's — the readback is the
+   *  whole canvas, margins included, and a consumer clips to the image itself. */
   getDisplayedSourceRect(): { x: number; y: number; width: number; height: number } | null {
-    const v = this.viewer;
-    const size = this.getTrueImageSize();
-    if (!v || !size) return null;
-    const r = v.visibleWorldRect();
-    const x = Math.max(0, r.x);
-    const y = Math.max(0, r.y);
-    return {
-      x,
-      y,
-      width: Math.min(size.width, r.x + r.width) - x,
-      height: Math.min(size.height, r.y + r.height) - y,
-    };
+    const r = this.tools.lastPixelsRect ?? this.viewer?.visibleWorldRect();
+    return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
   }
 
   downloadImage(): void {
@@ -767,8 +760,24 @@ export class NapariVisualizerService extends BaseStoreVisualizer implements IVie
   segmentRectangles(): Promise<number> {
     return this.tools.segmentRectangles();
   }
-  segmentRectanglesCellpose(): Promise<number> {
-    return this.tools.segmentRectanglesCellpose();
+  segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    return this.tools.segmentRectanglesCellpose({ ...opts, context: () => this.segmentContext() });
+  }
+  async segmentViewCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    const segmenter = this.cellSegmenter;
+    if (!this.viewer || !segmenter) return 0;
+    // A fresh readback, so the pixels and their rect match the camera now.
+    await this.tools.runReadback();
+    return this.cellSegmentTool.segmentView(this, segmenter, {
+      ...opts,
+      tileAccess: this.tiles,
+      zIndex: this.loaded?.z ?? 0,
+      context: () => this.segmentContext(),
+    });
+  }
+  /** The image and slice a segmentation run belongs to (see CellSegmentRunOptions.context). */
+  private segmentContext(): string {
+    return `${this.loaded?.filename ?? ''}|${this.loaded?.z ?? 0}`;
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);

@@ -15,7 +15,7 @@ annotation type looks the same on every image and in every session.
 Changing a class colour recolours every region of that class at once.
 
 New regions drawn with the tools get the class **Region**. Regions from AI segmentation get **sam** (SAM)
-or **cell** (Cellpose), and are coloured like any other class.
+or **cell** (Cellpose-SAM), and are coloured like any other class.
 
 ## The Classes panel
 

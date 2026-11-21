@@ -778,10 +778,26 @@ export class OpenSeadragonVisualizerService extends BaseStoreVisualizer implemen
     this.viewportPixels = null; // segment against the current viewport readback
     return this.samTool.segmentBoxes(this.toolHost);
   }
-  segmentRectanglesCellpose(): Promise<number> {
+  segmentRectanglesCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
     if (!this.cellSegmenter) return Promise.resolve(0);
     this.viewportPixels = null; // crop against the current viewport readback
-    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter);
+    return this.cellSegmentTool.segmentBoxes(this.toolHost, this.cellSegmenter, {
+      ...opts,
+      context: () => this.segmentContext(),
+    });
+  }
+  segmentViewCellpose(opts?: { diameterPx?: number | null }): Promise<number> {
+    if (!this.cellSegmenter) return Promise.resolve(0);
+    return this.cellSegmentTool.segmentView(this, this.cellSegmenter, {
+      ...opts,
+      tileAccess: this.tiles,
+      zIndex: this.currentZ,
+      context: () => this.segmentContext(),
+    });
+  }
+  /** The image and slice a segmentation run belongs to (see CellSegmentRunOptions.context). */
+  private segmentContext(): string {
+    return `${this.currentFileName ?? ''}|${this.currentZ}`;
   }
   setSamModel(id: string): void {
     this.samTool.setModel(id);

@@ -13,7 +13,7 @@ open an image differs.
 | --- | --- | --- |
 | [Tour of the viewer](viewer-tour.md) | Open images, zoom and pan, read the scale bar, adjust contrast and colours, switch plot types | 10 min |
 | [Annotate your first image](first-annotation.md) | Draw regions with several tools, edit them, classify them in the Region Editor and export GeoJSON | 20 min |
-| [Segment cells with AI](ai-segmentation.md) | Segment objects with SAM box and point prompts, and every cell in an area with Cellpose | 15 min |
+| [Segment cells with AI](ai-segmentation.md) | Segment objects with SAM box and point prompts, and every cell in an area with Cellpose-SAM | 15 min |
 | [Explore a spatial-omics dataset](spatial-omics.md) | Colour spots by cluster and gene, select spots from a region, read the distribution charts | 20 min |
 
 !!! tip "Before you start"

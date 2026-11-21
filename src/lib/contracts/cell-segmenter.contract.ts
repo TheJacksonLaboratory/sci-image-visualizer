@@ -15,7 +15,7 @@ export interface CellSegmentation {
 
 /**
  * Port for an automatic (prompt-free) cell segmenter — e.g. cellpose-SAM. The
- * library calls this on a client slide-crop of a drawn box. By default the
+ * library calls this on a client slide-crop of a drawn box, or on the whole view. By default the
  * {@link CELL_SEGMENTER} token resolves to the library's own cellpose-js-backed
  * {@link CellposeSegmenterService} (so the toolbar Cellpose tool works out of the
  * box), but a host can override the token to supply a different implementation
@@ -29,12 +29,23 @@ export interface CellSegmentProgress {
   onStatus?: (status: string) => void;
 }
 
+/** How to segment (all optional). */
+export interface CellSegmentOptions {
+  /**
+   * Typical cell diameter in pixels of the input image. A segmenter that works best
+   * at one cell size (cellpose-SAM: about 30 px) rescales the input to it. Omitted:
+   * the image is segmented as it is.
+   */
+  diameter?: number;
+}
+
 /** A segmenter that labels every cell of an image (one exclusive label per pixel). */
 export interface ICellSegmenter {
-  /** Segment all cells in an RGBA image into an instance label map. */
+  /** Segment all cells in an RGBA image into an instance label map at the input's size. */
   segmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
     progress?: CellSegmentProgress,
+    options?: CellSegmentOptions,
   ): Promise<CellSegmentation>;
 }
 

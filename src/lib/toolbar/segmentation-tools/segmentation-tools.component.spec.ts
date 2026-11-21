@@ -100,3 +100,62 @@ describe('SegmentationToolsComponent — model info accessibility', () => {
     expect(c['plainText'](undefined as never)).toBe('');
   });
 });
+
+describe('SegmentationToolsComponent — parameters in the model menu', () => {
+  function cellposeLike(): ToolbarToolContribution {
+    return {
+      ...contributedTool(),
+      params: [{ id: 'cellDiameterUm', label: 'Cell diameter (µm)', type: 'number' }],
+      paramsInModelMenu: 'Set cell diameter…',
+    };
+  }
+
+  it('puts a parameters entry under each checkpoint, which opens the dialog', () => {
+    const tools = new SegmentationToolsComponent();
+    tools.contributedTools = [cellposeLike()];
+    tools.ngOnChanges({ contributedTools: {} as never });
+    const opened: string[] = [];
+    const picked: string[] = [];
+    tools.openToolParams.subscribe((id) => opened.push(id));
+    tools.toolModelChange.subscribe((e) => picked.push(e.modelId));
+
+    const [a, b] = tools['toolMenuItems']['detect']!;
+    expect(a.items).toEqual([expect.objectContaining({ label: 'Set cell diameter…' })]);
+    // The active checkpoint's entry only opens the dialog…
+    a.items![0].command!({});
+    expect(opened).toEqual(['detect']);
+    expect(picked).toEqual([]);
+    // …another checkpoint's selects it first, so the dialog edits its values.
+    b.items![0].command!({});
+    expect(picked).toEqual(['model-b']);
+    expect(opened).toEqual(['detect', 'detect']);
+  });
+
+  it('makes the menu just the parameters entry when there is one checkpoint', () => {
+    const tools = new SegmentationToolsComponent();
+    tools.contributedTools = [
+      {
+        ...cellposeLike(),
+        models: () => [{ id: 'cpsam', label: 'Cellpose-SAM', info: 'x' }],
+        defaultModelId: () => 'cpsam',
+      },
+    ];
+    tools.ngOnChanges({ contributedTools: {} as never });
+    const opened: string[] = [];
+    tools.openToolParams.subscribe((id) => opened.push(id));
+
+    const items = tools['toolMenuItems']['detect']!;
+    expect(items).toEqual([expect.objectContaining({ label: 'Set cell diameter…' })]);
+    expect(items[0].items).toBeUndefined();
+    expect(items[0].icon).toBeUndefined(); // no icon, so no blank icon slot either
+    items[0].command!({});
+    expect(opened).toEqual(['detect']);
+  });
+
+  it('gives a tool without it no submenu', () => {
+    const tools = new SegmentationToolsComponent();
+    tools.contributedTools = [{ ...contributedTool(), params: [{ id: 'x', label: 'X', type: 'number' }] }];
+    tools.ngOnChanges({ contributedTools: {} as never });
+    expect(tools['toolMenuItems']['detect']!.every((i) => !i.items)).toBe(true);
+  });
+});

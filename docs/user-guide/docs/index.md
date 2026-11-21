@@ -58,7 +58,7 @@ You can also try every feature without installing anything in the
 | Editing regions         | Merge, ungroup, inverse, simplify, Bézier conversion, holes (donuts)                                         | [Region actions](reference/region-actions.md)              |
 | Organising annotations  | Region Editor table, annotation classes with colour presets, bulk relabelling                                | [Region Editor](reference/region-editor.md)                |
 | Exchanging annotations  | GeoJSON import and export (QuPath-compatible)                                                                | [GeoJSON](reference/geojson.md)                            |
-| AI segmentation         | Segment Anything (box and point prompts) and Cellpose, in the browser                                        | [AI segmentation](reference/segmentation.md)               |
+| AI segmentation         | Segment Anything (box and point prompts) and Cellpose-SAM, in the browser                                    | [AI segmentation](reference/segmentation.md)               |
 | Spatial omics           | Cells or spots over the tissue, coloured by cluster or gene; select from regions; distribution charts       | [Spatial omics](reference/spatial-omics.md)                |
 
 ## Getting help in the app

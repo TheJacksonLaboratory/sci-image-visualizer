@@ -283,7 +283,7 @@
     "Open 'img04.png'.",
     "Click the chevron next to the Segment button.",
     "Hover the ⓘ next to 'micro-sam ViT-B' so its info shows.",
-    "Capture the toolbar segmentation group with the menu and the info."
+    "Capture the toolbar segmentation group (SAM box, SAM point, SAM chevron, Cellpose-SAM and its chevron) with the menu and the info."
    ]
   },
   {
@@ -295,13 +295,49 @@
     "tutorials/ai-segmentation.md",
     "reference/segmentation.md"
    ],
-   "title": "Cellpose result: one region per cell",
+   "title": "Cellpose-SAM result: one region per cell",
    "sample": "002_img.png",
    "capture": "Viewer area",
    "steps": [
-    "Open '002_img.png' and draw one large rectangle over many cells.",
-    "Click 'Cellpose' (cells icon). The first run downloads the model (~588 MB).",
-    "When 'Added N cell region(s)' shows, capture the viewer area."
+    "Open '002_img.png' and leave the whole image in view (no rectangles).",
+    "Click 'Cellpose-SAM' (cells icon). The first run downloads the model (~588 MB).",
+    "When 'Added N cell region(s)' shows, capture the viewer area: the smooth cell outlines over the whole image."
+   ]
+  },
+  {
+   "id": "seg-cellpose-diameter-menu",
+   "file": "seg-cellpose-diameter-menu.png",
+   "section": "How-to guides",
+   "page": "how-to/segmentation.md",
+   "usedBy": [
+    "how-to/segmentation.md"
+   ],
+   "title": "The Cellpose-SAM menu with Set cell diameter…",
+   "sample": "002_img.png",
+   "capture": "Toolbar crop with the open menu",
+   "steps": [
+    "Open '002_img.png'.",
+    "Click the chevron (▾) right of the Cellpose-SAM (cells) button.",
+    "Capture the toolbar segmentation group with the open one-item menu 'Set cell diameter…'."
+   ]
+  },
+  {
+   "id": "seg-cellpose-diameter-dialog",
+   "file": "seg-cellpose-diameter-dialog.png",
+   "section": "How-to guides",
+   "page": "how-to/segmentation.md",
+   "usedBy": [
+    "how-to/segmentation.md",
+    "reference/segmentation.md"
+   ],
+   "title": "The cell diameter dialog in µm, with its help",
+   "sample": "WSI CMU-1",
+   "capture": "The dialog with its tooltip",
+   "steps": [
+    "Open the WSI tile 'CMU-1 · 1.5 Gpx (CC0)' (it reports a pixel size, so the dialog asks for µm).",
+    "Click the chevron (▾) right of Cellpose-SAM, then 'Set cell diameter…'.",
+    "Hover the ⓘ beside 'Cell diameter (µm)' so its help shows the image's µm per pixel.",
+    "Capture the dialog with the help tooltip."
    ]
   },
   {
@@ -312,13 +348,13 @@
    "usedBy": [
     "tutorials/ai-segmentation.md"
    ],
-   "title": "The Region Editor listing regions from SAM and Cellpose",
+   "title": "The Region Editor listing regions from SAM and Cellpose-SAM",
    "sample": "002_img.png",
    "capture": "Viewer area including the Region Editor",
    "steps": [
     "Open '002_img.png'.",
     "Draw two rectangles around two single cells (r) and click 'Segment with SAM (box prompt)'; wait for 'Added 2 region(s)'.",
-    "Draw one rectangle over 15–30 other cells and click 'Segment cells (cellpose-SAM)'; wait for 'Added N cell region(s)'.",
+    "Draw one rectangle over 15–30 other cells and click 'Cellpose-SAM'; wait for 'Added N cell region(s)'.",
     "Open the Region Editor.",
     "Capture the viewer area: the segmented outlines and the Region Editor whose Classes panel lists 'sam' and 'cell' with their counts."
    ]
