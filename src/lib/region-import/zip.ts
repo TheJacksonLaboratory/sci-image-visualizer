@@ -73,8 +73,14 @@ export function readZip(bytes: Uint8Array, inflateRaw: InflateRaw = platformInfl
       const len = view.getUint16(x + 2, true);
       if (id === 0x0001) {
         let p = x + 4;
-        if (size === U32) ((size = num(view, p)), (p += 8));
-        if (compressed === U32) ((compressed = num(view, p)), (p += 8));
+        if (size === U32) {
+          size = num(view, p);
+          p += 8;
+        }
+        if (compressed === U32) {
+          compressed = num(view, p);
+          p += 8;
+        }
         if (local === U32) local = num(view, p);
       }
       x += 4 + len;

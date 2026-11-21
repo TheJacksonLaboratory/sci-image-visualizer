@@ -67,6 +67,6 @@ describe('ShapeSelection', () => {
 
   it('should throw an error for unsupported shape type', () => {
     shape.type = 'circle' as any;
-    expect(() => shape.getRegion()).toThrowError('Unsupported shape type: circle');
+    expect(() => shape.getRegion()).toThrow('Unsupported shape type: circle');
   });
 });

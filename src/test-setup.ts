@@ -1,6 +1,8 @@
-import 'jest-preset-angular/setup-jest';
+import { setupZoneTestEnv } from 'jest-preset-angular/setup-env/zone';
 import 'jest-canvas-mock';
 import { TextEncoder, TextDecoder as UtilTextDecoder } from 'util';
+
+setupZoneTestEnv();
 
 if (typeof window.URL.createObjectURL === 'undefined') {
   window.URL.createObjectURL = jest.fn();

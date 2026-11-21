@@ -15,6 +15,7 @@ import { CommonModule } from '@angular/common';
 
 import type { SectionAxis, SectionView } from '../contracts/section-view.contract';
 import { SLICE_PLANE_COLORS } from '../implementations/napari-js/napari-volume-slice-planes';
+import { newImageData } from '../util/image-data';
 
 /** A press that moves farther than this (px) pans; a shorter one is a click. */
 const CLICK_SLOP_PX = 4;
@@ -342,7 +343,7 @@ export class SectionPaneComponent implements AfterViewInit, OnChanges, OnDestroy
     const canvas = document.createElement('canvas');
     canvas.width = image.width;
     canvas.height = image.height;
-    canvas.getContext('2d')?.putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
+    canvas.getContext('2d')?.putImageData(newImageData(image.data, image.width, image.height), 0, 0);
     this.image = { source: image, canvas };
     return canvas;
   }

@@ -180,7 +180,7 @@ describe('WandService', () => {
 
   it('rejects even patch sizes', () => {
     const img = makeGrayImage(20, 20, () => 0);
-    expect(() => service.computeRegion(img, 10, 10, { patchSize: 50 })).toThrowError(/patchSize/);
+    expect(() => service.computeRegion(img, 10, 10, { patchSize: 50 })).toThrow(/patchSize/);
   });
 
   it('union of two patch masks expands the polygon to cover both clicks', () => {

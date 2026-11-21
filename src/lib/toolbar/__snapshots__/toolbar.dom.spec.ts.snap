@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`ToolbarComponent (DOM characterization) 3D spatial cloud with screen-space region tools, eraser active 1`] = `
 [

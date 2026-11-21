@@ -187,7 +187,7 @@ describe('library components (CORE-21)', () => {
 
   const classes = sources(__dirname).flatMap((file) => {
     const names = [...readFileSync(file, 'utf8').matchAll(/export class (\w+)/g)].map((m) => m[1]);
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require(file) as Record<string, Type<unknown>>;
     return names.map((name) => ({ name, type: mod[name] })).filter((c) => !!c.type);
   });

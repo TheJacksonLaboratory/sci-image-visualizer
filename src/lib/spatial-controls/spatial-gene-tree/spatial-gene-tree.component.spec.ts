@@ -180,7 +180,11 @@ describe('SpatialGeneTreeComponent', () => {
       setView({ transcriptAllGenes: true, transcriptGeneColors: { KRT5: '#123456' } });
       expand();
       fixture.detectChanges();
-      const open = jest.spyOn(component as unknown as { openGeneStyle: () => void }, 'openGeneStyle');
+      // Not called through: the overlay panel is not rendered in this shallow test (Angular
+      // rethrows listener errors in tests since v20).
+      const open = jest
+        .spyOn(component as unknown as { openGeneStyle: () => void }, 'openGeneStyle')
+        .mockImplementation(() => undefined);
       const swatches = root.querySelectorAll('.sc-gene-leaf button.sc-gene-icon');
       expect(swatches.length).toBe(3);
       (swatches[1] as HTMLElement).click();

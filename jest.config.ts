@@ -3,6 +3,8 @@ export default {
   displayName: 'sci-image-visualizer',
   preset: 'jest-preset-angular',
   setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
+  // The library's specs only: examples/tile-server has its own `node --test` suite (test:server).
+  roots: ['<rootDir>/src'],
   coverageDirectory: '<rootDir>/coverage',
   // testing/ holds test doubles (fake OSD viewer, port stubs), not library code.
   coveragePathIgnorePatterns: ['/node_modules/', '<rootDir>/src/lib/testing/'],

@@ -2,6 +2,7 @@ import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { PixelData } from '../../contracts/visualizer.contract';
 import { DisplayPipeline, rgbNeedsRecolor } from '../osd/display-pipeline';
+import { newImageData } from '../../util/image-data';
 
 /** How the Plotly `image` trace of an image follows the Channels & Histogram dialog. */
 export type RecolorKind = 'rgb' | 'multichannel';
@@ -48,7 +49,7 @@ export function matrixToRgba(frame: number[][][], width: number, height: number)
 /** The browser's PNG encoder, off the main thread where it can be (`convertToBlob`/`toBlob`
  *  encode asynchronously), read back as a data URI. */
 export const encodePng: ImageEncoder = async (rgba, width, height) => {
-  const pixels = new ImageData(rgba, width, height);
+  const pixels = newImageData(rgba, width, height);
   let blob: Blob | null;
   if (typeof OffscreenCanvas !== 'undefined') {
     const canvas = new OffscreenCanvas(width, height);

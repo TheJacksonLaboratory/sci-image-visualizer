@@ -8,7 +8,7 @@ jest.mock('./tile-client', () => ({
   ...jest.requireActual('./tile-client'),
   fetchTileRgba: jest.fn(),
 }));
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const tileClient = require('./tile-client');
 
 /** A fake tile of n pixels, all with the given [r,g,b] (alpha 255). */
