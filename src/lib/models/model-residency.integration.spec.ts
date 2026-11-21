@@ -14,10 +14,10 @@ import { SamSessionService } from '../toolbar/segmentation/sam-session.service';
 import { setSamModelUrls } from '../toolbar/segmentation/sam-model-registry';
 import { ISamSession, SamEmbedding } from '../contracts/sam.contract';
 
-/** A large model owned by some other package (e.g. jit-extensions' retinal VNet). */
-function otherLargeModel(r: ModelResidency) {
+/** A model owned by some other package (e.g. jit-extensions' retinal VNet). */
+function otherModel(r: ModelResidency) {
   const release = jest.fn();
-  r.register({ id: 'retinal:vnet', loadedSizeMb: 6000, release });
+  r.register({ id: 'retinal:vnet', release });
   return release;
 }
 
@@ -57,15 +57,14 @@ describe('Cellpose under the model-residency rule', () => {
     svc = new CellposeSegmenterService(r);
   });
 
-  it('releases another large model before loading, then registers itself', async () => {
-    const releaseVnet = otherLargeModel(r);
+  it('releases another model before loading, then registers itself', async () => {
+    const releaseVnet = otherModel(r);
     fromPretrained.mockResolvedValue(fakeCellpose());
 
     await svc.segmentCells(image);
 
     expect(releaseVnet).toHaveBeenCalled();
-    expect(r.residentModels()).toEqual([{ id: svc.residencyId(), loadedSizeMb: expect.any(Number) }]);
-    expect(r.residentModels()[0].loadedSizeMb).toBeGreaterThanOrEqual(r.getThresholdMb());
+    expect(r.residentIds()).toEqual([svc.residencyId()]);
   });
 
   it('stays warm across repeated runs', async () => {
@@ -139,7 +138,7 @@ describe('Cellpose under the model-residency rule', () => {
     const log: string[] = [];
     const retinal = r.use('retinal:vnet', async () => {
       log.push(`retinal loads; cellpose resident=${svc.isLoaded()}`);
-      r.register({ id: 'retinal:vnet', loadedSizeMb: 6000, release: jest.fn() });
+      r.register({ id: 'retinal:vnet', release: jest.fn() });
     });
     await tick();
     expect(log).toEqual([]); // waiting for the Cellpose load
@@ -173,23 +172,16 @@ describe('SAM under the model-residency rule', () => {
     svc.useSessionFactory(async () => fakeSam());
   });
 
-  it('releases another large model before loading, and stays warm below the threshold', async () => {
-    const releaseVnet = otherLargeModel(r);
+  it('releases another model before loading, then registers itself', async () => {
+    const releaseVnet = otherModel(r);
 
     await svc.ensureSession();
 
     expect(releaseVnet).toHaveBeenCalled();
-    const [sam] = r.residentModels();
-    expect(sam.id).toBe(svc.residencyId());
-    expect(sam.loadedSizeMb).toBeLessThan(r.getThresholdMb());
-
-    // Below the threshold: using another model leaves SAM loaded.
-    await r.use('yolo:opticnerve', async () => undefined);
-    expect(svc.hasSession()).toBe(true);
+    expect(r.residentIds()).toEqual([svc.residencyId()]);
   });
 
-  it('is released (and rebuilt next time) when it is above the threshold', async () => {
-    r.setThresholdMb(100);
+  it('is released (and rebuilt next time) when another model is used', async () => {
     const session = await svc.ensureSession();
 
     await r.use('retinal:vnet', async () => undefined);
@@ -209,7 +201,6 @@ describe('SAM under the model-residency rule', () => {
   });
 
   it('holds SAM from acquisition through decode: a switch waits for the whole run', async () => {
-    r.setThresholdMb(100); // make SAM "large" so a switch would release it
     let finishDecode!: () => void;
     const decoded = new Promise<void>((res) => (finishDecode = res));
     let session!: ISamSession;
@@ -233,8 +224,8 @@ describe('SAM under the model-residency rule', () => {
   it('does not start a load when the viewer is destroyed while the switch waits', async () => {
     const factory = jest.fn(async () => fakeSam());
     svc.useSessionFactory(factory);
-    // Another large model is mid-run, so SAM's switch has to wait for it.
-    r.register({ id: 'retinal:vnet', loadedSizeMb: 6000, release: jest.fn() });
+    // Another model is mid-run, so SAM's switch has to wait for it.
+    r.register({ id: 'retinal:vnet', release: jest.fn() });
     let finishRetinal!: () => void;
     const retinalRun = r.use('retinal:vnet', () => new Promise<void>((res) => (finishRetinal = res)));
     await tick();
@@ -247,7 +238,7 @@ describe('SAM under the model-residency rule', () => {
 
     await expect(loading).rejects.toThrow(/disposed with its viewer/);
     expect(factory).not.toHaveBeenCalled();
-    expect(r.residentModels().filter((m) => m.id.startsWith('sam:'))).toEqual([]);
+    expect(r.residentIds().filter((id) => id.startsWith('sam:'))).toEqual([]);
   });
 
   it("unsubscribes a caller's progress listener once its load settles", async () => {
@@ -280,10 +271,11 @@ describe('SAM under the model-residency rule', () => {
     await other.ensureSession();
 
     expect(svc.residencyId()).not.toBe(other.residencyId());
-    expect(r.residentModels()).toHaveLength(2);
+    // Distinct ids are distinct models: the second viewer's load released the first's.
+    expect(r.residentIds()).toEqual([other.residencyId()]);
 
-    // Destroying one viewer's session leaves the other's registration alone.
-    other.ngOnDestroy();
-    expect(r.isResident(svc.residencyId())).toBe(true);
+    // Destroying one viewer's service leaves the other's registration alone.
+    svc.ngOnDestroy();
+    expect(r.isResident(other.residencyId())).toBe(true);
   });
 });

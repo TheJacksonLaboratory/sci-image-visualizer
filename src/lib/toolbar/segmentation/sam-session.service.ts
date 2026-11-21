@@ -4,20 +4,7 @@ import type { CachedImageData } from '../wand/wand-tool.service';
 import { frameToRgba } from './sam-prompt';
 import { getSamModel, isSamModelReady } from './sam-model-registry';
 import { ISamSession, SamEmbedding, SamModelDef } from '../../contracts/sam.contract';
-import {
-  MODEL_RESIDENCY,
-  ModelResidency,
-  estimateLoadedSizeMb,
-  modelResidency,
-} from '../../models/model-residency';
-
-/**
- * Loaded size assumed for a SAM model that does not declare one: a ~180 MB
- * ViT-B encoder plus its decoder, estimated (not measured). Below the 1 GB
- * residency threshold, so by default SAM stays warm alongside other models —
- * but starting it still releases any large model.
- */
-const DEFAULT_SAM_LOADED_SIZE_MB = estimateLoadedSizeMb(196);
+import { MODEL_RESIDENCY, ModelResidency, modelResidency } from '../../models/model-residency';
 
 /** Creates an unloaded inference session. */
 export type SamSessionFactory = () => Promise<ISamSession>;
@@ -54,8 +41,8 @@ class SupersededLoad extends Error {}
  * {@link ngOnDestroy} then disposes that viewer's session (and Worker) with it.
  *
  * Takes part in {@link ModelResidency}: {@link ensureSession} releases any other
- * large model before SAM loads, and the session registers with its
- * {@link SamModelDef.loadedSizeMb} so it is released in turn if it is large.
+ * loaded model before SAM loads, and the session registers so it is released
+ * in turn when another model is used.
  */
 @Injectable({ providedIn: 'root' })
 export class SamSessionService implements OnDestroy {
@@ -245,11 +232,7 @@ export class SamSessionService implements OnDestroy {
         throw new SupersededLoad();
       }
       this.session = session;
-      this.residency.register({
-        id: this.residencyId(model),
-        loadedSizeMb: model.loadedSizeMb ?? DEFAULT_SAM_LOADED_SIZE_MB,
-        release: () => this.release(session),
-      });
+      this.residency.register({ id: this.residencyId(model), release: () => this.release(session) });
       return session;
     })();
     load

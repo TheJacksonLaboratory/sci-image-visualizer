@@ -1,11 +1,6 @@
 import { Inject, Injectable, Optional } from '@angular/core';
 import { getOrtWasmBase } from './ort-runtime-config';
-import {
-  MODEL_RESIDENCY,
-  ModelResidency,
-  estimateLoadedSizeMb,
-  modelResidency,
-} from '../../models/model-residency';
+import { MODEL_RESIDENCY, ModelResidency, modelResidency } from '../../models/model-residency';
 
 import type {
   ICellSegmenter,
@@ -32,14 +27,6 @@ export function cellposeDiameter(diameter: number | undefined, width: number, he
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
 const DEFAULT_MODEL_URL = 'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
-
-/**
- * Loaded size (tab RAM + GPU) of the ~588 MB CPSAM graph. Estimated, not yet
- * measured: well above the 1 GB residency threshold either way, so Cellpose is
- * released when another model is used and rebuilt (from the IndexedDB cache)
- * on its next run.
- */
-const CELLPOSE_LOADED_SIZE_MB = estimateLoadedSizeMb(588);
 
 /**
  * Default in-library {@link ICellSegmenter} backed by cellpose-js (WebGPU/WASM
@@ -193,11 +180,7 @@ export class CellposeSegmenterService implements ICellSegmenter {
         }
         this.instance = cp;
         const id = `cellpose:${url}`;
-        this.residency.register({
-          id,
-          loadedSizeMb: CELLPOSE_LOADED_SIZE_MB,
-          release: () => this.release(cp),
-        });
+        this.residency.register({ id, release: () => this.release(cp) });
         return cp;
       })();
       this.loading = load;
