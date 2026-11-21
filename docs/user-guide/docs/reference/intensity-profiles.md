@@ -6,7 +6,8 @@ An intensity profile plots pixel intensity along a line, for example across a me
 
 !!! warning "Work in progress"
     Intensity profiles are not yet stable. Values are display values (8-bit, after contrast), not the
-    image's native 16-bit data.
+    image's native 16-bit data. The demo and JIT show the **Add an intensity line** button only in test
+    mode: add `?test=1` to the URL.
 
 ## Adding lines
 

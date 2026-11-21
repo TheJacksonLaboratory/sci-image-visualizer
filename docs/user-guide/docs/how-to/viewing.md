@@ -115,6 +115,10 @@ a profile along a line, use an [intensity profile line](#plot-intensity-along-a-
 
 ## Plot intensity along a line
 
+!!! note "Test mode"
+    Intensity lines are a test-mode feature in the demo and in JIT: open the viewer with `?test=1` added to
+    the URL to show the **Add an intensity line** button.
+
 1. In the **Image** or **Heatmap** view, click ![](../assets/icons/spline-chart.svg){ .siv-icon } **Add an
    intensity line**. A horizontal line appears across the middle of the view, and the **Intensity profile**
    inset opens with its plot.

@@ -662,12 +662,15 @@ export class AppComponent implements OnDestroy {
    *  having here. (Channels / download need a backend, but the plot-type selector
    *  works serverlessly.) */
   /**
-   * Show every backend's plot mode in the selector, under its backend-suffixed
-   * label — `?test=1` (or `?test=true`) in the URL.
+   * Test mode — `?test=1` (or `?test=true`) in the URL; off without it or with
+   * `?test=0`, like JIT's. It shows every backend's plot mode in the selector,
+   * under its backend-suffixed label, and the toolbar's "Add an intensity line"
+   * button, which JIT also shows only in test mode.
    *
-   * This lifts the `productionLabel` CURATION only. The capability gates still
-   * apply: a stack-only mode still needs a stack, a scalar mode still needs a
-   * grayscale image, and Spatial omics still needs a dataset loaded.
+   * The plot modes: this lifts the `productionLabel` CURATION only. The
+   * capability gates still apply: a stack-only mode still needs a stack, a
+   * scalar mode still needs a grayscale image, and Spatial omics still needs a
+   * dataset loaded.
    */
   readonly testMode = /^(1|true|yes)$/i.test(
     new URLSearchParams(window.location.search).get('test') ?? '',
@@ -678,6 +681,8 @@ export class AppComponent implements OnDestroy {
 
   readonly toolbarTools: ToolbarToolVisibility = {
     specialTools: true,
+    // Intensity profiles are not yet stable: test mode only, as in JIT.
+    intensityLines: this.testMode,
     zoomTools: true,
     regionTools: true,
     help: true,

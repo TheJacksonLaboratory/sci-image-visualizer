@@ -62,6 +62,10 @@ file was added.
   (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
   toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
   lost its frame.
+- **The demo shows "Add an intensity line" only in test mode, as JIT does.** Open it with `?test=1`
+  to show the button; without the parameter, or with `?test=0`, it is hidden. The user guide's
+  intensity-line pages, QA cases and capture steps say so. The library's default is unchanged
+  (`ToolbarToolVisibility.intensityLines` is `true`).
 
 ## [0.20.3] — 2026-11-19
 
