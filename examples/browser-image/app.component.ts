@@ -135,7 +135,14 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
   ? [
       { name: 'CMU-1 · 1.5 Gpx (CC0)', imageId: 'cmu-1', width: 46000, height: 32914, mppX: 0.499, mppY: 0.499 },
       { name: 'BC18 · 22 Gpx (NDPI)', imageId: 'bc18', width: 218240, height: 103424, mppX: 0.2264, mppY: 0.2264 },
-      { name: 'Sirius Red · 0.5 Gpx (NDPI)', imageId: 'sirius-red', width: 36480, height: 14080, mppX: 0.442, mppY: 0.442 },
+      {
+        name: 'Sirius Red · 0.5 Gpx (NDPI)',
+        imageId: 'sirius-red',
+        width: 36480,
+        height: 14080,
+        mppX: 0.442,
+        mppY: 0.442,
+      },
       // Two-channel fluorescence pair — the SAME pixels and the SAME pyramid,
       // differing only in the descriptor's `multichannel` flag, to isolate what
       // that flag alone does to the Channels pane:
@@ -144,16 +151,49 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
       //                                toggles have nothing to act on (the
       //                                behaviour seen against a server that
       //                                won't flag a LUT-less stack multichannel)
-      { name: '2-channel fluorescence · 0.35 Gpx', imageId: 'result-img', width: 16830, height: 20518, mppX: 0.3211, mppY: 0.3211, channels: 2 },
-      { name: '2-channel · multichannel:false (repro)', imageId: 'result-img-flat', width: 16830, height: 20518, mppX: 0.3211, mppY: 0.3211, channels: 2 },
+      {
+        name: '2-channel fluorescence · 0.35 Gpx',
+        imageId: 'result-img',
+        width: 16830,
+        height: 20518,
+        mppX: 0.3211,
+        mppY: 0.3211,
+        channels: 2,
+      },
+      {
+        name: '2-channel · multichannel:false (repro)',
+        imageId: 'result-img-flat',
+        width: 16830,
+        height: 20518,
+        mppX: 0.3211,
+        mppY: 0.3211,
+        channels: 2,
+      },
       // Project002 series2: a 15 GB ImageJ hyperstack (2ch x 27z, contiguous
       // planes behind a single IFD). Built from the middle z-slice — unlike
       // result_img this one carries an embedded ColorMap/LUT, so a server that
       // gates multichannel on "has a LUT" treats it differently.
-      { name: 'Project002 · 2-channel BF · 0.28 Gpx (z=13)', imageId: 'project002-2ch', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2 },
+      {
+        name: 'Project002 · 2-channel BF · 0.28 Gpx (z=13)',
+        imageId: 'project002-2ch',
+        width: 14971,
+        height: 18664,
+        mppX: 0.3211,
+        mppY: 0.3211,
+        channels: 2,
+      },
       // The same file as its real shape: 2 channels x 27 z-slices. Scrubbing the
       // stack swaps the tile `z` param server-side (no per-slice urls).
-      { name: 'Project002 · 2ch x 27z stack · 7.5 Gpx', imageId: 'project002-stack', width: 14971, height: 18664, mppX: 0.3211, mppY: 0.3211, channels: 2, slices: 27 },
+      {
+        name: 'Project002 · 2ch x 27z stack · 7.5 Gpx',
+        imageId: 'project002-stack',
+        width: 14971,
+        height: 18664,
+        mppX: 0.3211,
+        mppY: 0.3211,
+        channels: 2,
+        slices: 27,
+      },
     ]
   : [];
 
@@ -162,15 +202,23 @@ const TILED_IMAGES: TiledImage[] = TILE_SERVER
  * Asking for it is also what triggers the server to build that image's pyramid
  * from the Zarr store, so this is deliberately called on open, not at startup.
  */
-async function fetchTileDescriptor(base: string, imageId: string): Promise<{
-  width: number; height: number; mppX?: number; mppY?: number;
+async function fetchTileDescriptor(
+  base: string,
+  imageId: string,
+): Promise<{
+  width: number;
+  height: number;
+  mppX?: number;
+  mppY?: number;
   /** Bands: 3 for an RGB tissue image, N for a multichannel one (Xenium morphology: 4). */
   channels?: number;
   /** Slices in a z-stack. */
   z?: number;
 }> {
   const info = btoa(JSON.stringify({ image: imageId }))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
   const res = await fetch(`${base}tiles/info?info=${info}`);
   if (!res.ok) throw new Error(`tiles/info ${res.status}`);
   return res.json();
@@ -206,7 +254,6 @@ async function warmUp(base: string): Promise<void> {
  * by a draggable vertical splitter (see startResize).
  */
 @Component({
-  standalone: true,
   selector: 'app-root',
   imports: [CommonModule, VisualizationModule],
   providers: [
@@ -464,11 +511,15 @@ async function warmUp(base: string): Promise<void> {
         >Load your own…
         <input type="file" accept="image/*,.tif,.tiff,.dcm" (change)="onFile($event)" />
       </label>
-      <label class="upload annotations" title="A label volume (.nii, .nii.gz, .nrrd) with its ontology JSON, GeoJSON files, or a .zip of any — shown by themselves"
+      <label
+        class="upload annotations"
+        title="A label volume (.nii, .nii.gz, .nrrd) with its ontology JSON, GeoJSON files, or a .zip of any — shown by themselves"
         >Open annotations…
         <input type="file" multiple accept=".geojson,.json,.nii,.gz,.nrrd,.zip" (change)="onAnnotations($event)" />
       </label>
-      <label class="upload annotations" title="A folder of per-slice GeoJSON, a label volume with its ontology, or an OME-Zarr store (its labels/)"
+      <label
+        class="upload annotations"
+        title="A folder of per-slice GeoJSON, a label volume with its ontology, or an OME-Zarr store (its labels/)"
         >…folder
         <input type="file" webkitdirectory multiple (change)="onAnnotations($event)" />
       </label>
@@ -526,8 +577,9 @@ async function warmUp(base: string): Promise<void> {
             <ng-container *ngFor="let f of folderPath; let i = index; let last = last">
               <span>/</span>
               <span *ngIf="last" class="crumb-current">{{ f.name }}</span>
-              <button *ngIf="!last" class="crumb-back" (click)="goToDepth(i + 1)"
-                      [title]="'Back to ' + f.name">{{ f.name }}</button>
+              <button *ngIf="!last" class="crumb-back" (click)="goToDepth(i + 1)" [title]="'Back to ' + f.name">
+                {{ f.name }}
+              </button>
             </ng-container>
           </div>
           <div class="folder-hint" *ngIf="folder.slices">
@@ -672,9 +724,7 @@ export class AppComponent implements OnDestroy {
    * scalar mode still needs a grayscale image, and Spatial omics still needs a
    * dataset loaded.
    */
-  readonly testMode = /^(1|true|yes)$/i.test(
-    new URLSearchParams(window.location.search).get('test') ?? '',
-  );
+  readonly testMode = /^(1|true|yes)$/i.test(new URLSearchParams(window.location.search).get('test') ?? '');
 
   /** Spatial-omics datasets discovered from the server (see SpatialEntry). */
   spatialEntries: SpatialEntry[] = [];
@@ -710,17 +760,23 @@ export class AppComponent implements OnDestroy {
     return this.folderPath.length ? this.folderPath[this.folderPath.length - 1] : null;
   }
 
-  openFolder(f: Folder): void { this.folderPath = [...this.folderPath, f]; }
+  openFolder(f: Folder): void {
+    this.folderPath = [...this.folderPath, f];
+  }
 
   /** Jump to a breadcrumb depth: 0 = root, 1 = the first folder, and so on. */
-  goToDepth(depth: number): void { this.folderPath = this.folderPath.slice(0, depth); }
+  goToDepth(depth: number): void {
+    this.folderPath = this.folderPath.slice(0, depth);
+  }
 
   /** How many items a folder holds, for its tooltip. */
   folderCount(f: Folder): number {
     return (f.slices?.length ?? 0) + (f.spatial?.length ?? 0) + (f.folders?.length ?? 0);
   }
   /** Up one level, not all the way to the root. */
-  closeFolder(): void { this.folderPath = this.folderPath.slice(0, -1); }
+  closeFolder(): void {
+    this.folderPath = this.folderPath.slice(0, -1);
+  }
 
   /** Load a gigapixel image through the TILED (Mode A) server path. First warms
    *  the tile server with a visible message — a scaled-to-zero Cloud Run service
@@ -736,7 +792,16 @@ export class AppComponent implements OnDestroy {
       this.loading = false;
       this.loadingMessage = '';
     }
-    this.imageState.setTiledImage(t.imageId, t.name, t.width, t.height, t.mppX, t.mppY, t.channels ?? 3, t.slices ?? 1);
+    this.imageState.setTiledImage(
+      t.imageId,
+      t.name,
+      t.width,
+      t.height,
+      t.mppX,
+      t.mppY,
+      t.channels ?? 3,
+      t.slices ?? 1,
+    );
     await this.selectSpatialDataset(t.spatialDatasetId);
   }
 
@@ -781,9 +846,7 @@ export class AppComponent implements OnDestroy {
   async loadSpatial(entry: SpatialEntry): Promise<void> {
     this.active = entry.datasetId;
     this.loading = true;
-    this.loadingMessage = entry.imageId
-      ? 'Preparing the tissue image…'
-      : 'Loading observations…';
+    this.loadingMessage = entry.imageId ? 'Preparing the tissue image…' : 'Loading observations…';
     try {
       await warmUp(TILE_SERVER);
       if (entry.imageId) {
@@ -792,10 +855,16 @@ export class AppComponent implements OnDestroy {
         // materialise this image's pyramid, on first open only.
         const desc = await fetchTileDescriptor(TILE_SERVER, entry.imageId);
         this.imageState.setTiledImage(
-          entry.imageId, entry.name, desc.width, desc.height,
+          entry.imageId,
+          entry.name,
+          desc.width,
+          desc.height,
           // The descriptor's own band count: hard-coding 3 cut a multichannel image (a
           // Xenium morphology stack has 4) down to its first three in the histogram.
-          desc.mppX ?? 1, desc.mppY ?? 1, desc.channels ?? 3, desc.z ?? 1,
+          desc.mppX ?? 1,
+          desc.mppY ?? 1,
+          desc.channels ?? 3,
+          desc.z ?? 1,
         );
       }
       // NOT clearing the image for a dataset that brings none, deliberately. The Plotly

@@ -13,7 +13,6 @@ import { TooltipModule } from 'primeng/tooltip';
  */
 @Component({
   selector: 'spatial-heatmap-controls',
-  standalone: true,
   imports: [CommonModule, FormsModule, CheckboxModule, MultiSelectModule, TooltipModule],
   templateUrl: './spatial-heatmap-controls.component.html',
   styleUrls: ['./spatial-heatmap-controls.component.scss'],

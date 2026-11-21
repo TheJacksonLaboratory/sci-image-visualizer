@@ -71,7 +71,6 @@ function nativeRange(h: IHistogram | null): { min: number; max: number } {
  */
 @Component({
   selector: 'channel-histogram',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

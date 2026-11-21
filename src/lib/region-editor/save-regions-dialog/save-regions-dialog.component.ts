@@ -15,7 +15,6 @@ import { ProgressBarModule } from 'primeng/progressbar';
  */
 @Component({
   selector: 'region-save-regions-dialog',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

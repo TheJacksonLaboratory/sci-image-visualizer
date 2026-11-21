@@ -48,7 +48,6 @@ import { Supersede } from '../../util/supersede';
  */
 @Component({
   selector: 'spatial-groups-panel',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

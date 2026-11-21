@@ -72,7 +72,6 @@ interface AllGeneRowView {
  */
 @Component({
   selector: 'spatial-gene-tree',
-  standalone: true,
   imports: [
     CommonModule,
     SharedModule,

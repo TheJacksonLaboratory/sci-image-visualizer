@@ -17,7 +17,6 @@ import { ToolSliderComponent } from '../tool-slider/tool-slider.component';
  */
 @Component({
   selector: 'toolbar-plot-type-selector',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

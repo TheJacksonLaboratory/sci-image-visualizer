@@ -36,7 +36,6 @@ export type ColorByMode = 'group' | 'gene' | 'measure' | 'single';
  */
 @Component({
   selector: 'spatial-color-by',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

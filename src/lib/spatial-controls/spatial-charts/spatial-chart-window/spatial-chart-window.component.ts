@@ -12,7 +12,6 @@ import { DialogModule } from 'primeng/dialog';
  */
 @Component({
   selector: 'spatial-chart-window',
-  standalone: true,
   imports: [NgIf, DialogModule],
   templateUrl: './spatial-chart-window.component.html',
   styleUrls: ['./spatial-chart-window.component.scss'],

@@ -310,9 +310,10 @@ kbd {
 // (::ng-deep with no :host): the context menu and the toolbar overlays are appended to
 // <body>, outside this component's view. The same rules ship to hosts as
 // styles/viz-icons.scss; emitting them here too keeps a host that does not include that
-// stylesheet working.
+// stylesheet working. The path is relative to the partial (styles/), where the url()s are
+// written: the build rebases them from there.
 ::ng-deep {
-  @include viz-icons-rules.rules('./assets');
+  @include viz-icons-rules.rules('../assets');
 }
 
 /* SAM/cellpose model-download bar: kill PrimeNG's default `width 1s ease`

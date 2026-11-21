@@ -37,7 +37,6 @@ type ToCanvas = (u: number, v: number) => [number, number];
 
 @Component({
   selector: 'viz-section-pane',
-  standalone: true,
   imports: [CommonModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `

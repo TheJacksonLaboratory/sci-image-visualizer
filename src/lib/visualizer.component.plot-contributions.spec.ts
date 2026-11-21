@@ -572,7 +572,10 @@ describe('contributed plot types — panel state', () => {
  * — a plain object on the multi token, no decorators on the contributor's side.
  */
 describe('contributed plot types — panel rendering', () => {
-  @Component({ selector: 'test-mode-panel', template: '<span class="probe">{{ label }}</span>' })
+  @Component({
+    selector: 'test-mode-panel',
+    template: '<span class="probe">{{ label }}</span>',
+  })
   class ModePanelComponent {
     label: string;
     constructor(
@@ -599,8 +602,7 @@ describe('contributed plot types — panel rendering', () => {
     });
     shallowVisualizer();
     await TestBed.configureTestingModule({
-      declarations: [ModePanelComponent, ...extra],
-      imports: [VisualizerComponent, NoopAnimationsModule],
+      imports: [VisualizerComponent, NoopAnimationsModule, ModePanelComponent, ...extra],
       providers: [
         { provide: IMAGE_STATE_PORT, useValue: state },
         { provide: VISUALIZER, useValue: plot },
@@ -644,7 +646,10 @@ describe('contributed plot types — panel rendering', () => {
   });
 
   it('falls back to Image when the component panel throws while it is created', async () => {
-    @Component({ selector: 'test-broken-panel', template: '<i></i>' })
+    @Component({
+      selector: 'test-broken-panel',
+      template: '<i></i>',
+    })
     class BrokenPanelComponent {
       constructor() {
         throw new Error('panel constructor failed');

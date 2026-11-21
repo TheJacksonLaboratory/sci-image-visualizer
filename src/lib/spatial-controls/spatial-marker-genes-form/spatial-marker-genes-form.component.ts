@@ -36,7 +36,6 @@ import {
  */
 @Component({
   selector: 'spatial-marker-genes-form',
-  standalone: true,
   imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, MultiSelectModule],
   templateUrl: './spatial-marker-genes-form.component.html',
   styleUrls: ['./spatial-marker-genes-form.component.scss'],

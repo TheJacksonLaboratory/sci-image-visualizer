@@ -104,7 +104,6 @@ let chartInstanceSeq = 0;
  */
 @Component({
   selector: 'spatial-charts',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

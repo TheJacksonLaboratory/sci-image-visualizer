@@ -33,7 +33,6 @@ const HUE_GRADIENT = `linear-gradient(to right, ${Array.from(
  */
 @Component({
   selector: 'hex-color-picker',
-  standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],

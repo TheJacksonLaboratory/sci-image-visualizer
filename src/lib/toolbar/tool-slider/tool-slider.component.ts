@@ -10,7 +10,6 @@ import { TooltipModule } from 'primeng/tooltip';
  */
 @Component({
   selector: 'toolbar-tool-slider',
-  standalone: true,
   imports: [FormsModule, SliderModule, TooltipModule],
   templateUrl: './tool-slider.component.html',
   styleUrls: ['./tool-slider.component.scss'],

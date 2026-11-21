@@ -20,7 +20,6 @@ const IDLE: EmbeddingComputeState = { running: false, fraction: null, backend: n
  */
 @Component({
   selector: 'spatial-embedding-controls',
-  standalone: true,
   imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, ProgressBarModule, TooltipModule],
   templateUrl: './spatial-embedding-controls.component.html',
   styleUrls: ['./spatial-embedding-controls.component.scss'],

@@ -319,7 +319,6 @@ describe('ChannelHistogramComponent', () => {
 
   describe('OnPush (CORE-21)', () => {
     @Component({
-      standalone: true,
       imports: [ChannelHistogramComponent],
       template: '<channel-histogram [visible]="true"></channel-histogram>',
     })

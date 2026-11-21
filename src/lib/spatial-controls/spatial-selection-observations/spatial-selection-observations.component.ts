@@ -28,7 +28,6 @@ import type { ObservationsInSelection } from '../../contracts/display-types';
  */
 @Component({
   selector: 'spatial-selection-observations',
-  standalone: true,
   imports: [CommonModule, ButtonModule, TooltipModule],
   templateUrl: './spatial-selection-observations.component.html',
   styleUrls: ['./spatial-selection-observations.component.scss'],

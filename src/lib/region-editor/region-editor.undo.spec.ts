@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { ChangeDetectorRef, NO_ERRORS_SCHEMA } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
@@ -218,6 +218,8 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   function typeLabel(text: string): HTMLInputElement {
     editor['startEditLabel'](editor['regions'][0]);
+    // The editor is OnPush and nothing in it marked it dirty (the template's click handler would).
+    fixture.componentRef.injector.get(ChangeDetectorRef).markForCheck();
     fixture.detectChanges();
     const input = fixture.nativeElement.querySelector('td.class-cell input') as HTMLInputElement;
     expect(input).toBeTruthy();

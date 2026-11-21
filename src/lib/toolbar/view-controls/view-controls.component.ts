@@ -14,7 +14,6 @@ import { NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE } from '../../contract
  */
 @Component({
   selector: 'toolbar-view-controls',
-  standalone: true,
   imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, TooltipModule],
   templateUrl: './view-controls.component.html',
   styleUrls: ['./view-controls.component.scss'],

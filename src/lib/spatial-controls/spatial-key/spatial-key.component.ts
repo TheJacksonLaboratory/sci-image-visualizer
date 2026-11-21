@@ -27,7 +27,6 @@ import type { SpatialLegendEntry } from './spatial-key.model';
  */
 @Component({
   selector: 'spatial-key',
-  standalone: true,
   imports: [CommonModule, FormsModule, SharedModule, TooltipModule, TreeSelectModule],
   templateUrl: './spatial-key.component.html',
   styleUrls: ['./spatial-key.component.scss'],

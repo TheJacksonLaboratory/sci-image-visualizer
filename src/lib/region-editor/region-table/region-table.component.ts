@@ -30,7 +30,6 @@ export interface RegionPage {
  */
 @Component({
   selector: 'region-table',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

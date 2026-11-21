@@ -15,7 +15,6 @@ import { GLYPH_OPTIONS } from '../../spatial/spatial-panel-model';
  */
 @Component({
   selector: 'spatial-gene-style',
-  standalone: true,
   imports: [CommonModule, ButtonModule, InputTextModule],
   templateUrl: './spatial-gene-style.component.html',
   styleUrls: ['./spatial-gene-style.component.scss'],

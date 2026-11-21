@@ -14,7 +14,6 @@ import { ToolSliderComponent } from '../tool-slider/tool-slider.component';
  */
 @Component({
   selector: 'toolbar-region-tools',
-  standalone: true,
   imports: [CommonModule, ButtonModule, TooltipModule, ToolSliderComponent],
   templateUrl: './region-tools.component.html',
   styleUrls: ['./region-tools.component.scss'],

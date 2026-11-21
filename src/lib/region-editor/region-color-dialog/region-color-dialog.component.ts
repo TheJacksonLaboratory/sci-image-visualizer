@@ -19,7 +19,6 @@ export interface ClassColorEdit {
  */
 @Component({
   selector: 'region-color-dialog',
-  standalone: true,
   imports: [CommonModule, SharedModule, ButtonModule, DialogModule, HexColorPickerComponent],
   templateUrl: './region-color-dialog.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,

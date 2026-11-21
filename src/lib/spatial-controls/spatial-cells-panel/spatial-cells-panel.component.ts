@@ -22,7 +22,6 @@ import { PanelOption, tileOptions } from '../../spatial/spatial-panel-model';
  */
 @Component({
   selector: 'spatial-cells-panel',
-  standalone: true,
   imports: [CommonModule, FormsModule, InputSwitchModule, InputNumberModule, SelectButtonModule, SliderModule],
   templateUrl: './spatial-cells-panel.component.html',
   styleUrls: ['./spatial-cells-panel.component.scss'],

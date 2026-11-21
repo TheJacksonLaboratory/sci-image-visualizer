@@ -97,7 +97,6 @@ interface HoverLine {
  */
 @Component({
   selector: 'spatial-gene-heatmap',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

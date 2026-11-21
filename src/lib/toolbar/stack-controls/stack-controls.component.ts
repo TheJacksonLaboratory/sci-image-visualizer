@@ -18,7 +18,6 @@ export interface StackOption {
  */
 @Component({
   selector: 'toolbar-stack-controls',
-  standalone: true,
   imports: [CommonModule, FormsModule, ButtonModule, SliderModule, TooltipModule],
   templateUrl: './stack-controls.component.html',
   styleUrls: ['./stack-controls.component.scss'],

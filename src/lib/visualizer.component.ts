@@ -120,7 +120,6 @@ let plotInstanceSeq = 0;
  */
 @Component({
   selector: 'visualizer',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

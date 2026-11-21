@@ -18,7 +18,6 @@ import { MaskMode } from '../mask-export.service';
  */
 @Component({
   selector: 'region-save-mask-dialog',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

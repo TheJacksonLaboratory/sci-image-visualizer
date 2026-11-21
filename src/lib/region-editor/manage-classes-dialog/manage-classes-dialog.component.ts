@@ -21,7 +21,6 @@ import { HexColorPickerComponent } from '../../hex-color-picker/hex-color-picker
  */
 @Component({
   selector: 'region-manage-classes-dialog',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

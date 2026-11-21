@@ -44,7 +44,6 @@ import { SegmentationToolsComponent } from './segmentation-tools/segmentation-to
  */
 @Component({
   selector: 'plotting-toolbar',
-  standalone: true,
   imports: [
     CommonModule,
     ButtonModule,

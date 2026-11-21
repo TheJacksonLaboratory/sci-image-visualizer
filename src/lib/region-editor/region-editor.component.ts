@@ -71,7 +71,6 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
 
 @Component({
   selector: 'region-editor',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

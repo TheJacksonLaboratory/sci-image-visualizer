@@ -32,7 +32,6 @@ import { FloatingDragDirective, FloatingPos } from '../visualizer/floating-drag.
  */
 @Component({
   selector: 'viz-intensity-inset',
-  standalone: true,
   imports: [CommonModule, FloatingDragDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './intensity-inset.component.html',

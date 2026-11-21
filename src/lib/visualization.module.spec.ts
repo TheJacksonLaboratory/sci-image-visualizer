@@ -45,6 +45,9 @@ jest.mock('plotly.js-dist-min', () => ({
     <region-editor></region-editor>
     <hex-color-picker [color]="color" (colorChange)="picked = $event"></hex-color-picker>
   `,
+  // The point of this spec: a component declared in an NgModule that imports the shim.
+  // eslint-disable-next-line @angular-eslint/prefer-standalone
+  standalone: false,
 })
 class LegacyHostComponent {
   color = '#112233';

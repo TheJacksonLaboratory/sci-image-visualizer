@@ -1677,7 +1677,6 @@ describe('SpatialChartsComponent', () => {
 
 describe('SpatialChartsComponent — OnPush (SPATIAL-15)', () => {
   @Component({
-    standalone: true,
     imports: [SpatialChartsComponent],
     template: '<spatial-charts></spatial-charts>',
   })

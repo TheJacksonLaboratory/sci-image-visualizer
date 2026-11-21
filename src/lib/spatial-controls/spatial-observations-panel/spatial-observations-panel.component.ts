@@ -56,7 +56,6 @@ import { SpatialSelectionObservationsComponent } from '../spatial-selection-obse
 
 @Component({
   selector: 'spatial-observations-panel',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

@@ -72,7 +72,6 @@ export interface GeneMenuItem {
  */
 @Component({
   selector: 'spatial-transcripts-panel',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

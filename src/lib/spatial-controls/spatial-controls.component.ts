@@ -64,7 +64,6 @@ let controlsInstanceSeq = 0;
  */
 @Component({
   selector: 'spatial-controls',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,

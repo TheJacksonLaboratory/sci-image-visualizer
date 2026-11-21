@@ -25,7 +25,6 @@ import { MODEL_INFO } from '../model-info';
  */
 @Component({
   selector: 'toolbar-segmentation-tools',
-  standalone: true,
   imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TieredMenuModule, TooltipModule],
   templateUrl: './segmentation-tools.component.html',
   styleUrls: ['./segmentation-tools.component.scss'],
