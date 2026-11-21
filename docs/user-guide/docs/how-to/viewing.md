@@ -110,27 +110,7 @@ saved yet; try again a little later.
 ## Measure a distance with the scale bar
 
 The scale bar at the bottom left of the Image view shows a round length (1, 2 or 5 × 10ⁿ µm, switching to
-mm as you zoom out) and updates as you zoom. It is shown only for images that record their pixel size. For
-a profile along a line, use an [intensity profile line](#plot-intensity-along-a-line).
-
-## Plot intensity along a line
-
-!!! note "Test mode"
-    Intensity lines are a test-mode feature in the demo and in JIT: open the viewer with `?test=1` added to
-    the URL to show the **Add an intensity line** button.
-
-1. In the **Image** or **Heatmap** view, click ![](../assets/icons/spline-chart.svg){ .siv-icon } **Add an
-   intensity line**. A horizontal line appears across the middle of the view, and the **Intensity profile**
-   inset opens with its plot.
-2. Drag the line's ends onto the structure to measure. The plot updates as you drag.
-3. Click the button again to add another line, in a new colour, below the first.
-4. To remove a line, click it to select it and press ++delete++ or click <i class="pi pi-trash"></i>.
-
-The x axis is in µm when the image records its pixel size, otherwise in pixels. Values are the displayed
-8-bit intensities (luminance for RGB images), not the native 16-bit values. See
-[Intensity profile lines](../reference/intensity-profiles.md).
-
-![Two intensity lines and the Intensity profile inset](../assets/screenshots/intensity-profile.png)
+mm as you zoom out) and updates as you zoom. It is shown only for images that record their pixel size.
 
 ## Get back to the whole image
 

@@ -53,7 +53,6 @@ You can also try every feature without installing anything in the
 | Plot types              | Image, Heatmap, Contour, Surface, Volume, Isosurface, Spatial omics (2D and 3D)                               | [Plot types](reference/plot-types.md)                      |
 | Display                 | Per-channel colour, visibility, min/max, gamma, colormaps, histogram, composite export                       | [Channels & Histogram](reference/channels-histogram.md)    |
 | Stacks and volumes      | Slice slider, z-stacks, 3D volume and isosurface rendering, 3D camera                                        | [Stacks, volumes and 3D](reference/stacks-3d.md)           |
-| Measuring               | Intensity profile lines; region areas in µm² or mm²                                                          | [Intensity profiles](reference/intensity-profiles.md)      |
 | Drawing regions         | Rectangle, polyline, freeform, polygon, brush, magic wand, vertex tools, undo/redo                           | [Region tools](reference/region-tools.md)                  |
 | Editing regions         | Merge, ungroup, inverse, simplify, Bézier conversion, holes (donuts)                                         | [Region actions](reference/region-actions.md)              |
 | Organising annotations  | Region Editor table, annotation classes with colour presets, bulk relabelling                                | [Region Editor](reference/region-editor.md)                |

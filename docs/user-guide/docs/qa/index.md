@@ -106,7 +106,7 @@ gallery of samples on the left and the viewer on the right. The whole-slide (**W
 
 | Gallery entry                                    | Type                                         | Exercises                                                                                     |
 | ------------------------------------------------ | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `img01.png`                                      | Small 8-bit image (muscle section, grey)      | Region tools, wand, brush, region actions, Heatmap, intensity profiles                        |
+| `img01.png`                                      | Small 8-bit image (muscle section, grey)      | Region tools, wand, brush, region actions, Heatmap                                            |
 | `img03.png`, `052_img.png`, `024_img.png`         | Small fluorescence / cell images              | Wand on bright objects, SAM point prompts                                                     |
 | `img04.png`                                      | RGB fluorescence (blue nuclei, green cells)   | RGB channels, Channels & Histogram, SAM box prompt, Cellpose-SAM                              |
 | `002_img.png`                                    | RGB, many cells                               | Cellpose-SAM, many-region performance                                                         |
