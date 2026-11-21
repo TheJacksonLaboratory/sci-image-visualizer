@@ -9,6 +9,23 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **One in-browser model per tab, whatever its size (`ModelResidency`).** Before a different
+  model is used, every other loaded model is now released, not only those of 1 GB or more. A
+  model still stays warm while it is the one in use, and a running use of the old model still
+  finishes first. Releasing frees memory only: the download stays in the IndexedDB cache, so the
+  next use rebuilds the model from disk without downloading it again.
+- `ModelResidency.residentModels()` is replaced by `residentIds()`, which returns the ids.
+
+### Removed
+
+- **The 1 GB residency threshold and the loaded-size estimates:** `ResidentModel.loadedSizeMb`,
+  `SamModelDef.loadedSizeMb`, `ModelResidency.setThresholdMb()` / `getThresholdMb()`,
+  `setModelResidencyThresholdMb()`, `DEFAULT_MODEL_RESIDENCY_THRESHOLD_MB`,
+  `estimateLoadedSizeMb()`, and the unused `ModelResidency.activate()`. Owners now register a
+  model with its `id` and `release` only.
+
 ## [0.20.4] — 2026-11-20
 
 ### Added

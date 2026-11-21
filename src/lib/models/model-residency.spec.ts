@@ -1,8 +1,8 @@
-import { ModelResidency, estimateLoadedSizeMb } from './model-residency';
+import { ModelResidency } from './model-residency';
 
 /** A resident model whose release is observable. */
-function model(id: string, loadedSizeMb: number, log: string[]) {
-  return { id, loadedSizeMb, release: jest.fn(async () => void log.push(`release ${id}`)) };
+function model(id: string, log: string[]) {
+  return { id, release: jest.fn(async () => void log.push(`release ${id}`)) };
 }
 
 function deferred<T = void>() {
@@ -21,7 +21,7 @@ describe('ModelResidency', () => {
   });
 
   it('keeps a model warm across repeated uses of it', async () => {
-    const yolo = model('yolo:a', 1300, log);
+    const yolo = model('yolo:a', log);
     r.register(yolo);
 
     await r.use('yolo:a', async () => 'run 1');
@@ -31,13 +31,13 @@ describe('ModelResidency', () => {
     expect(r.isResident('yolo:a')).toBe(true);
   });
 
-  it('releases a large model before a different model is used', async () => {
-    const yolo = model('yolo:a', 1300, log);
+  it('releases the loaded model before a different model is used', async () => {
+    const yolo = model('yolo:a', log);
     r.register(yolo);
 
     await r.use('retinal:vnet', async () => {
       log.push('load retinal');
-      r.register(model('retinal:vnet', 6000, log));
+      r.register(model('retinal:vnet', log));
     });
 
     // Released BEFORE the new model loads, so the tab never holds both.
@@ -47,35 +47,13 @@ describe('ModelResidency', () => {
   });
 
   it('treats another checkpoint of the same tool as another model', async () => {
-    r.register(model('yolo:opticnerve', 1300, log));
+    r.register(model('yolo:opticnerve', log));
     await r.use('yolo:retina', async () => undefined);
     expect(log).toEqual(['release yolo:opticnerve']);
   });
 
-  it('leaves models below the threshold warm', async () => {
-    const stain = model('stain:gr2rgb-20x', 900, log);
-    r.register(stain);
-
-    await r.use('retinal:vnet', async () => undefined);
-
-    expect(stain.release).not.toHaveBeenCalled();
-  });
-
-  it('releases a model exactly at the threshold', async () => {
-    r.register(model('x', 1024, log));
-    await r.use('y', async () => undefined);
-    expect(log).toEqual(['release x']);
-  });
-
-  it('honours a changed threshold', async () => {
-    r.setThresholdMb(2000);
-    r.register(model('yolo:a', 1300, log));
-    await r.use('retinal:vnet', async () => undefined);
-    expect(log).toEqual([]);
-  });
-
   it('lets a running use of the old model finish before releasing it', async () => {
-    r.register(model('yolo:a', 1300, log));
+    r.register(model('yolo:a', log));
     const gate = deferred();
     const yoloRun = r.use('yolo:a', async () => {
       await gate.promise;
@@ -92,7 +70,7 @@ describe('ModelResidency', () => {
   });
 
   it('does not release a model its owner already replaced while it waited', async () => {
-    const old = model('yolo:a', 1300, log);
+    const old = model('yolo:a', log);
     r.register(old);
     const gate = deferred();
     const run = r.use('yolo:a', () => gate.promise);
@@ -105,37 +83,36 @@ describe('ModelResidency', () => {
     expect(old.release).not.toHaveBeenCalled();
   });
 
-  it('never leaves two large models loaded when two start at once', async () => {
-    r.register(model('a', 2000, log));
+  it('never leaves two models loaded when two start at once', async () => {
+    r.register(model('a', log));
     const loadB = deferred();
     await Promise.all([
       // b registers only after an async load, i.e. after c's switch has begun.
       r.use('b', async () => {
         await loadB.promise;
-        r.register(model('b', 2000, log));
+        r.register(model('b', log));
       }),
-      r.use('c', async () => void r.register(model('c', 2000, log))),
+      r.use('c', async () => void r.register(model('c', log))),
       Promise.resolve().then(() => loadB.resolve()),
     ]);
-    // c's switch waited for b's use (size unknown until it registered), then released it.
+    // c's switch waited for b's use (still loading, not yet registered), then released it.
     expect(log).toEqual(['release a', 'release b']);
-    expect(r.residentModels().map((m) => m.id)).toEqual(['c']);
+    expect(r.residentIds()).toEqual(['c']);
   });
 
-  it('does not wait for a running use of a small registered model', async () => {
-    r.register(model('sam:vit-t', 200, log));
-    const gate = deferred();
-    const samRun = r.use('sam:vit-t', () => gate.promise);
+  it('releases every other loaded model, whatever its size', async () => {
+    r.register(model('stain:gr2rgb-20x', log));
+    r.register(model('sam:vit-t', log));
+    r.register(model('yolo:a', log));
 
     await r.use('retinal:vnet', async () => void log.push('retinal starts'));
 
-    expect(log).toEqual(['retinal starts']);
-    gate.resolve();
-    await samRun;
+    expect(log).toEqual(['release stain:gr2rgb-20x', 'release sam:vit-t', 'release yolo:a', 'retinal starts']);
+    expect(r.residentIds()).toEqual([]);
   });
 
   it('joins a nested use of the model already in use instead of deadlocking behind a switch', async () => {
-    r.register(model('a', 2000, log));
+    r.register(model('a', log));
     const gate = deferred();
     const outer = r.use('a', async () => {
       await gate.promise; // meanwhile a switch to b queues and waits for this use
@@ -152,7 +129,7 @@ describe('ModelResidency', () => {
   });
 
   it('a switch drains uses that joined while it waited before releasing', async () => {
-    r.register(model('a', 2000, log));
+    r.register(model('a', log));
     const first = deferred();
     const second = deferred();
     const run1 = r.use('a', () => first.promise);
@@ -175,7 +152,7 @@ describe('ModelResidency', () => {
   });
 
   it('begin() holds a model across several steps until ended', async () => {
-    r.register(model('a', 2000, log));
+    r.register(model('a', log));
     const end = await r.begin('a');
     const switching = r.use('b', async () => undefined);
     await new Promise((res) => setTimeout(res, 0));
@@ -189,8 +166,8 @@ describe('ModelResidency', () => {
 
   it('keeps going when one release fails', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    r.register({ id: 'bad', loadedSizeMb: 2000, release: () => Promise.reject(new Error('boom')) });
-    r.register(model('good', 2000, log));
+    r.register({ id: 'bad', release: () => Promise.reject(new Error('boom')) });
+    r.register(model('good', log));
 
     await r.use('next', async () => undefined);
 
@@ -202,21 +179,5 @@ describe('ModelResidency', () => {
   it('returns the use result and propagates its failure', async () => {
     await expect(r.use('a', async () => 42)).resolves.toBe(42);
     await expect(r.use('a', () => Promise.reject(new Error('run failed')))).rejects.toThrow('run failed');
-  });
-
-  it('rejects a nonsensical threshold', () => {
-    expect(() => r.setThresholdMb(-1)).toThrow();
-    expect(() => r.setThresholdMb(Number.NaN)).toThrow();
-  });
-});
-
-describe('estimateLoadedSizeMb', () => {
-  it('scales fp16-weight models by the measured ~9x', () => {
-    // 144 MB YOLO measured at ~1.3 GB loaded.
-    expect(estimateLoadedSizeMb(144, { fp16Weights: true })).toBe(1296);
-  });
-
-  it('uses a smaller factor for graphs without the fp16->fp32 fold', () => {
-    expect(estimateLoadedSizeMb(100)).toBe(400);
   });
 });
