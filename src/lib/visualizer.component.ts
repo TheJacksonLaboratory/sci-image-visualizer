@@ -32,7 +32,7 @@ import { ButtonModule } from 'primeng/button';
 import { CheckboxModule } from 'primeng/checkbox';
 import { ContextMenu, ContextMenuModule } from 'primeng/contextmenu';
 import { DialogModule } from 'primeng/dialog';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { SliderModule } from 'primeng/slider';
@@ -128,7 +128,7 @@ let plotInstanceSeq = 0;
     CheckboxModule,
     ContextMenuModule,
     DialogModule,
-    DropdownModule,
+    SelectModule,
     InputNumberModule,
     ProgressBarModule,
     SliderModule,

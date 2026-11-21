@@ -34,7 +34,7 @@
         <!-- A filterable dropdown, not a free-text box: the genes are visible before anything is
         typed, and each keystroke narrows a list the user can see. Virtual-scrolled because a
         targeted panel runs to a few thousand names. -->
-        <p-dropdown
+        <p-select
           inputId="sc-gene"
           [options]="gene.options"
           optionLabel="label"
@@ -53,7 +53,7 @@
           appendTo="body"
           placeholder="Search {{ features.count | number }} genes…"
           styleClass="sc-full"
-        ></p-dropdown>
+        ></p-select>
         @if (gene.failed) {
           <small class="sc-hint">Gene lookup failed.</small>
         }
@@ -66,7 +66,7 @@
 @if (mode === 'measure') {
   <div class="sc-section">
     <label class="sc-lbl" for="sc-measure">Measurement</label>
-    <p-dropdown
+    <p-select
       inputId="sc-measure"
       [options]="measureOptions"
       optionLabel="label"
@@ -76,7 +76,7 @@
       placeholder="Pick a measurement"
       appendTo="body"
       styleClass="sc-full"
-    ></p-dropdown>
+    ></p-select>
   </div>
 }
 

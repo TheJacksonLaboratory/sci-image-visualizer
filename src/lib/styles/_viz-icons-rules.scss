@@ -37,18 +37,22 @@ $context-menu-icons: (
 /// Emit the icon and active-context-menu rules. `$assets` is the path, relative to the
 /// stylesheet being compiled, of the package's `src/lib/assets` folder.
 @mixin rules($assets) {
-  .context-menu-active > .p-menuitem-content {
-    background-color: var(--primary-color) !important;
+  .context-menu-active > .p-contextmenu-item-content {
+    background-color: var(--p-primary-color) !important;
   }
 
-  .context-menu-active > .p-menuitem-content .p-menuitem-icon,
-  .context-menu-active > .p-menuitem-content .p-menuitem-text {
+  .context-menu-active > .p-contextmenu-item-content .p-contextmenu-item-icon,
+  .context-menu-active > .p-contextmenu-item-content .p-contextmenu-item-label {
     color: #ffffff !important;
   }
 
   $active: ();
   @each $class in $context-menu-icons {
-    $active: list.append($active, '.context-menu-active > .p-menuitem-content .#{$class}', $separator: comma);
+    $active: list.append(
+      $active,
+      '.context-menu-active > .p-contextmenu-item-content .#{$class}',
+      $separator: comma
+    );
   }
   #{$active} {
     filter: brightness(0) invert(1);

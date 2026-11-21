@@ -3,7 +3,7 @@
   <div class="sc-markers">
     <div class="sc-row">
       <span class="sc-lbl">Clusters from</span>
-      <p-dropdown
+      <p-select
         [options]="markerColumnOptions"
         optionLabel="label"
         optionValue="value"
@@ -11,17 +11,17 @@
         (ngModelChange)="onMarkerColumn($event)"
         appendTo="body"
         [filter]="markerColumnOptions.length > 8"
-      ></p-dropdown>
+      ></p-select>
     </div>
     <div class="sc-row">
       <span class="sc-lbl">Per cluster</span>
-      <p-dropdown
+      <p-select
         [options]="markerPerGroupOptions"
         optionLabel="label"
         optionValue="value"
         [(ngModel)]="markerPerGroup"
         appendTo="body"
-      ></p-dropdown>
+      ></p-select>
     </div>
     <div class="sc-row">
       <span class="sc-lbl">Clusters</span>

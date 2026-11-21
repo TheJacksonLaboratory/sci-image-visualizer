@@ -2,8 +2,10 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Out
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
+import { IconFieldModule } from 'primeng/iconfield';
+import { InputIconModule } from 'primeng/inputicon';
 import { PaginatorModule } from 'primeng/paginator';
 import { RippleModule } from 'primeng/ripple';
 import { TableModule } from 'primeng/table';
@@ -33,8 +35,10 @@ export interface RegionPage {
     FormsModule,
     SharedModule,
     ButtonModule,
-    DropdownModule,
+    SelectModule,
     InputTextModule,
+    IconFieldModule,
+    InputIconModule,
     PaginatorModule,
     RippleModule,
     TableModule,

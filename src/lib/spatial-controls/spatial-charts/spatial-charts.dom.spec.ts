@@ -117,10 +117,10 @@ describe('SpatialChartsComponent (rendered)', () => {
 
   it('offers the embedding picker on the embedding tab, and Detach on every tab', async () => {
     const row = one(root, 'spatial-embedding-controls');
-    expect(row.querySelector('p-dropdown')).toBeNull();
+    expect(row.querySelector('p-select')).toBeNull();
     accessorOf(fixture, one(root, 'p-selectButton')).pick('embedding');
     await settle();
-    const picker = one(row, 'p-dropdown');
+    const picker = one(row, 'p-select');
     accessorOf(fixture, picker).pick('X_pca');
     await settle();
     expect(component['embedding']?.name).toBe('X_pca');
@@ -140,7 +140,7 @@ describe('SpatialChartsComponent (rendered)', () => {
       .mockResolvedValue();
     accessorOf(fixture, one(root, 'p-selectButton')).pick('embedding');
     await settle();
-    accessorOf(fixture, one(root, 'spatial-embedding-controls p-dropdown')).pick('local:tsne');
+    accessorOf(fixture, one(root, 'spatial-embedding-controls p-select')).pick('local:tsne');
     await settle();
     const compute = Array.from(root.querySelectorAll('spatial-embedding-controls p-button')).find((b) =>
       (b as unknown as { label?: string }).label?.startsWith('Compute'),

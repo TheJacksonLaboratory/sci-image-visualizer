@@ -367,7 +367,7 @@
       </div>
       <div class="sc-row">
         <span class="sc-lbl">Clip outliers</span>
-        <p-dropdown
+        <p-select
           [options]="clipOptions"
           optionLabel="label"
           optionValue="value"
@@ -376,7 +376,7 @@
           appendTo="body"
           pTooltip="Percentile the contrast window is taken at"
           tooltipPosition="top"
-        ></p-dropdown>
+        ></p-select>
         <!-- Reserves the readout column this row has no readout for, so the
         control's right edge lines up with every slider's. -->
         <span class="sc-val"></span>
@@ -399,7 +399,7 @@
       </svg>
     </button>
   </ng-template>
-  <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+  <p-popover #genePop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
       @if (styleGene; as g) {
         <spatial-gene-style
@@ -414,5 +414,5 @@
         ></spatial-gene-style>
       }
     </ng-template>
-  </p-overlayPanel>
+  </p-popover>
 }

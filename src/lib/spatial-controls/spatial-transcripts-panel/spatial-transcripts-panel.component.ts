@@ -15,7 +15,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { MenuModule } from 'primeng/menu';
 import { MultiSelectModule } from 'primeng/multiselect';
@@ -77,7 +77,7 @@ export interface GeneMenuItem {
     FormsModule,
     SharedModule,
     CheckboxModule,
-    DropdownModule,
+    SelectModule,
     InputNumberModule,
     MenuModule,
     MultiSelectModule,

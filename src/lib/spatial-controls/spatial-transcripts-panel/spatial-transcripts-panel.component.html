@@ -116,14 +116,14 @@
         @if (editingMax) {
           <div class="sc-row">
             <span class="sc-lbl">Max markers</span>
-            <p-dropdown
+            <p-select
               [options]="budgetOptions"
               optionLabel="label"
               optionValue="value"
               [ngModel]="view.transcriptBudget"
               (ngModelChange)="onTranscriptBudget($event)"
               appendTo="body"
-            ></p-dropdown>
+            ></p-select>
           </div>
         }
         @if (estimateOverMax && view.transcriptMode !== 'density') {
@@ -183,7 +183,7 @@
         @if (view.transcriptAllGenes && view.transcriptMode === 'glyphs') {
           <div class="sc-row">
             <span class="sc-lbl">Icon</span>
-            <p-dropdown
+            <p-select
               [options]="glyphOptions"
               optionLabel="label"
               optionValue="value"
@@ -207,7 +207,7 @@
                   </svg>
                 </span>
               </ng-template>
-            </p-dropdown>
+            </p-select>
           </div>
         }
         <div class="sc-row">

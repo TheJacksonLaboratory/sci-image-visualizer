@@ -10,7 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { SharedModule } from 'primeng/api';
 import { InputTextModule } from 'primeng/inputtext';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { PopoverModule } from 'primeng/popover';
 import { TooltipModule } from 'primeng/tooltip';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
@@ -72,14 +72,7 @@ interface AllGeneRowView {
  */
 @Component({
   selector: 'spatial-gene-tree',
-  imports: [
-    CommonModule,
-    SharedModule,
-    InputTextModule,
-    OverlayPanelModule,
-    TooltipModule,
-    SpatialGeneStyleComponent,
-  ],
+  imports: [CommonModule, SharedModule, InputTextModule, PopoverModule, TooltipModule, SpatialGeneStyleComponent],
   templateUrl: './spatial-gene-tree.component.html',
   styleUrls: ['./spatial-gene-tree.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

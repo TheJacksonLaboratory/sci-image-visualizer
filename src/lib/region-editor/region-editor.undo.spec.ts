@@ -6,7 +6,7 @@ import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { EMPTY, of } from 'rxjs';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { TableModule } from 'primeng/table';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { SelectButtonModule } from 'primeng/selectbutton';
@@ -113,7 +113,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
           FormsModule,
           RegionTableComponent,
           TableModule,
-          DropdownModule,
+          SelectModule,
           InputTextModule,
           RadioButtonModule,
           SelectButtonModule,

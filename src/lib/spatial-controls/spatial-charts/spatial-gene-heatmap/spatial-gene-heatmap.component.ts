@@ -15,8 +15,9 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { TooltipModule } from 'primeng/tooltip';
@@ -101,8 +102,9 @@ interface HoverLine {
   imports: [
     CommonModule,
     FormsModule,
+    ButtonModule,
     CheckboxModule,
-    DropdownModule,
+    SelectModule,
     InputTextModule,
     SelectButtonModule,
     TooltipModule,

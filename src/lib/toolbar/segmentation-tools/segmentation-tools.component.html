@@ -5,7 +5,7 @@ model picker. -->
 then the model-picker dropdown (the chevron) which governs BOTH tools.
 Falls back to Segment + point with no model picker when none are set. -->
 @if (samModels.length) {
-  <span class="p-buttonset segment-split">
+  <p-buttongroup class="segment-split">
     <p-button
       size="small"
       [text]="true"
@@ -27,9 +27,9 @@ Falls back to Segment + point with no model picker when none are set. -->
       (onClick)="samModelMenu.toggle($event)"
     >
     </p-button>
-  </span>
+  </p-buttongroup>
 } @else {
-  <span class="p-buttonset segment-split">
+  <p-buttongroup class="segment-split">
     <p-button
       size="small"
       [text]="true"
@@ -41,7 +41,7 @@ Falls back to Segment + point with no model picker when none are set. -->
       <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
     <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-  </span>
+  </p-buttongroup>
 }
 <!-- Point-prompt tool — shared between the models / no-models layouts so it
 always sits just left of the model dropdown. -->
@@ -78,16 +78,17 @@ the model's description as a hover tooltip. This replaced a single
 "About the SAM models" overlay panel — per-model text sits next to the
 model it describes, and YOLO/retinal get the same affordance.
 
-p-menu puts its click handler on the wrapping `.p-menuitem-content`,
+p-menu puts its click handler on the wrapping `.p-menu-item-content`,
 outside this template, so `command` still fires and the whole row stays
 clickable — which is also why the info icon has to stop propagation, or
 reading about a model would switch to it. -->
 <ng-template #modelMenuItem let-item let-hasSubmenu="hasSubmenu">
-  <a class="p-menuitem-link model-menu-item">
+  <!-- Used by a p-menu and a p-tieredMenu: each one's item classes (only its own are styled). -->
+  <a class="p-menu-item-link p-tieredmenu-item-link model-menu-item">
     @if (item.icon) {
-      <span class="p-menuitem-icon" [ngClass]="item.icon"></span>
+      <span class="p-menu-item-icon p-tieredmenu-item-icon" [ngClass]="item.icon"></span>
     }
-    <span class="p-menuitem-text">{{ item.label }}</span>
+    <span class="p-menu-item-label p-tieredmenu-item-label">{{ item.label }}</span>
     <!-- `bottom` like every other tooltip in this toolbar, and for room:
     these menus open under buttons that can sit near the right edge,
     where a `right` tooltip has a few hundred px and squeezes its text
@@ -136,7 +137,7 @@ Nothing here names a specific tool. The library ships only Cellpose; a
 host registers the rest, which is what lets this package be published
 without the closed model dependencies. -->
 @for (tool of contributedTools; track trackToolById($index, tool)) {
-  <span class="p-buttonset segment-split">
+  <p-buttongroup class="segment-split">
     <p-button
       size="small"
       [text]="true"
@@ -177,7 +178,7 @@ without the closed model dependencies. -->
       >
       </p-button>
     }
-  </span>
+  </p-buttongroup>
   <!-- A tiered menu, so a checkpoint can carry a parameters submenu
   (`paramsInModelMenu`, Cellpose-SAM → Set cell diameter…); without one it
   reads as the flat menu the SAM picker uses. -->

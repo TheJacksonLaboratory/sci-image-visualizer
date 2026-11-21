@@ -14,7 +14,7 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
  * Test-only stand-in for the PrimeNG form controls of the spatial-omics panels.
  *
  * The panel specs render under `NO_ERRORS_SCHEMA` rather than importing PrimeNG, so a
- * `p-dropdown [ngModel]` is an unknown element and `NgModel` finds no value accessor
+ * `p-select [ngModel]` is an unknown element and `NgModel` finds no value accessor
  * (NG01203). This directive is that accessor: it records what the template wrote into the
  * control ({@link value}) and lets a spec play the user ({@link pick}), which emits the
  * element's `(ngModelChange)` exactly as the real control would. Everything else a
@@ -23,8 +23,8 @@ import { SpatialSelectionMask, emptySelection } from '../spatial/spatial-selecti
  */
 @Directive({
   selector:
-    'p-checkbox[ngModel],p-dropdown[ngModel],p-selectButton[ngModel],p-slider[ngModel],' +
-    'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel],p-inputSwitch[ngModel]',
+    'p-checkbox[ngModel],p-select[ngModel],p-selectButton[ngModel],p-slider[ngModel],' +
+    'p-inputNumber[ngModel],p-multiSelect[ngModel],p-treeSelect[ngModel],p-toggleswitch[ngModel]',
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,

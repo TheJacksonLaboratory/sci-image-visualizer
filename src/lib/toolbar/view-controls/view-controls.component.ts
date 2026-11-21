@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE } from '../../contracts/plot-type';
@@ -13,7 +13,7 @@ import { NAPARI_DECIMATE_OPTIONS, NAPARI_DEFAULT_DECIMATE } from '../../contract
  */
 @Component({
   selector: 'toolbar-view-controls',
-  imports: [FormsModule, ButtonModule, DropdownModule, TooltipModule],
+  imports: [FormsModule, ButtonModule, SelectModule, TooltipModule],
   templateUrl: './view-controls.component.html',
   styleUrls: ['./view-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -1,6 +1,6 @@
 import { Observable } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { Message } from 'primeng/api';
+import { ToastMessageOptions } from 'primeng/api';
 
 import { IRegionStore } from '../contracts/visualizer.contract';
 import { MultiPolygon, Polygon, Rectangle, Region } from '../models/region';
@@ -41,7 +41,7 @@ export class RegionActions {
     private readonly ops: RegionOpsService,
     /** `[width, height]` of the image, when known — the frame inverse and merge rasterize in. */
     private readonly imageSize: () => number[] | undefined,
-    private readonly notify: (message: Message) => void,
+    private readonly notify: (message: ToastMessageOptions) => void,
   ) {}
 
   /** Mirror the store's selection and undo/redo depth until `until$` emits.

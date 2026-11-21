@@ -1,5 +1,5 @@
 <p-toolbar styleClass="region-toolbar">
-  <div class="p-toolbar-group-start align-items-center flex-wrap gap-1">
+  <div class="p-toolbar-start align-items-center flex-wrap gap-1">
     <p-button
       icon="pi pi-tag"
       size="small"
@@ -171,14 +171,14 @@
       [disabled]="!selectedRegions || !selectedRegions.length"
     >
     </p-button>
-    <p-overlayPanel #op (onHide)="bulkClass = ''; newBulkClass = ''">
+    <p-popover #op (onHide)="bulkClass = ''; newBulkClass = ''">
       <div class="flex flex-column gap-2" style="width: 18rem">
         <span class="font-medium text-900"
           >Set class on {{ selectedRegions?.length || 0 }} selected region(s)</span
         >
         <!-- Selecting a class applies it immediately (choosing an option closes the
           overlay, so there's no separate Apply button). -->
-        <p-dropdown
+        <p-select
           styleClass="w-full"
           appendTo="body"
           [options]="presetSet.classes"
@@ -195,7 +195,7 @@
               ><span class="chip-swatch" [style.background]="c.color"></span>{{ c.name }}</span
             >
           </ng-template>
-        </p-dropdown>
+        </p-select>
         <div class="p-inputgroup">
           <input
             type="text"
@@ -215,7 +215,7 @@
           ></button>
         </div>
       </div>
-    </p-overlayPanel>
+    </p-popover>
     <p-button
       icon="pi pi-trash"
       size="small"
@@ -332,14 +332,14 @@
   rejectButtonStyleClass="p-button-outlined"
 >
   <ng-template pTemplate="footer">
-    <button type="button" pButton icon="pi pi-check" label="Yes" (click)="cd.accept()"></button>
+    <button type="button" pButton icon="pi pi-check" label="Yes" (click)="cd.onAccept()"></button>
     <button
       type="button"
       class="p-button-outlined"
       pButton
       icon="pi pi-times"
       label="No"
-      (click)="cd.reject()"
+      (click)="cd.onReject()"
     ></button>
   </ng-template>
 </p-confirmDialog>

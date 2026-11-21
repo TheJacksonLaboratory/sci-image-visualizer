@@ -295,9 +295,10 @@ export class ChannelHistogramComponent implements OnInit, OnDestroy {
     return sel ? (this.rows.find((r) => r.kind === 'channel' && r.channel.index === sel.index) ?? null) : null;
   }
 
-  /** A row was selected: a channel's selects the channel (a group's row cannot be). */
-  protected onRowSelect(row: ChannelTreeRow): void {
-    if (row?.kind === 'channel') this.selectChannel(row.channel);
+  /** A row was selected: a channel's selects the channel (a group's row cannot be). The
+   *  table is single-select, so the event carries one row (its type also allows a list). */
+  protected onRowSelect(row: ChannelTreeRow | ChannelTreeRow[] | undefined): void {
+    if (!Array.isArray(row) && row?.kind === 'channel') this.selectChannel(row.channel);
   }
 
   /** Fold a group shut, or open it. */

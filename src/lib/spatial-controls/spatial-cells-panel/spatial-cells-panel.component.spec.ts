@@ -72,7 +72,7 @@ describe('SpatialCellsPanelComponent', () => {
     });
     fixture.detectChanges();
     expect(component['boundarySets'].map((s) => s.label)).toEqual(['Cell boundaries', 'Nuclear boundaries']);
-    expect(root.querySelectorAll('p-inputSwitch')).toHaveLength(2);
+    expect(root.querySelectorAll('p-toggleswitch')).toHaveLength(2);
     // Only the drawing's choice (fill, outline or both) is a select button.
     expect(root.querySelectorAll('p-selectButton')).toHaveLength(1);
     // The cells' outlines by default, alone.
@@ -136,7 +136,7 @@ describe('SpatialCellsPanelComponent', () => {
       },
     });
     fixture.detectChanges();
-    expect(root.querySelectorAll('p-inputSwitch')).toHaveLength(0);
+    expect(root.querySelectorAll('p-toggleswitch')).toHaveLength(0);
     expect(root.querySelectorAll('p-selectButton')).toHaveLength(2);
   });
 

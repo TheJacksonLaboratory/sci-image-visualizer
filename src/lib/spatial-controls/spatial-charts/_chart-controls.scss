@@ -9,22 +9,22 @@
 
   // As in the controls panel: the host element is inline, and `styleClass` only
   // reaches PrimeNG's inner div — so the host has to be sized here.
-  p-dropdown {
+  p-select {
     flex: 1 1 8rem;
     min-width: 0;
   }
 }
 
-:host ::ng-deep .sx-controls p-dropdown .p-dropdown {
+:host ::ng-deep .sx-controls p-select .p-select {
   width: 100%;
 }
 
 .sx-hint {
   font-size: 0.75rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   line-height: 1.35;
 }
 
 .sx-warn {
-  color: var(--orange-600, #c2410c);
+  color: var(--p-orange-600, #c2410c);
 }

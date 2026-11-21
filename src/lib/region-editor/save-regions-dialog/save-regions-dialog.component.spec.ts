@@ -43,10 +43,10 @@ describe('SaveRegionsDialogComponent', () => {
   });
 
   it('warns when the file exists', () => {
-    expect(document.querySelector('.p-dialog .p-error')).toBeNull();
+    expect(document.querySelector('.p-dialog .overwrite-warning')).toBeNull();
     fixture.componentRef.setInput('fileExists', true);
     fixture.detectChanges();
-    expect(document.querySelector('.p-dialog .p-error')?.textContent).toContain('will be overwritten');
+    expect(document.querySelector('.p-dialog .overwrite-warning')?.textContent).toContain('will be overwritten');
   });
 
   it('busy: progress and a Cancel that cancels the save', () => {

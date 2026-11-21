@@ -16,6 +16,8 @@ import { ProgressBarModule } from 'primeng/progressbar';
   selector: 'region-save-regions-dialog',
   imports: [FormsModule, SharedModule, ButtonModule, DialogModule, InputTextModule, ProgressBarModule],
   templateUrl: './save-regions-dialog.component.html',
+  // PrimeNG 18 dropped its .p-error utility; the same red as an invalid field's text.
+  styles: ['.overwrite-warning { color: var(--p-form-field-invalid-placeholder-color, #d9362b); }'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SaveRegionsDialogComponent {

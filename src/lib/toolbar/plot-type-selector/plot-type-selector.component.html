@@ -1,5 +1,5 @@
 <span class="toolbar-separator"></span>
-<p-dropdown
+<p-select
   [options]="options"
   optionLabel="label"
   optionValue="type"
@@ -37,7 +37,7 @@
       <span>{{ opt.label }}</span>
     </span>
   </ng-template>
-</p-dropdown>
+</p-select>
 @if (isosurface) {
   <toolbar-tool-slider
     label="Iso"

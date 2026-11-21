@@ -53,14 +53,13 @@
             <span class="class-cell-display">
               <!-- Quick-pick a preset class (its colour follows); the pencil is for
               a free-form name / rename (jit-ui#70). -->
-              <p-dropdown
+              <p-select
                 class="class-dropdown"
                 appendTo="body"
                 [options]="presetSet.classes"
                 optionLabel="name"
                 optionValue="name"
                 [ngModel]="region.label"
-                [autoDisplayFirst]="false"
                 ariaLabel="Class"
                 (onChange)="classPick.emit({ region: region, name: $event.value })"
               >
@@ -78,7 +77,7 @@
                     <span>{{ c.name }}</span>
                   </span>
                 </ng-template>
-              </p-dropdown>
+              </p-select>
               <i
                 class="pi pi-pencil icon-hover ml-2"
                 pTooltip="Rename / free-form label"
@@ -89,15 +88,15 @@
               ></i>
             </span>
           } @else {
-            <span class="p-input-icon-right class-cell-edit">
-              <i
+            <p-iconfield class="class-cell-edit" iconPosition="right">
+              <p-inputicon
                 class="pi pi-times icon-hover"
                 pTooltip="Close"
                 tooltipPosition="bottom"
                 role="button"
                 aria-label="Cancel rename"
                 (click)="stopEdit(region, false, $event)"
-              ></i>
+              ></p-inputicon>
               <input
                 type="text"
                 pInputText
@@ -109,7 +108,7 @@
                 (keydown.enter)="stopEdit(region, true, $event)"
                 (keydown.escape)="stopEdit(region, false, $event)"
               />
-            </span>
+            </p-iconfield>
           }
         </td>
         <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
@@ -120,7 +119,7 @@
             pRipple
             icon="pi pi-trash"
             aria-label="Delete region"
-            class="p-button-sm p-button-rounded p-button-text p-button-warning"
+            class="p-button-sm p-button-rounded p-button-text p-button-warn"
             (click)="deleteRow.emit(first + rowIdx)"
           ></button>
         </td>

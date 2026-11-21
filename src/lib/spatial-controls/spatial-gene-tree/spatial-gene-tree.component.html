@@ -182,7 +182,7 @@
     }
   }
   <!-- One picker for every gene row, filled for the gene that opened it. -->
-  <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+  <p-popover #genePop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
       @if (styleGene; as gene) {
         <spatial-gene-style
@@ -200,7 +200,7 @@
         ></spatial-gene-style>
       }
     </ng-template>
-  </p-overlayPanel>
+  </p-popover>
   <div class="sc-gene-footer">
     {{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }}
     genes selected

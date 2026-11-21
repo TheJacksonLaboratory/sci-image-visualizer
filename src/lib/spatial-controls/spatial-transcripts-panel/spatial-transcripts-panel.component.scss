@@ -8,14 +8,14 @@
 .sc-meter {
   height: 0.45rem;
   border-radius: 3px;
-  background: var(--surface-200, #e9ecef);
+  background: var(--p-content-border-color, #e9ecef);
   overflow: hidden;
 }
 .sc-meter-fill {
   height: 100%;
-  background: var(--primary-color, #2196f3);
+  background: var(--p-primary-color, #2196f3);
   &.over {
-    background: var(--orange-500, #f59e0b);
+    background: var(--p-orange-500, #f59e0b);
   }
 }
 .sc-meter-ends,
@@ -24,5 +24,5 @@
   justify-content: space-between;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 }

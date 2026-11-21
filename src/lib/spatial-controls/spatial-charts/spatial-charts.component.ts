@@ -15,7 +15,7 @@ import { markForCheckInZone } from '../../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { TooltipModule } from 'primeng/tooltip';
 import { combineLatest } from 'rxjs';
@@ -107,7 +107,7 @@ let chartInstanceSeq = 0;
   imports: [
     CommonModule,
     FormsModule,
-    DropdownModule,
+    SelectModule,
     SelectButtonModule,
     TooltipModule,
     SpatialHeatmapControlsComponent,

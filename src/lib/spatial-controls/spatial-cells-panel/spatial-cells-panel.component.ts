@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { InputSwitchModule } from 'primeng/inputswitch';
+import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { InputNumberModule } from 'primeng/inputnumber';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
@@ -21,7 +21,7 @@ import { PanelOption, tileOptions } from '../../spatial/spatial-panel-model';
  */
 @Component({
   selector: 'spatial-cells-panel',
-  imports: [FormsModule, InputSwitchModule, InputNumberModule, SelectButtonModule, SliderModule],
+  imports: [FormsModule, ToggleSwitchModule, InputNumberModule, SelectButtonModule, SliderModule],
   templateUrl: './spatial-cells-panel.component.html',
   styleUrls: ['./spatial-cells-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

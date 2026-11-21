@@ -1,7 +1,7 @@
 @if (groupOptions.length) {
   <div class="sc-subhead">Groups</div>
   <div class="sc-row sc-row-picker">
-    <p-dropdown
+    <p-select
       [options]="groupOptions"
       [group]="true"
       optionLabel="label"
@@ -16,9 +16,9 @@
       <ng-template let-group pTemplate="group">
         <span class="sc-group-heading">{{ group.label }}</span>
       </ng-template>
-    </p-dropdown>
+    </p-select>
     @if (groupVariantOptions.length) {
-      <p-dropdown
+      <p-select
         [options]="groupVariantOptions"
         optionLabel="label"
         optionValue="value"
@@ -26,7 +26,7 @@
         [ngModel]="activeCellTypeColumn"
         (ngModelChange)="onGroupVariant($event)"
         appendTo="body"
-      ></p-dropdown>
+      ></p-select>
     }
     @if (canImportGroups) {
       <button
@@ -97,7 +97,7 @@
     </div>
   }
   <!-- One picker for every group row, filled for the group that opened it. -->
-  <p-overlayPanel #groupPop styleClass="sc-gene-style" appendTo="body">
+  <p-popover #groupPop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
       @if (styleGroup; as group) {
         <spatial-gene-style
@@ -110,5 +110,5 @@
         ></spatial-gene-style>
       }
     </ng-template>
-  </p-overlayPanel>
+  </p-popover>
 }

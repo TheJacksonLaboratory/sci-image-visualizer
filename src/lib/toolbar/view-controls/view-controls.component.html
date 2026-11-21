@@ -154,7 +154,7 @@ covers this and a bare drag pans natively, so it's hidden in image view. -->
   <!-- Resolution (decimate factor) for the napari 3D types — reloads at coarser/finer sampling. -->
   @if (isNapari3dMode) {
     <span class="flex align-items-center mx-1 toolbar-text">Res</span>
-    <p-dropdown
+    <p-select
       [options]="decimateOptions"
       optionLabel="label"
       optionValue="value"
@@ -166,6 +166,6 @@ covers this and a bare drag pans natively, so it's hidden in image view. -->
       [style]="{ 'min-width': '6rem' }"
       (onChange)="selectResolution.emit($event.value)"
     >
-    </p-dropdown>
+    </p-select>
   }
 }

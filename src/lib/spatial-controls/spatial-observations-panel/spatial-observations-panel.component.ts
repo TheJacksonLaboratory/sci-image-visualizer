@@ -11,9 +11,9 @@ import { CommonModule } from '@angular/common';
 import { Observable, of } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { PopoverModule } from 'primeng/popover';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { SliderModule } from 'primeng/slider';
 import { TooltipModule } from 'primeng/tooltip';
@@ -60,9 +60,9 @@ import { SpatialSelectionObservationsComponent } from '../spatial-selection-obse
     CommonModule,
     FormsModule,
     CheckboxModule,
-    DropdownModule,
+    SelectModule,
     MultiSelectModule,
-    OverlayPanelModule,
+    PopoverModule,
     SelectButtonModule,
     SliderModule,
     TooltipModule,

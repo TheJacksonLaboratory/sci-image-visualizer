@@ -400,14 +400,14 @@ region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
                 [ngTemplateOutletContext]="{ $implicit: sel }"
               ></ng-container>
             </div>
-            <p-dropdown
+            <p-select
               [options]="sel.options"
               optionLabel="label"
               optionValue="value"
               [ngModel]="open.values[sel.id]"
               (ngModelChange)="open.values[sel.id] = $event"
               appendTo="body"
-            ></p-dropdown>
+            ></p-select>
           }
           <!-- Checkbox label sits beside the box and may run to a sentence, so
             it does not get the stacked label the other types use. -->

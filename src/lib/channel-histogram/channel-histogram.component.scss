@@ -135,7 +135,7 @@
 
 // A group of channels: a header row that folds open or shut.
 .ch-group-row td {
-  background: var(--surface-ground, transparent);
+  background: var(--p-content-hover-background, transparent);
 }
 .ch-group-toggle {
   display: inline-flex;

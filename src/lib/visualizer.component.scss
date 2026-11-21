@@ -82,12 +82,12 @@
 }
 
 .viz-pane-divider {
-  background: var(--surface-border, #cccccc);
+  background: var(--p-content-border-color, #cccccc);
   touch-action: none;
 
   &:hover,
   &:focus-visible {
-    background: var(--primary-color, #3b82f6);
+    background: var(--p-primary-color, #3b82f6);
     outline: none;
   }
 }
@@ -121,8 +121,8 @@
     z-index: 1000;
     width: auto;
     max-width: calc(100% - 16px);
-    background: var(--surface-card, #ffffff);
-    border: 1px solid var(--surface-border, #cccccc);
+    background: var(--p-content-background, #ffffff);
+    border: 1px solid var(--p-content-border-color, #cccccc);
     border-radius: 6px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 
@@ -142,9 +142,9 @@
   justify-content: center;
   padding: 0 0.4rem;
   cursor: move;
-  color: var(--primary-color);
-  background: var(--surface-100, rgba(0, 0, 0, 0.04));
-  border-right: 1px solid var(--surface-border, #cccccc);
+  color: var(--p-primary-color);
+  background: var(--p-content-hover-background, rgba(0, 0, 0, 0.04));
+  border-right: 1px solid var(--p-content-border-color, #cccccc);
   user-select: none;
 }
 
@@ -172,7 +172,7 @@ kbd {
 }
 
 .toolbar-separator {
-  border-left: 1px solid var(--surface-border);
+  border-left: 1px solid var(--p-content-border-color);
   height: 1.5rem;
   margin: 0 0.25rem;
   align-self: center;

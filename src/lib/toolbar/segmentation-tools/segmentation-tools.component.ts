@@ -10,6 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { MenuItem, SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
+import { ButtonGroupModule } from 'primeng/buttongroup';
 import { MenuModule } from 'primeng/menu';
 import { TieredMenuModule } from 'primeng/tieredmenu';
 import { TooltipModule } from 'primeng/tooltip';
@@ -25,7 +26,15 @@ import { MODEL_INFO } from '../model-info';
  */
 @Component({
   selector: 'toolbar-segmentation-tools',
-  imports: [CommonModule, SharedModule, ButtonModule, MenuModule, TieredMenuModule, TooltipModule],
+  imports: [
+    CommonModule,
+    SharedModule,
+    ButtonModule,
+    ButtonGroupModule,
+    MenuModule,
+    TieredMenuModule,
+    TooltipModule,
+  ],
   templateUrl: './segmentation-tools.component.html',
   styleUrls: ['./segmentation-tools.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

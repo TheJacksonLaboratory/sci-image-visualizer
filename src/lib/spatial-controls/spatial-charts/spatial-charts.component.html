@@ -25,7 +25,7 @@
         (ngModelChange)="onKind($event)"
         styleClass="sx-kind"
       ></p-selectButton>
-      <p-dropdown
+      <p-select
         [options]="groupOptions"
         optionLabel="label"
         optionValue="value"
@@ -40,7 +40,7 @@
             : 'Split a violin or box by a categorical column'
         "
         tooltipPosition="top"
-      ></p-dropdown>
+      ></p-select>
       <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
       answers a different question and two are routinely over-read, so the caveat
       travels with the explanation. -->

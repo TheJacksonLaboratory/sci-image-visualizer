@@ -3,7 +3,7 @@ against a heatmap is the same argument as a UMAP read against the map. -->
 <div class="sx-controls">
   <!-- A picker only when the dataset publishes more than one embedding. -->
   @if (isEmbedding && embeddings.length > 1) {
-    <p-dropdown
+    <p-select
       [options]="embeddings"
       optionLabel="label"
       optionValue="name"
@@ -12,7 +12,7 @@ against a heatmap is the same argument as a UMAP read against the map. -->
       appendTo="body"
       pTooltip="Which embedding to draw"
       tooltipPosition="top"
-    ></p-dropdown>
+    ></p-select>
   }
   <!-- Offered only for an embedding this dataset does not publish. It runs in a Web
   Worker on the GPU, so the panel stays usable while it goes. -->

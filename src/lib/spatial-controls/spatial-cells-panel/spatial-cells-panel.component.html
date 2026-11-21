@@ -29,11 +29,11 @@ colour is the Observations section's "Colour by", the markers' too. -->
   @for (set of boundarySets; track set) {
     <div class="sc-row">
       <span class="sc-lbl">{{ set.label }}</span>
-      <p-inputSwitch
+      <p-toggleswitch
         [ngModel]="boundaryOn(set.name)"
         (onChange)="onBoundary(set.name, $event.checked)"
         [attr.aria-label]="set.label"
-      ></p-inputSwitch>
+      ></p-toggleswitch>
     </div>
   }
 }

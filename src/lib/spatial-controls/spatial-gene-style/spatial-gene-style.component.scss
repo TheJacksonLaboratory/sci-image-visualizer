@@ -1,5 +1,5 @@
-// The picker's popover (its host's p-overlayPanel, styleClass "sc-gene-style").
-::ng-deep .sc-gene-style .p-overlaypanel-content {
+// The picker's popover (its host's p-popover, styleClass "sc-gene-style").
+::ng-deep .sc-gene-style .p-popover-content {
   padding: 0.75rem;
 }
 
@@ -32,18 +32,18 @@
   align-items: center;
   justify-content: center;
   height: 1.9rem;
-  border: 1px solid var(--surface-border, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--p-content-border-color, rgba(0, 0, 0, 0.15));
   border-radius: 4px;
   background: transparent;
-  color: var(--text-color, inherit);
+  color: var(--p-text-color, inherit);
   cursor: pointer;
   .sc-glyph-svg {
     width: 1.1rem;
     height: 1.1rem;
   }
   &.active {
-    border-color: var(--primary-color, #3b82f6);
-    background: var(--highlight-bg, rgba(59, 130, 246, 0.12));
+    border-color: var(--p-primary-color, #3b82f6);
+    background: var(--p-highlight-background, rgba(59, 130, 246, 0.12));
   }
 }
 
@@ -84,6 +84,6 @@
   border: 2px solid transparent;
   cursor: pointer;
   &.active {
-    border-color: var(--text-color, #000);
+    border-color: var(--p-text-color, #000);
   }
 }

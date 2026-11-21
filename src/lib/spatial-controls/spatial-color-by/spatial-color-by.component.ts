@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
@@ -39,7 +39,7 @@ export type ColorByMode = 'group' | 'gene' | 'measure' | 'single';
   imports: [
     CommonModule,
     FormsModule,
-    DropdownModule,
+    SelectModule,
     SelectButtonModule,
     SpatialGroupsPanelComponent,
     SpatialKeyComponent,

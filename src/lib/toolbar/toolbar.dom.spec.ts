@@ -64,8 +64,8 @@ function signature(fixture: ComponentFixture<unknown>): string[] {
       out.push(`slider:${handles.join('-')}`);
       return;
     }
-    if (tag === 'p-dropdown') {
-      out.push(`dropdown:${(el.querySelector('.p-dropdown-label')?.textContent ?? '').trim()}`);
+    if (tag === 'p-select') {
+      out.push(`dropdown:${(el.querySelector('.p-select-label')?.textContent ?? '').trim()}`);
       return;
     }
     if (tag === 'p-inputnumber') {
@@ -216,7 +216,7 @@ describe('ToolbarComponent (DOM characterization)', () => {
     expect(intensityButton()).toBeNull();
     // The rest of the special tools stay: the plot-type selector among them.
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('toolbar-plot-type-selector p-dropdown'),
+      (fixture.nativeElement as HTMLElement).querySelector('toolbar-plot-type-selector p-select'),
     ).not.toBeNull();
   });
 
