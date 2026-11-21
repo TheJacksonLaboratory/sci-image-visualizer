@@ -5,6 +5,7 @@ import 'primeicons/primeicons.css';
 import 'primeng/resources/primeng.min.css';
 import 'primeflex/primeflex.css';
 import 'primeng/resources/themes/saga-blue/theme.css';
+import { provideZoneChangeDetection } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { provideHttpClient } from '@angular/common/http';
@@ -32,5 +33,11 @@ import { AppComponent } from './app.component';
 setOrtWasmBase('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/');
 
 bootstrapApplication(AppComponent, {
-  providers: [provideHttpClient(), provideAnimations(), MessageService, ConfirmationService],
+  providers: [
+    provideZoneChangeDetection(),
+    provideHttpClient(),
+    provideAnimations(),
+    MessageService,
+    ConfirmationService,
+  ],
 }).catch((err) => console.error(err));
