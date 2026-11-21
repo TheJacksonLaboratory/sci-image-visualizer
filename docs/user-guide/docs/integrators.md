@@ -28,8 +28,7 @@ your own copy instead (an offline deployment, or a host site that bundles the gu
 ```
 
 The page paths above are appended to `docsUrl`, so the guide must keep its own folder structure under that
-prefix. To hide the toolbar's Help button, pass `toolbarTools` with `help: false`; to hide only its "Add an
-intensity line" button, pass `intensityLines: false`.
+prefix. To hide the toolbar's Help button, pass `toolbarTools` with `help: false`.
 
 !!! note "Contributed tools"
     Tools registered through `TOOLBAR_TOOLS` / `TOOLBAR_DIALOG_TOOLS` (for example JIT's YOLO and retinal

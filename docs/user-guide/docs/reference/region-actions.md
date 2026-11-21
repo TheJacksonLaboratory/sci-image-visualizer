@@ -11,7 +11,7 @@ open them at the top of the context menu.
 
 | Action | Icon | Shown when | What it does |
 | --- | --- | --- | --- |
-| **Select all regions** | <i class="pi pi-check-square"></i> | The image has regions | Selects every region (intensity lines excluded). |
+| **Select all regions** | <i class="pi pi-check-square"></i> | The image has regions | Selects every region. |
 | **Merge / group** | <i class="pi pi-link"></i> | 2 or more closed regions selected | Combines them into one region. If they do not touch, the result is one multi-part region. |
 | **Ungroup** | <i class="pi pi-sitemap"></i> | A multi-part region is selected | Splits it into one region per part. |
 | **Inverse** | <i class="pi pi-clone"></i> | 1 or more closed regions selected | Replaces the selection with everything outside it: the image rectangle, with the selected regions as holes. |

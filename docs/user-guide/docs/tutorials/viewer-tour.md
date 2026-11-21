@@ -21,7 +21,7 @@ The toolbar is organised in groups, left to right:
 | Group | What it holds |
 | --- | --- |
 | Plot type | The dropdown that switches between Image, Heatmap, Surface and the other views |
-| Display | Intensity lines, Channels & Histogram, Smoothen |
+| Display | Channels & Histogram, Smoothen |
 | Image actions | Download as PNG, Fit to view |
 | Zoom | Zoom box, Pan, Zoom in, Zoom out |
 | Regions | Region Editor, Selection and the drawing tools, Undo, Redo, Delete |

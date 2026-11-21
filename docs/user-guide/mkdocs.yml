@@ -100,7 +100,6 @@ nav:
       - Navigation: reference/navigation.md
       - Channels & Histogram: reference/channels-histogram.md
       - Stacks, volumes and 3D: reference/stacks-3d.md
-      - Intensity profile lines: reference/intensity-profiles.md
       - Region tools: reference/region-tools.md
       - Region actions (context menu): reference/region-actions.md
       - Region Editor: reference/region-editor.md

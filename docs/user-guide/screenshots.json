@@ -525,25 +525,6 @@
    ]
   },
   {
-   "id": "intensity-profile",
-   "file": "intensity-profile.png",
-   "section": "How-to guides",
-   "page": "how-to/viewing.md",
-   "usedBy": [
-    "how-to/viewing.md",
-    "reference/intensity-profiles.md"
-   ],
-   "title": "Two intensity lines and the Intensity profile inset",
-   "sample": "WSI CMU-1 (or img01.png)",
-   "capture": "Viewer area",
-   "steps": [
-    "Open the demo with '?test=1' added to the URL (the intensity line button is test-mode only), then the WSI 'CMU-1', and zoom in on tissue.",
-    "Click 'Add an intensity line' twice.",
-    "Drag the endpoints of each line across a structure.",
-    "Capture the viewer area with both lines and the 'Intensity profile' inset."
-   ]
-  },
-  {
    "id": "toolbar-floating",
    "file": "toolbar-floating.png",
    "section": "How-to guides",
@@ -860,7 +841,7 @@
    "sample": "img01.png",
    "capture": "Toolbar strip only, full width",
    "steps": [
-    "Open the demo with '?test=1' added to the URL (so the test-mode 'Add an intensity line' button shows), then click the sample 'img01.png'.",
+    "Open the demo, then click the sample 'img01.png'.",
     "Make the browser wide enough that the toolbar fits on as few rows as possible.",
     "Capture only the toolbar strip, from the drag handle (≡) to the Help (?) button."
    ]

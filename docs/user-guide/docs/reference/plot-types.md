@@ -71,10 +71,3 @@ SIV picks a renderer per plot type and falls back silently if one cannot draw:
 A fallback lasts for the current image only. WebGPU availability is checked once per page. See
 [Limits and requirements](limits.md#browser-and-graphics).
 
-!!! info "Test mode"
-    Developers and QA can open the viewer in **test mode** (in the demo and JIT, add `?test=1` to the URL
-    when the host supports it). The dropdown then shows every renderer explicitly, such as "Image (OSD)",
-    "Heatmap (Plotly)" and "Volume (napari · WebGPU)". It also adds test-only types: Scatter 2D (Plotly),
-    Surface (Plotly), Scatter 3D (Plotly), Isosurface (Plotly), Image (napari · WebGPU),
-    Scatter 2D (napari · WebGPU) and Scatter 3D (napari · WebGPU). The toolbar also shows **Add an intensity
-    line**, which is hidden outside test mode.

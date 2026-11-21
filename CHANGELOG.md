@@ -9,6 +9,13 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **The user guide documents only what production users see.** It no longer mentions test mode
+  (`?test=1`) or the tools it adds: the intensity profile lines (the "Intensity profile lines" reference
+  page, the how-to section, their QA cases and screenshot are removed) and the test-only plot types.
+  The Cellpose-SAM diameter menu and floating toolbar screenshots show the current buttons.
+
 ## [0.21.0] — 2026-11-20
 
 ### Changed

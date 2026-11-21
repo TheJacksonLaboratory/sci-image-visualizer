@@ -28,7 +28,6 @@ hide whole groups (see [Hidden groups](#hidden-groups)).
 | --- | --- | --- | --- |
 | **Plot type** dropdown | <i class="pi pi-image"></i> Image | Chooses how the data is drawn. See [Plot types](plot-types.md). | An image or a spatial dataset is loaded |
 | **Iso** band slider | — | The intensity band drawn as surfaces (0–255, mapped onto the volume's range). See [Isosurface](stacks-3d.md#isosurface-band). | Isosurface |
-| **Add an intensity line** | ![](../assets/icons/spline-chart.svg){ .siv-icon } | Adds a coloured line and plots the intensity along it. See [Intensity profile lines](intensity-profiles.md). | Image and Heatmap; in the demo and JIT, test mode only (`?test=1`) |
 | **Channels & Histogram** | ![](../assets/icons/invert.svg){ .siv-icon } | Opens the brightness/contrast, channel and colormap dialog. See [Channels & Histogram](channels-histogram.md). | Always |
 | **Spatial omics controls** | ![](../assets/icons/spatial-omics.svg){ .siv-icon } | Opens the Spatial omics panel. See [Spatial omics](spatial-omics.md). | Spatial omics plot types |
 | **Smoothen** | ![](../assets/icons/smooth.svg){ .siv-icon } | Switches between raw pixels (default, crisp blocks when zoomed in) and smoothed (bilinear) rendering. The icon turns white while smoothing is on. | Image |
@@ -118,7 +117,7 @@ An application embedding SIV can hide groups of controls:
 
 | Group hidden | Controls removed |
 | --- | --- |
-| Special tools | Plot type (with Iso and intensity line), Channels & Histogram, Spatial omics, Smoothen, Download, Fit to view |
+| Special tools | Plot type (with Iso), Channels & Histogram, Spatial omics, Smoothen, Download, Fit to view |
 | Zoom tools | Zoom drag, Zoom box, Pan, Zoom in, Zoom out |
 | Region tools | Every region and segmentation tool, and the Slice editor button |
 | Help | The Help button |

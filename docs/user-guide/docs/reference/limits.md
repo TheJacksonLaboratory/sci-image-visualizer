@@ -34,7 +34,6 @@ AI segmentation runs on the GPU (WebGPU) or the CPU (WebAssembly), depending on 
 | Composite PNG export | Up to 32 megapixels (larger images are saved at the largest level that fits) |
 | 3D build resolution | Full 1024, ½ 512, ¼ 256 (default), ⅛ 128 pixels in-plane |
 | Contour detail | Up to 400 × 400 cells |
-| Intensity profiles | 8-bit display values |
 
 ## Regions
 

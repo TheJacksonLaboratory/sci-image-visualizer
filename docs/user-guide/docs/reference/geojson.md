@@ -13,7 +13,6 @@ file**. The **Export Regions** dialog proposes `<image name>.geojson` (or `rois.
 - The file holds every region of the current image, plus the remaining features of a large region set.
 - For a stack opened from a single file, every slice's regions are saved in one file, each with its slice
   number. For a stack opened from a folder of files, one GeoJSON is saved per slice file.
-- Intensity profile lines are never exported.
 
 ### Save to server
 

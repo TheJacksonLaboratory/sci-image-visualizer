@@ -13,7 +13,6 @@ see [How-to guides](../how-to/index.md).
 | [Navigation](navigation.md) | Zoom, pan, zoom box, minimap, scale bar, right-click menu, download |
 | [Channels & Histogram](channels-histogram.md) | Channels, colours, histogram, min/max/gamma, colormaps, composite and 16-bit export |
 | [Stacks, volumes and 3D](stacks-3d.md) | Slice slider, stack mode, 3D camera, resolution, Z stretch, isosurface band, slice editor |
-| [Intensity profile lines](intensity-profiles.md) | Intensity along lines |
 
 ## Annotating
 
