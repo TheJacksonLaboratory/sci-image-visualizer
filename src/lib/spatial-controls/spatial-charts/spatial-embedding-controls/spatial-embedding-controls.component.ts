@@ -1,8 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { TooltipModule } from 'primeng/tooltip';
 
@@ -20,8 +19,7 @@ const IDLE: EmbeddingComputeState = { running: false, fraction: null, backend: n
  */
 @Component({
   selector: 'spatial-embedding-controls',
-  standalone: true,
-  imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, ProgressBarModule, TooltipModule],
+  imports: [FormsModule, ButtonModule, SelectModule, ProgressBarModule, TooltipModule],
   templateUrl: './spatial-embedding-controls.component.html',
   styleUrls: ['./spatial-embedding-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -52,7 +50,7 @@ export class SpatialEmbeddingControlsComponent {
   /** Compute the selected embedding in this browser. */
   @Output() readonly compute = new EventEmitter<void>();
   /** Stop the running computation. */
-  @Output() readonly cancel = new EventEmitter<void>();
+  @Output() readonly cancelCompute = new EventEmitter<void>();
   /** Move the chart into its own window, or back into the panel. */
   @Output() readonly detachedToggle = new EventEmitter<void>();
 }

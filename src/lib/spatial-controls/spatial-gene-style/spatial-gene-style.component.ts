@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 
@@ -15,8 +14,7 @@ import { GLYPH_OPTIONS } from '../../spatial/spatial-panel-model';
  */
 @Component({
   selector: 'spatial-gene-style',
-  standalone: true,
-  imports: [CommonModule, ButtonModule, InputTextModule],
+  imports: [ButtonModule, InputTextModule],
   templateUrl: './spatial-gene-style.component.html',
   styleUrls: ['./spatial-gene-style.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -629,7 +629,6 @@ describe('SpatialControlsComponent', () => {
 
 describe('SpatialControlsComponent — OnPush (SPATIAL-15)', () => {
   @Component({
-    standalone: true,
     imports: [SpatialControlsComponent],
     template: '<spatial-controls [visible]="true"></spatial-controls>',
   })

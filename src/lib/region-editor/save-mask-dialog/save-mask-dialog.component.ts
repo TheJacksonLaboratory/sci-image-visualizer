@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -18,9 +17,7 @@ import { MaskMode } from '../mask-export.service';
  */
 @Component({
   selector: 'region-save-mask-dialog',
-  standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     SharedModule,
     ButtonModule,

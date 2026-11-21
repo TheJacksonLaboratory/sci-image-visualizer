@@ -1,9 +1,9 @@
 <span class="toolbar-separator"></span>
 <!-- Heatmap view: single-image (high-def zoom) vs stack (frame slider). Plotly-only —
-     hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
-     spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
-     image, and these modes draw observations, not one of its slices. -->
-<ng-container *ngIf="stackToggle">
+hidden for napari, which has no single/stack toggle or per-frame fetch, and for the
+spatial-omics modes: a 3D omics dataset publishes its reference volume as a z-stack
+image, and these modes draw observations, not one of its slices. -->
+@if (stackToggle) {
   <p-button
     icon="pi pi-image"
     size="small"
@@ -24,10 +24,10 @@
     (onClick)="selectStackOption.emit(stackOptions[1])"
   >
   </p-button>
-</ng-container>
+}
 <!-- The slice bar. Live views swap the slice in place as it moves; the heatmap's single image
-     is re-plotted at the slice the bar settles on (a drag let go, or a pause in key steps). -->
-<ng-container *ngIf="liveScrubber || singleImage">
+is re-plotted at the slice the bar settles on (a drag let go, or a pause in key steps). -->
+@if (liveScrubber || singleImage) {
   <span class="flex align-items-center mx-1 toolbar-text">Slice</span>
   <p-slider
     [ngModel]="zIndex"
@@ -43,4 +43,4 @@
     styleClass="wand-sensitivity-slider"
   ></p-slider>
   <span class="flex align-items-center mx-1 toolbar-text">{{ zIndex }} of {{ maxIndex }}</span>
-</ng-container>
+}

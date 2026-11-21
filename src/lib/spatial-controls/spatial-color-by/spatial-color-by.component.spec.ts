@@ -79,7 +79,7 @@ describe('SpatialColorByComponent', () => {
     expect(mode()).toBe('gene');
     expect(fake.view$.value.colorBy).toBeNull();
     fixture.detectChanges();
-    const gene = one(root, 'p-dropdown[inputId=sc-gene]');
+    const gene = one(root, 'p-select[inputId=sc-gene]');
     expect((gene as unknown as { options: { value: string }[] }).options.map((o) => o.value)).toEqual([
       'Ttr',
       'Mbp',

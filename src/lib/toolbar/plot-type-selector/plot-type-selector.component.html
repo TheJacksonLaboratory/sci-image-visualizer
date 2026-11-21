@@ -1,5 +1,5 @@
 <span class="toolbar-separator"></span>
-<p-dropdown
+<p-select
   [options]="options"
   optionLabel="label"
   optionValue="type"
@@ -14,21 +14,31 @@
   (onChange)="selectPlotType.emit($event.value)"
 >
   <ng-template let-opt pTemplate="selectedItem">
-    <span class="plotmode-item" *ngIf="opt">
-      <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
-      <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
-      <span>{{ opt.label }}</span>
-    </span>
+    @if (opt) {
+      <span class="plotmode-item">
+        @if (isPiIcon(opt.icon)) {
+          <i [class]="opt.icon"></i>
+        }
+        @if (opt.icon && !isPiIcon(opt.icon)) {
+          <img class="plotmode-icon-img" [src]="opt.icon" alt="" />
+        }
+        <span>{{ opt.label }}</span>
+      </span>
+    }
   </ng-template>
   <ng-template let-opt pTemplate="item">
     <span class="plotmode-item">
-      <i *ngIf="isPiIcon(opt.icon)" [class]="opt.icon"></i>
-      <img *ngIf="opt.icon && !isPiIcon(opt.icon)" class="plotmode-icon-img" [src]="opt.icon" alt="" />
+      @if (isPiIcon(opt.icon)) {
+        <i [class]="opt.icon"></i>
+      }
+      @if (opt.icon && !isPiIcon(opt.icon)) {
+        <img class="plotmode-icon-img" [src]="opt.icon" alt="" />
+      }
       <span>{{ opt.label }}</span>
     </span>
   </ng-template>
-</p-dropdown>
-<ng-container *ngIf="isosurface">
+</p-select>
+@if (isosurface) {
   <toolbar-tool-slider
     label="Iso"
     [value]="isoRange"
@@ -44,13 +54,13 @@
     (valueChange)="onIsoRange($event)"
   >
   </toolbar-tool-slider>
-</ng-container>
+}
 <!-- Intensity tools (Heatmap / Image mode): add another colored line ROI.
-     Each added line gets the next bright palette colour and its own inset
-     trace; select a line on the image and use the trash tool to remove it
-     (and its trace). The lines are Region-based but excluded from the
-     Region Editor and exports. -->
-<ng-container *ngIf="intensityLines">
+Each added line gets the next bright palette colour and its own inset
+trace; select a line on the image and use the trash tool to remove it
+(and its trace). The lines are Region-based but excluded from the
+Region Editor and exports. -->
+@if (intensityLines) {
   <span class="toolbar-separator"></span>
   <p-button
     size="small"
@@ -64,4 +74,4 @@
   >
     <img src="assets/plotting/spline-chart.svg" class="toolbar-icon-dark" style="width: 1rem" alt="" />
   </p-button>
-</ng-container>
+}

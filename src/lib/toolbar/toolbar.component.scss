@@ -9,8 +9,8 @@
 }
 
 ::ng-deep .toolbar-input .p-inputtext {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
+  color: var(--p-primary-color);
+  border-color: var(--p-primary-color);
 }
 
 // Model-picker menu items (SAM / YOLO / retinal) and their info tooltip. Both
@@ -18,7 +18,7 @@
 // plot-type items above — these are intentionally global (no :host).
 //
 // The item is a flex row so the info icon can sit hard right of a label of any
-// length; `.p-menuitem-link` keeps PrimeNG's own padding/hover treatment.
+// length; `.p-menu-item-link` keeps PrimeNG's own padding/hover treatment.
 // PrimeNG fixes `.p-menu` at 12.5rem. The info icon takes width the label used
 // to have, so at that width a long name either wraps mid-token or pushes the icon
 // outside the menu box. Size these three menus to their content instead, keeping
@@ -39,7 +39,7 @@
     font-size: 0.75rem;
   }
 
-  .p-menuitem-text {
+  .p-menu-item-label {
     flex: 1 1 auto;
     // Let the menu widen to fit the label instead of wrapping it: the info icon
     // takes width the label used to have, which broke names like
@@ -74,7 +74,7 @@
     // exactly what would make this button reachable but invisible.
     &:focus-visible {
       opacity: 1;
-      outline: 2px solid var(--primary-color, #2196f3);
+      outline: 2px solid var(--p-primary-color, #2196f3);
       outline-offset: 2px;
       border-radius: 2px;
     }

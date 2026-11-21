@@ -1,26 +1,28 @@
 <div class="sc-subhead">Selected genes</div>
-<div class="sc-gene-sort" *ngIf="sortShown" role="group" aria-label="Sort genes">
-  <span class="sc-lbl">Sort by</span>
-  <button
-    type="button"
-    class="sc-sort-btn"
-    [class.active]="!byCount"
-    [attr.aria-pressed]="!byCount"
-    (click)="onGeneSort('name')"
-  >
-    Name
-  </button>
-  <button
-    type="button"
-    class="sc-sort-btn"
-    [class.active]="byCount"
-    [attr.aria-pressed]="byCount"
-    title="Transcripts in view, most first"
-    (click)="onGeneSort('count')"
-  >
-    Count
-  </button>
-</div>
+@if (sortShown) {
+  <div class="sc-gene-sort" role="group" aria-label="Sort genes">
+    <span class="sc-lbl">Sort by</span>
+    <button
+      type="button"
+      class="sc-sort-btn"
+      [class.active]="!byCount"
+      [attr.aria-pressed]="!byCount"
+      (click)="onGeneSort('name')"
+    >
+      Name
+    </button>
+    <button
+      type="button"
+      class="sc-sort-btn"
+      [class.active]="byCount"
+      [attr.aria-pressed]="byCount"
+      title="Transcripts in view, most first"
+      (click)="onGeneSort('count')"
+    >
+      Count
+    </button>
+  </div>
+}
 <div class="sc-gene-tree">
   <div class="sc-gene-row sc-gene-root">
     <button
@@ -38,27 +40,25 @@
         geneTotal | number
       }})</span
     >
-    <button
-      type="button"
-      class="sc-icon-btn"
-      (click)="geneTreeOpen = !geneTreeOpen"
-      *ngIf="!view.transcriptAllGenes && view.transcriptGenes.length"
-    >
-      <i class="pi" [class.pi-chevron-down]="geneTreeOpen" [class.pi-chevron-right]="!geneTreeOpen"></i>
-    </button>
-    <button
-      type="button"
-      class="sc-icon-btn"
-      (click)="toggleAllGenesOpen()"
-      *ngIf="view.transcriptAllGenes && allGeneList?.length"
-      [attr.aria-label]="allGenesOpen ? 'Hide the gene list' : 'Show every gene'"
-    >
-      <i class="pi" [class.pi-chevron-down]="allGenesOpen" [class.pi-chevron-right]="!allGenesOpen"></i>
-    </button>
+    @if (!view.transcriptAllGenes && view.transcriptGenes.length) {
+      <button type="button" class="sc-icon-btn" (click)="geneTreeOpen = !geneTreeOpen">
+        <i class="pi" [class.pi-chevron-down]="geneTreeOpen" [class.pi-chevron-right]="!geneTreeOpen"></i>
+      </button>
+    }
+    @if (view.transcriptAllGenes && allGeneList?.length) {
+      <button
+        type="button"
+        class="sc-icon-btn"
+        (click)="toggleAllGenesOpen()"
+        [attr.aria-label]="allGenesOpen ? 'Hide the gene list' : 'Show every gene'"
+      >
+        <i class="pi" [class.pi-chevron-down]="allGenesOpen" [class.pi-chevron-right]="!allGenesOpen"></i>
+      </button>
+    }
   </div>
   <!-- "All genes": every gene of the dataset, each with its eye when the dataset says which
-       transcripts are whose (its gene list in code order). -->
-  <ng-container *ngIf="allGenesOpen && view.transcriptAllGenes && allGeneList?.length">
+    transcripts are whose (its gene list in code order). -->
+  @if (allGenesOpen && view.transcriptAllGenes && allGeneList?.length) {
     <input
       pInputText
       class="sc-gene-filter"
@@ -67,125 +67,140 @@
       [value]="allGenesFilter"
       (input)="onAllGenesFilter($any($event.target).value)"
     />
-    <small class="sc-hint" *ngIf="!canHideAllGenes">
-      This dataset does not say which transcripts are whose, so its genes cannot be hidden one by one.
-    </small>
-    <small class="sc-hint" *ngIf="canHideAllGenes && view.transcriptMode === 'density'">
-      The density map draws every gene as one raster: genes are hidden one by one as circles or icons.
-    </small>
-    <div class="sc-gene-row sc-gene-leaf nested" *ngFor="let row of allRows; trackBy: trackByAllRow">
-      <button
-        type="button"
-        class="sc-eye"
-        [disabled]="!canHideAllGenes || view.transcriptMode === 'density'"
-        (click)="onAllGeneShown(row.gene, !row.shown)"
-      >
-        <i class="pi" [class.pi-eye]="row.shown" [class.pi-eye-slash]="!row.shown"></i>
-      </button>
-      <!-- The gene's colour among every gene; clicking it opens the colour picker. -->
-      <button
-        type="button"
-        class="sc-gene-icon"
-        *ngIf="row.swatch"
-        [style.color]="row.swatch"
-        [attr.aria-label]="'Colour for ' + row.gene"
-        pTooltip="Colour"
-        tooltipPosition="top"
-        (click)="openGeneStyle($event, row.gene, genePop)"
-      >
-        <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><circle r="0.75"></circle></svg>
-      </button>
-      <span class="sc-group-label" [title]="row.gene">{{ row.gene }}</span>
-      <span class="sc-gene-count" *ngIf="row.count !== null" title="Transcripts in view">{{
-        row.count | number
-      }}</span>
-    </div>
-    <small class="sc-hint" *ngIf="allGenesMatched > allRows.length">
-      Showing {{ allRows.length | number }} of {{ allGenesMatched | number }} genes: filter to find the others.
-    </small>
-    <small class="sc-hint" *ngIf="allGenesMatched === 0">No gene matches.</small>
-  </ng-container>
-  <ng-container *ngIf="geneTreeOpen && !view.transcriptAllGenes">
-    <ng-container *ngFor="let node of sortedTree; trackBy: trackByNode">
-      <div class="sc-gene-row sc-gene-group" *ngIf="node.name">
-        <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !groupShown.get(node.name))">
-          <i
-            class="pi"
-            [class.pi-eye]="groupShown.get(node.name)"
-            [class.pi-eye-slash]="!groupShown.get(node.name)"
-          ></i>
-        </button>
-        <span class="sc-group-label" [title]="node.name">{{ node.name }}</span>
-        <span class="sc-count">({{ node.genes.length }})</span>
-        <button type="button" class="sc-icon-btn" (click)="toggleGeneGroup(node.name)">
-          <i
-            class="pi"
-            [class.pi-chevron-down]="!collapsedGeneGroups.has(node.name)"
-            [class.pi-chevron-right]="collapsedGeneGroups.has(node.name)"
-          ></i>
-        </button>
-      </div>
-      <ng-container *ngIf="!node.name || !collapsedGeneGroups.has(node.name)">
-        <div
-          class="sc-gene-row sc-gene-leaf"
-          [class.nested]="!!node.name"
-          *ngFor="let gene of node.genes; trackBy: trackByLabelString"
+    @if (!canHideAllGenes) {
+      <small class="sc-hint">
+        This dataset does not say which transcripts are whose, so its genes cannot be hidden one by one.
+      </small>
+    }
+    @if (canHideAllGenes && view.transcriptMode === 'density') {
+      <small class="sc-hint">
+        The density map draws every gene as one raster: genes are hidden one by one as circles or icons.
+      </small>
+    }
+    @for (row of allRows; track trackByAllRow($index, row)) {
+      <div class="sc-gene-row sc-gene-leaf nested">
+        <button
+          type="button"
+          class="sc-eye"
+          [disabled]="!canHideAllGenes || view.transcriptMode === 'density'"
+          (click)="onAllGeneShown(row.gene, !row.shown)"
         >
-          <button type="button" class="sc-eye" (click)="onGenesShown([gene], !rows.get(gene)?.shown)">
-            <i class="pi" [class.pi-eye]="rows.get(gene)?.shown" [class.pi-eye-slash]="!rows.get(gene)?.shown"></i>
-          </button>
-          <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
-               Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
+          <i class="pi" [class.pi-eye]="row.shown" [class.pi-eye-slash]="!row.shown"></i>
+        </button>
+        <!-- The gene's colour among every gene; clicking it opens the colour picker. -->
+        @if (row.swatch) {
           <button
             type="button"
             class="sc-gene-icon"
-            [style.color]="rows.get(gene)?.swatch"
-            [attr.aria-label]="'Icon and colour for ' + gene"
-            pTooltip="Icon and colour"
+            [style.color]="row.swatch"
+            [attr.aria-label]="'Colour for ' + row.gene"
+            pTooltip="Colour"
             tooltipPosition="top"
-            (click)="openGeneStyle($event, gene, genePop)"
+            (click)="openGeneStyle($event, row.gene, genePop)"
           >
-            <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
-              <polygon
-                *ngIf="view.transcriptMode === 'glyphs'; else dotIcon"
-                [attr.points]="rows.get(gene)?.points"
-              ></polygon>
-              <ng-template #dotIcon><circle r="0.75"></circle></ng-template>
-            </svg>
+            <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg"><circle r="0.75"></circle></svg>
           </button>
-          <span class="sc-group-label">{{ gene }}</span>
-          <span
-            class="sc-gene-count"
-            *ngIf="rows.get(gene)?.count as n; else zeroCount"
-            title="Transcripts in view"
-            >{{ n | number }}</span
-          >
-          <ng-template #zeroCount>
-            <span class="sc-gene-count" *ngIf="geneCounts" title="Transcripts in view">0</span>
-          </ng-template>
+        }
+        <span class="sc-group-label" [title]="row.gene">{{ row.gene }}</span>
+        @if (row.count !== null) {
+          <span class="sc-gene-count" title="Transcripts in view">{{ row.count | number }}</span>
+        }
+      </div>
+    }
+    @if (allGenesMatched > allRows.length) {
+      <small class="sc-hint">
+        Showing {{ allRows.length | number }} of {{ allGenesMatched | number }} genes: filter to find the others.
+      </small>
+    }
+    @if (allGenesMatched === 0) {
+      <small class="sc-hint">No gene matches.</small>
+    }
+  }
+  @if (geneTreeOpen && !view.transcriptAllGenes) {
+    @for (node of sortedTree; track trackByNode($index, node)) {
+      @if (node.name) {
+        <div class="sc-gene-row sc-gene-group">
+          <button type="button" class="sc-eye" (click)="onGenesShown(node.genes, !groupShown.get(node.name))">
+            <i
+              class="pi"
+              [class.pi-eye]="groupShown.get(node.name)"
+              [class.pi-eye-slash]="!groupShown.get(node.name)"
+            ></i>
+          </button>
+          <span class="sc-group-label" [title]="node.name">{{ node.name }}</span>
+          <span class="sc-count">({{ node.genes.length }})</span>
+          <button type="button" class="sc-icon-btn" (click)="toggleGeneGroup(node.name)">
+            <i
+              class="pi"
+              [class.pi-chevron-down]="!collapsedGeneGroups.has(node.name)"
+              [class.pi-chevron-right]="collapsedGeneGroups.has(node.name)"
+            ></i>
+          </button>
         </div>
-      </ng-container>
-    </ng-container>
-  </ng-container>
+      }
+      @if (!node.name || !collapsedGeneGroups.has(node.name)) {
+        @for (gene of node.genes; track trackByLabelString($index, gene)) {
+          <div class="sc-gene-row sc-gene-leaf" [class.nested]="!!node.name">
+            <button type="button" class="sc-eye" (click)="onGenesShown([gene], !rows.get(gene)?.shown)">
+              <i
+                class="pi"
+                [class.pi-eye]="rows.get(gene)?.shown"
+                [class.pi-eye-slash]="!rows.get(gene)?.shown"
+              ></i>
+            </button>
+            <!-- The gene's marker, in its colour: its icon in Icons mode, a dot for circles.
+              Clicking it opens the icon and colour picker (as Xenium Explorer does). -->
+            <button
+              type="button"
+              class="sc-gene-icon"
+              [style.color]="rows.get(gene)?.swatch"
+              [attr.aria-label]="'Icon and colour for ' + gene"
+              pTooltip="Icon and colour"
+              tooltipPosition="top"
+              (click)="openGeneStyle($event, gene, genePop)"
+            >
+              <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
+                @if (view.transcriptMode === 'glyphs') {
+                  <polygon [attr.points]="rows.get(gene)?.points"></polygon>
+                } @else {
+                  <ng-template [ngTemplateOutlet]="dotIcon"></ng-template>
+                }
+                <ng-template #dotIcon><circle r="0.75"></circle></ng-template>
+              </svg>
+            </button>
+            <span class="sc-group-label">{{ gene }}</span>
+            @if (rows.get(gene)?.count; as n) {
+              <span class="sc-gene-count" title="Transcripts in view">{{ n | number }}</span>
+            } @else {
+              @if (geneCounts) {
+                <span class="sc-gene-count" title="Transcripts in view">0</span>
+              }
+            }
+          </div>
+        }
+      }
+    }
+  }
   <!-- One picker for every gene row, filled for the gene that opened it. -->
-  <p-overlayPanel #genePop styleClass="sc-gene-style" appendTo="body">
+  <p-popover #genePop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
-      <spatial-gene-style
-        *ngIf="styleGene as gene"
-        [gene]="gene"
-        what="Transcript"
-        [color]="styleColorOf(gene)"
-        [glyph]="styleGlyph ?? 'circle'"
-        [showIcons]="!view.transcriptAllGenes"
-        [iconHint]="
-          view.transcriptMode !== 'glyphs' ? 'Icons show when the transcript point style is Icons.' : null
-        "
-        (colorChange)="onGeneColor(gene, $event)"
-        (glyphChange)="onGlyph(gene, $event)"
-        (resetStyle)="resetGeneStyle(gene)"
-      ></spatial-gene-style>
+      @if (styleGene; as gene) {
+        <spatial-gene-style
+          [gene]="gene"
+          what="Transcript"
+          [color]="styleColorOf(gene)"
+          [glyph]="styleGlyph ?? 'circle'"
+          [showIcons]="!view.transcriptAllGenes"
+          [iconHint]="
+            view.transcriptMode !== 'glyphs' ? 'Icons show when the transcript point style is Icons.' : null
+          "
+          (colorChange)="onGeneColor(gene, $event)"
+          (glyphChange)="onGlyph(gene, $event)"
+          (resetStyle)="resetGeneStyle(gene)"
+        ></spatial-gene-style>
+      }
     </ng-template>
-  </p-overlayPanel>
+  </p-popover>
   <div class="sc-gene-footer">
     {{ (view.transcriptAllGenes ? geneTotal : view.transcriptGenes.length) | number }}/{{ geneTotal | number }}
     genes selected

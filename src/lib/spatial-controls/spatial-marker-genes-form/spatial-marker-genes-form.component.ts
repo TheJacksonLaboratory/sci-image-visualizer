@@ -9,10 +9,9 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { MultiSelectModule } from 'primeng/multiselect';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
@@ -36,8 +35,7 @@ import {
  */
 @Component({
   selector: 'spatial-marker-genes-form',
-  standalone: true,
-  imports: [CommonModule, FormsModule, ButtonModule, DropdownModule, MultiSelectModule],
+  imports: [FormsModule, ButtonModule, SelectModule, MultiSelectModule],
   templateUrl: './spatial-marker-genes-form.component.html',
   styleUrls: ['./spatial-marker-genes-form.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

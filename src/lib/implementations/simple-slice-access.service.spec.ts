@@ -1,15 +1,19 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { SimpleSliceAccessService } from './simple-slice-access.service';
 import { IImageInfo } from '../contracts/image.contract';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 describe('SimpleSliceAccessService', () => {
   let service: SimpleSliceAccessService;
   let http: HttpTestingController;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [HttpClientTestingModule] });
+    TestBed.configureTestingModule({
+      imports: [],
+      providers: [provideHttpClient(withInterceptorsFromDi()), provideHttpClientTesting()],
+    });
     service = TestBed.inject(SimpleSliceAccessService);
     http = TestBed.inject(HttpTestingController);
     (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest

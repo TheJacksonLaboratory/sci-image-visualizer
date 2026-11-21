@@ -1,40 +1,39 @@
 <!-- SAM toast: live status + encoder-download progress bar (jit-ui#90). Sticky
-     while a segment runs; stays open until the bar reaches 100% and the run ends. -->
+while a segment runs; stays open until the bar reaches 100% and the run ends. -->
 <p-toast [key]="samToastKey" position="bottom-right">
   <ng-template let-message pTemplate="message">
     <div style="flex: 1; min-width: 16rem">
       <div class="font-bold mb-1">{{ message.summary }}</div>
       <div>{{ segmentation.status || message.detail }}</div>
-      <p-progressBar
-        *ngIf="segmentation.downloading"
-        [value]="segmentation.progress"
-        styleClass="mt-2 sam-progress"
-      ></p-progressBar>
-      <p-progressBar
-        *ngIf="segmentation.busy && !segmentation.downloading"
-        mode="indeterminate"
-        styleClass="mt-2"
-        [style]="{ height: '4px' }"
-      ></p-progressBar>
+      @if (segmentation.downloading) {
+        <p-progressBar [value]="segmentation.progress" styleClass="mt-2 sam-progress"></p-progressBar>
+      }
+      @if (segmentation.busy && !segmentation.downloading) {
+        <p-progressBar mode="indeterminate" styleClass="mt-2" [style]="{ height: '4px' }"></p-progressBar>
+      }
     </div>
   </ng-template>
 </p-toast>
 
 <!-- Result/error notices from the library itself (segmentation outcome, region
-     validation). Rendered here so they do not depend on the host mounting a
-     keyless <p-toast> — without this the messages went nowhere in any host but
-     jit-ui, and a failed run looked like a button that did nothing. -->
+validation). Rendered here so they do not depend on the host mounting a
+keyless <p-toast> — without this the messages went nowhere in any host but
+jit-ui, and a failed run looked like a button that did nothing. -->
 <p-toast [key]="resultToastKey" position="bottom-right"></p-toast>
 
 <!-- Shared outlets for notices raised where there is no per-instance key to use:
-     the root-provided PlotlyService and the region-editor dialog. Rendered by a
-     single visualizer (ownsSharedToasts) so a message from the root service is
-     not shown once per live viewer. -->
-<p-toast *ngIf="ownsSharedToasts" [key]="vizToastKey"></p-toast>
-<p-toast *ngIf="ownsSharedToasts" [key]="vizAlertToastKey" position="center"></p-toast>
+the root-provided PlotlyService and the region-editor dialog. Rendered by a
+single visualizer (ownsSharedToasts) so a message from the root service is
+not shown once per live viewer. -->
+@if (ownsSharedToasts) {
+  <p-toast [key]="vizToastKey"></p-toast>
+}
+@if (ownsSharedToasts) {
+  <p-toast [key]="vizAlertToastKey" position="center"></p-toast>
+}
 
 <!-- Toolbar dock: docked across the top by default; drag the handle to detach
-     it into a floating, movable window (frees the top row for the image). -->
+it into a floating, movable window (frees the top row for the image). -->
 <div
   class="toolbar-dock"
   [class.floating]="toolbarFloating"
@@ -121,27 +120,28 @@
     <!-- Host-projected custom toolbar buttons, forwarded into the toolbar. -->
     <ng-content></ng-content>
   </plotting-toolbar>
-  <p-button
-    *ngIf="toolbarFloating"
-    class="toolbar-dock-btn"
-    icon="pi pi-thumbtack"
-    size="small"
-    [text]="true"
-    pTooltip="Dock to top"
-    tooltipPosition="bottom"
-    (onClick)="dockToolbar()"
-  >
-  </p-button>
+  @if (toolbarFloating) {
+    <p-button
+      class="toolbar-dock-btn"
+      icon="pi pi-thumbtack"
+      size="small"
+      [text]="true"
+      pTooltip="Dock to top"
+      tooltipPosition="bottom"
+      (onClick)="dockToolbar()"
+    >
+    </p-button>
+  }
 </div>
 
 <p-contextMenu #cm [model]="contextMenuItems" appendTo="body"></p-contextMenu>
 <!-- No `h-full` here: PrimeFlex's height:100% !important made #plot as tall as
-     the whole host, so under the docked toolbar its bottom toolbar-height strip
-     (incl. the OSD scale bar at bottom-left) was clipped by the host's
-     overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
+the whole host, so under the docked toolbar its bottom toolbar-height strip
+(incl. the OSD scale bar at bottom-left) was clipped by the host's
+overflow:hidden. The component stylesheet sizes it (.viz-plot { flex: 1 }). -->
 <!-- The plot, and while a volume view is split, the slice editor's pane on its left (its own
-     viewer, with every region tool) with a divider to resize the two. The plot div keeps its
-     place in the DOM either way: the backends find it by id, and a viewer mounted in it stays. -->
+viewer, with every region tool) with a divider to resize the two. The plot div keeps its
+place in the DOM either way: the backends find it by id, and a viewer mounted in it stays. -->
 <div
   class="viz-panes"
   [class.viz-quad]="sliceEditorShown"
@@ -149,8 +149,8 @@
   [style.grid-template-rows]="sliceEditorShown ? splitY + '% 6px minmax(0, 1fr)' : null"
 >
   <!-- The slice editor: the volume (the plot) top left, the slice being edited (Z) top right,
-       the sections through x and y below, in their axis colours. -->
-  <ng-container *ngIf="sliceEditorShown">
+  the sections through x and y below, in their axis colours. -->
+  @if (sliceEditorShown) {
     <div class="viz-cell viz-cell-z">
       <div class="viz-slice-pane" [id]="sliceDivName"></div>
       <span class="viz-pane-badge viz-pane-badge-z">Z · slice {{ zIndex }}</span>
@@ -185,58 +185,62 @@
       (pointerdown)="startPaneResize($event, 'y')"
       (keydown)="nudgePaneSize($event, 'y')"
     ></div>
-  </ng-container>
+  }
   <div class="w-full relative viz-plot" [id]="plotDivName">
-    <div *ngIf="imgLoading() || stackLoading() || isCaching()" class="loading-overlay">
-      <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
-         progress bar + "Loading frames...", not the generic spinner/"Loading image..." on top of
-         it (both were rendering at once for napari volume/isosurface loads). -->
-      <ng-container *ngIf="stackLoading(); else imgLoadingTpl">
-        <p-progressBar class="progress" [value]="loadingPercentage()"></p-progressBar>
-        <span class="text-loading">Loading frames...</span>
-      </ng-container>
-      <ng-template #imgLoadingTpl>
-        <!-- Cache-copy progress is shown whenever a cache download is active (isCaching), independent
-           of `imgLoading`, so it's never dropped/masked mid-download. -->
-        <ng-container *ngIf="isCaching(); else spinnerLoading">
-          <!-- Stage-aware message comes from CacheProgressService updating
-             imageLoadingMessage$ ("Caching image..." during the GCS download,
-             then "Generating preview..." during per-slice thumbnail gen). Once the
-             download hits 100% the remaining work (server preview/tile generation)
-             has no determinate progress, so fall through to the spinner template
-             rather than parking a full bar under "Loading image...". -->
-          <p-progressBar class="progress" [value]="cacheProgress()"></p-progressBar>
-          <span class="text-loading">{{ loadingMessage() }}</span>
-        </ng-container>
-        <ng-template #spinnerLoading>
-          <div *ngIf="imgLoading()" class="spinner"></div>
-          <span *ngIf="imgLoading() && !zoom()" class="text-loading">{{ loadingMessage() }}</span>
-          <span *ngIf="imgLoading() && zoom()" class="zoom-text-loading">{{ loadingMessage() }}</span>
-        </ng-template>
-      </ng-template>
-      <p-button
-        *ngIf="stackLoading() || imgLoading()"
-        class="cancel-loading"
-        label="Cancel"
-        (onClick)="cancelLoading()"
-      >
-      </p-button>
-    </div>
+    @if (imgLoading() || stackLoading() || isCaching()) {
+      <div class="loading-overlay">
+        <!-- Determinate stack/volume progress takes precedence: while it's active show ONLY the
+        progress bar + "Loading frames...", not the generic spinner/"Loading image..." on top of
+        it (both were rendering at once for napari volume/isosurface loads). -->
+        @if (stackLoading()) {
+          <p-progressBar class="progress" [value]="loadingPercentage()"></p-progressBar>
+          <span class="text-loading">Loading frames...</span>
+        } @else {
+          <!-- Cache-copy progress is shown whenever a cache download is active (isCaching), independent
+          of `imgLoading`, so it's never dropped/masked mid-download. -->
+          @if (isCaching()) {
+            <!-- Stage-aware message comes from CacheProgressService updating
+            imageLoadingMessage$ ("Caching image..." during the GCS download,
+            then "Generating preview..." during per-slice thumbnail gen). Once the
+            download hits 100% the remaining work (server preview/tile generation)
+            has no determinate progress, so fall through to the spinner template
+            rather than parking a full bar under "Loading image...". -->
+            <p-progressBar class="progress" [value]="cacheProgress()"></p-progressBar>
+            <span class="text-loading">{{ loadingMessage() }}</span>
+          } @else {
+            @if (imgLoading()) {
+              <div class="spinner"></div>
+            }
+            @if (imgLoading() && !zoom()) {
+              <span class="text-loading">{{ loadingMessage() }}</span>
+            }
+            @if (imgLoading() && zoom()) {
+              <span class="zoom-text-loading">{{ loadingMessage() }}</span>
+            }
+          }
+        }
+        @if (stackLoading() || imgLoading()) {
+          <p-button class="cancel-loading" label="Cancel" (onClick)="cancelLoading()"> </p-button>
+        }
+      </div>
+    }
     <!-- Translucent "sharpening" overlay shown after the small-tier preview is
-       on screen while the large-tier render is still loading in the
-       background. Lets the user see the blurry image underneath but makes
-       it clear something is still loading so they don't mistake the
-       low-res render for the final image. -->
-    <div *ngIf="render.sharpening && !imgLoading() && !stackLoading() && !isCaching()" class="sharpening-overlay">
-      <div class="spinner"></div>
-      <span class="text-loading">Sharpening preview...</span>
-    </div>
+    on screen while the large-tier render is still loading in the
+    background. Lets the user see the blurry image underneath but makes
+    it clear something is still loading so they don't mistake the
+    low-res render for the final image. -->
+    @if (render.sharpening && !imgLoading() && !stackLoading() && !isCaching()) {
+      <div class="sharpening-overlay">
+        <div class="spinner"></div>
+        <span class="text-loading">Sharpening preview...</span>
+      </div>
+    }
   </div>
 </div>
 
 <!-- Floating, draggable intensity-profile inset, shown while any intensity line
-     exists. Kept OUTSIDE the plot div and fixed to the viewport, so it floats over
-     the whole page rather than being clipped to the canvas. -->
+exists. Kept OUTSIDE the plot div and fixed to the viewport, so it floats over
+the whole page rather than being clipped to the canvas. -->
 <viz-intensity-inset
   [divId]="intensityInsetDiv"
   [plotDivName]="plotDivName"
@@ -249,62 +253,66 @@
 <channel-histogram [(visible)]="showChannelHistogram"></channel-histogram>
 
 <!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
-     SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
+SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
 <spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode"></spatial-controls>
 
 <!-- Side panel of the active contributed plot mode (PLOT_TYPE_CONTRIBUTIONS),
-     in the same right-hand area as the spatial controls and the Region Editor.
-     Exists only while the mode's session is live; there is no close button,
-     because leaving the mode is what ends it. A component panel gets
-     PLOT_MODE_CONTEXT / PLOT_MODE_SESSION from its injector; a `mount` panel's
-     host element is attached to the slot below (see plotModePanelSlot). -->
-<p-dialog
-  *ngIf="plotModePanel as panel"
-  [header]="panel.title"
-  [visible]="true"
-  [modal]="false"
-  [closable]="false"
-  [resizable]="true"
-  [draggable]="true"
-  appendTo="body"
-  position="right"
-  styleClass="plot-mode-panel"
-  [style]="{ width: '22rem', maxHeight: '85vh' }"
-  [contentStyle]="{ overflow: 'auto' }"
->
-  <ng-container *ngIf="panel.component">
-    <ng-container *ngComponentOutlet="panel.component; injector: panel.injector ?? undefined"></ng-container>
-  </ng-container>
-  <div *ngIf="panel.host" #plotModePanelSlot class="plot-mode-panel-slot"></div>
-</p-dialog>
+in the same right-hand area as the spatial controls and the Region Editor.
+Exists only while the mode's session is live; there is no close button,
+because leaving the mode is what ends it. A component panel gets
+PLOT_MODE_CONTEXT / PLOT_MODE_SESSION from its injector; a `mount` panel's
+host element is attached to the slot below (see plotModePanelSlot). -->
+@if (plotModePanel; as panel) {
+  <p-dialog
+    [header]="panel.title"
+    [visible]="true"
+    [modal]="false"
+    [closable]="false"
+    [resizable]="true"
+    [draggable]="true"
+    appendTo="body"
+    position="right"
+    styleClass="plot-mode-panel"
+    [style]="{ width: '22rem', maxHeight: '85vh' }"
+    [contentStyle]="{ overflow: 'auto' }"
+  >
+    @if (panel.component) {
+      <ng-container *ngComponentOutlet="panel.component; injector: panel.injector ?? undefined"></ng-container>
+    }
+    @if (panel.host) {
+      <div #plotModePanelSlot class="plot-mode-panel-slot"></div>
+    }
+  </p-dialog>
+}
 
 <!-- An open dialog tool (TOOLBAR_TOOLS, kind: 'dialog'). Non-modal so the user can
-     keep working on the image, e.g. painting with the brush the tool armed. The
-     tool renders its body into a host element attached to the slot below (see
-     toolDialogSlot); closing the dialog ends the tool's session. -->
-<p-dialog
-  *ngIf="toolDialog as dlg"
-  [header]="dlg.title"
-  [visible]="true"
-  (visibleChange)="$event || closeDialogTool()"
-  [modal]="false"
-  [closable]="true"
-  [resizable]="true"
-  [draggable]="true"
-  appendTo="body"
-  position="right"
-  styleClass="tool-dialog"
-  [style]="{ width: dlg.width, maxHeight: '85vh' }"
-  [contentStyle]="{ overflow: 'auto' }"
->
-  <div #toolDialogSlot class="tool-dialog-slot"></div>
-</p-dialog>
+keep working on the image, e.g. painting with the brush the tool armed. The
+tool renders its body into a host element attached to the slot below (see
+toolDialogSlot); closing the dialog ends the tool's session. -->
+@if (toolDialog; as dlg) {
+  <p-dialog
+    [header]="dlg.title"
+    [visible]="true"
+    (visibleChange)="$event || closeDialogTool()"
+    [modal]="false"
+    [closable]="true"
+    [resizable]="true"
+    [draggable]="true"
+    appendTo="body"
+    position="right"
+    styleClass="tool-dialog"
+    [style]="{ width: dlg.width, maxHeight: '85vh' }"
+    [contentStyle]="{ overflow: 'auto' }"
+  >
+    <div #toolDialogSlot class="tool-dialog-slot"></div>
+  </p-dialog>
+}
 
 <!-- Region Editor: non-modal, draggable, resizable floating dialog opened from
-     the toolbar (formerly the right-panel Regions tab). Modeless so regions can
-     still be drawn/selected on the plot while it's open; stays linked to this
-     plotting instance via the root RegionStore singleton. Opens over the right
-     side of the view. -->
+the toolbar (formerly the right-panel Regions tab). Modeless so regions can
+still be drawn/selected on the plot while it's open; stays linked to this
+plotting instance via the root RegionStore singleton. Opens over the right
+side of the view. -->
 <p-dialog
   header="Region Editor"
   [(visible)]="showRegionEditor"
@@ -321,7 +329,7 @@
 </p-dialog>
 
 <!-- Simplify (Douglas–Peucker): custom px-threshold picker for the selected
-     region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
+region(s), opened from the right-click "Simplify ▸ Custom…" action. -->
 <p-dialog
   header="Simplify region(s)"
   [(visible)]="displaySimplifyDialog"
@@ -348,101 +356,103 @@
 </p-dialog>
 
 <!-- Parameters for whichever contributed tool is open. One dialog for all of
-     them: a tool declares its fields (ToolParamSpec) and this renders them, so
-     the toolbar can lay every tool out the same way and a plugin needs no
-     PrimeNG of its own. Defaults come from the active checkpoint, since they
-     encode what it was trained for. -->
-<p-dialog
-  *ngIf="toolParams.openParams as open"
-  [header]="open.tool.label + ' parameters'"
-  [visible]="true"
-  (visibleChange)="closeToolParams()"
-  [modal]="true"
-  [style]="{ width: '30rem' }"
-  [draggable]="false"
-  [resizable]="false"
-  appendTo="body"
->
-  <div class="grid formgrid p-fluid">
-    <ng-container *ngFor="let f of open.fields">
-      <div class="field" [ngClass]="f.spec.type === 'boolean' ? 'col-12' : 'col-6'">
-        <ng-container *ngIf="f.number as n">
-          <div class="param-label">
-            <label class="text-sm">{{ n.label }}</label>
-            <ng-container
-              [ngTemplateOutlet]="paramInfo"
-              [ngTemplateOutletContext]="{ $implicit: n }"
-            ></ng-container>
-          </div>
-          <p-inputNumber
-            [ngModel]="open.values[n.id]"
-            (ngModelChange)="open.values[n.id] = $event"
-            [min]="n.min"
-            [max]="n.max"
-            [step]="n.step"
-            [minFractionDigits]="n.fractionDigits"
-            [showButtons]="true"
-          ></p-inputNumber>
-        </ng-container>
-
-        <ng-container *ngIf="f.select as sel">
-          <div class="param-label">
-            <label class="text-sm">{{ sel.label }}</label>
-            <ng-container
-              [ngTemplateOutlet]="paramInfo"
-              [ngTemplateOutletContext]="{ $implicit: sel }"
-            ></ng-container>
-          </div>
-          <p-dropdown
-            [options]="sel.options"
-            optionLabel="label"
-            optionValue="value"
-            [ngModel]="open.values[sel.id]"
-            (ngModelChange)="open.values[sel.id] = $event"
-            appendTo="body"
-          ></p-dropdown>
-        </ng-container>
-
-        <!-- Checkbox label sits beside the box and may run to a sentence, so
-             it does not get the stacked label the other types use. -->
-        <div *ngIf="f.spec.type === 'boolean'" class="flex align-items-center gap-2">
-          <p-checkbox
-            [ngModel]="open.values[f.spec.id]"
-            (ngModelChange)="open.values[f.spec.id] = $event"
-            [binary]="true"
-            [inputId]="open.tool.id + '-' + f.spec.id"
-          ></p-checkbox>
-          <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0">{{ f.spec.label }}</label>
-          <ng-container
-            [ngTemplateOutlet]="paramInfo"
-            [ngTemplateOutletContext]="{ $implicit: f.spec }"
-          ></ng-container>
+  them: a tool declares its fields (ToolParamSpec) and this renders them, so
+  the toolbar can lay every tool out the same way and a plugin needs no
+  PrimeNG of its own. Defaults come from the active checkpoint, since they
+  encode what it was trained for. -->
+@if (toolParams.openParams; as open) {
+  <p-dialog
+    [header]="open.tool.label + ' parameters'"
+    [visible]="true"
+    (visibleChange)="closeToolParams()"
+    [modal]="true"
+    [style]="{ width: '30rem' }"
+    [draggable]="false"
+    [resizable]="false"
+    appendTo="body"
+  >
+    <div class="grid formgrid p-fluid">
+      @for (f of open.fields; track f) {
+        <div class="field" [ngClass]="f.spec.type === 'boolean' ? 'col-12' : 'col-6'">
+          @if (f.number; as n) {
+            <div class="param-label">
+              <label class="text-sm">{{ n.label }}</label>
+              <ng-container
+                [ngTemplateOutlet]="paramInfo"
+                [ngTemplateOutletContext]="{ $implicit: n }"
+              ></ng-container>
+            </div>
+            <p-inputNumber
+              [ngModel]="open.values[n.id]"
+              (ngModelChange)="open.values[n.id] = $event"
+              [min]="n.min"
+              [max]="n.max"
+              [step]="n.step"
+              [minFractionDigits]="n.fractionDigits"
+              [showButtons]="true"
+            ></p-inputNumber>
+          }
+          @if (f.select; as sel) {
+            <div class="param-label">
+              <label class="text-sm">{{ sel.label }}</label>
+              <ng-container
+                [ngTemplateOutlet]="paramInfo"
+                [ngTemplateOutletContext]="{ $implicit: sel }"
+              ></ng-container>
+            </div>
+            <p-select
+              [options]="sel.options"
+              optionLabel="label"
+              optionValue="value"
+              [ngModel]="open.values[sel.id]"
+              (ngModelChange)="open.values[sel.id] = $event"
+              appendTo="body"
+            ></p-select>
+          }
+          <!-- Checkbox label sits beside the box and may run to a sentence, so
+            it does not get the stacked label the other types use. -->
+          @if (f.spec.type === 'boolean') {
+            <div class="flex align-items-center gap-2">
+              <p-checkbox
+                [ngModel]="open.values[f.spec.id]"
+                (ngModelChange)="open.values[f.spec.id] = $event"
+                [binary]="true"
+                [inputId]="open.tool.id + '-' + f.spec.id"
+              ></p-checkbox>
+              <label [for]="open.tool.id + '-' + f.spec.id" class="text-sm mb-0">{{ f.spec.label }}</label>
+              <ng-container
+                [ngTemplateOutlet]="paramInfo"
+                [ngTemplateOutletContext]="{ $implicit: f.spec }"
+              ></ng-container>
+            </div>
+          }
         </div>
-      </div>
-    </ng-container>
-  </div>
-  <!-- A field's help (`ToolParamSpec.tooltip`) behind an info icon beside its label. A
-       focusable button, so the tooltip also shows on keyboard focus, and the text is on
-       its aria-label for screen readers (the tooltip is rendered into body on demand). -->
-  <ng-template #paramInfo let-spec>
-    <button
-      *ngIf="spec.tooltip"
-      type="button"
-      class="pi pi-info-circle param-info-icon"
-      [attr.aria-label]="'About ' + spec.label + ': ' + spec.tooltip"
-      [pTooltip]="spec.tooltip"
-      tooltipPosition="top"
-      appendTo="body"
-      tooltipStyleClass="model-info-tooltip"
-    ></button>
-  </ng-template>
-  <ng-template pTemplate="footer">
-    <p-button
-      label="Reset to model defaults"
-      [text]="true"
-      size="small"
-      (onClick)="resetToolParams(open.tool.id)"
-    ></p-button>
-    <p-button label="Close" size="small" (onClick)="closeToolParams()"></p-button>
-  </ng-template>
-</p-dialog>
+      }
+    </div>
+    <!-- A field's help (`ToolParamSpec.tooltip`) behind an info icon beside its label. A
+      focusable button, so the tooltip also shows on keyboard focus, and the text is on
+      its aria-label for screen readers (the tooltip is rendered into body on demand). -->
+    <ng-template #paramInfo let-spec>
+      @if (spec.tooltip) {
+        <button
+          type="button"
+          class="pi pi-info-circle param-info-icon"
+          [attr.aria-label]="'About ' + spec.label + ': ' + spec.tooltip"
+          [pTooltip]="spec.tooltip"
+          tooltipPosition="top"
+          appendTo="body"
+          tooltipStyleClass="model-info-tooltip"
+        ></button>
+      }
+    </ng-template>
+    <ng-template pTemplate="footer">
+      <p-button
+        label="Reset to model defaults"
+        [text]="true"
+        size="small"
+        (onClick)="resetToolParams(open.tool.id)"
+      ></p-button>
+      <p-button label="Close" size="small" (onClick)="closeToolParams()"></p-button>
+    </ng-template>
+  </p-dialog>
+}

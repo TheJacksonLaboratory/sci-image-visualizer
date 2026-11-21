@@ -365,7 +365,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
     it('writes the boundaries', async () => {
       await build();
       // A switch per boundary set: the nuclei's on draws them with the cells'.
-      const nuclei = one(rowLabelled(cellsPart(), 'Nuclei'), 'p-inputSwitch');
+      const nuclei = one(rowLabelled(cellsPart(), 'Nuclei'), 'p-toggleswitch');
       expect(accessorOf(fixture, nuclei)).toBeTruthy();
       emit(nuclei, 'onChange', { checked: true });
       expect(lastWrite()).toEqual({ showCells: true, cellSet: 'both' });
@@ -399,7 +399,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         colorBy: { kind: 'column', name: 'graphclust' },
       });
       await settle();
-      const groupPicker = one(colourBy(), '.sc-row-picker p-dropdown');
+      const groupPicker = one(colourBy(), '.sc-row-picker p-select');
       // A k-means family is one entry; choosing it applies its first variant, to the markers too.
       pick(groupPicker, 'family:kmeans');
       expect(lastWrite()).toEqual({
@@ -409,11 +409,11 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         colorBy: { kind: 'column', name: 'kmeans_2' },
       });
       await settle();
-      const variant = colourBy().querySelectorAll('.sc-row-picker p-dropdown')[1];
+      const variant = colourBy().querySelectorAll('.sc-row-picker p-select')[1];
       pick(variant, 'kmeans_3');
       expect(lastWrite()).toEqual(expect.objectContaining({ cellTypeColumn: 'kmeans_3', hiddenGroups: [] }));
 
-      pick(one(colourBy(), '.sc-row-picker p-dropdown'), 'graphclust');
+      pick(one(colourBy(), '.sc-row-picker p-select'), 'graphclust');
       await settle();
       const rows = colourBy().querySelectorAll('.sc-group-row:not(.sc-group-all)');
       expect(Array.from(rows).map((r) => r.querySelector('.sc-group-label')?.textContent?.trim())).toEqual([
@@ -448,7 +448,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       await build();
       pick(one(colourBy(), '.sc-color-modes'), 'gene');
       fixture.detectChanges();
-      const gene = one(colourBy(), 'p-dropdown[inputId=sc-gene]');
+      const gene = one(colourBy(), 'p-select[inputId=sc-gene]');
       pick(gene, 'Mbp');
       expect(lastWrite()).toEqual(
         expect.objectContaining({
@@ -458,11 +458,10 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         }),
       );
       // The shared gene picker: the dropdown filters through it.
-      emit(one(colourBy(), 'p-dropdown[inputId=sc-gene]'), 'onFilter', { filter: 'sn' });
+      emit(one(colourBy(), 'p-select[inputId=sc-gene]'), 'onFilter', { filter: 'sn' });
       await settle();
-      const options = (
-        one(colourBy(), 'p-dropdown[inputId=sc-gene]') as unknown as { options: { value: string }[] }
-      ).options;
+      const options = (one(colourBy(), 'p-select[inputId=sc-gene]') as unknown as { options: { value: string }[] })
+        .options;
       // The filter's match, beside the gene picked.
       expect(options.map((o) => o.value)).toContain('Snap25');
       expect(options.map((o) => o.value)).not.toContain('Ttr');
@@ -546,10 +545,10 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       menu.model.find((m) => m.label.startsWith('Add marker genes'))!.command();
       fixture.detectChanges();
       const form = one(panelNamed(root, 'Transcripts'), '.sc-markers');
-      const column = one(rowLabelled(form, 'Clusters from'), 'p-dropdown');
+      const column = one(rowLabelled(form, 'Clusters from'), 'p-select');
       await fixture.whenStable();
       expect(accessorOf(fixture, column).value).toBe('graphclust');
-      pick(one(rowLabelled(form, 'Per cluster'), 'p-dropdown'), 3);
+      pick(one(rowLabelled(form, 'Per cluster'), 'p-select'), 3);
       emit(one(form, '.sc-markers-actions p-button'), 'onClick');
       await settle();
       expect(controls.markerGenes).toHaveBeenCalledWith('graphclust', 3);
@@ -581,7 +580,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
         )!,
       );
       fixture.detectChanges();
-      pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Max markers'), 'p-dropdown'), 200_000);
+      pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Max markers'), 'p-select'), 200_000);
       expect(lastWrite()).toEqual({ transcriptBudget: 200_000 });
 
       pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Colour by'), 'p-selectButton'), 'gene');
@@ -595,7 +594,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
 
       // With every gene shown as icons, one icon stands for all of them.
       view({ transcriptAllGenes: true });
-      pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Icon'), 'p-dropdown'), 'square');
+      pick(one(rowLabelled(panelNamed(root, 'Transcripts'), 'Icon'), 'p-select'), 'square');
       expect(lastWrite()).toEqual({ transcriptGlyphs: { '*': 'square' } });
     });
 
@@ -775,7 +774,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       // A measurement colours the markers, and the cells with them.
       pick(one(panelNamed(root, 'Observations'), '.sc-color-modes'), 'measure');
       fixture.detectChanges();
-      pick(one(panelNamed(root, 'Observations'), 'p-dropdown[inputId=sc-measure]'), 'total_counts');
+      pick(one(panelNamed(root, 'Observations'), 'p-select[inputId=sc-measure]'), 'total_counts');
       expect(lastWrite()).toEqual(
         expect.objectContaining({ colorBy: { kind: 'column', name: 'total_counts' }, cellColorMode: 'column' }),
       );
@@ -884,7 +883,7 @@ describe('SpatialControlsComponent (rendered: what each control writes)', () => 
       await settle();
       emit(one(root, 'p-checkbox[label="Log scale"]'), 'onChange', { checked: true });
       expect(lastWrite()).toEqual({ logScale: true });
-      pick(one(rowLabelled(root, 'Clip outliers'), 'p-dropdown'), [0.05, 0.95]);
+      pick(one(rowLabelled(root, 'Clip outliers'), 'p-select'), [0.05, 0.95]);
       expect(lastWrite()).toEqual({ percentileClip: [0.05, 0.95] });
     });
   });

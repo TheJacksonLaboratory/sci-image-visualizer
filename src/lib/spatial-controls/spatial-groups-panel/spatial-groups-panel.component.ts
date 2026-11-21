@@ -13,8 +13,8 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
-import { OverlayPanelModule } from 'primeng/overlaypanel';
+import { SelectModule } from 'primeng/select';
+import { PopoverModule } from 'primeng/popover';
 
 import type { ISpatialControls } from '../../contracts/visualizer.contract';
 import type { SpatialDataset } from '../../contracts/spatial-dataset.contract';
@@ -48,14 +48,13 @@ import { Supersede } from '../../util/supersede';
  */
 @Component({
   selector: 'spatial-groups-panel',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,
     SharedModule,
     CheckboxModule,
-    DropdownModule,
-    OverlayPanelModule,
+    SelectModule,
+    PopoverModule,
     SpatialGeneStyleComponent,
   ],
   templateUrl: './spatial-groups-panel.component.html',

@@ -1,6 +1,6 @@
 <span class="toolbar-separator"></span>
 <!-- Region Editor: opens the editor as a floating dialog (formerly the
-     right-panel Regions tab). Sits with the region drawing tools. -->
+right-panel Regions tab). Sits with the region drawing tools. -->
 <p-button
   size="small"
   [text]="true"
@@ -13,69 +13,76 @@
 </p-button>
 
 <!-- Region drawing tools, from REGION_TOOL_BUTTONS. A tool's parameter slider
-     follows its button while it is active. -->
-<ng-container *ngFor="let b of buttons; trackBy: trackByMode">
-  <p-button
-    *ngIf="shown(b)"
-    size="small"
-    [icon]="b.icon"
-    [ariaLabel]="b.label"
-    [text]="activeDragMode !== b.mode"
-    [pTooltip]="b.tooltip"
-    [escape]="false"
-    tooltipPosition="bottom"
-    (onClick)="toggleDragMode.emit(b.mode)"
-  >
-    <img
-      *ngIf="b.img"
-      [src]="'assets/plotting/' + b.img"
-      alt=""
-      style="width: 1rem"
-      [class]="activeDragMode === b.mode ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-    />
-  </p-button>
-  <ng-container *ngIf="shown(b) && b.slider && activeDragMode === b.mode" [ngSwitch]="b.slider">
-    <toolbar-tool-slider
-      *ngSwitchCase="'brush'"
-      label="Size"
-      [value]="brushSize"
-      [min]="brushSizeMin"
-      [max]="brushSizeMax"
-      [step]="brushSizeStep"
-      tooltip="Brush diameter in image pixels."
-      [valueText]="'' + brushSize"
-      (valueChange)="brushSizeChange.emit(asNumber($event))"
+follows its button while it is active. -->
+@for (b of buttons; track trackByMode($index, b)) {
+  @if (shown(b)) {
+    <p-button
+      size="small"
+      [icon]="b.icon"
+      [ariaLabel]="b.label"
+      [text]="activeDragMode !== b.mode"
+      [pTooltip]="b.tooltip"
+      [escape]="false"
+      tooltipPosition="bottom"
+      (onClick)="toggleDragMode.emit(b.mode)"
     >
-    </toolbar-tool-slider>
-    <toolbar-tool-slider
-      *ngSwitchCase="'wand'"
-      label="Sens."
-      [value]="wandSensitivity"
-      [min]="wandSensitivityMin"
-      [max]="wandSensitivityMax"
-      [step]="wandSensitivityStep"
-      tooltip="Higher = stricter (smaller selection); lower = looser.
+      @if (b.img) {
+        <img
+          [src]="'assets/plotting/' + b.img"
+          alt=""
+          style="width: 1rem"
+          [class]="activeDragMode === b.mode ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        />
+      }
+    </p-button>
+  }
+  @if (shown(b) && b.slider && activeDragMode === b.mode) {
+    @switch (b.slider) {
+      @case ('brush') {
+        <toolbar-tool-slider
+          label="Size"
+          [value]="brushSize"
+          [min]="brushSizeMin"
+          [max]="brushSizeMax"
+          [step]="brushSizeStep"
+          tooltip="Brush diameter in image pixels."
+          [valueText]="'' + brushSize"
+          (valueChange)="brushSizeChange.emit(asNumber($event))"
+        >
+        </toolbar-tool-slider>
+      }
+      @case ('wand') {
+        <toolbar-tool-slider
+          label="Sens."
+          [value]="wandSensitivity"
+          [min]="wandSensitivityMin"
+          [max]="wandSensitivityMax"
+          [step]="wandSensitivityStep"
+          tooltip="Higher = stricter (smaller selection); lower = looser.
                          Takes effect from the next click/drag tick."
-      [valueText]="wandSensitivity.toFixed(1)"
-      (valueChange)="wandSensitivityChange.emit(asNumber($event))"
-    >
-    </toolbar-tool-slider>
-    <toolbar-tool-slider
-      *ngSwitchCase="'eraser'"
-      label="Radius"
-      [value]="vertexEraserRadius"
-      [min]="vertexEraserRadiusMin"
-      [max]="vertexEraserRadiusMax"
-      [step]="vertexEraserRadiusStep"
-      tooltip="Eraser radius in image pixels.
+          [valueText]="wandSensitivity.toFixed(1)"
+          (valueChange)="wandSensitivityChange.emit(asNumber($event))"
+        >
+        </toolbar-tool-slider>
+      }
+      @case ('eraser') {
+        <toolbar-tool-slider
+          label="Radius"
+          [value]="vertexEraserRadius"
+          [min]="vertexEraserRadiusMin"
+          [max]="vertexEraserRadiusMax"
+          [step]="vertexEraserRadiusStep"
+          tooltip="Eraser radius in image pixels.
                          Vertices within this distance of the cursor are removed, and the
                          outline is rejoined at the eraser's edge."
-      [valueText]="'' + vertexEraserRadius"
-      (valueChange)="vertexEraserRadiusChange.emit(asNumber($event))"
-    >
-    </toolbar-tool-slider>
-  </ng-container>
-</ng-container>
+          [valueText]="'' + vertexEraserRadius"
+          (valueChange)="vertexEraserRadiusChange.emit(asNumber($event))"
+        >
+        </toolbar-tool-slider>
+      }
+    }
+  }
+}
 
 <p-button
   size="small"

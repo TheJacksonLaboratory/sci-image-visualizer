@@ -7,7 +7,7 @@
 .sc-empty {
   padding: 0.5rem 0;
   font-size: 0.85rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   line-height: 1.4;
 
   code {
@@ -26,7 +26,7 @@
   flex-direction: column;
   gap: 0.1rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--surface-border, #dee2e6);
+  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
 }
 
 .sc-dataset-name {
@@ -36,7 +36,7 @@
 
 .sc-dataset-count {
   font-size: 0.75rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 }
 
 .sc-btns {
@@ -48,7 +48,7 @@
    "controls, then the chart they drive" rather than one long form. */
 .sc-charts {
   padding-top: 0.5rem;
-  border-top: 1px solid var(--surface-border, #dee2e6);
+  border-top: 1px solid var(--p-content-border-color, #dee2e6);
   gap: 0;
 }
 
@@ -69,18 +69,18 @@
 
   i {
     font-size: 0.7rem;
-    color: var(--text-color-secondary, #6c757d);
+    color: var(--p-text-muted-color, #6c757d);
   }
 
   small {
     font-weight: 400;
-    color: var(--text-color-secondary, #6c757d);
+    color: var(--p-text-muted-color, #6c757d);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   &:hover {
-    color: var(--primary-color, #3b82f6);
+    color: var(--p-primary-color, #3b82f6);
   }
 }

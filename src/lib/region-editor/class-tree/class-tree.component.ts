@@ -36,7 +36,6 @@ export type ClassVisibility = 'shown' | 'hidden' | 'partial';
  */
 @Component({
   selector: 'region-class-tree',
-  standalone: true,
   imports: [CommonModule, FormsModule, InputTextModule, TooltipModule, HexColorPickerComponent],
   templateUrl: './class-tree.component.html',
   styleUrls: ['./class-tree.component.scss'],

@@ -6,11 +6,11 @@
 
 .sc-hint {
   font-size: 0.75rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 }
 
 .sc-error {
-  color: var(--red-600, #c62828);
+  color: var(--p-red-600, #c62828);
 }
 
 .sc-section {
@@ -21,7 +21,7 @@
 
 .sc-lbl {
   font-size: 0.78rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   white-space: nowrap;
 }
 
@@ -30,13 +30,13 @@
   align-items: center;
   gap: 0.6rem;
 
-  // The <p-slider> and <p-dropdown> HOST elements are inline by default, so
+  // The <p-slider> and <p-select> HOST elements are inline by default, so
   // they ignore flex sizing. `styleClass` does not help: PrimeNG puts that
   // class on its inner div, so styling it leaves the host collapsed — which
   // renders a slider as nothing but its round handle, and reads as a radio
   // button. Size the hosts here and stretch the track below.
   p-slider,
-  p-dropdown,
+  p-select,
   p-treeSelect {
     flex: 1 1 0;
     min-width: 0;
@@ -46,7 +46,7 @@
 :host ::ng-deep .sc-row p-slider .p-slider {
   width: 100%;
 }
-:host ::ng-deep .sc-row p-dropdown .p-dropdown,
+:host ::ng-deep .sc-row p-select .p-select,
 :host ::ng-deep .sc-row p-treeSelect .p-treeselect {
   width: 100%;
 }
@@ -93,7 +93,7 @@
 }
 
 :host ::ng-deep .sc-full,
-:host ::ng-deep .sc-full .p-dropdown,
+:host ::ng-deep .sc-full .p-select,
 :host ::ng-deep .sc-full .p-autocomplete,
 :host ::ng-deep .sc-full input {
   width: 100%;
@@ -109,13 +109,13 @@
   display: flex;
   justify-content: space-between;
   font-size: 0.7rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   margin-top: 0.2rem;
 }
 
 // ── Xenium Explorer-style collapsible sections ─────────────────────────────────────
 .sc-panel {
-  border: 1px solid var(--surface-border, #dee2e6);
+  border: 1px solid var(--p-content-border-color, #dee2e6);
   border-radius: 6px;
   margin-bottom: 0.5rem;
   overflow: hidden;
@@ -128,7 +128,7 @@
   padding: 0.5rem 0.7rem;
   cursor: pointer;
   user-select: none;
-  background: var(--surface-100, #f5f6f7);
+  background: var(--p-content-hover-background, #f5f6f7);
 
   .sc-panel-title {
     flex: 1;
@@ -138,8 +138,8 @@
 
 // The open section's header takes the accent, as Explorer highlights it.
 .sc-panel.open > .sc-panel-head {
-  background: var(--primary-color, #2196f3);
-  color: var(--primary-color-text, #fff);
+  background: var(--p-primary-color, #2196f3);
+  color: var(--p-primary-contrast-color, #fff);
 }
 
 .sc-panel-body {
@@ -159,12 +159,12 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 
   &::after {
     content: '';
     flex: 1;
-    border-top: 1px solid var(--surface-border, #dee2e6);
+    border-top: 1px solid var(--p-content-border-color, #dee2e6);
   }
 }
 
@@ -185,7 +185,7 @@
   }
 
   &:hover .sc-subsection-title {
-    color: var(--primary-color, #3b82f6);
+    color: var(--p-primary-color, #3b82f6);
   }
 }
 
@@ -194,7 +194,7 @@
   flex-direction: column;
   gap: 0.45rem;
   padding-left: 0.6rem;
-  border-left: 2px solid var(--surface-border, #dee2e6);
+  border-left: 2px solid var(--p-content-border-color, #dee2e6);
 }
 
 :host ::ng-deep .sc-buttons .p-button {
@@ -204,7 +204,7 @@
 
 // Picker + side buttons on one line: [ dropdown ][k][+]
 .sc-row-picker {
-  p-dropdown,
+  p-select,
   p-multiSelect,
   p-treeSelect {
     flex: 1 1 0;
@@ -217,7 +217,7 @@
 :host ::ng-deep .sc-row-picker p-multiselect .p-multiselect {
   width: 100%;
 }
-:host ::ng-deep .sc-row-picker p-dropdown:has(.sc-variant) {
+:host ::ng-deep .sc-row-picker p-select:has(.sc-variant) {
   flex: 0 0 6.5rem;
 }
 :host ::ng-deep .sc-row-picker p-treeselect:has(.sc-palette) {
@@ -236,14 +236,14 @@
   padding: 0.25rem 0.35rem;
   font: inherit;
   font-size: 1.05rem;
-  color: var(--text-color, #333);
+  color: var(--p-text-color, #333);
   border-radius: 4px;
 
   &:hover {
-    background: var(--surface-200, #e9ecef);
+    background: var(--p-content-border-color, #e9ecef);
   }
   &.active {
-    color: var(--primary-color, #2196f3);
+    color: var(--p-primary-color, #2196f3);
     font-weight: 700;
   }
   &:disabled {
@@ -254,8 +254,8 @@
 
 .sc-small-btn {
   margin-left: auto;
-  border: 1px solid var(--surface-border, #ced4da);
-  background: var(--surface-0, #fff);
+  border: 1px solid var(--p-content-border-color, #ced4da);
+  background: var(--p-content-background, #fff);
   border-radius: 4px;
   padding: 0.2rem 0.6rem;
   font: inherit;
@@ -276,7 +276,7 @@
 .sc-gene-tree {
   max-height: 16rem;
   overflow-y: auto;
-  border: 1px solid var(--surface-border, #dee2e6);
+  border: 1px solid var(--p-content-border-color, #dee2e6);
   border-radius: 4px;
   padding: 0.25rem 0.4rem;
 }
@@ -311,7 +311,7 @@
 .sc-count {
   flex: 0 0 auto;
   font-size: 0.78rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 }
 
 .sc-glyph-option {
@@ -326,14 +326,14 @@
   fill: currentColor;
 }
 
-:host ::ng-deep .sc-glyph-pick .p-dropdown-label {
+:host ::ng-deep .sc-glyph-pick .p-select-label {
   padding: 0.2rem 0.4rem;
 }
 
 .sc-color-input {
   width: 2.5rem;
   height: 1.8rem;
-  border: 1px solid var(--surface-border, #ced4da);
+  border: 1px solid var(--p-content-border-color, #ced4da);
   border-radius: 4px;
   padding: 0;
   background: none;
@@ -373,7 +373,7 @@
   cursor: pointer;
   &:hover,
   &:focus-visible {
-    border-color: var(--surface-border, rgba(0, 0, 0, 0.2));
+    border-color: var(--p-content-border-color, rgba(0, 0, 0, 0.2));
   }
 }
 
@@ -394,7 +394,7 @@
   }
 
   &:hover {
-    color: var(--primary-color, #3b82f6);
+    color: var(--p-primary-color, #3b82f6);
   }
 }
 
@@ -456,13 +456,13 @@
 .sc-seltx-bar {
   height: 0.45rem;
   border-radius: 2px;
-  background: var(--surface-200, #e9ecef);
+  background: var(--p-content-border-color, #e9ecef);
   overflow: hidden;
 
   span {
     display: block;
     height: 100%;
-    background: var(--primary-color, #3b82f6);
+    background: var(--p-primary-color, #3b82f6);
   }
 }
 
@@ -489,7 +489,7 @@
   font-size: 0.78rem;
 
   dt {
-    color: var(--text-color-secondary, #6c757d);
+    color: var(--p-text-muted-color, #6c757d);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

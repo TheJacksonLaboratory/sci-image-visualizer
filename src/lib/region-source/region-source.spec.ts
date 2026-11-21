@@ -1,5 +1,13 @@
-import { HTTP_INTERCEPTORS, HttpClient, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import {
+  HTTP_INTERCEPTORS,
+  HttpClient,
+  HttpHandler,
+  HttpInterceptor,
+  HttpRequest,
+  provideHttpClient,
+  withInterceptorsFromDi,
+} from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { openHttpRegionSource } from './http-region-source';
 import { RegionTileCache, isAbortError } from './region-source';
@@ -278,8 +286,12 @@ describe('openHttpRegionSource', () => {
 
     beforeEach(() => {
       TestBed.configureTestingModule({
-        imports: [HttpClientTestingModule],
-        providers: [{ provide: HTTP_INTERCEPTORS, useClass: Auth, multi: true }],
+        imports: [],
+        providers: [
+          { provide: HTTP_INTERCEPTORS, useClass: Auth, multi: true },
+          provideHttpClient(withInterceptorsFromDi()),
+          provideHttpClientTesting(),
+        ],
       });
       http = TestBed.inject(HttpClient);
       server = TestBed.inject(HttpTestingController);

@@ -1,4 +1,4 @@
-import { EnvironmentInjector, createEnvironmentInjector } from '@angular/core';
+import { EnvironmentInjector, Type, createEnvironmentInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { SamSessionService } from './sam-session.service';
@@ -138,7 +138,7 @@ describe('SamSessionService scope (one session per app, disposable per viewer)',
     const root = TestBed.inject(EnvironmentInjector);
     const chainA = createEnvironmentInjector(provideVisualization(), root);
     const chainB = createEnvironmentInjector(provideVisualization(), root);
-    const sessionsOf = (i: EnvironmentInjector, t: typeof SamToolService | typeof SamPointToolService) =>
+    const sessionsOf = (i: EnvironmentInjector, t: Type<SamToolService | SamPointToolService>) =>
       (i.get(t) as unknown as { sessions: SamSessionService }).sessions;
 
     // Each chain has its own tool feeds…

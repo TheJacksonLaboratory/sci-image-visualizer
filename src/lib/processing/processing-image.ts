@@ -1,3 +1,5 @@
+import { newImageData } from '../util/image-data';
+
 /**
  * Unified image container used throughout the processing pipeline.
  * Decouples pipeline logic from any specific library's image format.
@@ -26,7 +28,7 @@ export class ProcessingImage {
    */
   toImageData(): ImageData {
     if (this.channels === 4) {
-      return new ImageData(this.data, this.width, this.height);
+      return newImageData(this.data, this.width, this.height);
     }
     const c = this.channels;
     if (c < 1 || c > 3) {

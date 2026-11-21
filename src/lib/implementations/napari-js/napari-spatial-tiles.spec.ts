@@ -1477,7 +1477,7 @@ describe('NapariSpatialTileLayers: drawing cells', () => {
     const getPolygonTile = jest.fn(async () => rings());
     const getColumn = jest.fn(async () => ({ meta, codes: Uint16Array.of(0, 1) }));
     // One expression value per cell; replaced to stand for a new gene vector.
-    let expression = Float32Array.of(3, 40);
+    let expression: Float32Array = Float32Array.of(3, 40);
     const getFeatureVector = jest.fn(async () => expression);
     const dataset = {
       id: 'd',

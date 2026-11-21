@@ -12,207 +12,233 @@
   styleClass="spatial-controls-dialog"
 >
   <!-- No port bound: say why rather than showing controls that do nothing. -->
-  <div class="sc-empty" *ngIf="!controls">
-    No spatial-omics data source is configured. A host provides one by binding
-    <code>SPATIAL_DATA_PORT</code>.
-  </div>
-
-  <div class="sc-empty" *ngIf="controls && !dataset">No dataset is loaded.</div>
-
-  <div class="sc-body" *ngIf="controls && dataset as ds">
-    <div class="sc-dataset">
-      <span class="sc-dataset-name">{{ ds.name }}</span>
-      <span class="sc-dataset-count">{{ ds.observations.count | number }} observations</span>
+  @if (!controls) {
+    <div class="sc-empty">
+      No spatial-omics data source is configured. A host provides one by binding
+      <code>SPATIAL_DATA_PORT</code>.
     </div>
+  }
 
-    <!-- Organised as Xenium Explorer's side panel: one collapsible section per layer,
-         each with its own on/off switch in the header. -->
+  @if (controls && !dataset) {
+    <div class="sc-empty">No dataset is loaded.</div>
+  }
 
-    <!-- Images -->
-    <div class="sc-panel" *ngIf="ds.imageRef && !is3d" [class.open]="open.images">
-      <div class="sc-panel-head" (click)="toggleSection('images')">
-        <p-checkbox
-          [binary]="true"
-          [ngModel]="view.showImage"
-          (click)="$event.stopPropagation()"
-          (onChange)="onShowImage($event.checked)"
-        ></p-checkbox>
-        <span class="sc-panel-title">Images</span>
-        <i class="pi" [class.pi-chevron-down]="open.images" [class.pi-chevron-right]="!open.images"></i>
+  @if (controls && dataset; as ds) {
+    <div class="sc-body">
+      <div class="sc-dataset">
+        <span class="sc-dataset-name">{{ ds.name }}</span>
+        <span class="sc-dataset-count">{{ ds.observations.count | number }} observations</span>
       </div>
-      <div class="sc-panel-body" *ngIf="open.images">
-        <small class="sc-hint"> Channels, colours and contrast are in the Channels &amp; Histogram dialog. </small>
-      </div>
-    </div>
-
-    <!-- Volume: in 3D, the Images section's place: the reference volume the observations sit in. -->
-    <div class="sc-panel" *ngIf="ds.volume && is3d" [class.open]="open.volume">
-      <div class="sc-panel-head" (click)="toggleSection('volume')">
-        <p-checkbox
-          [binary]="true"
-          [ngModel]="view.showVolume"
-          (click)="$event.stopPropagation()"
-          (onChange)="onShowVolume($event.checked)"
-        ></p-checkbox>
-        <span class="sc-panel-title">Volume</span>
-        <i class="pi" [class.pi-chevron-down]="open.volume" [class.pi-chevron-right]="!open.volume"></i>
-      </div>
-      <div class="sc-panel-body" *ngIf="open.volume">
-        <!-- Its own opacity: reading the cloud or a density field through the anatomy means turning
-           the anatomy down, not the data. -->
-        <div class="sc-row">
-          <span class="sc-lbl">Opacity</span>
-          <p-slider
-            [ngModel]="view.volumeOpacity"
-            [min]="0.05"
-            [max]="1"
-            [step]="0.05"
-            [disabled]="!view.showVolume"
-            (onChange)="onVolumeOpacity($event.value)"
-          ></p-slider>
-          <span class="sc-val">{{ view.volumeOpacity }}</span>
+      <!-- Organised as Xenium Explorer's side panel: one collapsible section per layer,
+      each with its own on/off switch in the header. -->
+      <!-- Images -->
+      @if (ds.imageRef && !is3d) {
+        <div class="sc-panel" [class.open]="open.images">
+          <div class="sc-panel-head" (click)="toggleSection('images')">
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="view.showImage"
+              (click)="$event.stopPropagation()"
+              (onChange)="onShowImage($event.checked)"
+            ></p-checkbox>
+            <span class="sc-panel-title">Images</span>
+            <i class="pi" [class.pi-chevron-down]="open.images" [class.pi-chevron-right]="!open.images"></i>
+          </div>
+          @if (open.images) {
+            <div class="sc-panel-body">
+              <small class="sc-hint">
+                Channels, colours and contrast are in the Channels &amp; Histogram dialog.
+              </small>
+            </div>
+          }
         </div>
-        <small class="sc-hint">The registered anatomy the observations sit in.</small>
-      </div>
-    </div>
-
-    <!-- Transcripts -->
-    <spatial-transcripts-panel
-      *ngIf="hasTranscripts && (!is3d || hasTranscripts3d)"
-      [controls]="controls"
-      [dataset]="ds"
-      [view]="view"
-      [genes]="genes"
-      [estimate]="estimate"
-      [densityStats]="densityStats"
-      [geneCounts]="geneCounts"
-      [colormapOptions]="colormapOptions"
-      [is3d]="is3d"
-      [open]="open.transcripts"
-      (openChange)="setOpen('transcripts', $event)"
-    >
-    </spatial-transcripts-panel>
-
-    <!-- Observations, then what else draws them: the gene map, the 3D scene, and the
-         continuous-only knobs. -->
-    <spatial-observations-panel
-      [controls]="controls"
-      [dataset]="ds"
-      [view]="view"
-      [genes]="genes"
-      [legend]="legend"
-      [colorBarCss]="colorBarCss"
-      [selection]="selection"
-      [selectedCategory]="selectedCategory"
-      [colormapOptions]="colormapOptions"
-      [is3d]="is3d"
-      [cellsAvailable]="hasCells && (!is3d || hasCells3d)"
-      [open]="open.observations"
-      (openChange)="setOpen('observations', $event)"
-      (categoryClicked)="selectCategory($event)"
-    >
-      <!-- Cell segmentations: with a cell segmentation (in 3D, a 3D one), how the cells are drawn
-           while the Observations are shown as them. -->
-      <spatial-cells-panel
-        *ngIf="hasCells && (!is3d || hasCells3d)"
+      }
+      <!-- Volume: in 3D, the Images section's place: the reference volume the observations sit in. -->
+      @if (ds.volume && is3d) {
+        <div class="sc-panel" [class.open]="open.volume">
+          <div class="sc-panel-head" (click)="toggleSection('volume')">
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="view.showVolume"
+              (click)="$event.stopPropagation()"
+              (onChange)="onShowVolume($event.checked)"
+            ></p-checkbox>
+            <span class="sc-panel-title">Volume</span>
+            <i class="pi" [class.pi-chevron-down]="open.volume" [class.pi-chevron-right]="!open.volume"></i>
+          </div>
+          @if (open.volume) {
+            <div class="sc-panel-body">
+              <!-- Its own opacity: reading the cloud or a density field through the anatomy means turning
+              the anatomy down, not the data. -->
+              <div class="sc-row">
+                <span class="sc-lbl">Opacity</span>
+                <p-slider
+                  [ngModel]="view.volumeOpacity"
+                  [min]="0.05"
+                  [max]="1"
+                  [step]="0.05"
+                  [disabled]="!view.showVolume"
+                  (onChange)="onVolumeOpacity($event.value)"
+                ></p-slider>
+                <span class="sc-val">{{ view.volumeOpacity }}</span>
+              </div>
+              <small class="sc-hint">The registered anatomy the observations sit in.</small>
+            </div>
+          }
+        </div>
+      }
+      <!-- Transcripts -->
+      @if (hasTranscripts && (!is3d || hasTranscripts3d)) {
+        <spatial-transcripts-panel
+          [controls]="controls"
+          [dataset]="ds"
+          [view]="view"
+          [genes]="genes"
+          [estimate]="estimate"
+          [densityStats]="densityStats"
+          [geneCounts]="geneCounts"
+          [colormapOptions]="colormapOptions"
+          [is3d]="is3d"
+          [open]="open.transcripts"
+          (openChange)="setOpen('transcripts', $event)"
+        >
+        </spatial-transcripts-panel>
+      }
+      <!-- Observations, then what else draws them: the gene map, the 3D scene, and the
+      continuous-only knobs. -->
+      <spatial-observations-panel
         [controls]="controls"
         [dataset]="ds"
         [view]="view"
+        [genes]="genes"
+        [legend]="legend"
+        [colorBarCss]="colorBarCss"
+        [selection]="selection"
+        [selectedCategory]="selectedCategory"
+        [colormapOptions]="colormapOptions"
         [is3d]="is3d"
-        [cells3dStatus]="cells3dStatus"
-      ></spatial-cells-panel>
-    </spatial-observations-panel>
-
-    <!-- Regions, under the Observations: the drawn regions, and selecting what they enclose. Off by
-         default; the dataset's own region set is the Cell segmentations'. -->
-    <div class="sc-panel" [class.open]="open.annotations">
-      <div class="sc-panel-head" (click)="toggleSection('annotations')">
-        <p-checkbox
-          [binary]="true"
-          [ngModel]="view.showAnnotations !== false"
-          (click)="$event.stopPropagation()"
-          (onChange)="onShowAnnotations($event.checked)"
-          pTooltip="Show the regions"
-          tooltipPosition="top"
-        ></p-checkbox>
-        <span class="sc-panel-title">Regions</span>
-        <i class="pi" [class.pi-chevron-down]="open.annotations" [class.pi-chevron-right]="!open.annotations"></i>
-      </div>
-      <div class="sc-panel-body" *ngIf="open.annotations">
-        <div class="sc-row">
-          <p-button
-            label="Select from ROIs"
-            icon="pi pi-object-group"
-            size="small"
-            [outlined]="true"
-            [loading]="selectingFromRegions"
-            (onClick)="selectFromRegions()"
-            [pTooltip]="
-              selectsClassVolumes
-                ? 'Select every observation inside the volumes of the classes picked in the Region Editor'
-                : 'Select every observation inside the drawn regions'
-            "
-            tooltipPosition="top"
-          ></p-button>
-          <p-button
-            *ngIf="hasSelection"
-            label="Clear"
-            size="small"
-            [text]="true"
-            (onClick)="clearSelection()"
-          ></p-button>
-        </div>
-        <small class="sc-hint" *ngIf="hasSelection">
-          {{ selection.count | number }} of {{ ds.observations.count | number }} selected — the rest are muted.
-        </small>
-        <small class="sc-hint" *ngIf="selectionMissed">
-          No observations fell inside the
-          {{ missedMode === 'class-volumes' ? 'picked classes' : 'drawn regions' }}.
-        </small>
-        <small class="sc-hint" *ngIf="selectsClassVolumes">
-          Selects inside the volume of {{ pickedClasses[0]
-          }}{{ pickedClasses.length > 1 ? ' and ' + (pickedClasses.length - 1 | number) + ' more classes' : '' }},
-          picked in the Region Editor. Draw a region to select by it instead.
-        </small>
-        <small class="sc-hint" *ngIf="is3d && !selectsClassVolumes && pickedClasses.length">
-          The classes picked in the Region Editor are not on the reference volume shown here, so this selects by
-          the regions drawn over the cloud instead.
-        </small>
-        <small class="sc-hint" *ngIf="is3d && !selectsClassVolumes">
-          In 3D a region cuts through the cloud's full depth. Orbit and draw again to cut from another angle.
-          <ng-container *ngIf="!pickedClasses.length">
-            Pick classes in the Region Editor's class tree to select inside their volumes.
-          </ng-container>
-        </small>
-      </div>
-    </div>
-
-    <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
-         the colour controls on purpose: changing the gene and watching the
-         distribution move is one action, and two floating windows made that
-         harder to see rather than easier. -->
-    <div class="sc-section sc-charts">
-      <button
-        type="button"
-        class="sc-disclosure"
-        (click)="toggleCharts()"
-        [attr.aria-expanded]="chartsOpen"
-        [attr.aria-controls]="chartsBodyId"
+        [cellsAvailable]="hasCells && (!is3d || hasCells3d)"
+        [open]="open.observations"
+        (openChange)="setOpen('observations', $event)"
+        (categoryClicked)="selectCategory($event)"
       >
-        <i class="pi" [class.pi-chevron-right]="!chartsOpen" [class.pi-chevron-down]="chartsOpen"></i>
-        <span>Distribution</span>
-        <small *ngIf="!chartsOpen && view.colorBy">of {{ colorByLabel }}</small>
-      </button>
-      <!-- Kept MOUNTED when collapsed, only hidden: destroying it would throw
-           away the chart kind and grouping the user picked. `active` is what
-           stops it drawing while it has no size. -->
-      <div [id]="chartsBodyId" [hidden]="!chartsOpen">
-        <spatial-charts [active]="visible && chartsOpen"></spatial-charts>
+        <!-- Cell segmentations: with a cell segmentation (in 3D, a 3D one), how the cells are drawn
+        while the Observations are shown as them. -->
+        @if (hasCells && (!is3d || hasCells3d)) {
+          <spatial-cells-panel
+            [controls]="controls"
+            [dataset]="ds"
+            [view]="view"
+            [is3d]="is3d"
+            [cells3dStatus]="cells3dStatus"
+          ></spatial-cells-panel>
+        }
+      </spatial-observations-panel>
+      <!-- Regions, under the Observations: the drawn regions, and selecting what they enclose. Off by
+      default; the dataset's own region set is the Cell segmentations'. -->
+      <div class="sc-panel" [class.open]="open.annotations">
+        <div class="sc-panel-head" (click)="toggleSection('annotations')">
+          <p-checkbox
+            [binary]="true"
+            [ngModel]="view.showAnnotations !== false"
+            (click)="$event.stopPropagation()"
+            (onChange)="onShowAnnotations($event.checked)"
+            pTooltip="Show the regions"
+            tooltipPosition="top"
+          ></p-checkbox>
+          <span class="sc-panel-title">Regions</span>
+          <i
+            class="pi"
+            [class.pi-chevron-down]="open.annotations"
+            [class.pi-chevron-right]="!open.annotations"
+          ></i>
+        </div>
+        @if (open.annotations) {
+          <div class="sc-panel-body">
+            <div class="sc-row">
+              <p-button
+                label="Select from ROIs"
+                icon="pi pi-object-group"
+                size="small"
+                [outlined]="true"
+                [loading]="selectingFromRegions"
+                (onClick)="selectFromRegions()"
+                [pTooltip]="
+                  selectsClassVolumes
+                    ? 'Select every observation inside the volumes of the classes picked in the Region Editor'
+                    : 'Select every observation inside the drawn regions'
+                "
+                tooltipPosition="top"
+              ></p-button>
+              @if (hasSelection) {
+                <p-button label="Clear" size="small" [text]="true" (onClick)="clearSelection()"></p-button>
+              }
+            </div>
+            @if (hasSelection) {
+              <small class="sc-hint">
+                {{ selection.count | number }} of {{ ds.observations.count | number }} selected — the rest are
+                muted.
+              </small>
+            }
+            @if (selectionMissed) {
+              <small class="sc-hint">
+                No observations fell inside the
+                {{ missedMode === 'class-volumes' ? 'picked classes' : 'drawn regions' }}.
+              </small>
+            }
+            @if (selectsClassVolumes) {
+              <small class="sc-hint">
+                Selects inside the volume of {{ pickedClasses[0]
+                }}{{
+                  pickedClasses.length > 1 ? ' and ' + (pickedClasses.length - 1 | number) + ' more classes' : ''
+                }}, picked in the Region Editor. Draw a region to select by it instead.
+              </small>
+            }
+            @if (is3d && !selectsClassVolumes && pickedClasses.length) {
+              <small class="sc-hint">
+                The classes picked in the Region Editor are not on the reference volume shown here, so this selects
+                by the regions drawn over the cloud instead.
+              </small>
+            }
+            @if (is3d && !selectsClassVolumes) {
+              <small class="sc-hint">
+                In 3D a region cuts through the cloud's full depth. Orbit and draw again to cut from another angle.
+                @if (!pickedClasses.length) {
+                  Pick classes in the Region Editor's class tree to select inside their volumes.
+                }
+              </small>
+            }
+          </div>
+        }
+      </div>
+      <!-- Distributions of whatever the map is coloured by. In the SAME dialog as
+      the colour controls on purpose: changing the gene and watching the
+      distribution move is one action, and two floating windows made that
+      harder to see rather than easier. -->
+      <div class="sc-section sc-charts">
+        <button
+          type="button"
+          class="sc-disclosure"
+          (click)="toggleCharts()"
+          [attr.aria-expanded]="chartsOpen"
+          [attr.aria-controls]="chartsBodyId"
+        >
+          <i class="pi" [class.pi-chevron-right]="!chartsOpen" [class.pi-chevron-down]="chartsOpen"></i>
+          <span>Distribution</span>
+          @if (!chartsOpen && view.colorBy) {
+            <small>of {{ colorByLabel }}</small>
+          }
+        </button>
+        <!-- Kept MOUNTED when collapsed, only hidden: destroying it would throw
+        away the chart kind and grouping the user picked. `active` is what
+        stops it drawing while it has no size. -->
+        <div [id]="chartsBodyId" [hidden]="!chartsOpen">
+          <spatial-charts [active]="visible && chartsOpen"></spatial-charts>
+        </div>
+      </div>
+      <div class="sc-btns">
+        <p-button label="Reset" size="small" [text]="true" (onClick)="reset()"></p-button>
       </div>
     </div>
-
-    <div class="sc-btns">
-      <p-button label="Reset" size="small" [text]="true" (onClick)="reset()"></p-button>
-    </div>
-  </div>
+  }
 </p-dialog>

@@ -20,9 +20,9 @@
   background: transparent;
   cursor: pointer;
   padding: 0;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   .pi-eye {
-    color: var(--text-color, #333);
+    color: var(--p-text-color, #333);
   }
   &:disabled {
     cursor: default;
@@ -41,16 +41,16 @@
   }
 }
 .sc-sort-btn {
-  border: 1px solid var(--surface-border, #ced4da);
-  background: var(--surface-0, #fff);
-  color: var(--text-color, #333);
+  border: 1px solid var(--p-content-border-color, #ced4da);
+  background: var(--p-content-background, #fff);
+  color: var(--p-text-color, #333);
   border-radius: 4px;
   padding: 0.1rem 0.5rem;
   font: inherit;
   cursor: pointer;
   &.active {
-    border-color: var(--primary-color, #2196f3);
-    color: var(--primary-color, #2196f3);
+    border-color: var(--p-primary-color, #2196f3);
+    color: var(--p-primary-color, #2196f3);
     font-weight: 600;
   }
 }
@@ -67,7 +67,7 @@
   text-align: right;
   font-size: 0.78rem;
   padding: 0.2rem 0;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
 }
 
 // Per-gene marker button in the gene tree, and the icon/colour picker it opens.

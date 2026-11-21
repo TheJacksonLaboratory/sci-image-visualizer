@@ -1,120 +1,137 @@
-<div class="sx-body" *ngIf="controls">
-  <!-- The chart follows whatever the map is coloured by, so the two can never
-       disagree about what is being shown. -->
-  <div class="sx-head">
-    <span class="sx-subject" *ngIf="subject">{{ subject }}</span>
-    <span class="sx-subject sx-muted" *ngIf="!subject">nothing selected to chart</span>
-    <span class="sx-badge" *ngIf="selectionCount"> {{ selectionCount | number }} selected </span>
-    <i class="pi pi-spin pi-spinner sx-busy" *ngIf="busy" aria-label="loading"></i>
+@if (controls) {
+  <div class="sx-body">
+    <!-- The chart follows whatever the map is coloured by, so the two can never
+    disagree about what is being shown. -->
+    <div class="sx-head">
+      @if (subject) {
+        <span class="sx-subject">{{ subject }}</span>
+      }
+      @if (!subject) {
+        <span class="sx-subject sx-muted">nothing selected to chart</span>
+      }
+      @if (selectionCount) {
+        <span class="sx-badge"> {{ selectionCount | number }} selected </span>
+      }
+      @if (busy) {
+        <i class="pi pi-spin pi-spinner sx-busy" aria-label="loading"></i>
+      }
+    </div>
+    <div class="sx-controls">
+      <p-selectButton
+        [options]="kindOptions"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="kind"
+        (ngModelChange)="onKind($event)"
+        styleClass="sx-kind"
+      ></p-selectButton>
+      <p-select
+        [options]="groupOptions"
+        optionLabel="label"
+        optionValue="value"
+        [ngModel]="groupBy"
+        (ngModelChange)="onGroupBy($event)"
+        placeholder="No grouping"
+        appendTo="body"
+        [disabled]="kind === 'histogram'"
+        [pTooltip]="
+          kind === 'heatmap'
+            ? 'The categorical column the heatmap\'s columns come from'
+            : 'Split a violin or box by a categorical column'
+        "
+        tooltipPosition="top"
+      ></p-select>
+      <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
+      answers a different question and two are routinely over-read, so the caveat
+      travels with the explanation. -->
+      <i
+        class="pi pi-question-circle sx-help"
+        [pTooltip]="kindHelp"
+        [escape]="false"
+        tooltipPosition="left"
+        tooltipStyleClass="sx-help-tip"
+        [attr.aria-label]="'About the ' + kind + ' chart'"
+        tabindex="0"
+      ></i>
+    </div>
+    @if (kind === 'heatmap' && geneHeatmap) {
+      <div class="sx-controls">
+        <p-selectButton
+          [options]="heatmapRowOptions"
+          optionLabel="label"
+          optionValue="value"
+          [ngModel]="heatmapRows"
+          (ngModelChange)="onHeatmapRows($event)"
+          styleClass="sx-heatmap-rows"
+          pTooltip="Picked genes: the means of a few genes per group. All genes: every gene against every cell, zoomable"
+          tooltipPosition="top"
+        ></p-selectButton>
+      </div>
+    }
+    @if (kind === 'heatmap' && !showsGeneHeatmap) {
+      <spatial-heatmap-controls
+        [geneOptions]="geneOptions"
+        [genes]="heatmapGenes"
+        [zScore]="heatmapZScore"
+        (genesChange)="onHeatmapGenes($event)"
+        (filterChange)="onGeneFilter($event)"
+        (zScoreChange)="onHeatmapZScore($event)"
+      ></spatial-heatmap-controls>
+    }
+    <spatial-embedding-controls
+      [isEmbedding]="kind === 'embedding'"
+      [embeddings]="embeddings"
+      [embedding]="embedding"
+      [computable]="isComputable"
+      [computed]="isComputed"
+      [running]="isComputing"
+      [state]="computeState"
+      [estimateLabel]="computeEstimateLabel"
+      [tooLargeNote]="tsneTooLarge ? tsneTooLargeNote : null"
+      [detached]="detached"
+      (embeddingChange)="onEmbedding($event)"
+      (compute)="computeEmbedding()"
+      (cancelCompute)="cancelCompute()"
+      (detachedToggle)="toggleDetached()"
+    >
+    </spatial-embedding-controls>
+    @if (!detached && !showsGeneHeatmap) {
+      <div [id]="chartDiv" class="sx-plot"></div>
+    }
+    @if (showsGeneHeatmap && !detached) {
+      <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
+    }
+    <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
+    leaving a blank panel that looks broken. -->
+    @if (detached) {
+      <div class="sx-detached">Shown in its own window.</div>
+    }
+    <ng-container *ngTemplateOutlet="hints"></ng-container>
   </div>
-
-  <div class="sx-controls">
-    <p-selectButton
-      [options]="kindOptions"
-      optionLabel="label"
-      optionValue="value"
-      [ngModel]="kind"
-      (ngModelChange)="onKind($event)"
-      styleClass="sx-kind"
-    ></p-selectButton>
-    <p-dropdown
-      [options]="groupOptions"
-      optionLabel="label"
-      optionValue="value"
-      [ngModel]="groupBy"
-      (ngModelChange)="onGroupBy($event)"
-      placeholder="No grouping"
-      appendTo="body"
-      [disabled]="kind === 'histogram'"
-      [pTooltip]="
-        kind === 'heatmap'
-          ? 'The categorical column the heatmap\'s columns come from'
-          : 'Split a violin or box by a categorical column'
-      "
-      tooltipPosition="top"
-    ></p-dropdown>
-    <!-- What the chart on screen shows, and what it must NOT be read for. Each of these
-         answers a different question and two are routinely over-read, so the caveat
-         travels with the explanation. -->
-    <i
-      class="pi pi-question-circle sx-help"
-      [pTooltip]="kindHelp"
-      [escape]="false"
-      tooltipPosition="left"
-      tooltipStyleClass="sx-help-tip"
-      [attr.aria-label]="'About the ' + kind + ' chart'"
-      tabindex="0"
-    ></i>
-  </div>
-
-  <div class="sx-controls" *ngIf="kind === 'heatmap' && geneHeatmap">
-    <p-selectButton
-      [options]="heatmapRowOptions"
-      optionLabel="label"
-      optionValue="value"
-      [ngModel]="heatmapRows"
-      (ngModelChange)="onHeatmapRows($event)"
-      styleClass="sx-heatmap-rows"
-      pTooltip="Picked genes: the means of a few genes per group. All genes: every gene against every cell, zoomable"
-      tooltipPosition="top"
-    ></p-selectButton>
-  </div>
-
-  <spatial-heatmap-controls
-    *ngIf="kind === 'heatmap' && !showsGeneHeatmap"
-    [geneOptions]="geneOptions"
-    [genes]="heatmapGenes"
-    [zScore]="heatmapZScore"
-    (genesChange)="onHeatmapGenes($event)"
-    (filterChange)="onGeneFilter($event)"
-    (zScoreChange)="onHeatmapZScore($event)"
-  ></spatial-heatmap-controls>
-
-  <spatial-embedding-controls
-    [isEmbedding]="kind === 'embedding'"
-    [embeddings]="embeddings"
-    [embedding]="embedding"
-    [computable]="isComputable"
-    [computed]="isComputed"
-    [running]="isComputing"
-    [state]="computeState"
-    [estimateLabel]="computeEstimateLabel"
-    [tooLargeNote]="tsneTooLarge ? tsneTooLargeNote : null"
-    [detached]="detached"
-    (embeddingChange)="onEmbedding($event)"
-    (compute)="computeEmbedding()"
-    (cancel)="cancelCompute()"
-    (detachedToggle)="toggleDetached()"
-  >
-  </spatial-embedding-controls>
-
-  <div [id]="chartDiv" class="sx-plot" *ngIf="!detached && !showsGeneHeatmap"></div>
-
-  <ng-container *ngIf="showsGeneHeatmap && !detached">
-    <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
-  </ng-container>
-
-  <!-- Detached: the chart keeps drawing, in its own window. Says so rather than
-       leaving a blank panel that looks broken. -->
-  <div class="sx-detached" *ngIf="detached">Shown in its own window.</div>
-
-  <ng-container *ngTemplateOutlet="hints"></ng-container>
-</div>
+}
 
 <!-- Declared once and rendered in both the panel and the detached window: the ladder is
-     deliberately not mutually exclusive (a heatmap still needs its grouping prompt), so
-     collapsing it to a single expression would drop a hint rather than move it. -->
+deliberately not mutually exclusive (a heatmap still needs its grouping prompt), so
+collapsing it to a single expression would drop a hint rather than move it. -->
 <ng-template #hints>
-  <small class="sx-hint" *ngIf="notice">{{ notice }}</small>
-  <small class="sx-hint" *ngIf="!notice && suggestsGrouping"> Pick a grouping to compare categories. </small>
-  <small class="sx-hint" *ngIf="!notice && selectionCount && kind === 'histogram'">
-    The selection is overlaid on the full distribution.
-  </small>
-  <small class="sx-hint" *ngIf="!notice && selectionCount && kind !== 'histogram' && kind !== 'heatmap'">
-    Showing the selection only.
-  </small>
-  <small class="sx-hint" *ngIf="!notice && kind === 'heatmap' && !showsGeneHeatmap">{{ heatmapNote }}</small>
-  <small class="sx-hint" *ngIf="!notice && kind === 'embedding'">{{ embeddingNote }}</small>
+  @if (notice) {
+    <small class="sx-hint">{{ notice }}</small>
+  }
+  @if (!notice && suggestsGrouping) {
+    <small class="sx-hint"> Pick a grouping to compare categories. </small>
+  }
+  @if (!notice && selectionCount && kind === 'histogram') {
+    <small class="sx-hint"> The selection is overlaid on the full distribution. </small>
+  }
+  @if (!notice && selectionCount && kind !== 'histogram' && kind !== 'heatmap') {
+    <small class="sx-hint"> Showing the selection only. </small>
+  }
+  @if (!notice && kind === 'heatmap' && !showsGeneHeatmap) {
+    <small class="sx-hint">{{ heatmapNote }}</small>
+  }
+  @if (!notice && kind === 'embedding') {
+    <small class="sx-hint">{{ embeddingNote }}</small>
+  }
 </ng-template>
 
 <!-- One instance at a time: in the panel, or in the detached window. -->
@@ -129,18 +146,19 @@
   ></spatial-gene-heatmap>
 </ng-template>
 
-<spatial-chart-window
-  *ngIf="detached"
-  [title]="detachedTitle"
-  [divId]="detachedDiv"
-  [fixedHeight]="hasFixedHeight"
-  (closed)="toggleDetached()"
-  (shown)="onDetachedWindowShown()"
-  (resizeEnd)="onDetachedResizeEnd()"
-  [showPlot]="!showsGeneHeatmap"
->
-  <ng-container *ngIf="showsGeneHeatmap">
-    <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
-  </ng-container>
-  <ng-container *ngTemplateOutlet="hints"></ng-container>
-</spatial-chart-window>
+@if (detached) {
+  <spatial-chart-window
+    [title]="detachedTitle"
+    [divId]="detachedDiv"
+    [fixedHeight]="hasFixedHeight"
+    (closed)="toggleDetached()"
+    (shown)="onDetachedWindowShown()"
+    (resizeEnd)="onDetachedResizeEnd()"
+    [showPlot]="!showsGeneHeatmap"
+  >
+    @if (showsGeneHeatmap) {
+      <ng-container *ngTemplateOutlet="geneHeatmapView"></ng-container>
+    }
+    <ng-container *ngTemplateOutlet="hints"></ng-container>
+  </spatial-chart-window>
+}

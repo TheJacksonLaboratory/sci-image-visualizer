@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { PlotlyService, PlotType } from './plotly.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -23,14 +23,21 @@ import { ImageLayoutContext, chartLayout, overlayLayout, surfaceLayout, volumeLa
 import { buildHeatmapTraces, buildRgbImageTraces, buildSurfaceTraces } from './plotly-trace-builders';
 import { CONFIG, CONFIG_SURFACE } from '../../plot.utilities';
 import { CELL_SEGMENTER, CellSegmentation, ICellSegmenter } from '../../contracts/cell-segmenter.contract';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 describe('PlotlyService', () => {
   let service: PlotlyService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
   });
@@ -67,8 +74,14 @@ describe('PlotlyService load and plot image', () => {
     imageInfo.showStack = false;
 
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     // Bypass HttpClient for local file paths in tests — auth headers not needed here
@@ -110,8 +123,14 @@ describe('PlotlyService relayout handler', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
 
@@ -282,8 +301,14 @@ describe('PlotlyService region glue (Plotly-specific)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
 
@@ -477,8 +502,14 @@ describe('PlotlyService viewport + stack-state methods', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     (service as unknown as { plotDiv: string }).plotDiv = 'plot';
@@ -595,8 +626,14 @@ describe('PlotlyService service-lifetime subscriptions (review CORE-1)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     jest
@@ -673,8 +710,14 @@ describe('PlotlyService async supersession (review OSD-PLOTLY-8)', () => {
   beforeEach(() => {
     zoom$ = new Subject<ArrayBuffer>();
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     TestBed.overrideProvider(TILE_ACCESS_PORT, {
       useValue: {
@@ -843,8 +886,14 @@ describe('PlotlyService canvas tools (setActiveTool)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     document.body.innerHTML = '<div id="plot"></div>';
@@ -905,8 +954,14 @@ describe('PlotlyService layouts and isosurface band (characterization)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     Object.assign(service, { screenHeight: 600, scaleratio: true, dragMode: 'pan', imageLength: 2 });
@@ -1059,8 +1114,14 @@ describe('PlotlyService dedicated renderers (characterization)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     document.body.innerHTML = '<div id="plot"></div>';
@@ -1182,12 +1243,14 @@ describe('PlotlyService — Cellpose run on a stack slice loaded alone (#105 re-
       },
     };
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         PlotlyService,
         ...VIZ_PORT_STUBS,
         MessageService,
         { provide: CELL_SEGMENTER, useValue: segmenter },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     const service = TestBed.inject(PlotlyService);

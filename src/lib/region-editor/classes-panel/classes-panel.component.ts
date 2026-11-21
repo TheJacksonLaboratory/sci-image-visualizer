@@ -40,7 +40,6 @@ interface ClassRow {
  */
 @Component({
   selector: 'region-classes-panel',
-  standalone: true,
   imports: [CommonModule, FormsModule, ButtonModule, InputTextModule, TooltipModule, HexColorPickerComponent],
   templateUrl: './classes-panel.component.html',
   styleUrls: ['./classes-panel.component.scss'],

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { MessageService } from 'primeng/api';
 
 import { PlotlyService } from './plotly/plotly.service';
@@ -11,6 +11,7 @@ import { CanvasToolHost } from '../toolbar/tool-kit/canvas-tool';
 import { CANVAS_TOOL_IDS } from '../contracts/display-types';
 import { RegionStore } from '../store/region-store.service';
 import { Rectangle, Region } from '../models/region';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 type Backend = PlotlyService | OpenSeadragonVisualizerService | NapariVisualizerService;
 const tools = (b: Backend) => (b as unknown as { canvasTools: CanvasToolManager }).canvasTools;
@@ -29,13 +30,15 @@ describe('canvas tools per backend (RT-21)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         PlotlyService,
         OpenSeadragonVisualizerService,
         NapariVisualizerService,
         MessageService,
         ...VIZ_PORT_STUBS,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     backends = [

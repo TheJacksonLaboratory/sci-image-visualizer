@@ -1,6 +1,6 @@
 import { Component, NgModule, NgZone, Type, isStandalone, ɵComponentDef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { BehaviorSubject, EMPTY, of } from 'rxjs';
@@ -21,6 +21,7 @@ import { ToolbarComponent } from './toolbar/toolbar.component';
 import { VisualizerComponent } from './visualizer.component';
 import { RegionEditorComponent } from './region-editor/region-editor.component';
 import { HexColorPickerComponent } from './hex-color-picker/hex-color-picker.component';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 jest.mock('plotly.js-dist-min', () => ({
   newPlot: jest.fn(),
@@ -44,6 +45,9 @@ jest.mock('plotly.js-dist-min', () => ({
     <region-editor></region-editor>
     <hex-color-picker [color]="color" (colorChange)="picked = $event"></hex-color-picker>
   `,
+  // The point of this spec: a component declared in an NgModule that imports the shim.
+  // eslint-disable-next-line @angular-eslint/prefer-standalone
+  standalone: false,
 })
 class LegacyHostComponent {
   color = '#112233';
@@ -74,10 +78,17 @@ describe('VisualizationModule (re-export shim)', () => {
       if (!String(args[0]).includes('Could not parse CSS stylesheet')) consoleError(...args);
     });
     await TestBed.configureTestingModule({
-      imports: [LegacyHostModule, HttpClientTestingModule, NoopAnimationsModule],
-      providers: [MessageService, ConfirmationService, ...VIZ_PORT_STUBS, REGION_IO_STUB],
       errorOnUnknownElements: true,
       errorOnUnknownProperties: true,
+      imports: [LegacyHostModule, NoopAnimationsModule],
+      providers: [
+        MessageService,
+        ConfirmationService,
+        ...VIZ_PORT_STUBS,
+        REGION_IO_STUB,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     }).compileComponents();
   });
 
@@ -176,7 +187,7 @@ describe('library components (CORE-21)', () => {
 
   const classes = sources(__dirname).flatMap((file) => {
     const names = [...readFileSync(file, 'utf8').matchAll(/export class (\w+)/g)].map((m) => m[1]);
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require(file) as Record<string, Type<unknown>>;
     return names.map((name) => ({ name, type: mod[name] })).filter((c) => !!c.type);
   });

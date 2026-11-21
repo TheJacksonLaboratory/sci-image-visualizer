@@ -1733,7 +1733,10 @@ describe('RegionEditorComponent — annotation-class presets (jit-ui#70)', () =>
 });
 
 describe('RegionEditorComponent — OnPush', () => {
-  @Component({ standalone: true, imports: [RegionEditorComponent], template: '<region-editor></region-editor>' })
+  @Component({
+    imports: [RegionEditorComponent],
+    template: '<region-editor></region-editor>',
+  })
   class HostComponent {}
 
   it('re-renders when the viewer changes the regions (an async update, not a template event)', async () => {

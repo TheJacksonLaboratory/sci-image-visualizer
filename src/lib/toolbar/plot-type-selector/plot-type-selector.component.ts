@@ -1,9 +1,8 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { TooltipModule } from 'primeng/tooltip';
 
 import { PlotType, PlotTypeId } from '../../contracts/plot-type';
@@ -17,16 +16,7 @@ import { ToolSliderComponent } from '../tool-slider/tool-slider.component';
  */
 @Component({
   selector: 'toolbar-plot-type-selector',
-  standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    SharedModule,
-    ButtonModule,
-    DropdownModule,
-    TooltipModule,
-    ToolSliderComponent,
-  ],
+  imports: [FormsModule, SharedModule, ButtonModule, SelectModule, TooltipModule, ToolSliderComponent],
   templateUrl: './plot-type-selector.component.html',
   styleUrls: ['./plot-type-selector.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

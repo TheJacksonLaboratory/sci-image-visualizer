@@ -10,21 +10,21 @@
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .classes-panel-header {
   display: flex;
   align-items: center;
   gap: 0.35rem;
   padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 .classes-panel-title {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   margin-right: auto;
 }
 /* The search box over the list, as the class tree has. */
@@ -56,19 +56,19 @@
   border-left: 3px solid transparent;
 }
 .class-row:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--p-content-hover-background, rgba(0, 0, 0, 0.04));
 }
 /* The class picked last (in the class tree, or a surface in 3D). */
 .class-row.picked {
-  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
+  background: var(--p-highlight-background, rgba(51, 153, 255, 0.12));
 }
 /* A class with a selected region. */
 .class-row.marked {
-  box-shadow: inset 3px 0 0 var(--primary-color);
+  box-shadow: inset 3px 0 0 var(--p-primary-color);
 }
 .class-row.active {
-  background: var(--highlight-bg, rgba(51, 153, 255, 0.12));
-  border-left-color: var(--primary-color);
+  background: var(--p-highlight-background, rgba(51, 153, 255, 0.12));
+  border-left-color: var(--p-primary-color);
 }
 .class-row .row-swatch {
   flex: 0 0 auto;
@@ -83,7 +83,7 @@
   font-size: 0.85rem;
 }
 .class-row.active .row-name {
-  color: var(--primary-color);
+  color: var(--p-primary-color);
   font-weight: 600;
 }
 .class-row .row-count {
@@ -92,8 +92,8 @@
   text-align: center;
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
-  color: var(--text-color-secondary);
-  background: var(--surface-200, rgba(0, 0, 0, 0.06));
+  color: var(--p-text-muted-color);
+  background: var(--p-content-border-color, rgba(0, 0, 0, 0.06));
   border-radius: 10px;
   padding: 0 0.4rem;
 }
@@ -105,7 +105,7 @@
 }
 .classes-empty {
   font-size: 0.8rem;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   padding: 0.5rem;
 }
 /* Keep the row's icon buttons compact so rows stay dense. */
@@ -127,7 +127,7 @@
 }
 .class-row .row-3d.on {
   opacity: 1;
-  color: var(--primary-color);
+  color: var(--p-primary-color);
 }
 
 /* The eye: faint on a shown class (most are), plain on a hidden one. */

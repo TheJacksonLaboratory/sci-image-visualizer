@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -21,9 +20,7 @@ import { HexColorPickerComponent } from '../../hex-color-picker/hex-color-picker
  */
 @Component({
   selector: 'region-manage-classes-dialog',
-  standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     SharedModule,
     ButtonModule,
@@ -62,9 +59,6 @@ export class ManageClassesDialogComponent {
     { label: 'Exact', value: 'exact' },
     { label: 'Normalized', value: 'normalized' },
   ];
-
-  /** Rows keep their DOM (and input focus) while their class object is replaced. */
-  protected readonly trackByIndex = (i: number): number => i;
 
   protected addClass(): void {
     this.update((d) => ({ classes: [...d.classes, { name: '', color: '#888888', source: 'user' }] }));

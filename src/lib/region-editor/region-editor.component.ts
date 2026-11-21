@@ -13,13 +13,12 @@ import {
 } from '@angular/core';
 import { markForCheckInZone } from '../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
-import { OverlayPanel, OverlayPanelModule } from 'primeng/overlaypanel';
+import { Popover, PopoverModule } from 'primeng/popover';
 import { ToolbarModule } from 'primeng/toolbar';
 import { TooltipModule } from 'primeng/tooltip';
 import { saveAs } from 'file-saver';
@@ -71,16 +70,14 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
 
 @Component({
   selector: 'region-editor',
-  standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     SharedModule,
     ButtonModule,
     ConfirmDialogModule,
-    DropdownModule,
+    SelectModule,
     InputTextModule,
-    OverlayPanelModule,
+    PopoverModule,
     ToolbarModule,
     TooltipModule,
     ClassesPanelComponent,
@@ -97,7 +94,7 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
   providers: [RegionPersistenceService],
 })
 export class RegionEditorComponent implements OnInit, OnDestroy {
-  @ViewChild('op') private overlayPanel!: OverlayPanel;
+  @ViewChild('op') private popover!: Popover;
 
   /**
    * Whether the editor is on screen (its dialog open). Closed, it asks the region source nothing:
@@ -1022,7 +1019,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
    * Ensure every class label present in the loaded regions exists in the preset
    * list, auto-adding any that are missing (using the region's already-resolved
    * colour). This makes classes carried in a loaded/imported GeoJSON show up as
-   * chips + Class-dropdown options (a p-dropdown can't display a value that isn't
+   * chips + Class-dropdown options (a p-select can't display a value that isn't
    * an option) and lets the user manage them. The placeholder 'legend' and empty
    * labels are ignored. (jit-ui#70)
    */
@@ -1164,7 +1161,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   protected applyBulkClass(): void {
     if (!this.bulkClass) return;
     this.applyClassToSelected(this.bulkClass);
-    this.overlayPanel?.hide();
+    this.popover?.hide();
   }
 
   /** "Edit class on selected rows" popup — add a new class and set it on the selection. */
@@ -1179,7 +1176,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
     this.applyClassToSelected(name);
     this.bulkClass = name;
     this.newBulkClass = '';
-    this.overlayPanel?.hide();
+    this.popover?.hide();
   }
 
   // ── Manage-classes dialog ──

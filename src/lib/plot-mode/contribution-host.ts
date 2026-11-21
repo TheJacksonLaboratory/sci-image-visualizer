@@ -1,6 +1,6 @@
 import { Injector, NgZone, Type } from '@angular/core';
 import { Observable } from 'rxjs';
-import { Message } from 'primeng/api';
+import { ToastMessageOptions } from 'primeng/api';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { PlotType, PlotTypeId } from '../contracts/plot-type';
@@ -52,7 +52,7 @@ export interface ContributionViewer {
   renderedType(): PlotType;
   /** A contributed mode could not start: select its base type, already on screen. */
   selectBase(type: PlotType): void;
-  notify(message: Message): void;
+  notify(message: ToastMessageOptions): void;
   detectChanges(): void;
 }
 

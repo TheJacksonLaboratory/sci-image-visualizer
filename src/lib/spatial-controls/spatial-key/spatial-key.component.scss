@@ -8,8 +8,8 @@
    40-cluster column must not push the sliders off screen. */
 .sc-key {
   padding: 0.5rem 0;
-  border-top: 1px solid var(--surface-border, #dee2e6);
-  border-bottom: 1px solid var(--surface-border, #dee2e6);
+  border-top: 1px solid var(--p-content-border-color, #dee2e6);
+  border-bottom: 1px solid var(--p-content-border-color, #dee2e6);
 }
 
 .sc-legend {
@@ -43,12 +43,12 @@
   color: inherit;
 
   &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+    background: var(--p-content-hover-background, rgba(0, 0, 0, 0.04));
   }
 
   &.selected {
-    border-color: var(--primary-color, #3b82f6);
-    background: var(--surface-hover, rgba(59, 130, 246, 0.08));
+    border-color: var(--p-primary-color, #3b82f6);
+    background: var(--p-content-hover-background, rgba(59, 130, 246, 0.08));
     font-weight: 600;
   }
 }

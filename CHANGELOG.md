@@ -11,6 +11,21 @@ file was added.
 
 ### Changed
 
+- **Breaking: Angular 21 and PrimeNG 21 (#90).** The peer dependencies are Angular `^21.0.0`,
+  `primeng` `^21.1.0` and `@angular/cdk` `^21.0.0` (a PrimeNG 21 peer). `@angular/animations` is no
+  longer a peer: the library does not use it, and PrimeNG 21 animates with CSS. Hosts provide
+  PrimeNG's theme as a preset through `providePrimeNG()` (PrimeNG 18 and later ship no theme CSS),
+  keep zone.js change detection (`provideZoneChangeDetection()`), and set a font, which PrimeNG 21's
+  presets do not. The [host integration guide](docs/guides/host-integration.md) shows the setup.
+  Node 20.19 or later.
+- **Styles use PrimeNG 21's design tokens** (`--p-primary-color`, `--p-text-muted-color`,
+  `--p-content-border-color`, ...) instead of PrimeNG 17's CSS variables, so they follow the host's
+  preset and its dark mode. Overrides follow PrimeNG's renamed classes (Select, Popover,
+  ToggleSwitch, menu items, paginator).
+- Toasts are typed with PrimeNG's `ToastMessageOptions`, the new name of `Message` in
+  `primeng/api` (same shape).
+- The example app's theme is Lara with a blue primary, the closest preset to saga-blue.
+
 - **The user guide documents only what production users see.** It no longer mentions test mode
   (`?test=1`) or the tools it adds: the intensity profile lines (the "Intensity profile lines" reference
   page, the how-to section, their QA cases and screenshot are removed) and the test-only plot types.

@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -15,17 +14,10 @@ import { ProgressBarModule } from 'primeng/progressbar';
  */
 @Component({
   selector: 'region-save-regions-dialog',
-  standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    SharedModule,
-    ButtonModule,
-    DialogModule,
-    InputTextModule,
-    ProgressBarModule,
-  ],
+  imports: [FormsModule, SharedModule, ButtonModule, DialogModule, InputTextModule, ProgressBarModule],
   templateUrl: './save-regions-dialog.component.html',
+  // PrimeNG 18 dropped its .p-error utility; the same red as an invalid field's text.
+  styles: ['.overwrite-warning { color: var(--p-form-field-invalid-placeholder-color, #d9362b); }'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SaveRegionsDialogComponent {

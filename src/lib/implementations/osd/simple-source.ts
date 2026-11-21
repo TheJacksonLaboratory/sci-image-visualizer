@@ -7,6 +7,7 @@ import { TileDescriptor, throwIfAborted } from '../tile-server';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IChannelState } from '../../contracts/channel-histogram-api.contract';
 import { SimpleSliceAccessService } from '../simple-slice-access.service';
+import { newImageData } from '../../util/image-data';
 
 /** One decoded single-band channel plane (serverless multichannel). */
 export interface SimplePlane {
@@ -378,7 +379,7 @@ export class OsdSimpleSource {
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (!ctx) return undefined;
-    ctx.putImageData(new ImageData(out, w, h), 0, 0);
+    ctx.putImageData(newImageData(out, w, h), 0, 0);
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
     if (!blob) return undefined;
     return URL.createObjectURL(blob);

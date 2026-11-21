@@ -7,6 +7,11 @@ import { DestroyRef } from '@angular/core';
  */
 export class TestDestroyRef implements DestroyRef {
   private callbacks: (() => void)[] = [];
+  private isDestroyed = false;
+
+  get destroyed(): boolean {
+    return this.isDestroyed;
+  }
 
   onDestroy(callback: () => void): () => void {
     this.callbacks.push(callback);
@@ -18,6 +23,7 @@ export class TestDestroyRef implements DestroyRef {
   destroy(): void {
     const callbacks = this.callbacks;
     this.callbacks = [];
+    this.isDestroyed = true;
     for (const callback of callbacks) callback();
   }
 }

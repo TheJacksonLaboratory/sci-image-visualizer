@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -7,6 +7,7 @@ import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { PlotType } from '../../contracts/plot-type';
 import { OSD_ZOOM_PER_SCROLL } from './osd-zoom';
 import { buildViewerOptions } from './openseadragon-viewer-options';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 /**
  * Viewer-option coverage.
@@ -62,7 +63,7 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
   beforeEach(() => {
     capturedOptions.length = 0;
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         OpenSeadragonVisualizerService,
         ...VIZ_PORT_STUBS,
@@ -75,6 +76,8 @@ describe('OpenSeadragonVisualizerService — viewer options', () => {
             selectDiagramDisplay: () => undefined,
           },
         },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);

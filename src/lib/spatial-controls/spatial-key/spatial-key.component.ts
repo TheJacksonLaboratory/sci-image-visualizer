@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { TooltipModule } from 'primeng/tooltip';
@@ -27,8 +26,7 @@ import type { SpatialLegendEntry } from './spatial-key.model';
  */
 @Component({
   selector: 'spatial-key',
-  standalone: true,
-  imports: [CommonModule, FormsModule, SharedModule, TooltipModule, TreeSelectModule],
+  imports: [FormsModule, SharedModule, TooltipModule, TreeSelectModule],
   templateUrl: './spatial-key.component.html',
   styleUrls: ['./spatial-key.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -10,18 +10,21 @@
   <div #dropdown class="hex-picker-dropdown" [hidden]="!open()">
     <!-- Hexagon grid -->
     <div class="hex-grid">
-      <div *ngFor="let row of colorRows" class="hex-row">
-        <button
-          *ngFor="let c of row"
-          type="button"
-          class="hex-cell"
-          [style.background]="c"
-          [class.hex-selected]="c === color"
-          [title]="c"
-          [attr.aria-label]="'Select color ' + c"
-          (click)="selectAndClose(c)"
-        ></button>
-      </div>
+      @for (row of colorRows; track row) {
+        <div class="hex-row">
+          @for (c of row; track c) {
+            <button
+              type="button"
+              class="hex-cell"
+              [style.background]="c"
+              [class.hex-selected]="c === color"
+              [title]="c"
+              [attr.aria-label]="'Select color ' + c"
+              (click)="selectAndClose(c)"
+            ></button>
+          }
+        </div>
+      }
     </div>
 
     <!-- Hex input + native picker -->

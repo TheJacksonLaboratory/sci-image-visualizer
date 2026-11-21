@@ -1,6 +1,6 @@
 <!-- The detached chart. Its own non-modal, draggable, resizable window so it can be put
-     beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
-     stacking context, or it would be clipped by the panel it is meant to sit next to. -->
+beside the spatial-omics dialog. `appendTo="body"` keeps it out of the dialog's
+stacking context, or it would be clipped by the panel it is meant to sit next to. -->
 <p-dialog
   [header]="title"
   [visible]="true"
@@ -24,6 +24,8 @@
   }"
   styleClass="spatial-detached-dialog"
 >
-  <div *ngIf="showPlot" [id]="divId" class="sx-detached-plot" [class.sx-plot-fixed]="fixedHeight"></div>
+  @if (showPlot) {
+    <div [id]="divId" class="sx-detached-plot" [class.sx-plot-fixed]="fixedHeight"></div>
+  }
   <ng-content></ng-content>
 </p-dialog>

@@ -54,7 +54,7 @@
   padding: 1rem;
   text-align: center;
   font-size: 0.85rem;
-  color: var(--text-color-secondary, #6c757d);
+  color: var(--p-text-muted-color, #6c757d);
   pointer-events: none;
 }
 
@@ -67,8 +67,8 @@
   font-size: 0.75rem;
   line-height: 1.4;
   white-space: nowrap;
-  background: var(--surface-overlay, rgba(30, 30, 30, 0.92));
-  color: var(--text-color, #eee);
+  background: var(--p-overlay-popover-background, rgba(30, 30, 30, 0.92));
+  color: var(--p-text-color, #eee);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 
   b {

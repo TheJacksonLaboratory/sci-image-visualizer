@@ -55,10 +55,8 @@
 
 /* The actual scroll container.
  *
- * PrimeNG renders a different class name depending on the version
- * (`p-datatable-wrapper` in v15, `p-datatable-table-container` in v17,
- * `p-scroller-viewport` when virtual scrolling is used), so we target all
- * of them.
+ * `p-datatable-table-container`, or `p-virtualscroller` when virtual
+ * scrolling is used, so we target both.
  *
  * - flex: 1 1 0     → basis 0 means flex sizes this element from the
  *                     remaining space, NOT from the intrinsic <table>
@@ -68,9 +66,8 @@
  *                     <p-table> input to resolve to a real number.
  * - overflow:auto   → produces the vertical scrollbar when rows overflow.
  */
-::ng-deep .region-editor-content .p-datatable.region-editor-table > .p-datatable-wrapper,
 ::ng-deep .region-editor-content .p-datatable.region-editor-table > .p-datatable-table-container,
-::ng-deep .region-editor-content .p-datatable.region-editor-table .p-scroller-viewport {
+::ng-deep .region-editor-content .p-datatable.region-editor-table .p-virtualscroller {
   flex: 1 1 0;
   min-height: 0;
   height: 100%;
@@ -91,7 +88,7 @@
 :host > p-paginator {
   display: block;
   flex: 0 0 auto;
-  border-top: 1px solid var(--surface-border);
+  border-top: 1px solid var(--p-content-border-color);
   padding: 0.25rem 0;
 }
 
@@ -125,11 +122,11 @@
  * colour on hover, and a pointer cursor so it's obviously clickable. */
 .class-cell .icon-hover {
   cursor: pointer;
-  color: var(--text-color-secondary);
+  color: var(--p-text-muted-color);
   transition: color 0.15s ease;
 }
 .class-cell .icon-hover:hover {
-  color: var(--primary-color);
+  color: var(--p-primary-color);
 }
 
 /* When the cell is in edit mode the input should fill the available
@@ -176,7 +173,10 @@
   font-size: 0.75rem !important;
 }
 
-::ng-deep .p-datatable-sm .p-paginator .p-paginator-element {
+::ng-deep
+  .p-datatable-sm
+  .p-paginator
+  :is(.p-paginator-first, .p-paginator-prev, .p-paginator-page, .p-paginator-next, .p-paginator-last) {
   min-width: 1.5rem !important;
   height: 1.5rem !important;
 }
@@ -187,21 +187,21 @@
   min-width: unset !important;
 }
 
-::ng-deep .p-datatable-sm .p-paginator .p-dropdown {
+::ng-deep .p-datatable-sm .p-paginator .p-select {
   height: 1.5rem !important;
 }
 
-::ng-deep .p-datatable-sm .p-paginator .p-dropdown .p-dropdown-label {
+::ng-deep .p-datatable-sm .p-paginator .p-select .p-select-label {
   padding: 0.1rem 0.25rem !important;
   line-height: 1.2 !important;
 }
 
-::ng-deep .p-datatable-sm .p-paginator .p-dropdown .p-dropdown-trigger {
+::ng-deep .p-datatable-sm .p-paginator .p-select .p-select-dropdown {
   width: 1.25rem !important;
 }
 
 /* Dropdown panel items (appended to body) — make them compact too */
-::ng-deep .p-paginator-rpp-options .p-dropdown-panel .p-dropdown-items .p-dropdown-item {
+::ng-deep .p-paginator-rpp-dropdown .p-select-overlay .p-select-list .p-select-option {
   padding: 0.25rem 0.5rem !important;
   font-size: 0.75rem !important;
 }
@@ -211,10 +211,10 @@
   min-width: 0;
   flex: 1 1 auto;
 }
-::ng-deep .class-cell .class-dropdown.p-dropdown {
+::ng-deep .class-cell .class-dropdown.p-select {
   width: 100%;
 }
-::ng-deep .class-cell .class-dropdown .p-dropdown-label {
+::ng-deep .class-cell .class-dropdown .p-select-label {
   padding: 0.15rem 0.5rem;
   display: flex;
   align-items: center;

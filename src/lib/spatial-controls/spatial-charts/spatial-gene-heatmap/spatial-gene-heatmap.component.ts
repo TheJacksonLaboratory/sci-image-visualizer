@@ -15,8 +15,9 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ButtonModule } from 'primeng/button';
 import { CheckboxModule } from 'primeng/checkbox';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { TooltipModule } from 'primeng/tooltip';
@@ -55,6 +56,7 @@ import {
   scaleMeans,
 } from '../../../spatial/gene-heatmap/heatmap-paint';
 import { HeatmapTile, HeatmapTileStore, tileKey } from '../../../spatial/gene-heatmap/heatmap-tile-store';
+import { newImageData } from '../../../util/image-data';
 
 /** Which matrix is drawn: every cell, or each group's mean. */
 export type GeneHeatmapView = 'cells' | 'groups';
@@ -97,12 +99,12 @@ interface HoverLine {
  */
 @Component({
   selector: 'spatial-gene-heatmap',
-  standalone: true,
   imports: [
     CommonModule,
     FormsModule,
+    ButtonModule,
     CheckboxModule,
-    DropdownModule,
+    SelectModule,
     InputTextModule,
     SelectButtonModule,
     TooltipModule,
@@ -702,7 +704,7 @@ export class SpatialGeneHeatmapComponent implements AfterViewInit, OnChanges, On
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     const pixels = paintValues(t.values, lo, hi, CELLS_LUT);
-    ctx.putImageData(new ImageData(pixels, t.cols, t.rows), 0, 0);
+    ctx.putImageData(newImageData(pixels, t.cols, t.rows), 0, 0);
     this.painted.set(key, canvas);
     // Painted tiles follow the store's: a few hundred at most.
     if (this.painted.size > 512) this.painted.delete(this.painted.keys().next().value!);
@@ -731,7 +733,7 @@ export class SpatialGeneHeatmapComponent implements AfterViewInit, OnChanges, On
     image.height = block.blocks;
     const ictx = image.getContext('2d');
     if (!ictx) return;
-    ictx.putImageData(new ImageData(paintValues(block.values, lo, hi, lut), K, block.blocks), 0, 0);
+    ictx.putImageData(newImageData(paintValues(block.values, lo, hi, lut), K, block.blocks), 0, 0);
     ctx.imageSmoothingEnabled = false;
     const size = 2 ** gy;
     const sy = plot.y + ((block.firstRow - w.y0) / (w.y1 - w.y0)) * plot.h;

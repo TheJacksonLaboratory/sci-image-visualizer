@@ -1,34 +1,11 @@
 <!-- SAM (jit-ui#90): box-prompt segment, interactive point prompts, and a
-     model picker. -->
+model picker. -->
 <span class="toolbar-separator"></span>
 <!-- SAM controls grouped: box-prompt Segment, then the point-prompt tool,
-     then the model-picker dropdown (the chevron) which governs BOTH tools.
-     Falls back to Segment + point with no model picker when none are set. -->
-<span *ngIf="samModels.length; else segmentPlain" class="p-buttonset segment-split">
-  <p-button
-    size="small"
-    [text]="true"
-    ariaLabel="Segment with SAM (box prompt)"
-    pTooltip="Segment the drawn rectangles with SAM (box prompt)"
-    tooltipPosition="bottom"
-    (onClick)="segmentRegions.emit()"
-  >
-    <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
-  </p-button>
-  <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-  <p-button
-    icon="pi pi-chevron-down"
-    size="small"
-    [text]="true"
-    ariaLabel="Pick the SAM model"
-    pTooltip="Pick the SAM model (used by both segment tools)"
-    tooltipPosition="bottom"
-    (onClick)="samModelMenu.toggle($event)"
-  >
-  </p-button>
-</span>
-<ng-template #segmentPlain>
-  <span class="p-buttonset segment-split">
+then the model-picker dropdown (the chevron) which governs BOTH tools.
+Falls back to Segment + point with no model picker when none are set. -->
+@if (samModels.length) {
+  <p-buttongroup class="segment-split">
     <p-button
       size="small"
       [text]="true"
@@ -40,10 +17,34 @@
       <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
     </p-button>
     <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
-  </span>
-</ng-template>
+    <p-button
+      icon="pi pi-chevron-down"
+      size="small"
+      [text]="true"
+      ariaLabel="Pick the SAM model"
+      pTooltip="Pick the SAM model (used by both segment tools)"
+      tooltipPosition="bottom"
+      (onClick)="samModelMenu.toggle($event)"
+    >
+    </p-button>
+  </p-buttongroup>
+} @else {
+  <p-buttongroup class="segment-split">
+    <p-button
+      size="small"
+      [text]="true"
+      ariaLabel="Segment with SAM (box prompt)"
+      pTooltip="Segment the drawn rectangles with SAM (box prompt)"
+      tooltipPosition="bottom"
+      (onClick)="segmentRegions.emit()"
+    >
+      <img src="assets/plotting/sam-box-prompt.svg" class="toolbar-icon-dark" style="width: 1rem" />
+    </p-button>
+    <ng-container [ngTemplateOutlet]="samPointBtn"></ng-container>
+  </p-buttongroup>
+}
 <!-- Point-prompt tool — shared between the models / no-models layouts so it
-     always sits just left of the model dropdown. -->
+always sits just left of the model dropdown. -->
 <ng-template #samPointBtn>
   <p-button
     size="small"
@@ -72,65 +73,71 @@
 </p-menu>
 
 <!-- Shared item body for all three model pickers (SAM / YOLO / retinal):
-     the standard check-or-blank icon and label, plus an info icon carrying
-     the model's description as a hover tooltip. This replaced a single
-     "About the SAM models" overlay panel — per-model text sits next to the
-     model it describes, and YOLO/retinal get the same affordance.
+the standard check-or-blank icon and label, plus an info icon carrying
+the model's description as a hover tooltip. This replaced a single
+"About the SAM models" overlay panel — per-model text sits next to the
+model it describes, and YOLO/retinal get the same affordance.
 
-     p-menu puts its click handler on the wrapping `.p-menuitem-content`,
-     outside this template, so `command` still fires and the whole row stays
-     clickable — which is also why the info icon has to stop propagation, or
-     reading about a model would switch to it. -->
+p-menu puts its click handler on the wrapping `.p-menu-item-content`,
+outside this template, so `command` still fires and the whole row stays
+clickable — which is also why the info icon has to stop propagation, or
+reading about a model would switch to it. -->
 <ng-template #modelMenuItem let-item let-hasSubmenu="hasSubmenu">
-  <a class="p-menuitem-link model-menu-item">
-    <span *ngIf="item.icon" class="p-menuitem-icon" [ngClass]="item.icon"></span>
-    <span class="p-menuitem-text">{{ item.label }}</span>
+  <!-- Used by a p-menu and a p-tieredMenu: each one's item classes (only its own are styled). -->
+  <a class="p-menu-item-link p-tieredmenu-item-link model-menu-item">
+    @if (item.icon) {
+      <span class="p-menu-item-icon p-tieredmenu-item-icon" [ngClass]="item.icon"></span>
+    }
+    <span class="p-menu-item-label p-tieredmenu-item-label">{{ item.label }}</span>
     <!-- `bottom` like every other tooltip in this toolbar, and for room:
-         these menus open under buttons that can sit near the right edge,
-         where a `right` tooltip has a few hundred px and squeezes its text
-         into a narrow column instead of using its max-width. -->
+    these menus open under buttons that can sit near the right edge,
+    where a `right` tooltip has a few hundred px and squeezes its text
+    into a narrow column instead of using its max-width. -->
     <!-- A focusable <button>, not a bare <i>. As an <i> the description
-         was reachable only by hovering a mouse: not tabbable, no
-         accessible name, nothing for a screen reader to announce — so
-         keyboard and AT users could pick a checkpoint but never read what
-         it was. PrimeNG's tooltip shows on focus as well as hover, so
-         making it a button restores it for free.
+    was reachable only by hovering a mouse: not tabbable, no
+    accessible name, nothing for a screen reader to announce — so
+    keyboard and AT users could pick a checkpoint but never read what
+    it was. PrimeNG's tooltip shows on focus as well as hover, so
+    making it a button restores it for free.
 
-         `aria-describedby` is deliberately not used: the tooltip is
-         rendered into `body` on demand and has no stable id to point at.
-         The description is carried on `aria-label` instead, which is
-         announced whether or not the tooltip is showing. It is stripped of
-         markup first, since the copy contains `<b>`/`<br>` for the visual
-         tooltip and those would otherwise be read out literally. -->
-    <button
-      *ngIf="item.tooltip"
-      type="button"
-      class="pi pi-info-circle model-info-icon"
-      [attr.aria-label]="item.infoLabel"
-      [pTooltip]="item.tooltip"
-      [escape]="false"
-      tooltipPosition="bottom"
-      appendTo="body"
-      tooltipStyleClass="model-info-tooltip"
-      (click)="$event.stopPropagation()"
-      (keydown.enter)="$event.stopPropagation()"
-      (keydown.space)="$event.stopPropagation()"
-    ></button>
+    `aria-describedby` is deliberately not used: the tooltip is
+    rendered into `body` on demand and has no stable id to point at.
+    The description is carried on `aria-label` instead, which is
+    announced whether or not the tooltip is showing. It is stripped of
+    markup first, since the copy contains `<b>`/`<br>` for the visual
+    tooltip and those would otherwise be read out literally. -->
+    @if (item.tooltip) {
+      <button
+        type="button"
+        class="pi pi-info-circle model-info-icon"
+        [attr.aria-label]="item.infoLabel"
+        [pTooltip]="item.tooltip"
+        [escape]="false"
+        tooltipPosition="bottom"
+        appendTo="body"
+        tooltipStyleClass="model-info-tooltip"
+        (click)="$event.stopPropagation()"
+        (keydown.enter)="$event.stopPropagation()"
+        (keydown.space)="$event.stopPropagation()"
+      ></button>
+    }
     <!-- A custom item template replaces the tiered menu's own submenu arrow. -->
-    <span *ngIf="hasSubmenu" class="pi pi-angle-right model-menu-submenu-icon" aria-hidden="true"></span>
+    @if (hasSubmenu) {
+      <span class="pi pi-angle-right model-menu-submenu-icon" aria-hidden="true"></span>
+    }
   </a>
 </ng-template>
 <!-- Run tools: the library's own Cellpose, then the contributed ones
-     (TOOLBAR_TOOLS). Unlike the SAM tools these need no prompt — they sweep
-     the whole current view (Cellpose also takes drawn rectangles) — so there
-     is nothing to draw first. Each renders the same split button: run, pick
-     checkpoint, open parameters.
+(TOOLBAR_TOOLS). Unlike the SAM tools these need no prompt — they sweep
+the whole current view (Cellpose also takes drawn rectangles) — so there
+is nothing to draw first. Each renders the same split button: run, pick
+checkpoint, open parameters.
 
-     Nothing here names a specific tool. The library ships only Cellpose; a
-     host registers the rest, which is what lets this package be published
-     without the closed model dependencies. -->
-<ng-container *ngFor="let tool of contributedTools; trackBy: trackToolById">
-  <span class="p-buttonset segment-split">
+Nothing here names a specific tool. The library ships only Cellpose; a
+host registers the rest, which is what lets this package be published
+without the closed model dependencies. -->
+@for (tool of contributedTools; track trackToolById($index, tool)) {
+  <p-buttongroup class="segment-split">
     <p-button
       size="small"
       [text]="true"
@@ -140,15 +147,13 @@
       (onClick)="runTool.emit(tool.id)"
     >
       <!-- `toolbar-icon-dark` is hardcoded rather than bound, unlike the
-           toggle tools: these fire a run and have no active state. -->
-      <img
-        *ngIf="tool.icon.src"
-        [src]="tool.icon.src"
-        class="toolbar-icon-dark"
-        style="width: 1rem"
-        [alt]="tool.label"
-      />
-      <i *ngIf="tool.icon.pi" class="pi {{ tool.icon.pi }}"></i>
+      toggle tools: these fire a run and have no active state. -->
+      @if (tool.icon.src) {
+        <img [src]="tool.icon.src" class="toolbar-icon-dark" style="width: 1rem" [alt]="tool.label" />
+      }
+      @if (tool.icon.pi) {
+        <i class="pi {{ tool.icon.pi }}"></i>
+      }
     </p-button>
     <p-button
       icon="pi pi-chevron-down"
@@ -161,21 +166,22 @@
     >
     </p-button>
     <!-- No button when the parameters open from the model menu (Cellpose-SAM). -->
-    <p-button
-      *ngIf="tool.params.length && !tool.paramsInModelMenu"
-      icon="pi pi-sliders-h"
-      size="small"
-      [text]="true"
-      [ariaLabel]="'Parameters for ' + tool.label"
-      [pTooltip]="tool.paramsTooltip || 'Parameters'"
-      tooltipPosition="bottom"
-      (onClick)="openToolParams.emit(tool.id)"
-    >
-    </p-button>
-  </span>
+    @if (tool.params.length && !tool.paramsInModelMenu) {
+      <p-button
+        icon="pi pi-sliders-h"
+        size="small"
+        [text]="true"
+        [ariaLabel]="'Parameters for ' + tool.label"
+        [pTooltip]="tool.paramsTooltip || 'Parameters'"
+        tooltipPosition="bottom"
+        (onClick)="openToolParams.emit(tool.id)"
+      >
+      </p-button>
+    }
+  </p-buttongroup>
   <!-- A tiered menu, so a checkpoint can carry a parameters submenu
-       (`paramsInModelMenu`, Cellpose-SAM → Set cell diameter…); without one it
-       reads as the flat menu the SAM picker uses. -->
+  (`paramsInModelMenu`, Cellpose-SAM → Set cell diameter…); without one it
+  reads as the flat menu the SAM picker uses. -->
   <p-tieredMenu
     #toolMenu
     styleClass="model-menu"
@@ -190,4 +196,4 @@
       ></ng-container>
     </ng-template>
   </p-tieredMenu>
-</ng-container>
+}

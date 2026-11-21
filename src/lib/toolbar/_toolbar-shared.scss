@@ -3,12 +3,12 @@
  * their controls stay flex items of the toolbar's button row. */
 
 .toolbar-text {
-  color: var(--primary-color);
+  color: var(--p-primary-color);
   font-size: 0.875rem;
 }
 
 .toolbar-separator {
-  border-left: 1px solid var(--surface-border);
+  border-left: 1px solid var(--p-content-border-color);
   height: 1.5rem;
   margin: 0 0.25rem;
   align-self: center;

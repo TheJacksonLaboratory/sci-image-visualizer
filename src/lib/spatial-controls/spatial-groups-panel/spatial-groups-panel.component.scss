@@ -18,7 +18,7 @@
   cursor: pointer;
   &:hover,
   &:focus-visible {
-    outline: 2px solid var(--surface-border, rgba(0, 0, 0, 0.35));
+    outline: 2px solid var(--p-content-border-color, rgba(0, 0, 0, 0.35));
     outline-offset: 1px;
   }
 }
@@ -34,10 +34,10 @@
   text-align: left;
   cursor: pointer;
   &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    background: var(--p-content-hover-background, rgba(0, 0, 0, 0.05));
   }
   &.selected {
-    background: var(--highlight-bg, rgba(33, 150, 243, 0.15));
+    background: var(--p-highlight-background, rgba(33, 150, 243, 0.15));
     font-weight: 600;
   }
 }

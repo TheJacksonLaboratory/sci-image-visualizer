@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { NgIf } from '@angular/common';
 import { DialogModule } from 'primeng/dialog';
 
 /**
@@ -12,8 +11,7 @@ import { DialogModule } from 'primeng/dialog';
  */
 @Component({
   selector: 'spatial-chart-window',
-  standalone: true,
-  imports: [NgIf, DialogModule],
+  imports: [DialogModule],
   templateUrl: './spatial-chart-window.component.html',
   styleUrls: ['./spatial-chart-window.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

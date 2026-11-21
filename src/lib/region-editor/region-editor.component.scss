@@ -60,7 +60,7 @@
 /* Thin vertical divider used between groups of toolbar buttons in the
  * table caption. */
 .toolbar-separator {
-  border-left: 1px solid var(--surface-border);
+  border-left: 1px solid var(--p-content-border-color);
   height: 1.5rem;
   margin: 0 0.25rem;
   align-self: center;

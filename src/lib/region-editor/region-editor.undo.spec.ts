@@ -1,12 +1,12 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { NO_ERRORS_SCHEMA } from '@angular/core';
+import { ChangeDetectorRef, NO_ERRORS_SCHEMA } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { EMPTY, of } from 'rxjs';
 import { ConfirmationService, MessageService } from 'primeng/api';
 import { TableModule } from 'primeng/table';
-import { DropdownModule } from 'primeng/dropdown';
+import { SelectModule } from 'primeng/select';
 import { InputTextModule } from 'primeng/inputtext';
 import { RadioButtonModule } from 'primeng/radiobutton';
 import { SelectButtonModule } from 'primeng/selectbutton';
@@ -113,7 +113,7 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
           FormsModule,
           RegionTableComponent,
           TableModule,
-          DropdownModule,
+          SelectModule,
           InputTextModule,
           RadioButtonModule,
           SelectButtonModule,
@@ -218,6 +218,8 @@ describe('RegionEditorComponent — edits commit undoably (RT-1 / RT-18)', () =>
 
   function typeLabel(text: string): HTMLInputElement {
     editor['startEditLabel'](editor['regions'][0]);
+    // The editor is OnPush and nothing in it marked it dirty (the template's click handler would).
+    fixture.componentRef.injector.get(ChangeDetectorRef).markForCheck();
     fixture.detectChanges();
     const input = fixture.nativeElement.querySelector('td.class-cell input') as HTMLInputElement;
     expect(input).toBeTruthy();

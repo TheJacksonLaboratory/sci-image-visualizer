@@ -4,7 +4,7 @@
 [![CI / CD](https://github.com/TheJacksonLaboratory/sci-image-visualizer/actions/workflows/ci-cd.yaml/badge.svg)](https://github.com/TheJacksonLaboratory/sci-image-visualizer/actions/workflows/ci-cd.yaml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-A framework-style **Angular 17** library for **interactive scientific image
+A framework-style **Angular 21** library for **interactive scientific image
 visualization and annotation**. It renders large / multi-channel images through
 pluggable backends — a tiled [OpenSeadragon](https://openseadragon.github.io/)
 viewer, [Plotly](https://plotly.com/javascript/) 2D/3D plots, and a
@@ -27,22 +27,22 @@ npm install @jax-data-science/sci-image-visualizer
 Then install the **peer dependencies** your app doesn't already have:
 
 ```bash
-npm install @angular/animations @angular/router primeng primeicons primeflex \
+npm install @angular/cdk @angular/router primeng @primeuix/themes primeicons primeflex \
   image-js file-saver buffer onnxruntime-web
 ```
 
 ### Peer dependencies
 
-| Package                                                        | Range                           | Notes                                                                                                                    |
-| -------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `@angular/common` · `core` · `forms` · `animations` · `router` | `^17.3.0`                       | Angular 17. The library does not use animations or the router itself; PrimeNG's dialog, table, toast and menus need them |
-| `rxjs`                                                         | `^7.8.0`                        |                                                                                                                          |
-| `primeng`                                                      | `^17.18.0`                      | toolbar / dialogs / table / dropdown UI                                                                                  |
-| `primeicons` · `primeflex`                                     | `^7.0.0` · `^3.3.0` or `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup))     |
-| `image-js`                                                     | `^0.35.6`                       | client-side image processing                                                                                             |
-| `file-saver`                                                   | `^2.0.5`                        | GeoJSON / mask export                                                                                                    |
-| `buffer`                                                       | `^5.7.1`                        | Node `Buffer` polyfill for the Plotly backend                                                                            |
-| `onnxruntime-web`                                              | `~1.26.0`                       | browser SAM / cellpose inference (WebGPU/WASM)                                                                           |
+| Package                                                 | Range                           | Notes                                                                                                                |
+| ------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `@angular/common` · `core` · `forms` · `router` · `cdk` | `^21.0.0`                       | Angular 21. The library does not use the router or the CDK itself; PrimeNG 21 needs them                             |
+| `rxjs`                                                  | `^7.8.0`                        |                                                                                                                      |
+| `primeng`                                               | `^21.1.0`                       | toolbar / dialogs / table / select UI; the host provides its theme (see [Host setup](#host-setup))                   |
+| `primeicons` · `primeflex`                              | `^7.0.0` · `^3.3.0` or `^4.0.0` | optional peers, but the templates use their icon and utility classes; load their CSS (see [Host setup](#host-setup)) |
+| `image-js`                                              | `^0.35.6`                       | client-side image processing                                                                                         |
+| `file-saver`                                            | `^2.0.5`                        | GeoJSON / mask export                                                                                                |
+| `buffer`                                                | `^5.7.1`                        | Node `Buffer` polyfill for the Plotly backend                                                                        |
+| `onnxruntime-web`                                       | `~1.26.0`                       | browser SAM / cellpose inference (WebGPU/WASM)                                                                       |
 
 The rendering backends and helpers — `openseadragon`, `plotly.js-dist-min`,
 `napari-js`, `cellpose-js`, `fast-png`, and `tslib` — are declared as regular
@@ -58,10 +58,11 @@ Besides the ports, the library expects these from the host app. The
 [`examples/browser-image/main.ts`](examples/browser-image/main.ts) shows all of
 it working.
 
-1. **Providers:** `provideHttpClient()`, `provideAnimations()`, and PrimeNG's
-   `MessageService` and `ConfirmationService`.
-2. **CSS:** `primeicons/primeicons.css`, `primeng/resources/primeng.min.css`,
-   `primeflex/primeflex.css` and a PrimeNG theme.
+1. **Providers:** `provideHttpClient()`, PrimeNG's theme through `providePrimeNG()`
+   (a preset from `@primeuix/themes`), and PrimeNG's `MessageService` and
+   `ConfirmationService`.
+2. **CSS:** `primeicons/primeicons.css` and `primeflex/primeflex.css`, and a font
+   on `:root` or `body` (PrimeNG 21's presets set none).
 3. **Assets:** serve the package's `src/lib/assets` at `assets/plotting/`
    (icons and colormap previews). In `angular.json`:
    ```json

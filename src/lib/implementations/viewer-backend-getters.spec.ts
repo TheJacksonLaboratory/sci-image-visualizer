@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { MessageService } from 'primeng/api';
 import { Subject } from 'rxjs';
 
@@ -7,6 +7,7 @@ import { PlotlyService } from './plotly/plotly.service';
 import { OpenSeadragonVisualizerService } from './osd/openseadragon-visualizer.service';
 import { NapariVisualizerService } from './napari-js/napari-visualizer.service';
 import { VIZ_PORT_STUBS } from '../testing/viz-port-stubs';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 type Rect = { x: number; y: number; width: number; height: number };
 
@@ -22,13 +23,15 @@ describe('IViewerBackend capability-gated getters', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         PlotlyService,
         OpenSeadragonVisualizerService,
         NapariVisualizerService,
         MessageService,
         ...VIZ_PORT_STUBS,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     plotly = TestBed.inject(PlotlyService);

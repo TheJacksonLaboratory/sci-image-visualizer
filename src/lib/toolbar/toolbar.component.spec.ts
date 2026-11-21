@@ -255,6 +255,8 @@ describe('ToolbarComponent — dialog tools', () => {
     >
       <button class="host-pipeline">pipeline</button>
     </plotting-toolbar>`,
+    imports: [ToolbarComponent],
+    schemas: [NO_ERRORS_SCHEMA],
   })
   class HostComponent {
     type: PlotTypeId = PlotType.IMAGE;
@@ -279,9 +281,7 @@ describe('ToolbarComponent — dialog tools', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [HostComponent],
-      imports: [ToolbarComponent],
-      schemas: [NO_ERRORS_SCHEMA],
+      imports: [HostComponent],
     })
       .overrideComponent(ToolbarComponent, {
         set: { imports: [CommonModule, FormsModule], schemas: [NO_ERRORS_SCHEMA] },

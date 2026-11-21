@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
 import { VIZ_PORT_STUBS } from '../../testing/viz-port-stubs';
@@ -7,6 +7,7 @@ import { TILE_ACCESS_PORT } from '../../contracts/ports/tile-access.port';
 import { PlotType } from '../../contracts/plot-type';
 import { IImageInfo } from '../../contracts/image.contract';
 import { VisualizerStore } from '../../store/visualizer-store.service';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 /**
  * Mounted-image lifecycle against a fake viewer (review OSD-PLOTLY-1, -4, -5, -6).
@@ -103,7 +104,7 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
   beforeEach(() => {
     viewers.length = 0;
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         OpenSeadragonVisualizerService,
         ...VIZ_PORT_STUBS,
@@ -116,6 +117,8 @@ describe('OpenSeadragonVisualizerService — image lifecycle and simple-mode sta
             selectDiagramDisplay: () => undefined,
           },
         },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
