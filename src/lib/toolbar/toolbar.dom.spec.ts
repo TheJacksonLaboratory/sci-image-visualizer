@@ -192,6 +192,20 @@ describe('ToolbarComponent (DOM characterization)', () => {
     ).toMatchSnapshot();
   });
 
+  it('opens Cellpose-SAM parameters from its model menu, with no parameters button', async () => {
+    const cellpose = { ...tool, id: 'cellpose', label: 'Cellpose-SAM', paramsInModelMenu: 'Set cell diameter…' };
+    await render({
+      imageInfo: image({}),
+      plotTypeOptions,
+      selectedPlotType: PlotType.IMAGE,
+      contributedTools: [cellpose, tool],
+    });
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[aria-label="Parameters for Cellpose-SAM"]')).toBeNull();
+    // A tool without it keeps its button.
+    expect(el.querySelector('[aria-label="Parameters for Detect"]')).not.toBeNull();
+  });
+
   it('hides only the intensity line button with intensityLines: false', async () => {
     const intensityButton = (): Element | null =>
       (fixture.nativeElement as HTMLElement).querySelector('[aria-label="Add an intensity line"]');

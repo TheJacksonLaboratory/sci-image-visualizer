@@ -9,8 +9,59 @@ file was added.
 
 ## [Unreleased]
 
+### Added
+
+- **Cellpose-SAM on the whole view (#97).** Run with no rectangle drawn, Cellpose-SAM segments
+  every cell in the view, clipped to the image. With rectangles drawn it segments inside them, as
+  before. A re-run replaces the cells it found earlier in the same area (`region.source` is now
+  `'cellpose'`); cells elsewhere stay.
+- **Cellpose-SAM picks its own resolution (#98).** A new **Cell diameter (µm)** parameter (default
+  10 µm), turned into pixels with the image's pixel size, or **Cell diameter (px)** for an image
+  without one, sets the resolution Cellpose-SAM works at: cells are brought to ~30 px, its training
+  size. The view is read at full resolution (re-cropped on the server when zoomed out,
+  `TILE_ACCESS_PORT`; averaged down when zoomed in), and cellpose-js brings cells to 30 px for the
+  network and runs the flow dynamics back at full resolution (`resample`), so masks are full
+  resolution. Large views are segmented in overlapping tiles (cells on seams kept once), up to
+  ~36 MP of full-resolution area and ~40 MP for the network; past that the run reads coarser and
+  says to zoom in. Traced outlines are smoothed off their pixel staircase (`smoothPixelRing`), for
+  drawn rectangles too. The viewer's zoom does not change.
+- **`sampleViewAtScale()`**, the view-sampling helper behind it, exported for run tools that want
+  the view at a model's scale (with `currentMicronsPerPixel()`). `ICellSegmenter.segmentCells`
+  takes an optional third `CellSegmentOptions` argument (`diameter`, in input pixels),
+  `IVisualizer.segmentRectanglesCellpose` an optional `{ diameterPx }`, and the new
+  `IVisualizer.segmentViewCellpose({ diameterPx })` runs the whole-view mode on the backend regions
+  are edited on (the slice pane while the volume view is split), crop-fetching the slice on screen.
+
+### Fixed
+
+- **napari `getDisplayedSourceRect()` covered less than `getDisplayedPixelData()`.** It returned the
+  camera rect clamped to the image while the readback is the whole canvas, so a consumer pairing
+  the two (the pipeline's "use current view", the run tools) mapped canvas margins onto the image
+  when zoomed out. It now returns the rect captured with the readback, unclamped, as the contract
+  and OSD already do.
+- **A Cellpose run no longer writes into another image or slice.** A run whose image or slice changed
+  before it finished (rectangles or whole view) is discarded instead of committed into the regions
+  now on screen.
+
 ### Changed
 
+- **The Cellpose button is a split button like the contributed tools:** run ("Segment cells with
+  Cellpose-SAM in the displayed view, or in drawn rectangles") and a menu holding **Set cell diameter…**, in place of a parameters button
+  (`ToolbarToolContribution.paramsInModelMenu`, new and optional: with one checkpoint the menu is
+  just that entry, with several each checkpoint gets it as a submenu; the run tools' model menus
+  are now PrimeNG tiered menus).
+- **Parameter help behind an info icon.** In the tool parameters dialog, a field's help
+  (`ToolParamSpec.tooltip`) is now shown by an ⓘ button beside its label (hover or keyboard focus,
+  and announced to screen readers) instead of a hidden hover on the label. Cellpose-SAM's cell
+  diameter fields explain how the diameter sets the resolution.
+- **The Set cell diameter dialog shows one field:** **Cell diameter (µm)** when the image reports its
+  pixel size (its help quotes it), else **Cell diameter (px)**. A run tool picks the fields for the
+  image on screen with the new optional `ToolbarToolContribution.paramsFor(viz)`.
+- **The SAM point-prompt icon is larger:** its viewBox is cropped to the artwork, so it fills the
+  toolbar button like the box-prompt icon. It is listed through the run-tool list
+  (`CellposeToolContribution`, order 50), so the toolbar's `segmentCellpose` output is gone. The
+  toast is titled "Cellpose-SAM", the tooltip describes the whole-view run, and the cells icon has
+  lost its frame.
 - **The demo shows "Add an intensity line" only in test mode, as JIT does.** Open it with `?test=1`
   to show the button; without the parameter, or with `?test=0`, it is hidden. The user guide's
   intensity-line pages, QA cases and capture steps say so. The library's default is unchanged

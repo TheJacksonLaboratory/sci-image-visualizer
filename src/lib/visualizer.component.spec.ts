@@ -85,6 +85,7 @@ function mockPlotService(): any {
     setVertexEraserRadius: jest.fn(),
     segmentRectangles: jest.fn().mockResolvedValue(0),
     segmentRectanglesCellpose: jest.fn().mockResolvedValue(0),
+    segmentViewCellpose: jest.fn().mockResolvedValue(0),
     setSamModel: jest.fn(),
     setSamPointMode: jest.fn(),
     commitSamPoints: jest.fn(),
@@ -116,7 +117,7 @@ function makeComponent(plot: any, spatialData?: any): VisualizerComponent {
         busy$: new BehaviorSubject(false),
         progress$: new BehaviorSubject(-1),
       } as any,
-      // CellSegmentToolService
+      // CellposeToolContribution (a stand-in without models(): not listed)
       {
         status$: new BehaviorSubject(''),
         busy$: new BehaviorSubject(false),

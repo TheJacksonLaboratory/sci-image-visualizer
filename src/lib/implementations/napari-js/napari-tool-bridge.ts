@@ -13,7 +13,10 @@ import { packedFrame } from '../../toolbar/tool-kit/frame-pixels';
 import { WandService } from '../../toolbar/wand/wand.service';
 import { SamToolService } from '../../toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from '../../toolbar/segmentation/sam-point-tool.service';
-import { CellSegmentToolService } from '../../toolbar/segmentation/cell-segment-tool.service';
+import {
+  CellSegmentRunOptions,
+  CellSegmentToolService,
+} from '../../toolbar/segmentation/cell-segment-tool.service';
 import { NapariRegionOverlay, OverlayViewer } from './napari-region-overlay';
 import { READBACK_DEBOUNCE_MS } from './napari-helpers';
 
@@ -408,11 +411,11 @@ export class NapariToolBridge {
   }
 
   /** Cellpose over the drawn rectangles (see {@link segmentRectangles}). */
-  async segmentRectanglesCellpose(): Promise<number> {
+  async segmentRectanglesCellpose(opts?: CellSegmentRunOptions): Promise<number> {
     const segmenter = this.deps.cellSegmenter;
     if (!this.host.viewer() || !this.coordTransform || !segmenter) return 0;
     await this.runReadback();
     this.cachedImageSource = null;
-    return this.deps.cellSegmentTool.segmentBoxes(this.toolHost, segmenter);
+    return this.deps.cellSegmentTool.segmentBoxes(this.toolHost, segmenter, opts);
   }
 }

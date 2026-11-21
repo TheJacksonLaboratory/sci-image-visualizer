@@ -10,9 +10,25 @@ import {
 import type {
   ICellSegmenter,
   CellSegmentation,
+  CellSegmentOptions,
   CellSegmentProgress,
 } from '../../contracts/cell-segmenter.contract';
 import type { Cellpose } from 'cellpose-js';
+
+/** cellpose-js refuses to resize an image past 4096² pixels. */
+const CELLPOSE_MAX_RESIZED_PIXELS = 4096 * 4096;
+
+/**
+ * The `diameter` to hand cellpose-js: undefined (no rescale) when none is given or it
+ * is already ~30 px, else raised just enough that the upscaled image stays under
+ * cellpose-js's 4096² limit — small cells in a large crop would otherwise throw.
+ */
+export function cellposeDiameter(diameter: number | undefined, width: number, height: number): number | undefined {
+  if (!diameter || !(diameter > 0)) return undefined;
+  const minDiameter = 30 * Math.sqrt((width * height) / CELLPOSE_MAX_RESIZED_PIXELS);
+  const d = Math.max(diameter, minDiameter);
+  return Math.abs(30 / d - 1) < 0.05 ? undefined : d;
+}
 
 /** Hosted cellpose-SAM ONNX (CPSAM, fp16). Override via {@link setModelUrl}. */
 const DEFAULT_MODEL_URL = 'https://huggingface.co/jax-image-tools/cellpose-sam-onnx/resolve/main/cpsam_fp16.onnx';
@@ -83,13 +99,15 @@ export class CellposeSegmenterService implements ICellSegmenter {
   segmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
     progress?: CellSegmentProgress,
+    options?: CellSegmentOptions,
   ): Promise<CellSegmentation> {
-    return this.residency.use(this.residencyId(), () => this.runSegmentCells(image, progress));
+    return this.residency.use(this.residencyId(), () => this.runSegmentCells(image, progress, options));
   }
 
   private async runSegmentCells(
     image: { data: Uint8ClampedArray; width: number; height: number },
     progress?: CellSegmentProgress,
+    options?: CellSegmentOptions,
   ): Promise<CellSegmentation> {
     let announcedDownload = false;
     // Already inside this model's use(): load directly rather than through
@@ -105,9 +123,16 @@ export class CellposeSegmenterService implements ICellSegmenter {
       (status) => progress?.onStatus?.(status),
     );
     progress?.onStatus?.('Preprocessing image…');
+    const diameter = cellposeDiameter(options?.diameter, image.width, image.height);
     const out = await cp.segment(
       { data: image.data, width: image.width, height: image.height, channels: 4 },
       {
+        // cellpose-js rescales the image so cells are ~30 px, the size CPSAM was trained on.
+        diameter,
+        // With a rescale, run the flow dynamics back at the input's resolution (upstream
+        // Cellpose's default): mask edges follow the flows at full detail instead of a
+        // nearest-neighbour upscale of the network-resolution masks.
+        resample: diameter !== undefined,
         // cellpose-js runs inference in its worker (these fire between tiles) and
         // averaging/dynamics on the main thread; surface both so the toast shows
         // real progress instead of looking stuck.

@@ -79,4 +79,18 @@ describe('ToolParamsModel', () => {
     c.close();
     expect(c.openParams).toBeNull();
   });
+
+  it("shows the fields a tool picks for the image on screen, keeping the others' values", () => {
+    const t: ToolbarToolContribution = {
+      ...tool(),
+      paramsFor: (viz) => (viz.getTrueImageSize() ? [{ id: 'minArea', label: 'Min area', type: 'number' }] : []),
+    };
+    const c = modelWith(t);
+    c.open('detect', { getTrueImageSize: () => ({ width: 1, height: 1 }) } as never);
+    expect(c.openParams!.fields.map((f) => f.spec.id)).toEqual(['minArea']);
+    expect(Object.keys(c.openParams!.values)).toEqual(['confidence', 'overlapX', 'minArea']);
+    // Without a visualizer, every field.
+    c.open('detect');
+    expect(c.openParams!.fields).toHaveLength(3);
+  });
 });

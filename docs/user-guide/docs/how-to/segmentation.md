@@ -22,17 +22,44 @@ others stay, so you can adjust them and run again. New regions are in the class 
 
 Click the button again, or press ++s++, to stop.
 
-## Segment every cell in an area with Cellpose
+## Segment every cell with Cellpose-SAM
 
-1. Draw one or more rectangles (++r++) over the areas to segment.
-2. Click ![](../assets/icons/cells.svg){ .siv-icon } **Segment cells (cellpose-SAM)**.
+1. Pan and zoom so the view shows the area to segment.
+2. Click ![](../assets/icons/cells.svg){ .siv-icon } **Cellpose-SAM**.
 
-Each rectangle is replaced by one region per detected cell, in the class **cell**. Rectangles with no
-cells found stay in place.
+Every cell in the view becomes a region in the class **cell**. Running it again over the same area
+replaces the cells it found there before; cells elsewhere stay.
+
+To segment only some areas, draw rectangles (++r++) over them first: Cellpose-SAM then segments inside
+each rectangle and replaces it with its cells. Rectangles with no cells found stay in place.
+
+### Set the cell size
+
+Cellpose-SAM works best when cells are about 30 pixels across, so it does not segment the pixels at your
+zoom level. It reads the view at full resolution, fetching more detail when you are zoomed out, brings the
+cells to that size for the model, and traces their outlines back at full resolution, smoothed. Your view
+does not change. Set the diameter close to the real size: a diameter twice too large halves the detail
+the model sees.
+
+1. Click <i class="pi pi-chevron-down"></i> next to Cellpose-SAM, then **Set cell diameter…**.
+
+    ![The Cellpose-SAM menu with Set cell diameter…](../assets/screenshots/seg-cellpose-diameter-menu.png){ width="360" }
+
+2. Set the typical size of the cells or nuclei. The dialog asks for the unit the image supports:
+    - **Cell diameter (µm)** (10 µm by default) when the image reports its pixel size;
+    - **Cell diameter (px)** (30 px by default), in full-resolution pixels, when it does not.
+
+    Hover <i class="pi pi-info-circle"></i> beside the field for details, including the image's pixel size.
+
+    ![The cell diameter dialog in µm, with its help showing the image's pixel size](../assets/screenshots/seg-cellpose-diameter-dialog.png){ width="480" }
+
+Set the diameter to 0 to segment the pixels as displayed.
 
 !!! tip
-    Cellpose processes the rectangle in tiles. Several medium rectangles are easier to review than one huge
-    one, and a run can be undone in one step with ++ctrl+z++.
+    A large view is segmented in tiles ("Tile 3/8: …" in the progress message), so it takes longer, but
+    keeps full detail up to about 6000 × 6000 full-resolution pixels. If the result says to zoom in, the
+    view was too large to read at the cells' best scale: zoom in, or draw rectangles. A run can be undone
+    in one step with ++ctrl+z++.
 
 ## Pick the right SAM model
 
@@ -60,7 +87,7 @@ The choice applies to both SAM tools. It is not remembered after a reload.
 ## Prepare for working offline or on a slow network
 
 Run each model you need once while you have a good connection: open any image, draw a rectangle and run
-**Segment** with each model, and **Cellpose** once. The models stay in the browser cache. Clearing the
+**Segment** with each model, and **Cellpose-SAM** once. The models stay in the browser cache. Clearing the
 browser's site data removes them.
 
 ## Get better results
@@ -81,7 +108,7 @@ regions) and follow [Relabel many regions at once](classes.md#relabel-many-regio
 ## Run a contributed tool
 
 Applications can add their own tools (for example detection models in JAX Image Tools). They appear in the
-segmentation group with a run button, a model picker <i class="pi pi-chevron-down"></i> and
-<i class="pi pi-sliders-h"></i> **Parameters**. Unlike SAM and Cellpose, many of them process the whole
-current view, so there is nothing to draw first. Their documentation is part of the host application's
+segmentation group after Cellpose-SAM, with a run button, a model picker
+<i class="pi pi-chevron-down"></i> and, for most, <i class="pi pi-sliders-h"></i> **Parameters**. Like Cellpose-SAM,
+many of them process the whole current view, so there is nothing to draw first. Their documentation is part of the host application's
 guide.

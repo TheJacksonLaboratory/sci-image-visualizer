@@ -25,7 +25,7 @@ The toolbar is organised in groups, left to right:
 | Image actions | Download as PNG, Fit to view |
 | Zoom | Zoom box, Pan, Zoom in, Zoom out |
 | Regions | Region Editor, Selection and the drawing tools, Undo, Redo, Delete |
-| Segmentation | Segment (SAM), SAM point prompts, model picker, Cellpose |
+| Segmentation | Segment (SAM), SAM point prompts, model picker, Cellpose-SAM |
 | Help | Opens this guide |
 
 Hover over any button to see its name and keyboard shortcut. The [toolbar reference](../reference/toolbar.md)

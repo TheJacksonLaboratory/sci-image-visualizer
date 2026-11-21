@@ -73,7 +73,7 @@ import { IVisualizer, VISUALIZER, VisualizerHandle } from './contracts/visualize
 import { SAM_MODELS, getDefaultSamModelId, isSamModelReady } from './toolbar/segmentation/sam-model-registry';
 import { SamToolService } from './toolbar/segmentation/sam-tool.service';
 import { SamPointToolService } from './toolbar/segmentation/sam-point-tool.service';
-import { CellSegmentToolService } from './toolbar/segmentation/cell-segment-tool.service';
+import { CellposeToolContribution } from './toolbar/segmentation/cellpose-tool.contribution';
 import { SegmentationRunner } from './toolbar/segmentation/segmentation-runner';
 import {
   TOOLBAR_TOOLS,
@@ -614,7 +614,8 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     private cdr: ChangeDetectorRef,
     private session: VisualizerStore,
     private samTool: SamToolService,
-    private cellSegmentTool: CellSegmentToolService,
+    // The built-in Cellpose tool, listed with the contributed run tools (#97).
+    cellposeTool: CellposeToolContribution,
     private samPointTool: SamPointToolService,
     private regionOps: RegionOpsService,
     @Optional() @Inject(VIZ_CONFIG) private vizConfig?: VizConfig,
@@ -637,7 +638,9 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     // specs' `new` can pass one; Angular always provides it.
     private readonly destroyRef: DestroyRef = undefined as unknown as DestroyRef,
   ) {
-    this.contributedTools = visibleToolContributions(toolContributions);
+    // Cellpose rides the contributed tools' split button (run, model, parameters); its
+    // `order` keeps it ahead of the host's tools.
+    this.contributedTools = visibleToolContributions([cellposeTool, ...(toolContributions ?? [])]);
     this.toolParams = new ToolParamsModel(this.contributedTools);
     this.contributions = new ContributionHost(plotTypeContributions, toolContributions, {
       visualizer: this.plotService,
@@ -1251,15 +1254,6 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     await this.segmentation.run('SAM', this.samTool, () => this.plotService.segmentRectangles());
   }
 
-  /** Auto-segment cells inside each drawn rectangle with cellpose-SAM, client-side
-   *  (jit-ui#90). Each box is cropped (browser slide-crop) then run through the
-   *  cellpose-js model; the same sticky `sam` toast + progress bar is reused. */
-  protected async segmentCellpose() {
-    await this.segmentation.run('Cellpose', this.cellSegmentTool, () =>
-      this.plotService.segmentRectanglesCellpose(),
-    );
-  }
-
   // ── contributed tool parameters (see ToolParamsModel) ─────────────────
   paramsFor(toolId: string): Record<string, unknown> {
     return this.toolParams.paramsFor(toolId);
@@ -1268,7 +1262,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.toolParams.setModel(e.toolId, e.modelId);
   }
   protected openToolParams(toolId: string): void {
-    this.toolParams.open(toolId);
+    this.toolParams.open(toolId, this.plotService);
   }
   protected closeToolParams(): void {
     this.toolParams.close();

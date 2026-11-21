@@ -69,7 +69,7 @@ export interface NumberParamSpec {
   step?: number;
   /** Decimal places to show. Omit for integers. */
   fractionDigits?: number;
-  /** Hover help. Plain text; it is not rendered as HTML. */
+  /** Help shown by an info icon beside the label. Plain text; it is not rendered as HTML. */
   tooltip?: string;
 }
 
@@ -166,6 +166,21 @@ export interface ToolbarToolContribution {
 
   /** Parameter fields, in dialog order. Empty hides the parameters button. */
   params: ToolParamSpec[];
+  /**
+   * The fields the dialog shows for the image on screen, when they depend on it — a
+   * subset of {@link params}, possibly with help text about this image. Called each time
+   * the dialog opens; omitted, the dialog shows {@link params}. Hidden fields keep their
+   * values and still reach `run`.
+   */
+  paramsFor?(viz: IVisualizer): ToolParamSpec[];
+  /**
+   * Open the parameters from the checkpoint menu instead of a toolbar button, with an
+   * entry of this label (e.g. "Set cell diameter…"); the parameters button is not
+   * shown. With one checkpoint the menu is just that entry; with several, each
+   * checkpoint gets it as a submenu. For a tool with one or two parameters, which do
+   * not earn a button of their own.
+   */
+  paramsInModelMenu?: string;
   /**
    * Baseline parameter values for a checkpoint. Called on first use and again
    * on "Reset to model defaults", so it must be pure and must return every key

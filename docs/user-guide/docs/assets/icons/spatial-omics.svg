@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 512 512">
   <!-- Spatial omics: an array of observations (spots / cells) whose SIZE varies
        with the value they carry — the thing this plot mode draws.
-       Deliberately frameless, so it does not read as cells.svg (the cellpose
-       button, a framed dot cluster) sitting in the same toolbar.
+       Deliberately a regular grid, so it does not read as cells.svg (the
+       Cellpose-SAM button, a scattered dot cluster) in the same toolbar.
 
        Sized for a 16px toolbar icon, which drives every choice:
         - Solid fills only. The toolbar tints icons with

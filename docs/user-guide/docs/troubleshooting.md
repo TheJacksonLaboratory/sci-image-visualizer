@@ -161,7 +161,8 @@ runs use the browser's cache.
 - Make sure the rectangles are on screen: only the visible part is segmented.
 - Improve the contrast so objects stand out.
 - For SAM, try another model (patho-sam for stained histology).
-- For Cellpose, make sure the rectangle contains whole cells.
+- For Cellpose-SAM, make sure the rectangle contains whole cells, and that the cell diameter
+  (<i class="pi pi-chevron-down"></i> → **Set cell diameter…**) matches your cells.
 
 ### Segmentation is slow on a large model
 
