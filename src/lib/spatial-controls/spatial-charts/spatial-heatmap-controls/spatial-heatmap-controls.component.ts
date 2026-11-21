@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CheckboxModule } from 'primeng/checkbox';
 import { MultiSelectModule } from 'primeng/multiselect';
@@ -13,7 +12,7 @@ import { TooltipModule } from 'primeng/tooltip';
  */
 @Component({
   selector: 'spatial-heatmap-controls',
-  imports: [CommonModule, FormsModule, CheckboxModule, MultiSelectModule, TooltipModule],
+  imports: [FormsModule, CheckboxModule, MultiSelectModule, TooltipModule],
   templateUrl: './spatial-heatmap-controls.component.html',
   styleUrls: ['./spatial-heatmap-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

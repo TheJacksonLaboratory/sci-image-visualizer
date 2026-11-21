@@ -13,7 +13,6 @@ import {
   computed,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import { hslToHex } from '../store/class-color.util';
@@ -33,7 +32,7 @@ const HUE_GRADIENT = `linear-gradient(to right, ${Array.from(
  */
 @Component({
   selector: 'hex-color-picker',
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   templateUrl: './hex-color-picker.component.html',
   styleUrls: ['./hex-color-picker.component.scss'],
   // OnPush so the always-in-DOM (but hidden) picker panel — a ~130-cell honeycomb

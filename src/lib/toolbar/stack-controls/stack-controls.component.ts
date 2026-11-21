@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnDestroy, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { SliderModule } from 'primeng/slider';
@@ -18,7 +17,7 @@ export interface StackOption {
  */
 @Component({
   selector: 'toolbar-stack-controls',
-  imports: [CommonModule, FormsModule, ButtonModule, SliderModule, TooltipModule],
+  imports: [FormsModule, ButtonModule, SliderModule, TooltipModule],
   templateUrl: './stack-controls.component.html',
   styleUrls: ['./stack-controls.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

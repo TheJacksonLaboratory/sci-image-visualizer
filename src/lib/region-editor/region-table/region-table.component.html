@@ -17,38 +17,42 @@
   >
     <ng-template pTemplate="header">
       <!-- Hide the column header when there are no regions to show. -->
-      <tr *ngIf="total > 0">
-        <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
-        <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
-        <th
-          *ngIf="!volumes"
-          class="surface-col-header"
-          pResizableColumn
-          pTooltip="The region's area on this slice"
-          tooltipPosition="top"
-        >
-          Surface
-        </th>
-        <th
-          *ngIf="volumes"
-          class="surface-col-header"
-          pResizableColumn
-          pTooltip="The volume of the region's class over the whole stack: its area on every slice, one slice thick"
-          tooltipPosition="top"
-        >
-          Volume
-        </th>
-        <!-- Trash column: just enough for the icon. -->
-        <th style="width: 2rem"></th>
-      </tr>
+      @if (total > 0) {
+        <tr>
+          <!-- Class column: shrinks to fit "Region" by default, grows with longer labels. -->
+          <th class="class-col-header" pResizableColumn>Class <p-sortIcon field="label"></p-sortIcon></th>
+          @if (!volumes) {
+            <th
+              class="surface-col-header"
+              pResizableColumn
+              pTooltip="The region's area on this slice"
+              tooltipPosition="top"
+            >
+              Surface
+            </th>
+          }
+          @if (volumes) {
+            <th
+              class="surface-col-header"
+              pResizableColumn
+              pTooltip="The volume of the region's class over the whole stack: its area on every slice, one slice thick"
+              tooltipPosition="top"
+            >
+              Volume
+            </th>
+          }
+          <!-- Trash column: just enough for the icon. -->
+          <th style="width: 2rem"></th>
+        </tr>
+      }
     </ng-template>
     <ng-template pTemplate="body" let-region let-rowIdx="rowIndex">
       <tr [pSelectableRow]="region" [pSelectableRowIndex]="rowIdx">
         <td class="class-cell">
-          <ng-container *ngIf="!labelDrafts.has(region); else editLabelTpl">
+          @if (!labelDrafts.has(region)) {
             <span class="class-cell-display">
               <!-- Quick-pick a preset class (its colour follows); the pencil is for
-                     a free-form name / rename (jit-ui#70). -->
+              a free-form name / rename (jit-ui#70). -->
               <p-dropdown
                 class="class-dropdown"
                 appendTo="body"
@@ -84,8 +88,7 @@
                 (click)="startEdit(region, $event)"
               ></i>
             </span>
-          </ng-container>
-          <ng-template #editLabelTpl>
+          } @else {
             <span class="p-input-icon-right class-cell-edit">
               <i
                 class="pi pi-times icon-hover"
@@ -107,7 +110,7 @@
                 (keydown.escape)="stopEdit(region, false, $event)"
               />
             </span>
-          </ng-template>
+          }
         </td>
         <!-- Surface area (µm²/mm² when the image is scaled, else px²). -->
         <td class="surface-cell">{{ rowView.get(region)?.measure || '—' }}</td>
@@ -126,15 +129,16 @@
   </p-table>
 </div>
 
-<p-paginator
-  *ngIf="total > 0"
-  [rows]="rows"
-  [totalRecords]="total"
-  [first]="first"
-  [rowsPerPageOptions]="rowsPerPageOptions"
-  [showCurrentPageReport]="true"
-  currentPageReportTemplate="{first} to {last} of {totalRecords}"
-  (onPageChange)="onPage($event)"
-  styleClass="region-editor-paginator"
->
-</p-paginator>
+@if (total > 0) {
+  <p-paginator
+    [rows]="rows"
+    [totalRecords]="total"
+    [first]="first"
+    [rowsPerPageOptions]="rowsPerPageOptions"
+    [showCurrentPageReport]="true"
+    currentPageReportTemplate="{first} to {last} of {totalRecords}"
+    (onPageChange)="onPage($event)"
+    styleClass="region-editor-paginator"
+  >
+  </p-paginator>
+}

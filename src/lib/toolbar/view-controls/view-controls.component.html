@@ -1,18 +1,19 @@
 <!-- Zoom tools. Plotly rubber-band drag-zoom: on OpenSeadragon the box-zoom
-     covers this and a bare drag pans natively, so it's hidden in image view. -->
-<ng-container *ngIf="isHeatmap && zoomTools">
+covers this and a bare drag pans natively, so it's hidden in image view. -->
+@if (isHeatmap && zoomTools) {
   <span class="toolbar-separator"></span>
-  <p-button
-    *ngIf="!isImageView"
-    icon="pi pi-search"
-    size="small"
-    [text]="activeDragMode !== 'zoom'"
-    ariaLabel="Zoom drag"
-    pTooltip="Zoom drag"
-    tooltipPosition="bottom"
-    (onClick)="toggleDragMode.emit('zoom')"
-  >
-  </p-button>
+  @if (!isImageView) {
+    <p-button
+      icon="pi pi-search"
+      size="small"
+      [text]="activeDragMode !== 'zoom'"
+      ariaLabel="Zoom drag"
+      pTooltip="Zoom drag"
+      tooltipPosition="bottom"
+      (onClick)="toggleDragMode.emit('zoom')"
+    >
+    </p-button>
+  }
   <p-button
     size="small"
     [text]="activeDragMode !== 'zoomToBox'"
@@ -61,10 +62,10 @@
     (onClick)="zoomOut.emit()"
   >
   </p-button>
-</ng-container>
+}
 
 <!-- Surface 3D controls -->
-<ng-container *ngIf="!isHeatmap">
+@if (!isHeatmap) {
   <span class="toolbar-separator"></span>
   <p-button
     icon="pi pi-search"
@@ -117,39 +118,41 @@
   >
   </p-button>
   <!-- 3D coordinate-axes / scale gizmo toggle (napari-js WebGPU volume/isosurface, and the 3D
-       spatial cloud).
-       `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
-       (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
-  <p-button
-    size="small"
-    *ngIf="axesToggle"
-    styleClass="p-button-icon-only"
-    [text]="!axesVisible"
-    ariaLabel="Toggle 3D axes"
-    pTooltip="Toggle 3D axes / scale"
-    tooltipPosition="bottom"
-    (onClick)="toggleAxes.emit()"
-  >
-    <img
-      src="assets/plotting/3d-coordinates.svg"
-      [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
-      style="width: 1rem"
-    />
-  </p-button>
+  spatial cloud).
+  `p-button-icon-only` gives the same square sizing as the neighbouring pi-icon buttons
+  (the projected <img> doesn't trigger PrimeNG's automatic icon-only sizing). -->
+  @if (axesToggle) {
+    <p-button
+      size="small"
+      styleClass="p-button-icon-only"
+      [text]="!axesVisible"
+      ariaLabel="Toggle 3D axes"
+      pTooltip="Toggle 3D axes / scale"
+      tooltipPosition="bottom"
+      (onClick)="toggleAxes.emit()"
+    >
+      <img
+        src="assets/plotting/3d-coordinates.svg"
+        [class]="axesVisible ? 'toolbar-icon-active' : 'toolbar-icon-dark'"
+        style="width: 1rem"
+      />
+    </p-button>
+  }
   <!-- Wireframe toggle: the surface, and the volume's and spatial 3D's region classes and cells. -->
-  <p-button
-    icon="pi pi-share-alt"
-    size="small"
-    *ngIf="showsWireframeToggle"
-    [text]="!wireframeActive"
-    ariaLabel="Toggle wireframe"
-    pTooltip="Toggle wireframe"
-    tooltipPosition="bottom"
-    (onClick)="toggleWireframe.emit()"
-  >
-  </p-button>
+  @if (showsWireframeToggle) {
+    <p-button
+      icon="pi pi-share-alt"
+      size="small"
+      [text]="!wireframeActive"
+      ariaLabel="Toggle wireframe"
+      pTooltip="Toggle wireframe"
+      tooltipPosition="bottom"
+      (onClick)="toggleWireframe.emit()"
+    >
+    </p-button>
+  }
   <!-- Resolution (decimate factor) for the napari 3D types — reloads at coarser/finer sampling. -->
-  <ng-container *ngIf="isNapari3dMode">
+  @if (isNapari3dMode) {
     <span class="flex align-items-center mx-1 toolbar-text">Res</span>
     <p-dropdown
       [options]="decimateOptions"
@@ -164,5 +167,5 @@
       (onChange)="selectResolution.emit($event.value)"
     >
     </p-dropdown>
-  </ng-container>
-</ng-container>
+  }
+}

@@ -11,7 +11,6 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
 
 import { IImageInfo } from '../contracts/image.contract';
 import { IntensityProfile, IVisualizer, VISUALIZER } from '../contracts/visualizer.contract';
@@ -32,7 +31,7 @@ import { FloatingDragDirective, FloatingPos } from '../visualizer/floating-drag.
  */
 @Component({
   selector: 'viz-intensity-inset',
-  imports: [CommonModule, FloatingDragDirective],
+  imports: [FloatingDragDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './intensity-inset.component.html',
   styleUrls: ['./intensity-inset.component.scss'],
@@ -76,7 +75,7 @@ export class IntensityInsetComponent implements OnInit, OnDestroy {
       .subscribe((profiles) => {
         this.profiles = profiles;
         this.hasProfiles.set(profiles.length > 0);
-        // The panel is behind *ngIf. detectChanges() materializes it synchronously (the
+        // The panel is behind @if. detectChanges() materializes it synchronously (the
         // stream may fire outside the zone, e.g. from an OSD drag). Render on the next
         // frame, AFTER layout: drawn synchronously, Plotly sizes a fresh chart to a zero
         // box and keeps it, so the inset stays blank.

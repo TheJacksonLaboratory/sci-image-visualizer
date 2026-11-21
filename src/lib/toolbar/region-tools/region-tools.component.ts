@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { TooltipModule } from 'primeng/tooltip';
 
@@ -14,7 +13,7 @@ import { ToolSliderComponent } from '../tool-slider/tool-slider.component';
  */
 @Component({
   selector: 'toolbar-region-tools',
-  imports: [CommonModule, ButtonModule, TooltipModule, ToolSliderComponent],
+  imports: [ButtonModule, TooltipModule, ToolSliderComponent],
   templateUrl: './region-tools.component.html',
   styleUrls: ['./region-tools.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

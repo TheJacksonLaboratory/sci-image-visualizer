@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnChanges, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
@@ -31,7 +30,6 @@ export interface RegionPage {
 @Component({
   selector: 'region-table',
   imports: [
-    CommonModule,
     FormsModule,
     SharedModule,
     ButtonModule,

@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ButtonModule } from 'primeng/button';
 import { RippleModule } from 'primeng/ripple';
 import { ToolbarModule } from 'primeng/toolbar';
@@ -45,7 +44,6 @@ import { SegmentationToolsComponent } from './segmentation-tools/segmentation-to
 @Component({
   selector: 'plotting-toolbar',
   imports: [
-    CommonModule,
     ButtonModule,
     RippleModule,
     ToolbarModule,

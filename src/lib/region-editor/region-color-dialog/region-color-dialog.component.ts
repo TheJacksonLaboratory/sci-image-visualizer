@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { SharedModule } from 'primeng/api';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -19,7 +18,7 @@ export interface ClassColorEdit {
  */
 @Component({
   selector: 'region-color-dialog',
-  imports: [CommonModule, SharedModule, ButtonModule, DialogModule, HexColorPickerComponent],
+  imports: [SharedModule, ButtonModule, DialogModule, HexColorPickerComponent],
   templateUrl: './region-color-dialog.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

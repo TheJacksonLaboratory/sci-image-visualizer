@@ -1,24 +1,27 @@
 <div class="sc-style-pop">
-  <ng-container *ngIf="showIcons">
+  @if (showIcons) {
     <div class="sc-style-title">{{ what }} Icon</div>
     <div class="sc-style-icons" role="radiogroup" [attr.aria-label]="'Icon for ' + gene">
-      <button
-        type="button"
-        *ngFor="let opt of glyphOptions"
-        class="sc-style-icon"
-        role="radio"
-        [attr.aria-checked]="opt.value === glyph"
-        [class.active]="opt.value === glyph"
-        [title]="opt.label"
-        (click)="glyphChange.emit(opt.value)"
-      >
-        <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
-          <polygon [attr.points]="opt.points"></polygon>
-        </svg>
-      </button>
+      @for (opt of glyphOptions; track opt) {
+        <button
+          type="button"
+          class="sc-style-icon"
+          role="radio"
+          [attr.aria-checked]="opt.value === glyph"
+          [class.active]="opt.value === glyph"
+          [title]="opt.label"
+          (click)="glyphChange.emit(opt.value)"
+        >
+          <svg viewBox="-1.2 -1.2 2.4 2.4" class="sc-glyph-svg">
+            <polygon [attr.points]="opt.points"></polygon>
+          </svg>
+        </button>
+      }
     </div>
-    <small class="sc-hint" *ngIf="iconHint">{{ iconHint }}</small>
-  </ng-container>
+    @if (iconHint) {
+      <small class="sc-hint">{{ iconHint }}</small>
+    }
+  }
   <div class="sc-style-title">{{ what }} Color</div>
   <div class="sc-style-color">
     <label class="sc-style-swatch" [style.background]="color" title="Pick a colour">
@@ -36,16 +39,17 @@
   </div>
   <div class="sc-style-title sc-style-sub">Presets</div>
   <div class="sc-style-presets">
-    <button
-      type="button"
-      *ngFor="let c of colorPresets"
-      class="sc-style-preset"
-      [style.background]="c"
-      [class.active]="c === color.toLowerCase()"
-      [title]="c"
-      [attr.aria-label]="'Colour ' + c"
-      (click)="colorChange.emit(c)"
-    ></button>
+    @for (c of colorPresets; track c) {
+      <button
+        type="button"
+        class="sc-style-preset"
+        [style.background]="c"
+        [class.active]="c === color.toLowerCase()"
+        [title]="c"
+        [attr.aria-label]="'Colour ' + c"
+        (click)="colorChange.emit(c)"
+      ></button>
+    }
   </div>
   <p-button
     label="Reset to default"

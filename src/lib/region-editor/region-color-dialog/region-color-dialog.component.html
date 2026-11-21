@@ -12,10 +12,12 @@
     <span
       >Outline colour per class for the <b>{{ selectedCount }}</b> selected region(s):</span
     >
-    <div *ngFor="let edit of draft; let i = index" class="flex align-items-center gap-3">
-      <span class="font-medium flex-1">{{ edit.label || 'Unclassified' }}</span>
-      <hex-color-picker [color]="edit.color" (colorChange)="setColor(i, $event)"></hex-color-picker>
-    </div>
+    @for (edit of draft; track edit; let i = $index) {
+      <div class="flex align-items-center gap-3">
+        <span class="font-medium flex-1">{{ edit.label || 'Unclassified' }}</span>
+        <hex-color-picker [color]="edit.color" (colorChange)="setColor(i, $event)"></hex-color-picker>
+      </div>
+    }
   </div>
   <ng-template pTemplate="footer">
     <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="close()"> </p-button>

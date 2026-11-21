@@ -19,21 +19,22 @@
       (onClick)="toggleFill()"
     >
     </p-button>
-    <p-button
-      *ngIf="volumeView"
-      icon="pi pi-eye"
-      size="small"
-      [text]="!regionsThroughVolume"
-      [attr.aria-pressed]="regionsThroughVolume"
-      pTooltip="See the regions through the volume. Off, the volume hides the parts of them behind what it shows; on, none (layers traced inside bright structures, such as an OCT's)."
-      tooltipPosition="bottom"
-      ariaLabel="Regions through volume"
-      (onClick)="toggleThroughVolume()"
-    >
-    </p-button>
+    @if (volumeView) {
+      <p-button
+        icon="pi pi-eye"
+        size="small"
+        [text]="!regionsThroughVolume"
+        [attr.aria-pressed]="regionsThroughVolume"
+        pTooltip="See the regions through the volume. Off, the volume hides the parts of them behind what it shows; on, none (layers traced inside bright structures, such as an OCT's)."
+        tooltipPosition="bottom"
+        ariaLabel="Regions through volume"
+        (onClick)="toggleThroughVolume()"
+      >
+      </p-button>
+    }
     <span class="toolbar-separator"></span>
     <!-- New regions are now created from the diagram toolbar
-         (rectangle, polyline, freeform, wand). -->
+    (rectangle, polyline, freeform, wand). -->
     <p-button
       icon="pi pi-upload"
       size="small"
@@ -92,19 +93,20 @@
       [disabled]="(!regions || !regions.length) && !hasRegionSource"
     >
     </p-button>
-    <p-button
-      *ngIf="canImportFromServer"
-      icon="pi pi-cloud-download"
-      size="small"
-      [text]="true"
-      styleClass="mr-2"
-      pTooltip="Import regions from server: a GeoJSON file, a folder of per-slice GeoJSON files or a label volume (.nii, .nii.gz, .nrrd)."
-      tooltipPosition="bottom"
-      ariaLabel="Import regions from server"
-      [loading]="importing"
-      (click)="importFromServer()"
-    >
-    </p-button>
+    @if (canImportFromServer) {
+      <p-button
+        icon="pi pi-cloud-download"
+        size="small"
+        [text]="true"
+        styleClass="mr-2"
+        pTooltip="Import regions from server: a GeoJSON file, a folder of per-slice GeoJSON files or a label volume (.nii, .nii.gz, .nrrd)."
+        tooltipPosition="bottom"
+        ariaLabel="Import regions from server"
+        [loading]="importing"
+        (click)="importFromServer()"
+      >
+      </p-button>
+    }
     <p-button
       size="small"
       [text]="true"
@@ -115,9 +117,9 @@
       [disabled]="!regions || !regions.length"
     >
       <!-- References the file so Inkscape edits to mask.svg show up directly
-           (the lib's assets/** are served at assets/plotting/). The
-           toolbar-icon-dark filter recolours the black SVG to the theme blue,
-           same as region-editor.svg and the other SVG toolbar icons. -->
+      (the lib's assets/** are served at assets/plotting/). The
+      toolbar-icon-dark filter recolours the black SVG to the theme blue,
+      same as region-editor.svg and the other SVG toolbar icons. -->
       <img
         src="assets/plotting/mask.svg"
         class="toolbar-icon-dark"
@@ -175,7 +177,7 @@
           >Set class on {{ selectedRegions?.length || 0 }} selected region(s)</span
         >
         <!-- Selecting a class applies it immediately (choosing an option closes the
-             overlay, so there's no separate Apply button). -->
+          overlay, so there's no separate Apply button). -->
         <p-dropdown
           styleClass="w-full"
           appendTo="body"
@@ -273,25 +275,26 @@
   (treeViewChange)="classTreeView = $event"
 >
   <!-- A region set with a class hierarchy (an atlas ontology) can show its classes as a tree. -->
-  <region-class-tree
-    *ngIf="classHierarchy as hierarchy"
-    [nodes]="hierarchy"
-    [counts]="treeCounts"
-    [colorOf]="treeColor"
-    [picked]="pickedClass"
-    [marked]="markedClasses"
-    [volume]="volumeView"
-    [shown3d]="shown3dNames"
-    [cellable]="cellableClasses"
-    [individual]="individualClasses"
-    (toggleCells)="setClassesIndividual3d($event.classes, $event.individual)"
-    (pick)="pickClasses($event)"
-    (recolor)="setClassColor($event.name, $event.color)"
-    (toggle3d)="toggleClass3d($event.name, $event.classes)"
-    [hidden]="hiddenClasses"
-    (toggleHidden)="setClassesHidden($event.classes, $event.hidden)"
-  >
-  </region-class-tree>
+  @if (classHierarchy; as hierarchy) {
+    <region-class-tree
+      [nodes]="hierarchy"
+      [counts]="treeCounts"
+      [colorOf]="treeColor"
+      [picked]="pickedClass"
+      [marked]="markedClasses"
+      [volume]="volumeView"
+      [shown3d]="shown3dNames"
+      [cellable]="cellableClasses"
+      [individual]="individualClasses"
+      (toggleCells)="setClassesIndividual3d($event.classes, $event.individual)"
+      (pick)="pickClasses($event)"
+      (recolor)="setClassColor($event.name, $event.color)"
+      (toggle3d)="toggleClass3d($event.name, $event.classes)"
+      [hidden]="hiddenClasses"
+      (toggleHidden)="setClassesHidden($event.classes, $event.hidden)"
+    >
+    </region-class-tree>
+  }
 </region-classes-panel>
 
 <region-table
@@ -319,7 +322,7 @@
 </region-table>
 
 <!-- Live-edit mode: no Save/Cancel — every edit commits immediately to the
-     active image's region cache. -->
+    active image's region cache. -->
 
 <p-confirmDialog
   #cd

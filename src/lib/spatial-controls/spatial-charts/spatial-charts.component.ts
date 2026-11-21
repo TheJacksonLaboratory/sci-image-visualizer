@@ -153,7 +153,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * The div inside the detached window.
    *
    * A separate id rather than moving the existing div: Angular destroys and recreates a
-   * div across an `*ngIf`, so Plotly would be left holding a detached node. Two divs and
+   * div across an `@if`, so Plotly would be left holding a detached node. Two divs and
    * a redraw is both simpler and correct.
    *
    * ONE is enough for every kind, because only the active kind is ever plotted. Detaching
@@ -821,7 +821,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
     // Guard on the div the ACTIVE kind will draw into, not always the shared one. While a
-    // kind is detached the inline div is removed by its `*ngIf`, so checking that one
+    // kind is detached the inline div is removed by its `@if`, so checking that one
     // bailed here and the detached window never got a plot.
     if (!document.getElementById(this.plotTarget)) {
       // Leaving the gene heatmap (Picked genes, or another kind): its view removed the div, and

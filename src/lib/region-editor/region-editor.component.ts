@@ -13,7 +13,6 @@ import {
 } from '@angular/core';
 import { markForCheckInZone } from '../util/mark-for-check';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
@@ -72,7 +71,6 @@ const SELECT_ALL_SOURCE_LIMIT = 5000;
 @Component({
   selector: 'region-editor',
   imports: [
-    CommonModule,
     FormsModule,
     SharedModule,
     ButtonModule,

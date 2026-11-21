@@ -11,7 +11,6 @@ import {
   Output,
   ViewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 import type { SectionAxis, SectionView } from '../contracts/section-view.contract';
 import { SLICE_PLANE_COLORS } from '../implementations/napari-js/napari-volume-slice-planes';
@@ -38,7 +37,7 @@ type ToCanvas = (u: number, v: number) => [number, number];
 
 @Component({
   selector: 'viz-section-pane',
-  imports: [CommonModule],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <canvas
@@ -53,7 +52,9 @@ type ToCanvas = (u: number, v: number) => [number, number];
       (dblclick)="fit()"
     ></canvas>
     <span class="section-badge" [style.background]="axisColor">{{ label }}</span>
-    <span *ngIf="!view" class="section-empty">Waiting for the volume…</span>
+    @if (!view) {
+      <span class="section-empty">Waiting for the volume…</span>
+    }
   `,
   styles: [
     `

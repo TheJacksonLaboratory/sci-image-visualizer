@@ -1,4 +1,4 @@
-<ng-container *ngIf="groupOptions.length">
+@if (groupOptions.length) {
   <div class="sc-subhead">Groups</div>
   <div class="sc-row sc-row-picker">
     <p-dropdown
@@ -17,90 +17,98 @@
         <span class="sc-group-heading">{{ group.label }}</span>
       </ng-template>
     </p-dropdown>
-    <p-dropdown
-      *ngIf="groupVariantOptions.length"
-      [options]="groupVariantOptions"
-      optionLabel="label"
-      optionValue="value"
-      styleClass="sc-variant"
-      [ngModel]="activeCellTypeColumn"
-      (ngModelChange)="onGroupVariant($event)"
-      appendTo="body"
-    ></p-dropdown>
-    <button
-      *ngIf="canImportGroups"
-      type="button"
-      class="sc-icon-btn"
-      [disabled]="groupImporting"
-      (click)="groupFile.click()"
-      title="Import cell groups (CSV of cell_id, group)"
-    >
-      <i
-        class="pi"
-        [class.pi-plus-circle]="!groupImporting"
-        [class.pi-spin]="groupImporting"
-        [class.pi-spinner]="groupImporting"
-      ></i>
-    </button>
+    @if (groupVariantOptions.length) {
+      <p-dropdown
+        [options]="groupVariantOptions"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="sc-variant"
+        [ngModel]="activeCellTypeColumn"
+        (ngModelChange)="onGroupVariant($event)"
+        appendTo="body"
+      ></p-dropdown>
+    }
+    @if (canImportGroups) {
+      <button
+        type="button"
+        class="sc-icon-btn"
+        [disabled]="groupImporting"
+        (click)="groupFile.click()"
+        title="Import cell groups (CSV of cell_id, group)"
+      >
+        <i
+          class="pi"
+          [class.pi-plus-circle]="!groupImporting"
+          [class.pi-spin]="groupImporting"
+          [class.pi-spinner]="groupImporting"
+        ></i>
+      </button>
+    }
     <input #groupFile type="file" accept=".csv,.tsv,.txt" hidden (change)="onImportGroupsFile(groupFile)" />
   </div>
-  <small class="sc-hint sc-error" *ngIf="groupImportError">{{ groupImportError }}</small>
-
-  <div class="sc-group-list" *ngIf="groupRows.length">
-    <div class="sc-group-row sc-group-all">
-      <p-checkbox
-        [binary]="true"
-        [ngModel]="allGroupsShown"
-        (onChange)="onAllGroupsShown($event.checked)"
-      ></p-checkbox>
-      <span class="sc-group-label">All groups</span>
-      <span class="sc-count">({{ groupTotal | number }})</span>
-      <button type="button" class="sc-icon-btn" (click)="groupsExpanded = !groupsExpanded">
-        <i class="pi" [class.pi-chevron-down]="groupsExpanded" [class.pi-chevron-right]="!groupsExpanded"></i>
-      </button>
-    </div>
-    <ng-container *ngIf="groupsExpanded">
-      <div class="sc-group-row" *ngFor="let row of groupRows; trackBy: trackByLabel">
+  @if (groupImportError) {
+    <small class="sc-hint sc-error">{{ groupImportError }}</small>
+  }
+  @if (groupRows.length) {
+    <div class="sc-group-list">
+      <div class="sc-group-row sc-group-all">
         <p-checkbox
           [binary]="true"
-          [ngModel]="isGroupShown(row.label)"
-          (onChange)="onGroupShown(row.label, $event.checked)"
+          [ngModel]="allGroupsShown"
+          (onChange)="onAllGroupsShown($event.checked)"
         ></p-checkbox>
-        <!-- The group's colour; clicking it opens the colour picker. -->
-        <button
-          type="button"
-          class="sc-dot sc-dot-btn"
-          [style.background]="row.color"
-          [attr.aria-label]="'Colour for ' + row.label"
-          title="Colour"
-          (click)="openGroupStyle($event, row.label, groupPop)"
-        ></button>
-        <!-- The name selects the group's observations; again, clears. -->
-        <button
-          type="button"
-          class="sc-group-label sc-group-select"
-          [class.selected]="selectedCategory !== null && selectedCategory === codeOf(row.label)"
-          [title]="'Select ' + row.label"
-          (click)="onGroupClicked(row.label)"
-        >
-          {{ row.label }}
+        <span class="sc-group-label">All groups</span>
+        <span class="sc-count">({{ groupTotal | number }})</span>
+        <button type="button" class="sc-icon-btn" (click)="groupsExpanded = !groupsExpanded">
+          <i class="pi" [class.pi-chevron-down]="groupsExpanded" [class.pi-chevron-right]="!groupsExpanded"></i>
         </button>
-        <span class="sc-count">({{ row.count | number }})</span>
       </div>
-    </ng-container>
-  </div>
+      @if (groupsExpanded) {
+        @for (row of groupRows; track trackByLabel($index, row)) {
+          <div class="sc-group-row">
+            <p-checkbox
+              [binary]="true"
+              [ngModel]="isGroupShown(row.label)"
+              (onChange)="onGroupShown(row.label, $event.checked)"
+            ></p-checkbox>
+            <!-- The group's colour; clicking it opens the colour picker. -->
+            <button
+              type="button"
+              class="sc-dot sc-dot-btn"
+              [style.background]="row.color"
+              [attr.aria-label]="'Colour for ' + row.label"
+              title="Colour"
+              (click)="openGroupStyle($event, row.label, groupPop)"
+            ></button>
+            <!-- The name selects the group's observations; again, clears. -->
+            <button
+              type="button"
+              class="sc-group-label sc-group-select"
+              [class.selected]="selectedCategory !== null && selectedCategory === codeOf(row.label)"
+              [title]="'Select ' + row.label"
+              (click)="onGroupClicked(row.label)"
+            >
+              {{ row.label }}
+            </button>
+            <span class="sc-count">({{ row.count | number }})</span>
+          </div>
+        }
+      }
+    </div>
+  }
   <!-- One picker for every group row, filled for the group that opened it. -->
   <p-overlayPanel #groupPop styleClass="sc-gene-style" appendTo="body">
     <ng-template pTemplate="content">
-      <spatial-gene-style
-        *ngIf="styleGroup as group"
-        [gene]="group"
-        what="Group"
-        [color]="groupColorOf(group)"
-        [showIcons]="false"
-        (colorChange)="onGroupColor(group, $event)"
-        (resetStyle)="resetGroupColor(group)"
-      ></spatial-gene-style>
+      @if (styleGroup; as group) {
+        <spatial-gene-style
+          [gene]="group"
+          what="Group"
+          [color]="groupColorOf(group)"
+          [showIcons]="false"
+          (colorChange)="onGroupColor(group, $event)"
+          (resetStyle)="resetGroupColor(group)"
+        ></spatial-gene-style>
+      }
     </ng-template>
   </p-overlayPanel>
-</ng-container>
+}

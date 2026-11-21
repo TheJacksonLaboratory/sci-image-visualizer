@@ -11,43 +11,48 @@
   [closeOnEscape]="!busy"
 >
   <!-- Idle: filename + overwrite warning. -->
-  <div *ngIf="!busy" class="flex flex-column gap-3 pt-2">
-    <label [for]="inputId" class="font-medium">GeoJSON filename</label>
-    <input
-      [id]="inputId"
-      type="text"
-      pInputText
-      [ngModel]="filename"
-      (ngModelChange)="filenameChange.emit($event)"
-      class="w-full"
-    />
-    <small *ngIf="fileExists" class="p-error">
-      <i class="pi pi-exclamation-triangle mr-1"></i>
-      This file already exists and will be overwritten.
-    </small>
-  </div>
+  @if (!busy) {
+    <div class="flex flex-column gap-3 pt-2">
+      <label [for]="inputId" class="font-medium">GeoJSON filename</label>
+      <input
+        [id]="inputId"
+        type="text"
+        pInputText
+        [ngModel]="filename"
+        (ngModelChange)="filenameChange.emit($event)"
+        class="w-full"
+      />
+      @if (fileExists) {
+        <small class="p-error">
+          <i class="pi pi-exclamation-triangle mr-1"></i>
+          This file already exists and will be overwritten.
+        </small>
+      }
+    </div>
+  }
 
   <!-- Busy: progress while regions serialize + upload. -->
-  <div *ngIf="busy" class="flex flex-column gap-3 pt-2">
-    <span>Saving regions…</span>
-    <p-progressBar mode="indeterminate" [style]="{ height: '0.75rem' }"></p-progressBar>
-  </div>
+  @if (busy) {
+    <div class="flex flex-column gap-3 pt-2">
+      <span>Saving regions…</span>
+      <p-progressBar mode="indeterminate" [style]="{ height: '0.75rem' }"></p-progressBar>
+    </div>
+  }
 
   <ng-template pTemplate="footer">
-    <p-button *ngIf="!busy" label="Cancel" icon="pi pi-times" [text]="true" (onClick)="close()"></p-button>
-    <p-button
-      *ngIf="!busy"
-      [label]="confirmLabel"
-      [icon]="confirmIcon"
-      [disabled]="!filename || !filename.trim()"
-      (onClick)="confirm.emit()"
-    ></p-button>
-    <p-button
-      *ngIf="busy"
-      label="Cancel"
-      icon="pi pi-times"
-      [text]="true"
-      (onClick)="cancelSave.emit()"
-    ></p-button>
+    @if (!busy) {
+      <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="close()"></p-button>
+    }
+    @if (!busy) {
+      <p-button
+        [label]="confirmLabel"
+        [icon]="confirmIcon"
+        [disabled]="!filename || !filename.trim()"
+        (onClick)="confirm.emit()"
+      ></p-button>
+    }
+    @if (busy) {
+      <p-button label="Cancel" icon="pi pi-times" [text]="true" (onClick)="cancelSave.emit()"></p-button>
+    }
   </ng-template>
 </p-dialog>
