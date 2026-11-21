@@ -52,7 +52,7 @@ export class SpatialEmbeddingControlsComponent {
   /** Compute the selected embedding in this browser. */
   @Output() readonly compute = new EventEmitter<void>();
   /** Stop the running computation. */
-  @Output() readonly cancel = new EventEmitter<void>();
+  @Output() readonly cancelCompute = new EventEmitter<void>();
   /** Move the chart into its own window, or back into the panel. */
   @Output() readonly detachedToggle = new EventEmitter<void>();
 }

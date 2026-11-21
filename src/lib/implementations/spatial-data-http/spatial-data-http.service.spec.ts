@@ -1,10 +1,11 @@
 import { firstValueFrom } from 'rxjs';
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
 import { SpatialDataHttpService } from './spatial-data-http.service';
 import { SPATIAL_WIRE_VERSION, SpatialManifest } from './spatial-wire';
 import { isCategoricalColumn, isContinuousColumn } from '../../contracts/spatial-dataset.contract';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 const BASE = 'http://localhost:8090';
 
@@ -34,8 +35,8 @@ describe('SpatialDataHttpService', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [SpatialDataHttpService],
+      imports: [],
+      providers: [SpatialDataHttpService, provideHttpClient(withInterceptorsFromDi()), provideHttpClientTesting()],
     });
     service = TestBed.inject(SpatialDataHttpService);
     http = TestBed.inject(HttpTestingController);

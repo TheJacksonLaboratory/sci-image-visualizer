@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { InjectionToken } from '@angular/core';
 import { MessageService } from 'primeng/api';
 import * as Plotly from 'plotly.js-dist-min';
@@ -13,6 +13,7 @@ import { RegionStore } from './store/region-store.service';
 import { VisualizerStore } from './store/visualizer-store.service';
 import { PlotUtilities } from './plot.utilities';
 import { regionsFromGeoJson, regionsToGeoJson } from './models/region-geojson';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -58,8 +59,14 @@ describe('PlotlyService region round-trip (characterization)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
 
@@ -218,8 +225,14 @@ describe('Region GeoJSON round trip (characterization)', () => {
 
   it('RegionStore, PlotUtilities and PlotlyService produce the same GeoJSON', () => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     const plotly = TestBed.inject(PlotlyService);
     const store = new RegionStore(new VisualizerStore());
@@ -317,8 +330,14 @@ describe('Region GeoJSON round trip (characterization)', () => {
 
   it('PlotlyService.exportRegions goes through the store with its file name', () => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     const plotly = TestBed.inject(PlotlyService);
     const store = TestBed.inject(RegionStore);

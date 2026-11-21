@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { MessageService } from 'primeng/api';
 import * as Plotly from 'plotly.js-dist-min';
 
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 import { PlotlyService, PlotType } from './plotly.service';
 import { PlotlyImageLoader } from './plotly-image-loader';
@@ -137,8 +137,14 @@ describe('PlotlyService channel display of a colour image', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     internals().recolor.encode = fakeEncode;

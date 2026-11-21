@@ -1,7 +1,7 @@
 import { NgZone } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { HttpClient } from '@angular/common/http';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpClient, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { BehaviorSubject, firstValueFrom, of } from 'rxjs';
 
 import { buildLut, Camera3D, framingFor, mapScalar, MultiChannelImageView, Viewer } from 'napari-js';
@@ -172,7 +172,7 @@ describe('NapariVisualizerService', () => {
     );
 
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         NapariVisualizerService,
         VisualizerStore,
@@ -180,6 +180,8 @@ describe('NapariVisualizerService', () => {
         { provide: TILE_ACCESS_PORT, useValue: tilesPort },
         { provide: VIZ_CONFIG, useValue: { slideCropServer: 'http://srv/' } },
         { provide: SPATIAL_DATA_PORT, useValue: spatialPort },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     service = TestBed.inject(NapariVisualizerService);
@@ -1698,7 +1700,7 @@ describe('NapariVisualizerService', () => {
     (globalThis as { createImageBitmap: unknown }).createImageBitmap = jest
       .fn()
       .mockResolvedValue({ width: 256, height: 256, close: () => undefined });
-    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
     addVolume.mockClear();
     const div = document.createElement('div');
     div.id = 'vol-level-host';
@@ -1741,7 +1743,7 @@ describe('NapariVisualizerService', () => {
       if (init?.signal) signals.push(init.signal);
       return held.then(() => ({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) }));
     });
-    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
     addVolume.mockClear();
     const div = document.createElement('div');
     div.id = 'vol-cancel-host';
@@ -1791,7 +1793,7 @@ describe('NapariVisualizerService', () => {
       if (cancelled) afterCancel++;
       return held.then(() => ({ ok: true, status: 200, blob: () => Promise.resolve(new Blob()) }));
     });
-    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+    const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
     addVolume.mockClear();
     const div = document.createElement('div');
     div.id = 'vol-mc-cancel-host';
@@ -2208,7 +2210,7 @@ describe('NapariVisualizerService', () => {
         // The opening view has to come from somewhere, and the reference volume's
         // box is the framing worth having — the brain, not a stray segmentation.
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         await mount3d(spatialDatasetVolume(3));
         // 4x6x10 voxels of 100x200x400 -> a 400 x 1200 x 4000 world box about the origin,
         // framed to fit the canvas. Suppressing every framing would leave Camera3D's
@@ -2337,7 +2339,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('hides the reference volume without re-fetching it', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         const getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getVolume = getVolume;
         await mount3d(spatialDatasetVolume(3));
@@ -2360,7 +2362,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('adds the reference volume once though the view changes while it downloads, and hides it', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         addVolume.mockClear();
         let release: (v: Uint8Array) => void = () => undefined;
         spatialPort.getVolume = jest.fn(() => new Promise<Uint8Array>((r) => (release = r)));
@@ -2384,7 +2386,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('applies the reference volume opacity, at build and on a change', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         store.setSpatialView({ volumeOpacity: 0.2 });
         await mount3d(spatialDatasetVolume(3));
@@ -2538,7 +2540,7 @@ describe('NapariVisualizerService', () => {
           .filter((l) => typeof l?.name === 'string' && l.name.startsWith('gene map'));
 
       it('draws nothing until the option is on AND a gene is the colour source', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2571,7 +2573,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('draws the sheets additively on the reference volume’s own lattice', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2595,7 +2597,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('fills only the imaged planes as sheets, and bridges them as a volume', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2632,7 +2634,7 @@ describe('NapariVisualizerService', () => {
       it('ignores the section restriction while interpolating', async () => {
         // A volume built from ONE section would smear that slide through the whole
         // depth and present it as an estimate of the specimen.
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2658,7 +2660,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('draws one sheet when a section is picked, and clamps a stale index', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2719,7 +2721,7 @@ describe('NapariVisualizerService', () => {
       it('honours the chosen colormap, and follows the image’s live without one', async () => {
         // 3D mounts no display-state subscription of its own, so the spatial
         // subscription is the ONLY thing that keeps the colour scale current here.
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getFeatureVector.mockResolvedValue(new Float32Array([1, 2, 3, 4, 5, 6]));
         await mount3d(sectioned());
@@ -2792,7 +2794,7 @@ describe('NapariVisualizerService', () => {
           .filter((l) => typeof l?.name === 'string' && l.name.startsWith('density · '));
 
       it('draws nothing extra until the option is switched on', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(clustered());
 
@@ -2800,7 +2802,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('draws one additive, tinted volume per cluster, biggest first', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getColumn.mockResolvedValue(column);
         await mount3d(clustered());
@@ -2825,7 +2827,7 @@ describe('NapariVisualizerService', () => {
         // Regression: the volumes read `invert` from the display state, which only the image,
         // volume and surface scenes keep current. Opened straight into the cloud, they took the
         // stale default (or whatever the previous scene left), and a toggle never reached them.
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getColumn.mockResolvedValue(column);
         store.setInvert(true);
@@ -2843,7 +2845,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('divides the opacity budget across the clusters so overlap does not blow out', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         spatialPort.getColumn.mockResolvedValue(column);
         await mount3d(clustered());
@@ -2864,7 +2866,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('rasterises total density when the colouring is not categorical', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(clustered());
 
@@ -2930,7 +2932,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('re-rasterises for a different selection of the same size', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(clustered());
         store.setSpatialView({ densityVolume: true });
@@ -2950,7 +2952,7 @@ describe('NapariVisualizerService', () => {
       });
 
       it('does not re-rasterise for a change that cannot alter the field', async () => {
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
         await mount3d(clustered());
         store.setSpatialView({ densityVolume: true });
@@ -3215,7 +3217,7 @@ describe('NapariVisualizerService', () => {
     describe('reference volume', () => {
       it('adds the volume with the declared dimensions and voxel size', async () => {
         spatialPort.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 6 * 10));
-        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+        const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
 
         await mount3d(spatialDatasetVolume());
 
@@ -3363,7 +3365,7 @@ describe('NapariVisualizerService', () => {
      *  here, or the assembly awaits responses that never come. */
     async function mountVolume(info: IImageInfo) {
       jest.spyOn(TestBed.inject(HttpClient), 'get').mockReturnValue(of(new Blob()));
-      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume');
+      const addVolume = jest.spyOn(Viewer.prototype, 'addVolume') as jest.SpiedFunction<Viewer['addVolume']>;
       const div = document.createElement('div');
       div.id = 'vol-box-host';
       document.body.appendChild(div);

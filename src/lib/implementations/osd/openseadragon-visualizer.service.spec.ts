@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { EMPTY, firstValueFrom } from 'rxjs';
 
 import { OpenSeadragonVisualizerService } from './openseadragon-visualizer.service';
@@ -11,6 +11,7 @@ import * as tileClient from './tile-client';
 import { VisualizerStore } from '../../store/visualizer-store.service';
 import type { CachedImageData } from '../../toolbar/wand/wand-tool.service';
 import { isPackedFrame, PackedFrame } from '../../toolbar/tool-kit/frame-pixels';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
@@ -29,8 +30,13 @@ describe('OpenSeadragonVisualizerService (characterization, unmounted)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [OpenSeadragonVisualizerService, ...VIZ_PORT_STUBS],
+      imports: [],
+      providers: [
+        OpenSeadragonVisualizerService,
+        ...VIZ_PORT_STUBS,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
     http = TestBed.inject(HttpTestingController);
@@ -740,8 +746,13 @@ describe('OpenSeadragonVisualizerService — exportComposite', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [OpenSeadragonVisualizerService, ...VIZ_PORT_STUBS],
+      imports: [],
+      providers: [
+        OpenSeadragonVisualizerService,
+        ...VIZ_PORT_STUBS,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
     http = TestBed.inject(HttpTestingController);
@@ -832,7 +843,7 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
+      imports: [],
       providers: [
         OpenSeadragonVisualizerService,
         ...VIZ_PORT_STUBS,
@@ -847,6 +858,8 @@ describe('OpenSeadragonVisualizerService (tiled load via /tiles/info)', () => {
             selectDiagramDisplay: () => undefined,
           },
         },
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
       ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
@@ -937,8 +950,13 @@ describe('OpenSeadragonVisualizerService — plot-mode viewport', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [OpenSeadragonVisualizerService, ...VIZ_PORT_STUBS],
+      imports: [],
+      providers: [
+        OpenSeadragonVisualizerService,
+        ...VIZ_PORT_STUBS,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(OpenSeadragonVisualizerService);
     http = TestBed.inject(HttpTestingController);

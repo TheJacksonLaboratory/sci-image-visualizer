@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { InjectionToken } from '@angular/core';
 import { MessageService } from 'primeng/api';
 
@@ -11,6 +11,7 @@ import { Polygon, Region } from '../../models/region';
 import { IntensityProfile } from '../../contracts/visualizer.contract';
 import { IImageInfo } from '../../contracts/image.contract';
 import { IntensityProfileService } from '../../intensity/intensity-profile.service';
+import { provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 /**
  * Locks the intensity-profile sampling used by the LINE plot type's draggable
@@ -21,8 +22,14 @@ describe('IntensityProfileService sampling', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(IntensityProfileService);
   });
@@ -79,8 +86,14 @@ describe('PlotlyService sampling cache after setSamplingFrames (OSD-PLOTLY-2)', 
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
   });
@@ -140,8 +153,14 @@ describe('PlotlyService intensity profile lines (characterization)', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [PlotlyService, ...VIZ_PORT_STUBS, MessageService],
+      imports: [],
+      providers: [
+        PlotlyService,
+        ...VIZ_PORT_STUBS,
+        MessageService,
+        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClientTesting(),
+      ],
     });
     service = TestBed.inject(PlotlyService);
     regionStore = TestBed.inject(RegionStore);
