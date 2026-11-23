@@ -9,6 +9,12 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The transcripts' "Colour by" toggle sits beside its label.** It started at the middle of the
+  dialog, like the sliders, so "Cluster | Cell type | Gene" ran past the dialog's right edge and was
+  cropped. It now follows the label, its buttons on one line, as "Show as" does.
+
 ## [0.22.1] — 2026-11-23
 
 ### Fixed

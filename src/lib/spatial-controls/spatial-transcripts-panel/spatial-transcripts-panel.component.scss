@@ -26,3 +26,18 @@
   font-weight: 600;
   color: var(--p-text-muted-color, #6c757d);
 }
+
+// "Colour by" is a short label beside a toggle of up to three buttons, not a label over a
+// slider: the shared half-width label column (`.sc-row .sc-lbl`) started the toggle at the
+// dialog's middle, and "Cluster | Cell type | Gene" ran past the right edge and was cropped.
+// The toggle sits right after the label instead, its buttons on one line (as "Show as").
+.sc-colour-by .sc-lbl {
+  flex: 0 0 auto;
+}
+:host ::ng-deep .sc-colour-by .p-selectbutton {
+  display: flex;
+  flex-wrap: nowrap;
+}
+:host ::ng-deep .sc-colour-by .p-button {
+  white-space: nowrap;
+}
