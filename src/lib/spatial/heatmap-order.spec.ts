@@ -62,10 +62,14 @@ describe('orderHeatmap', () => {
   });
 
   it('puts a gene with nothing measured last in the diagonal', () => {
-    const gaps = matrix(['Empty', 'Mbp'], ['A', 'B'], [
-      [NaN, NaN],
-      [0, 1],
-    ]);
+    const gaps = matrix(
+      ['Empty', 'Mbp'],
+      ['A', 'B'],
+      [
+        [NaN, NaN],
+        [0, 1],
+      ],
+    );
     expect(orderHeatmap(gaps, { genes: 'peak', groups: 'dataset' }).matrix.rows).toEqual(['Mbp', 'Empty']);
   });
 
@@ -88,10 +92,14 @@ describe('orderHeatmap', () => {
 
   it('clusters groups by their profiles over the genes', () => {
     const out = orderHeatmap(
-      matrix(['g1', 'g2'], ['P', 'Q', 'R', 'S'], [
-        [1, 0, 1, 0],
-        [0, 1, 0, 1],
-      ]),
+      matrix(
+        ['g1', 'g2'],
+        ['P', 'Q', 'R', 'S'],
+        [
+          [1, 0, 1, 0],
+          [0, 1, 0, 1],
+        ],
+      ),
       { genes: 'picked', groups: 'clustered' },
     ).matrix;
     const pos = (c: string) => out.cols.indexOf(c);
@@ -117,23 +125,52 @@ describe('clusterOrder', () => {
 
   it('returns every index once', () => {
     const rows = Array.from({ length: 40 }, (_, i) => [Math.sin(i), Math.cos(i * 3), i % 5]);
-    expect(clusterOrder(40, 3, vectors(rows)).slice().sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 40 }, (_, i) => i),
-    );
+    expect(
+      clusterOrder(40, 3, vectors(rows))
+        .slice()
+        .sort((a, b) => a - b),
+    ).toEqual(Array.from({ length: 40 }, (_, i) => i));
   });
 
   it('keeps the input order for identical vectors', () => {
-    expect(clusterOrder(4, 2, vectors([[1, 1], [1, 1], [1, 1], [1, 1]]))).toEqual([0, 1, 2, 3]);
+    expect(
+      clusterOrder(
+        4,
+        2,
+        vectors([
+          [1, 1],
+          [1, 1],
+          [1, 1],
+          [1, 1],
+        ]),
+      ),
+    ).toEqual([0, 1, 2, 3]);
   });
 
   it('compares vectors only where both are measured', () => {
     // 0 and 2 agree wherever both have a value; 1 differs from both.
-    const order = clusterOrder(3, 3, vectors([[1, NaN, 1], [5, 5, 5], [1, 1, NaN]]));
+    const order = clusterOrder(
+      3,
+      3,
+      vectors([
+        [1, NaN, 1],
+        [5, 5, 5],
+        [1, 1, NaN],
+      ]),
+    );
     expect(Math.abs(order.indexOf(0) - order.indexOf(2))).toBe(1);
   });
 
   it('copes with vectors that share no measurement', () => {
-    const order = clusterOrder(3, 2, vectors([[1, NaN], [NaN, 1], [1, NaN]]));
+    const order = clusterOrder(
+      3,
+      2,
+      vectors([
+        [1, NaN],
+        [NaN, 1],
+        [1, NaN],
+      ]),
+    );
     expect(order.slice().sort()).toEqual([0, 1, 2]);
     expect(Math.abs(order.indexOf(0) - order.indexOf(2))).toBe(1);
   });

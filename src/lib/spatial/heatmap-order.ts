@@ -123,7 +123,15 @@ function peakOrder(nRows: number, colOrder: number[], at: (r: number, c: number)
  */
 export function clusterOrder(n: number, dim: number, get: (i: number, k: number) => number): number[] {
   if (n <= 2) return identity(n);
-  // Copied once into a dense array: the distance loop below reads each value n times.
+  return averageLinkageLeaves(n, distances(n, dim, get));
+}
+
+/**
+ * The n × n distances between `n` vectors, as {@link clusterOrder} defines them.
+ *
+ * The vectors are copied once into a dense array: the loop reads each value n times.
+ */
+function distances(n: number, dim: number, get: (i: number, k: number) => number): Float32Array {
   const data = new Float64Array(n * dim);
   let gaps = false;
   for (let i = 0; i < n; i++) {
@@ -137,32 +145,12 @@ export function clusterOrder(n: number, dim: number, get: (i: number, k: number)
   let far = 0;
   const disjoint: number[] = [];
   for (let i = 0; i < n; i++) {
-    const bi = i * dim;
     for (let j = i + 1; j < n; j++) {
-      const bj = j * dim;
-      let sum = 0;
-      let shared = dim;
-      if (gaps) {
-        shared = 0;
-        for (let k = 0; k < dim; k++) {
-          const diff = data[bi + k] - data[bj + k];
-          // NaN on either side: not compared.
-          if (diff === diff) {
-            sum += diff * diff;
-            shared++;
-          }
-        }
-      } else {
-        for (let k = 0; k < dim; k++) {
-          const diff = data[bi + k] - data[bj + k];
-          sum += diff * diff;
-        }
-      }
-      if (shared === 0) {
+      const dist = gaps ? gappedDistance(data, i * dim, j * dim, dim) : fullDistance(data, i * dim, j * dim, dim);
+      if (Number.isNaN(dist)) {
         disjoint.push(i * n + j);
         continue;
       }
-      const dist = Math.sqrt((sum * dim) / shared);
       d[i * n + j] = d[j * n + i] = dist;
       if (dist > far) far = dist;
     }
@@ -172,7 +160,42 @@ export function clusterOrder(n: number, dim: number, get: (i: number, k: number)
     const j = ij % n;
     d[i * n + j] = d[j * n + i] = far * 2 + 1;
   }
+  return d;
+}
 
+/** Euclidean distance between the vectors at `bi` and `bj`, all entries measured. */
+function fullDistance(data: Float64Array, bi: number, bj: number, dim: number): number {
+  let sum = 0;
+  for (let k = 0; k < dim; k++) {
+    const diff = data[bi + k] - data[bj + k];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
+
+/**
+ * Euclidean distance over the entries both vectors have, scaled up to the full length;
+ * NaN when they share none.
+ */
+function gappedDistance(data: Float64Array, bi: number, bj: number, dim: number): number {
+  let sum = 0;
+  let shared = 0;
+  for (let k = 0; k < dim; k++) {
+    const diff = data[bi + k] - data[bj + k];
+    // NaN on either side: not compared.
+    if (diff === diff) {
+      sum += diff * diff;
+      shared++;
+    }
+  }
+  return shared ? Math.sqrt((sum * dim) / shared) : NaN;
+}
+
+/**
+ * The leaf order of the average-linkage clustering of `n` items with distances `d`
+ * (n × n, updated in place), by nearest-neighbour chain.
+ */
+function averageLinkageLeaves(n: number, d: Float32Array): number[] {
   const size = new Uint32Array(n).fill(1);
   const active = new Uint8Array(n).fill(1);
   const leaves: number[][] = Array.from({ length: n }, (_, i) => [i]);
