@@ -109,16 +109,26 @@ describe('ChartDataModel', () => {
     void first;
   });
 
-  it('fetches each heatmap gene once, keeps chosen genes among the options, and drops unknown ones', async () => {
+  it('fetches each heatmap gene once, and drops genes the next dataset lacks', async () => {
     data.setHeatmapGenes(['Ttr', 'Mbp']);
     await data.loadHeatmapGenes(controls);
     await data.loadHeatmapGenes(controls);
     expect(controls.continuousValues).toHaveBeenCalledTimes(2);
     expect(data.snapshot().heatmapRows.map((r) => r.name)).toEqual(['Ttr', 'Mbp']);
-    data.filterGenes('zzz');
-    expect(data.geneOptions.map((o) => o.value)).toEqual(['Ttr', 'Mbp']);
     data.onDatasetChanged(ds('B', ['Mbp']), [], []);
     expect(data.heatmapGenes).toEqual(['Mbp']);
+  });
+
+  it('keeps the rows of a whole-transcriptome dataset that does not inline its names', () => {
+    // Its genes come from the port's search, so there is no list to check them against:
+    // the same dataset re-emitted keeps its rows, another dataset drops them.
+    const remote = (id: string): SpatialDataset => ({ ...ds(id), features: { count: 18078 } });
+    data.onDatasetChanged(remote('A'), [], []);
+    data.setHeatmapGenes(['Gene9001']);
+    data.onDatasetChanged(remote('A'), [], []);
+    expect(data.heatmapGenes).toEqual(['Gene9001']);
+    data.onDatasetChanged(remote('B'), [], []);
+    expect(data.heatmapGenes).toEqual([]);
   });
 
   it('loads an embedding once, and keeps the one chosen last', async () => {

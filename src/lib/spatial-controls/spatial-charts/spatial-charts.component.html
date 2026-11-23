@@ -74,7 +74,9 @@
         [genes]="heatmapGenes"
         [zScore]="heatmapZScore"
         (genesChange)="onHeatmapGenes($event)"
+        [genesAreRemote]="genesAreRemote"
         (filterChange)="onGeneFilter($event)"
+        (panelShow)="onGenePanelShow()"
         (zScoreChange)="onHeatmapZScore($event)"
       ></spatial-heatmap-controls>
     }

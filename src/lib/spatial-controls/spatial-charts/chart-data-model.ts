@@ -5,7 +5,6 @@ import type {
   SpatialEmbeddingMeta,
 } from '../../contracts/spatial-dataset.contract';
 import type { SpatialColorBy } from '../../contracts/display-types';
-import { geneOptionsFor } from '../../spatial/gene-search';
 import type { OmicsGrouping } from '../../implementations/plotly/omics-trace-builders';
 import { Supersede } from '../../util/supersede';
 
@@ -60,7 +59,6 @@ export class ChartDataModel {
    * kind is: this is what the panel is charting, not what the map is drawing.
    */
   heatmapGenes: string[] = [];
-  geneOptions: { label: string; value: string }[] = [];
 
   /** Embeddings to offer, and which of them is drawn. */
   embeddings: SpatialEmbeddingMeta[] = [];
@@ -75,13 +73,6 @@ export class ChartDataModel {
    *  distribution is counts per category, not a histogram of its codes. */
   private categorical: OmicsGrouping | null = null;
   private grouping: OmicsGrouping | null = null;
-  /** Every gene the dataset inlined. `geneOptions` is only ever the best few hundred of
-   *  these — see `gene-search.ts` for why a whole-transcriptome list cannot be handed to
-   *  the control whole. */
-  private geneNames: string[] = [];
-  /** What is typed in the picker's filter box, so the options can be rebuilt when the
-   *  selection changes without losing the query. */
-  private geneQuery = '';
   /** Fetched vectors by gene name, so adding a fourth gene does not refetch the first
    *  three — each is a full per-observation Float32Array. */
   private readonly geneCache = new Map<string, Float32Array>();
@@ -154,16 +145,18 @@ export class ChartDataModel {
       this.groupBy = null;
       this.grouping = null;
     }
-    // The heatmap's rows come from the dataset's gene list. A dataset too wide to inline
-    // its names offers none here — the panel's typeahead is the way in for those, and the
-    // heatmap needs names it can list.
-    this.geneNames = [...(dataset?.features?.names ?? [])];
-    this.geneQuery = '';
-    // Validated against the WHOLE list, not the visible options: those are capped, and
-    // filtering the selection by them would drop genes the dataset still has.
-    const known = new Set(this.geneNames);
-    this.heatmapGenes = this.heatmapGenes.filter((n) => known.has(n));
-    this.refreshGeneOptions();
+    // Carried-over rows are kept only where the new dataset has those genes. Validated
+    // against its WHOLE inlined list, not the picker's options: those are capped, and
+    // filtering by them would drop genes the dataset still has. A whole-transcriptome
+    // dataset does not inline its names, so there is nothing to check a carried-over gene
+    // against: another dataset's rows are dropped, and the same dataset's kept.
+    const names = dataset?.features?.names;
+    if (names) {
+      const known = new Set(names);
+      this.heatmapGenes = this.heatmapGenes.filter((n) => known.has(n));
+    } else if (switched || !dataset?.features) {
+      this.heatmapGenes = [];
+    }
     this.geneCache.clear();
 
     // Embeddings belong to the dataset, so they are re-read with it and the loaded
@@ -253,17 +246,9 @@ export class ChartDataModel {
     return true;
   }
 
-  /** The heatmap's rows. Chosen genes stay among the options, or the control cannot label
-   *  its chips. */
+  /** The heatmap's rows. */
   setHeatmapGenes(names: string[] | null): void {
     this.heatmapGenes = names ?? [];
-    this.refreshGeneOptions();
-  }
-
-  /** The gene picker's filter box changed: search the resident names, show the best. */
-  filterGenes(query: string | null): void {
-    this.geneQuery = query ?? '';
-    this.refreshGeneOptions();
   }
 
   /**
@@ -337,12 +322,5 @@ export class ChartDataModel {
    */
   supersedeEmbeddingLoad(): void {
     this.embeddingLoad.cancel();
-  }
-
-  private refreshGeneOptions(): void {
-    this.geneOptions = geneOptionsFor(this.geneNames, this.geneQuery, this.heatmapGenes).map((n) => ({
-      label: n,
-      value: n,
-    }));
   }
 }

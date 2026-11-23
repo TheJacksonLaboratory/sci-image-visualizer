@@ -22,6 +22,9 @@ export class SpatialHeatmapControlsComponent {
   protected readonly geneVirtualScrollFrom = 200;
   /** The picker's options: the best matches for the filter, plus the genes chosen. */
   @Input() geneOptions: { label: string; value: string }[] = [];
+  /** The options come from the port per keystroke (a whole-transcriptome dataset whose
+   *  list is not loaded yet), which changes what an empty list means. */
+  @Input() genesAreRemote = false;
   /** The genes the rows are. */
   @Input() genes: string[] = [];
   /** Each gene is z-scored across the groups. */
@@ -30,6 +33,8 @@ export class SpatialHeatmapControlsComponent {
   @Output() readonly genesChange = new EventEmitter<string[]>();
   /** What is typed in the picker's filter box. */
   @Output() readonly filterChange = new EventEmitter<string>();
+  /** The picker opened: its list starts over from the head of the genes. */
+  @Output() readonly panelShow = new EventEmitter<void>();
   /** The z-score toggle changed. */
   @Output() readonly zScoreChange = new EventEmitter<boolean>();
 }

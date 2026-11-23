@@ -848,6 +848,33 @@ describe('SpatialChartsComponent', () => {
       expect(component['heatmapGenes']).toEqual(['Gene17000']);
     });
 
+    it('searches a whole-transcriptome dataset\u2019s genes through the port, as the other gene pickers do', async () => {
+      // No names inlined: the picker asks the port per keystroke, then loads the whole list
+      // on first open and filters it locally.
+      dataset$.next({ ...dataset, id: 'wt', features: { count: 18078 } });
+      await flush();
+      expect(component['geneOptions']).toEqual([]);
+      expect(component['genesAreRemote']).toBe(true);
+
+      controls.searchFeatures = jest.fn(async (query: string) =>
+        query ? ['Gene9001', 'Gene9002'] : ['Gene0', 'Gene9001', 'Gene9002'],
+      );
+      component['onGeneFilter']('Gene900');
+      await flush();
+      expect(controls.searchFeatures).toHaveBeenCalledWith('Gene900', 50);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene9001', 'Gene9002']);
+
+      // A searched gene charts like an inlined one, and stays in its place once ticked.
+      await component['onHeatmapGenes'](['Gene9002']);
+      expect(controls.continuousValues).toHaveBeenCalledWith({ kind: 'feature', name: 'Gene9002' });
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene9001', 'Gene9002']);
+
+      component['onGenePanelShow']();
+      await flush();
+      expect(component['genesAreRemote']).toBe(false);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene0', 'Gene9001', 'Gene9002']);
+    });
+
     it('seeds with the gene already on screen, rather than opening empty', async () => {
       view$.next({ ...view$.value, colorBy: { kind: 'feature', name: 'Ttr' } });
       await flush();

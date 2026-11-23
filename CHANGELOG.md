@@ -16,6 +16,10 @@ file was added.
   observations expressing". Only picked genes a search hides are listed ahead of the matches, so
   their chips keep their labels. The picker also clears its filter when it closes, reopens on the
   head of the gene list, has a clear button, and says "No match" when a search finds nothing.
+- **The heatmap's gene picker lists a whole-transcriptome dataset's genes.** A dataset that does not
+  inline its gene names offered none to pick from. The picker now uses the same gene list and
+  search as the panel's other gene pickers: it searches the data port as you type, and loads the
+  whole list the first time it opens.
 
 ## [0.22.0] — 2026-11-21
 

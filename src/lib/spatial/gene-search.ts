@@ -58,27 +58,3 @@ export function searchGeneNames(names: readonly string[], query: string, limit =
   }
   return [...prefix, ...contains].slice(0, limit);
 }
-
-/**
- * The options a picker should show: the best matches, plus anything already chosen.
- *
- * A multi-select whose option list is capped must still carry its SELECTED values, or the
- * control cannot resolve them — the chips lose their labels and, worse, a value absent
- * from the options can be dropped from the model on the next change.
- *
- * A selected gene the search found keeps its place among the matches: ticking a gene must
- * not move it to the top of the list, as the other gene pickers do not (see
- * `GenePickerModel`). Only the selections the search left out are added, ahead of the
- * matches.
- */
-export function geneOptionsFor(
-  names: readonly string[],
-  query: string,
-  selected: readonly string[] = [],
-  limit = GENE_OPTIONS_MAX,
-): string[] {
-  const matches = searchGeneNames(names, query, limit);
-  if (selected.length === 0) return matches;
-  const shown = new Set(matches);
-  return [...selected.filter((n) => !shown.has(n)), ...matches];
-}

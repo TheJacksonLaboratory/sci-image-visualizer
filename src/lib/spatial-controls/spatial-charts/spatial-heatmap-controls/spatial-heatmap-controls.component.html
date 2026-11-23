@@ -1,8 +1,9 @@
 <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
      kinds chart whatever single source the map is coloured by. It behaves as the
-     panel's other gene pickers ("Show observations expressing"): a ticked gene stays
-     in its place in the list, the filter is cleared when the list closes, and the
-     list reopens on the head of the gene list. -->
+     panel's other gene pickers ("Show observations expressing"), from the same model:
+     a ticked gene stays in its place in the list, the filter is cleared when the list
+     closes, the list reopens on the head of the gene list, and a whole-transcriptome
+     dataset's genes are searched (and fetched on first open) the same way. -->
 <div class="sx-controls">
   <p-multiSelect
     [options]="geneOptions"
@@ -14,14 +15,14 @@
     filterBy="label"
     [resetFilterOnHide]="true"
     (onFilter)="filterChange.emit($event.filter)"
-    (onPanelShow)="filterChange.emit('')"
+    (onPanelShow)="panelShow.emit()"
     [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
     [virtualScrollItemSize]="30"
     appendTo="body"
     [showToggleAll]="false"
     [showClear]="true"
-    emptyFilterMessage="No match"
-    emptyMessage="No genes"
+    [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
+    [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
     [maxSelectedLabels]="3"
     selectedItemsLabel="{0} genes"
     placeholder="Pick genes for the rows"

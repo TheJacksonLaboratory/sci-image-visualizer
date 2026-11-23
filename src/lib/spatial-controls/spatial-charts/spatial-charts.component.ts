@@ -33,6 +33,8 @@ import {
   EmbeddingComputeState,
 } from '../../spatial/embedding-compute-coordinator';
 import { ChartDataModel } from './chart-data-model';
+import { GenePickerModel } from '../spatial-gene-picker';
+import { PanelOption } from '../../spatial/spatial-panel-model';
 import { EMBEDDING_CONFIG, PlotlyChartHost } from './plotly-chart-host';
 import { ChartKindOption, chartKindOptions, embeddingNote, heatmapNote, kindHelp } from './chart-help';
 import {
@@ -247,8 +249,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     return this.data.heatmapGenes;
   }
   /** The heatmap gene picker's options. */
-  protected get geneOptions(): { label: string; value: string }[] {
-    return this.data.geneOptions;
+  protected get geneOptions(): PanelOption<string>[] {
+    return this.genePicker.options;
+  }
+  /** True when the options come from the port per keystroke rather than a resident list. */
+  protected get genesAreRemote(): boolean {
+    return this.genePicker.remote;
   }
   /** Categorical column the violin/box splits by; null = one trace for all. */
   protected get groupBy(): string | null {
@@ -317,6 +323,23 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly zone = inject(NgZone);
 
+  /**
+   * The heatmap gene picker's list and search: the same model as the panel's other gene
+   * pickers ("Show observations expressing", ...), so it lists, searches and orders genes
+   * as they do — a whole-transcriptome dataset's names included, which it fetches on first
+   * open or searches per keystroke. Its own instance: the rows it keeps among the options
+   * are the heatmap's, not the map's.
+   */
+  private readonly genePicker = new GenePickerModel(
+    () => this.controls,
+    () => this.data.heatmapGenes,
+    (fn) =>
+      this.zone.run(() => {
+        fn();
+        this.cdr.markForCheck();
+      }),
+  );
+
   /** Re-render this OnPush view, re-entering the zone when the change came from outside it. */
   private changed(): void {
     markForCheckInZone(this.cdr, this.zone);
@@ -374,6 +397,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         this.dataset = dataset;
         const reimported = !!regrouped && regrouped !== this.groupingEntry(dataset);
         this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
+        this.genePicker.setDataset(dataset);
         const switched = this.data.onDatasetChanged(
           dataset,
           this.controls?.categoricalColumns() ?? [],
@@ -724,7 +748,12 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** The gene picker's filter box changed: search the resident names, show the best. */
   protected onGeneFilter(query: string): void {
-    this.data.filterGenes(query);
+    void this.genePicker.onFilter(query);
+  }
+
+  /** The heatmap gene picker opened — see {@link GenePickerModel.ensureList}. */
+  protected onGenePanelShow(): void {
+    void this.genePicker.ensureList();
   }
 
   /** Roughly how long a run will take, in seconds, from the measured anchor. */
