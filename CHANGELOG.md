@@ -11,6 +11,11 @@ file was added.
 
 ### Fixed
 
+- **Zooming the spatial-omics image keeps every channel, at the best resolution already loaded.**
+  While the finer tiles loaded, the image dropped to its coarsest level and showed only its first
+  channel, the others appearing as their own tiles arrived. napari-js 0.20.1 fills each loading tile
+  from the levels already loaded, for every channel, and stops fetching the tiles the view has left,
+  so the tiles on screen arrive sooner. `napari-js` `^0.20.1`.
 - **The transcripts' "Colour by" toggle sits beside its label.** It started at the middle of the
   dialog, like the sliders, so "Cluster | Cell type | Gene" ran past the dialog's right edge and was
   cropped. It now follows the label, its buttons on one line, as "Show as" does.
