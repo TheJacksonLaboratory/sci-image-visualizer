@@ -64,8 +64,12 @@ export function searchGeneNames(names: readonly string[], query: string, limit =
  *
  * A multi-select whose option list is capped must still carry its SELECTED values, or the
  * control cannot resolve them — the chips lose their labels and, worse, a value absent
- * from the options can be dropped from the model on the next change. Selections come
- * first so they stay visible while a search narrows everything else.
+ * from the options can be dropped from the model on the next change.
+ *
+ * A selected gene the search found keeps its place among the matches: ticking a gene must
+ * not move it to the top of the list, as the other gene pickers do not (see
+ * `GenePickerModel`). Only the selections the search left out are added, ahead of the
+ * matches.
  */
 export function geneOptionsFor(
   names: readonly string[],
@@ -75,6 +79,6 @@ export function geneOptionsFor(
 ): string[] {
   const matches = searchGeneNames(names, query, limit);
   if (selected.length === 0) return matches;
-  const seen = new Set(selected);
-  return [...selected, ...matches.filter((n) => !seen.has(n))];
+  const shown = new Set(matches);
+  return [...selected.filter((n) => !shown.has(n)), ...matches];
 }

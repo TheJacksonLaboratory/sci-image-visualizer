@@ -1,19 +1,27 @@
 <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
-     kinds chart whatever single source the map is coloured by. -->
+     kinds chart whatever single source the map is coloured by. It behaves as the
+     panel's other gene pickers ("Show observations expressing"): a ticked gene stays
+     in its place in the list, the filter is cleared when the list closes, and the
+     list reopens on the head of the gene list. -->
 <div class="sx-controls">
   <p-multiSelect
     [options]="geneOptions"
     optionLabel="label"
     optionValue="value"
     [ngModel]="genes"
-    (ngModelChange)="genesChange.emit($event)"
+    (ngModelChange)="genesChange.emit($event ?? [])"
     [filter]="true"
     filterBy="label"
+    [resetFilterOnHide]="true"
     (onFilter)="filterChange.emit($event.filter)"
-    [virtualScroll]="true"
+    (onPanelShow)="filterChange.emit('')"
+    [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
     [virtualScrollItemSize]="30"
     appendTo="body"
     [showToggleAll]="false"
+    [showClear]="true"
+    emptyFilterMessage="No match"
+    emptyMessage="No genes"
     [maxSelectedLabels]="3"
     selectedItemsLabel="{0} genes"
     placeholder="Pick genes for the rows"

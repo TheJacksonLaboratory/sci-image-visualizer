@@ -9,6 +9,14 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The heatmap's gene picker behaves as the panel's other gene pickers.** Ticking a gene in "Pick
+  genes for the rows" no longer moves it to the top of the list: it stays in place, as in "Show
+  observations expressing". Only picked genes a search hides are listed ahead of the matches, so
+  their chips keep their labels. The picker also clears its filter when it closes, reopens on the
+  head of the gene list, has a clear button, and says "No match" when a search finds nothing.
+
 ## [0.22.0] — 2026-11-21
 
 ### Changed

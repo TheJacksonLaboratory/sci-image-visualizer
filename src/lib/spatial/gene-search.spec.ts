@@ -62,8 +62,15 @@ describe('geneOptionsFor', () => {
     expect(geneOptionsFor(panel, 'mbp', ['Mbp'])).toEqual(['Mbp']);
   });
 
-  it('puts selections first, so they stay visible while a search narrows the rest', () => {
-    expect(geneOptionsFor(panel, '', ['Gfap'])).toEqual(['Gfap', 'Mbp', 'Ttr', 'Snap25']);
+  it('leaves a selected gene that matches in its place, rather than moving it to the top', () => {
+    // As the other gene pickers do: ticking a gene does not reorder the list.
+    expect(geneOptionsFor(panel, '', ['Gfap'])).toEqual(['Mbp', 'Ttr', 'Snap25', 'Gfap']);
+    expect(geneOptionsFor(panel, '', ['Snap25', 'Mbp'])).toEqual(['Mbp', 'Ttr', 'Snap25', 'Gfap']);
+  });
+
+  it('adds only the selections the search left out, ahead of the matches', () => {
+    expect(geneOptionsFor(panel, 's', ['Gfap', 'Snap25'])).toEqual(['Gfap', 'Snap25']);
+    expect(geneOptionsFor(panel, '', ['Gfap'], 2)).toEqual(['Gfap', 'Mbp', 'Ttr']);
   });
 
   it('is just the search when nothing is selected', () => {

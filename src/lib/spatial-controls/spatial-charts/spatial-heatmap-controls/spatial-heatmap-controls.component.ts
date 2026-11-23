@@ -18,13 +18,15 @@ import { TooltipModule } from 'primeng/tooltip';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SpatialHeatmapControlsComponent {
+  /** Above this many options the list scrolls virtually, as the other gene pickers do. */
+  protected readonly geneVirtualScrollFrom = 200;
   /** The picker's options: the best matches for the filter, plus the genes chosen. */
   @Input() geneOptions: { label: string; value: string }[] = [];
   /** The genes the rows are. */
   @Input() genes: string[] = [];
   /** Each gene is z-scored across the groups. */
   @Input() zScore = true;
-  /** The genes picked for the rows. */
+  /** The genes picked for the rows (none once cleared). */
   @Output() readonly genesChange = new EventEmitter<string[]>();
   /** What is typed in the picker's filter box. */
   @Output() readonly filterChange = new EventEmitter<string>();
