@@ -842,10 +842,12 @@ describe('SpatialChartsComponent', () => {
       await component['onHeatmapGenes'](['Gene17000']);
       expect(component['heatmapGenes']).toEqual(['Gene17000']);
 
-      // Same wide dataset again: the gene is real and must be kept.
+      // Same wide dataset again (a column imported): the gene is real and must be kept,
+      // and so must its option — the chip is labelled from it.
       dataset$.next({ ...dataset, features: { count: names.length, names } });
       await flush();
       expect(component['heatmapGenes']).toEqual(['Gene17000']);
+      expect(component['geneOptions'].map((o) => o.value)).toContain('Gene17000');
     });
 
     it('searches a whole-transcriptome dataset\u2019s genes through the port, as the other gene pickers do', async () => {

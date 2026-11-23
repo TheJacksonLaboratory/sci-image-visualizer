@@ -402,12 +402,13 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
         this.dataset = dataset;
         const reimported = !!regrouped && regrouped !== this.groupingEntry(dataset);
         this.datasetHasGeneHeatmap = !!dataset?.geneHeatmap;
-        this.genePicker.setDataset(dataset);
         const switched = this.data.onDatasetChanged(
           dataset,
           this.controls?.categoricalColumns() ?? [],
           embeddings,
         );
+        // After the rows are checked against the new dataset: the picker keeps the ones left.
+        this.genePicker.setDataset(dataset);
         // Nothing to draw for the kind that was selected; fall back rather than sit blank.
         if (this.kind === 'embedding' && embeddings.length === 0) this.kind = 'histogram';
         // Everything loaded was the previous dataset's: fetch afresh, even when the view

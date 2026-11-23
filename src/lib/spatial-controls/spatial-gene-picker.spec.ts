@@ -65,6 +65,22 @@ describe('GenePickerModel', () => {
       expect(values()).toEqual(['Snap25', 'Ttr']);
     });
 
+    it('keeps a chosen gene from past the head when the dataset is emitted again', () => {
+      const names = Array.from({ length: 1000 }, (_, i) => `Gene${i}`);
+      picker.setDataset(withNames(names));
+      chosen = ['Gene900'];
+      // The same dataset again, as after a column import: the chip needs its option.
+      picker.setDataset(withNames(names));
+      expect(values()[0]).toBe('Gene900');
+      expect(picker.options.length).toBe(GENE_OPTIONS_MAX + 1);
+    });
+
+    it("leaves out a chosen gene the new dataset's list lacks", () => {
+      chosen = ['Snap25', 'Mbp'];
+      picker.setDataset(withNames(['Ttr', 'Mbp']));
+      expect(values()).toEqual(['Ttr', 'Mbp']);
+    });
+
     it('emits each change on state$, for an OnPush dropdown', async () => {
       const seen: string[][] = [];
       picker.state$.subscribe((s) => seen.push(s.options.map((o) => o.value)));
