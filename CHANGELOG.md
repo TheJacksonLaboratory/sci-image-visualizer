@@ -16,6 +16,9 @@ file was added.
   channel, the others appearing as their own tiles arrived. napari-js 0.20.1 fills each loading tile
   from the levels already loaded, for every channel, and stops fetching the tiles the view has left,
   so the tiles on screen arrive sooner. `napari-js` `^0.20.1`.
+- **The transcripts' "Colour by" toggle sits beside its label.** It started at the middle of the
+  dialog, like the sliders, so "Cluster | Cell type | Gene" ran past the dialog's right edge and was
+  cropped. It now follows the label, its buttons on one line, as "Show as" does.
 
 ## [0.22.1] — 2026-11-23
 
