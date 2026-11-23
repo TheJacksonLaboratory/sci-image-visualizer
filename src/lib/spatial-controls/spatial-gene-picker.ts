@@ -89,9 +89,12 @@ export class GenePickerModel {
     this.listLoading = false;
     const names = dataset?.features?.names;
     this.names = names ? [...names] : [];
-    // The head of the list, not all of it.
+    // The head of the list, not all of it — plus the genes still chosen, so a gene picked
+    // from past that head keeps its chip when the same dataset is emitted again (a column
+    // imported). A chosen gene the new list lacks is the previous dataset's: left out.
+    const resident = names ? new Set(names) : null;
     this.set({
-      options: searchGeneNames(this.names, '').map(geneOption),
+      options: this.withChosen(searchGeneNames(this.names, ''), (g) => !resident || resident.has(g)),
       remote: !!dataset?.features && !names,
       failed: false,
     });
@@ -168,10 +171,13 @@ export class GenePickerModel {
     );
   }
 
-  /** Options for `names`, plus the genes already chosen. */
-  private withChosen(names: readonly string[]): PanelOption<string>[] {
+  /** Options for `names`, plus the genes already chosen (those `keep` accepts). */
+  private withChosen(
+    names: readonly string[],
+    keep: (gene: string) => boolean = () => true,
+  ): PanelOption<string>[] {
     const seen = new Set(names);
-    return [...this.chosen().filter((g) => !seen.has(g)), ...names].map(geneOption);
+    return [...this.chosen().filter((g) => !seen.has(g) && keep(g)), ...names].map(geneOption);
   }
 
   private set(patch: Partial<GenePickerState>): void {

@@ -115,6 +115,32 @@ describe('SpatialChartsComponent (rendered)', () => {
     expect(component['heatmapZScore']).toBe(false);
   });
 
+  it('keeps a ticked gene in its place, as the other gene pickers do', async () => {
+    accessorOf(fixture, one(root, 'p-selectButton')).pick('heatmap');
+    await settle();
+    const genes = one(one(root, 'spatial-heatmap-controls'), 'p-multiSelect');
+    const shown = () => (genes as unknown as { options: { value: string }[] }).options.map((o) => o.value);
+
+    // Mbp is second in the dataset's list, and stays second once ticked.
+    accessorOf(fixture, genes).pick(['Mbp']);
+    await settle();
+    expect(shown()).toEqual(['Ttr', 'Mbp']);
+
+    // A filter that hides it still lists it (the control must label its chip) ...
+    fire(genes, 'onFilter', { filter: 'tt' });
+    fixture.detectChanges();
+    expect(shown()).toEqual(['Mbp', 'Ttr']);
+    // ... and reopening the list, whose filter box was cleared on close, starts over.
+    fire(genes, 'onPanelShow', {});
+    fixture.detectChanges();
+    expect(shown()).toEqual(['Ttr', 'Mbp']);
+
+    // The clear button empties the rows.
+    accessorOf(fixture, genes).pick(null);
+    await settle();
+    expect(component['heatmapGenes']).toEqual([]);
+  });
+
   it('offers the embedding picker on the embedding tab, and Detach on every tab', async () => {
     const row = one(root, 'spatial-embedding-controls');
     expect(row.querySelector('p-select')).toBeNull();

@@ -842,10 +842,39 @@ describe('SpatialChartsComponent', () => {
       await component['onHeatmapGenes'](['Gene17000']);
       expect(component['heatmapGenes']).toEqual(['Gene17000']);
 
-      // Same wide dataset again: the gene is real and must be kept.
+      // Same wide dataset again (a column imported): the gene is real and must be kept,
+      // and so must its option — the chip is labelled from it.
       dataset$.next({ ...dataset, features: { count: names.length, names } });
       await flush();
       expect(component['heatmapGenes']).toEqual(['Gene17000']);
+      expect(component['geneOptions'].map((o) => o.value)).toContain('Gene17000');
+    });
+
+    it('searches a whole-transcriptome dataset\u2019s genes through the port, as the other gene pickers do', async () => {
+      // No names inlined: the picker asks the port per keystroke, then loads the whole list
+      // on first open and filters it locally.
+      dataset$.next({ ...dataset, id: 'wt', features: { count: 18078 } });
+      await flush();
+      expect(component['geneOptions']).toEqual([]);
+      expect(component['genesAreRemote']).toBe(true);
+
+      controls.searchFeatures = jest.fn(async (query: string) =>
+        query ? ['Gene9001', 'Gene9002'] : ['Gene0', 'Gene9001', 'Gene9002'],
+      );
+      component['onGeneFilter']('Gene900');
+      await flush();
+      expect(controls.searchFeatures).toHaveBeenCalledWith('Gene900', 50);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene9001', 'Gene9002']);
+
+      // A searched gene charts like an inlined one, and stays in its place once ticked.
+      await component['onHeatmapGenes'](['Gene9002']);
+      expect(controls.continuousValues).toHaveBeenCalledWith({ kind: 'feature', name: 'Gene9002' });
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene9001', 'Gene9002']);
+
+      component['onGenePanelShow']();
+      await flush();
+      expect(component['genesAreRemote']).toBe(false);
+      expect(component['geneOptions'].map((o) => o.value)).toEqual(['Gene0', 'Gene9001', 'Gene9002']);
     });
 
     it('seeds with the gene already on screen, rather than opening empty', async () => {
@@ -909,6 +938,51 @@ describe('SpatialChartsComponent', () => {
       // Mbp is flat, so it distinguishes nothing — zeros, not NaN.
       expect(traces[0].z[0]).toEqual([0, 0]);
       expect(layout.xaxis.title.text).toBe('region');
+    });
+
+    it('reorders the rows and columns it drew, without computing the matrix again', async () => {
+      component['onKind']('heatmap');
+      await flush();
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
+      await flush();
+      const compute = jest.spyOn(spatialMath, 'computeHeatmapMatrixAsync');
+
+      component['onHeatmapOrder']({ genes: 'name', groups: 'dataset' });
+      await flush();
+      // A–Z, flipped for Plotly: Mbp on top, so last in `y`.
+      expect(lastPlot().traces[0].y).toEqual(['Ttr', 'Mbp']);
+
+      // Both groups have four cells: a tie keeps the dataset order.
+      component['onHeatmapOrder']({ genes: 'peak', groups: 'cells' });
+      await flush();
+      const { traces } = lastPlot();
+      expect(traces[0].x).toEqual(['A', 'B']);
+      // Ttr peaks in B, Mbp (flat) in A: Mbp first, so last in `y`.
+      expect(traces[0].y).toEqual(['Ttr', 'Mbp']);
+      expect(traces[0].z[1]).toEqual([0, 0]);
+      expect(compute).not.toHaveBeenCalled();
+      compute.mockRestore();
+    });
+
+    it('draws every group as a column, past the forty it used to keep', async () => {
+      const categories = Array.from({ length: 60 }, (_, i) => `C${i}`);
+      const n = categories.length * 3;
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column,
+        categories,
+        colors: categories.map(() => '#888'),
+        codes: Uint16Array.from({ length: n }, (_, i) => i % categories.length),
+      }));
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from({ length: n }, (_, i) => i),
+      );
+      component['onKind']('heatmap');
+      await flush();
+      await component['onGroupBy']('region');
+      await component['onHeatmapGenes'](['Ttr']);
+      await flush();
+      expect(lastPlot().traces[0].x).toHaveLength(60);
+      expect(component['heatmapNote']).not.toContain('strongest');
     });
 
     it('narrows to the selection, and switches to per-cell columns for a small one', async () => {
@@ -1364,6 +1438,44 @@ describe('SpatialChartsComponent', () => {
         (Plotly.relayout as jest.Mock).mockClear();
         component['onDetachedResizeEnd']();
         expect(Plotly.relayout).toHaveBeenCalledWith(win, { width: 640 });
+        win.remove();
+      });
+
+      it('fills the window with a many-gene heatmap, refitting once its div has resized', async () => {
+        // The panel's heatmap fixes a height; the window's fills. The window's div sheds its
+        // fixed-height class only on the next change detection — after Plotly measured it —
+        // so the plot is refit to the new box, or it keeps Plotly's 450 px default, clipped.
+        const genes = Array.from({ length: 20 }, (_, i) => `G${i}`);
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]),
+        );
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column,
+          categories: ['A', 'B'],
+          colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component['onKind']('heatmap');
+        await flush();
+        await component['onHeatmapGenes'](genes);
+        await flush();
+        expect(lastPlot().layout.height).toBeGreaterThan(0);
+        expect(component['hasFixedHeight']).toBe(true);
+
+        const win = enterWindow();
+        Object.defineProperty(win, 'clientWidth', { value: 640, configurable: true });
+        (Plotly.relayout as jest.Mock).mockClear();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
+        await flush();
+        await flush();
+
+        expect(lastPlot().layout.height).toBeUndefined();
+        expect(component['hasFixedHeight']).toBe(false);
+        expect(Plotly.relayout).toHaveBeenCalledWith(win, { autosize: true });
         win.remove();
       });
 

@@ -25,15 +25,14 @@ describe('chart-help', () => {
     );
   });
 
-  it('says what the heatmap shows: rows, columns, scaling and the cap', () => {
+  it('says what the heatmap shows: rows, columns, scaling, and an axis too big to cluster', () => {
     const base = {
       geneCount: 2,
       selectionCount: 0,
       zScore: true,
-      hidden: 0,
       groupBy: 'class',
-      maxColumns: 40,
       cellColumns: 200,
+      clusterMax: 1000,
     };
     expect(heatmapNote({ ...base, geneCount: 0 })).toBe('Pick one or more genes for the rows.');
     expect(heatmapNote({ ...base, selectionCount: 12 })).toMatch(/^One column per selected cell \(12\)/);
@@ -41,7 +40,13 @@ describe('chart-help', () => {
     expect(heatmapNote({ ...base, zScore: false, selectionCount: 500 })).toMatch(
       /over the selected cells\. Raw means/,
     );
-    expect(heatmapNote({ ...base, hidden: 298 })).toContain('Showing the 40 strongest of 338');
+    expect(heatmapNote({ ...base, clusterSkipped: { genes: false, groups: false } })).not.toContain('cluster');
+    expect(heatmapNote({ ...base, clusterSkipped: { genes: true, groups: false } })).toContain(
+      'Too many genes to cluster (over 1,000): kept in their order.',
+    );
+    expect(heatmapNote({ ...base, selectionCount: 12, clusterSkipped: { genes: true, groups: true } })).toContain(
+      'Too many genes and groups to cluster',
+    );
     expect(heatmapNote({ ...base, groupBy: null })).toContain('within each group');
   });
 });

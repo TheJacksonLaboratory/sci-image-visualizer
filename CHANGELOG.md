@@ -9,6 +9,44 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The heatmap's gene picker behaves as the panel's other gene pickers.** Ticking a gene in "Pick
+  genes for the rows" no longer moves it to the top of the list: it stays in place, as in "Show
+  observations expressing". Only picked genes a search hides are listed ahead of the matches, so
+  their chips keep their labels. The picker also clears its filter when it closes, reopens on the
+  head of the gene list, has a clear button, and says "No match" when a search finds nothing.
+- **The heatmap's gene picker lists a whole-transcriptome dataset's genes.** A dataset that does not
+  inline its gene names offered none to pick from. The picker now uses the same gene list and
+  search as the panel's other gene pickers: it searches the data port as you type, and loads the
+  whole list the first time it opens.
+- **The heatmap's z-score checkbox shows its label again.** PrimeNG 18+ Checkbox has no `label`
+  input, so the text was dropped.
+
+### Added
+
+- **The heatmap fits its panel, with every group as a column.** It no longer keeps only the 40
+  groups with the strongest signal: every category is a column (`subclass`'s 338 included). It no
+  longer grows 24 px per gene, so 500 genes no longer make it 12,000 px tall. In the panel it grows
+  up to 560 px; in the detached window, past 12 genes, it fills the window and follows its size.
+  Plotly thins the gene and group labels to what fits, and the hover names every cell.
+- **Sort orders for the heatmap.**
+  - Sort genes: as picked; by peak group, which puts each gene under the group where it is
+    highest so the markers form a diagonal; clustered, with similar profiles side by side
+    (average linkage); or A–Z.
+  - Sort groups: dataset order; clustered; or most cells first.
+  - Changing the order redraws the matrix without computing it again. Clustering stops at
+    1,000 genes or groups (about 0.25 s); past that, the axis keeps its order and the note
+    says so.
+- **The heatmap fetches its genes 8 at a time**, instead of one after another. On the dev server,
+  500 genes (select all on Visium H&E) now load in about 5 s instead of 40 s. The first failed
+  request stops further ones; genes already fetched are kept, and the note says what failed.
+- **Select all in the gene pickers.** "Pick genes for the rows", "Show observations expressing" and
+  the transcript genes picker have PrimeNG's select-all checkbox in their header. It selects every
+  gene in the list, or only the ones the search shows, keeping those already picked. The list holds
+  the best 500 matches at most, so on a whole-transcriptome dataset it selects those 500, not every
+  gene.
+
 ## [0.22.0] — 2026-11-21
 
 ### Changed

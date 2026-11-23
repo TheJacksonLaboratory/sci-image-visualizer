@@ -1,4 +1,4 @@
-import { GENE_OPTIONS_MAX, geneOptionsFor, searchGeneNames } from './gene-search';
+import { GENE_OPTIONS_MAX, searchGeneNames } from './gene-search';
 
 describe('searchGeneNames', () => {
   const panel = ['Mbp', 'Ambp', 'Ttr', 'Snap25', 'MBD2', 'Gfap', 'Camk2a'];
@@ -46,27 +46,5 @@ describe('searchGeneNames', () => {
 
   it('takes no limit as no options', () => {
     expect(searchGeneNames(panel, 'mbp', 0)).toEqual([]);
-  });
-});
-
-describe('geneOptionsFor', () => {
-  const panel = ['Mbp', 'Ttr', 'Snap25', 'Gfap'];
-
-  it('keeps a selected gene that the query excludes', () => {
-    // A capped multi-select that drops its own selections cannot resolve their labels,
-    // and the model loses them on the next change — the chips silently disappear.
-    expect(geneOptionsFor(panel, 'ttr', ['Mbp'])).toEqual(['Mbp', 'Ttr']);
-  });
-
-  it('does not list a selected gene twice when it also matches', () => {
-    expect(geneOptionsFor(panel, 'mbp', ['Mbp'])).toEqual(['Mbp']);
-  });
-
-  it('puts selections first, so they stay visible while a search narrows the rest', () => {
-    expect(geneOptionsFor(panel, '', ['Gfap'])).toEqual(['Gfap', 'Mbp', 'Ttr', 'Snap25']);
-  });
-
-  it('is just the search when nothing is selected', () => {
-    expect(geneOptionsFor(panel, 'gf')).toEqual(['Gfap']);
   });
 });

@@ -1,5 +1,32 @@
 @use '../chart-controls';
 
+.sx-zscore {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+// A labelled select, sharing the row with the other one.
+.sx-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+
+  p-select {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
+.sx-sort-lbl {
+  font-size: 0.78rem;
+  color: var(--p-text-muted-color, #6c757d);
+  white-space: nowrap;
+}
+
 :host {
   display: contents;
 }

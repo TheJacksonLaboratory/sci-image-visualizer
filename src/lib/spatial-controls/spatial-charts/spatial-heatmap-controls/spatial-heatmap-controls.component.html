@@ -1,19 +1,28 @@
 <!-- The heatmap's rows are a gene LIST, so it needs its own picker: the other
-     kinds chart whatever single source the map is coloured by. -->
+     kinds chart whatever single source the map is coloured by. It behaves as the
+     panel's other gene pickers ("Show observations expressing"), from the same model:
+     a ticked gene stays in its place in the list, the filter is cleared when the list
+     closes, the list reopens on the head of the gene list, and a whole-transcriptome
+     dataset's genes are searched (and fetched on first open) the same way. -->
 <div class="sx-controls">
   <p-multiSelect
     [options]="geneOptions"
     optionLabel="label"
     optionValue="value"
     [ngModel]="genes"
-    (ngModelChange)="genesChange.emit($event)"
+    (ngModelChange)="genesChange.emit($event ?? [])"
     [filter]="true"
     filterBy="label"
+    [resetFilterOnHide]="true"
     (onFilter)="filterChange.emit($event.filter)"
-    [virtualScroll]="true"
+    (onPanelShow)="panelShow.emit()"
+    [virtualScroll]="geneOptions.length > geneVirtualScrollFrom"
     [virtualScrollItemSize]="30"
     appendTo="body"
-    [showToggleAll]="false"
+    [showToggleAll]="true"
+    [showClear]="true"
+    [emptyFilterMessage]="genesAreRemote ? 'No match — keep typing' : 'No match'"
+    [emptyMessage]="genesAreRemote ? 'Type to search genes' : 'No genes'"
     [maxSelectedLabels]="3"
     selectedItemsLabel="{0} genes"
     placeholder="Pick genes for the rows"
@@ -21,12 +30,50 @@
     tooltipPosition="top"
     styleClass="sx-genes"
   ></p-multiSelect>
-  <p-checkbox
-    [binary]="true"
-    [ngModel]="zScore"
-    (onChange)="zScoreChange.emit($event.checked)"
-    label="z-score"
+  <!-- PrimeNG 18+ Checkbox has no label input: the label is its own element. -->
+  <span
+    class="sx-zscore"
     pTooltip="Scale each gene across the groups. Without it one highly-expressed gene saturates the colour scale and the rest reads as blank"
     tooltipPosition="top"
-  ></p-checkbox>
+  >
+    <p-checkbox
+      [binary]="true"
+      [ngModel]="zScore"
+      (onChange)="zScoreChange.emit($event.checked)"
+      inputId="sx-zscore"
+    ></p-checkbox>
+    <label for="sx-zscore">z-score</label>
+  </span>
+</div>
+<!-- The order of the rows and of the columns, the usual ones for a marker heatmap: see
+     `heatmap-order.ts`. -->
+<div class="sx-controls">
+  <span class="sx-sort">
+    <label class="sx-sort-lbl" for="sx-sort-genes">Sort genes</label>
+    <p-select
+      inputId="sx-sort-genes"
+      [options]="geneOrderOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="order.genes"
+      (ngModelChange)="orderChange.emit({ genes: $event, groups: order.groups })"
+      appendTo="body"
+      pTooltip="By peak group: each gene under the group where it is highest, so markers form a diagonal. Clustered: genes with similar profiles side by side"
+      tooltipPosition="top"
+    ></p-select>
+  </span>
+  <span class="sx-sort">
+    <label class="sx-sort-lbl" for="sx-sort-groups">Sort groups</label>
+    <p-select
+      inputId="sx-sort-groups"
+      [options]="groupOrderOptions"
+      optionLabel="label"
+      optionValue="value"
+      [ngModel]="order.groups"
+      (ngModelChange)="orderChange.emit({ genes: order.genes, groups: $event })"
+      appendTo="body"
+      pTooltip="Clustered: groups with similar profiles over the genes side by side. Most cells first: the biggest groups on the left"
+      tooltipPosition="top"
+    ></p-select>
+  </span>
 </div>

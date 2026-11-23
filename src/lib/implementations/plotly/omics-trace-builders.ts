@@ -810,7 +810,32 @@ export function buildHeatmapTraces(input: OmicsHeatmapInput): unknown[] {
   ];
 }
 
-export function heatmapLayout(input: OmicsHeatmapInput): unknown {
+/**
+ * Up to this many genes the heatmap is as tall as its rows (24 px each); past it, it fits
+ * the panel or the detached window.
+ */
+export const HEATMAP_FIT_FROM_ROWS = 12;
+
+/**
+ * The tallest the heatmap grows inside the spatial-omics panel. The panel scrolls, so it has
+ * no height of its own to fill: this is about what the dialog shows at once beside the other
+ * sections. The detached window has one, and the heatmap fills it.
+ */
+export const HEATMAP_PANEL_MAX_HEIGHT = 560;
+
+/**
+ * The heatmap's layout.
+ *
+ * A few genes keep a height of their own, so 3 rows are not stretched to the panel's. More
+ * fit the space whole — every row and every column on screen, whatever the count, with no
+ * scrolling: the detached window's height (`fill`), or at most
+ * {@link HEATMAP_PANEL_MAX_HEIGHT} in the panel. Their labels then do not all fit, and
+ * Plotly thins a category axis's labels to what its length holds (one per ~12 px at this
+ * font size); the hover names every cell.
+ */
+export function heatmapLayout(input: OmicsHeatmapInput, opts: { fill?: boolean } = {}): unknown {
+  const content = Math.max(180, 24 * input.rows.length + 110);
+  const fits = input.rows.length <= HEATMAP_FIT_FROM_ROWS;
   return {
     // Left margin grows with the longest gene name; the labels are the point.
     margin: { t: 10, r: 10, b: 90, l: 8 },
@@ -818,7 +843,6 @@ export function heatmapLayout(input: OmicsHeatmapInput): unknown {
     hovermode: 'closest',
     xaxis: { automargin: true, tickangle: -45, tickfont: { size: 10 }, title: { text: input.groupLabel ?? '' } },
     yaxis: { automargin: true, tickfont: { size: 10 } },
-    // Grows with the gene count so 3 rows are not stretched to 20 rows' height.
-    height: Math.max(180, 24 * input.rows.length + 110),
+    ...(fits ? { height: content } : opts.fill ? {} : { height: Math.min(content, HEATMAP_PANEL_MAX_HEIGHT) }),
   };
 }
