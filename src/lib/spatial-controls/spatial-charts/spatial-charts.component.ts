@@ -849,10 +849,18 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
 
   /** Draw the active kind, then re-render the panel around it (notices, height, notes). */
   private async render(): Promise<void> {
+    const wasFixed = this.plot.hasFixedHeight;
     try {
       await this.renderChart();
     } finally {
       this.changed();
+      // The detached div's sizing class follows whether the layout fixes its own height, and
+      // changes only with the next change detection — after Plotly measured the div. A plot
+      // that autosized into the old box (Plotly's 450 px default, where the fixed-height div
+      // had no height of its own) would stay that size, clipped. Refit it to the new box.
+      if (this.plot.hasFixedHeight !== wasFixed) {
+        setTimeout(() => this.plot.refit(this.plotTarget), 0);
+      }
     }
   }
 
@@ -991,6 +999,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       zScored: this.heatmapZScore,
       groupLabel: drawn.groupLabel,
     };
-    await this.draw(buildHeatmapTraces(input), heatmapLayout(input));
+    // Detached, the window has a height to fill; in the panel, which scrolls, it is capped.
+    await this.draw(buildHeatmapTraces(input), heatmapLayout(input, { fill: this.detached }));
   }
 }

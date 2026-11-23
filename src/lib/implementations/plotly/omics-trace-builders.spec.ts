@@ -5,6 +5,7 @@ import {
   countsLayout,
   heatmapLayout,
   HEATMAP_FIT_FROM_ROWS,
+  HEATMAP_PANEL_MAX_HEIGHT,
   OmicsGrouping,
   OmicsTraceInput,
   benefitsFromGrouping,
@@ -406,16 +407,20 @@ describe('omics-trace-builders', () => {
       expect(buildHeatmapTraces({ ...input, cols: [], values: new Float32Array(0) })).toEqual([]);
     });
 
-    it('grows its height with a few genes, and fills the container past them', () => {
+    it('grows its height with a few genes, and fits the panel or the window past them', () => {
       const rows = (n: number) => Array.from({ length: n }, (_, i) => `g${i}`);
       const short = heatmapLayout(input) as any;
       const twelve = heatmapLayout({ ...input, rows: rows(HEATMAP_FIT_FROM_ROWS) }) as any;
       expect(twelve.height).toBeGreaterThan(short.height);
       expect(short.xaxis.title.text).toBe('class');
-      // 500 genes would be 12,000 px tall: the plot fills its panel or window instead.
-      const many = heatmapLayout({ ...input, rows: rows(500) }) as any;
-      expect(many.height).toBeUndefined();
-      expect(many.autosize).toBe(true);
+      expect((heatmapLayout(input, { fill: true }) as any).height).toBe(short.height);
+      // 500 genes would be 12,000 px tall: capped in the panel, filling the detached window.
+      expect((heatmapLayout({ ...input, rows: rows(500) }) as any).height).toBe(HEATMAP_PANEL_MAX_HEIGHT);
+      const window = heatmapLayout({ ...input, rows: rows(500) }, { fill: true }) as any;
+      expect(window.height).toBeUndefined();
+      expect(window.autosize).toBe(true);
+      // Between the two: as tall as its rows.
+      expect((heatmapLayout({ ...input, rows: rows(15) }) as any).height).toBe(24 * 15 + 110);
     });
   });
 });

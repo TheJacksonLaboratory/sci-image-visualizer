@@ -26,10 +26,10 @@ file was added.
 ### Added
 
 - **The heatmap fits its panel, with every group as a column.** It no longer keeps only the 40
-  groups with the strongest signal: every category is a column (`subclass`'s 338 included). Past
-  12 genes the plot fills the panel, or the detached window, instead of growing 24 px per gene,
-  so 500 genes no longer make it 12,000 px tall. Plotly thins the gene and group labels to what
-  fits, and the hover names every cell.
+  groups with the strongest signal: every category is a column (`subclass`'s 338 included). It no
+  longer grows 24 px per gene, so 500 genes no longer make it 12,000 px tall. In the panel it grows
+  up to 560 px; in the detached window, past 12 genes, it fills the window and follows its size.
+  Plotly thins the gene and group labels to what fits, and the hover names every cell.
 - **Sort orders for the heatmap.**
   - Sort genes: as picked; by peak group, which puts each gene under the group where it is
     highest so the markers form a diagonal; clustered, with similar profiles side by side

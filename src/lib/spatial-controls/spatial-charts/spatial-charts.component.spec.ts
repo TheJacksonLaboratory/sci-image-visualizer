@@ -1439,6 +1439,44 @@ describe('SpatialChartsComponent', () => {
         win.remove();
       });
 
+      it('fills the window with a many-gene heatmap, refitting once its div has resized', async () => {
+        // The panel's heatmap fixes a height; the window's fills. The window's div sheds its
+        // fixed-height class only on the next change detection — after Plotly measured it —
+        // so the plot is refit to the new box, or it keeps Plotly's 450 px default, clipped.
+        const genes = Array.from({ length: 20 }, (_, i) => `G${i}`);
+        controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+          Float32Array.from([1, 1, 1, 1, 9, 9, 9, 9]),
+        );
+        controls.categoricalView = jest.fn(async (column: string) => ({
+          name: column,
+          categories: ['A', 'B'],
+          colors: ['#f00', '#00f'],
+          codes: Uint16Array.from([0, 0, 0, 0, 1, 1, 1, 1]),
+        }));
+        await build(controls);
+        view$.next({ ...view$.value, colorBy: { kind: 'column', name: 'region' } });
+        await flush();
+        component['onKind']('heatmap');
+        await flush();
+        await component['onHeatmapGenes'](genes);
+        await flush();
+        expect(lastPlot().layout.height).toBeGreaterThan(0);
+        expect(component['hasFixedHeight']).toBe(true);
+
+        const win = enterWindow();
+        Object.defineProperty(win, 'clientWidth', { value: 640, configurable: true });
+        (Plotly.relayout as jest.Mock).mockClear();
+        component['toggleDetached']();
+        component['onDetachedWindowShown']();
+        await flush();
+        await flush();
+
+        expect(lastPlot().layout.height).toBeUndefined();
+        expect(component['hasFixedHeight']).toBe(false);
+        expect(Plotly.relayout).toHaveBeenCalledWith(win, { autosize: true });
+        win.remove();
+      });
+
       it('names the window for what it is showing', async () => {
         dataset$.next({ ...dataset, embeddings: [umapMeta] });
         await build(controls);
