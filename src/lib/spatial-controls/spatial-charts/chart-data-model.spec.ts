@@ -1,6 +1,6 @@
 import { ISpatialControls } from '../../contracts/visualizer.contract';
 import { SpatialDataset, SpatialEmbedding } from '../../contracts/spatial-dataset.contract';
-import { ChartDataModel } from './chart-data-model';
+import { ChartDataModel, HEATMAP_FETCH_CONCURRENCY } from './chart-data-model';
 
 const ds = (id: string, names = ['Ttr', 'Mbp']): SpatialDataset => ({
   id,
@@ -117,6 +117,80 @@ describe('ChartDataModel', () => {
     expect(data.snapshot().heatmapRows.map((r) => r.name)).toEqual(['Ttr', 'Mbp']);
     data.onDatasetChanged(ds('B', ['Mbp']), [], []);
     expect(data.heatmapGenes).toEqual(['Mbp']);
+  });
+
+  describe('fetching many heatmap genes', () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `G${i}`);
+    /** Holds every request until released, counting how many run at once. */
+    function held() {
+      const pending: { name: string; resolve: (v: Float32Array) => void; reject: (e: Error) => void }[] = [];
+      let inFlight = 0;
+      let peak = 0;
+      controls.continuousValues = jest.fn(
+        (source: { name: string }) =>
+          new Promise<Float32Array>((resolve, reject) => {
+            inFlight++;
+            peak = Math.max(peak, inFlight);
+            const done = () => inFlight--;
+            pending.push({
+              name: source.name,
+              resolve: (v) => (done(), resolve(v)),
+              reject: (e) => (done(), reject(e)),
+            });
+          }),
+      ) as never;
+      return { pending, peak: () => peak };
+    }
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    it(`runs ${HEATMAP_FETCH_CONCURRENCY} requests at once, no more, until every gene is in`, async () => {
+      const req = held();
+      data.setHeatmapGenes(names(20));
+      const load = data.loadHeatmapGenes(controls);
+      await tick();
+      expect(req.pending).toHaveLength(HEATMAP_FETCH_CONCURRENCY);
+      expect(data.busy).toBe(true);
+      // Answer each as it comes; the next request starts as a lane frees up.
+      for (let i = 0; i < 20; i++) {
+        req.pending[i].resolve(new Float32Array([i, 0, 0, 0]));
+        await tick();
+      }
+      await load;
+      expect(req.peak()).toBe(HEATMAP_FETCH_CONCURRENCY);
+      expect(controls.continuousValues).toHaveBeenCalledTimes(20);
+      expect(data.snapshot().heatmapRows.map((r) => r.name)).toEqual(names(20));
+      expect(data.busy).toBe(false);
+    });
+
+    it('stops asking after a failure, keeps what arrived, and says so', async () => {
+      const req = held();
+      data.setHeatmapGenes(names(20));
+      const load = data.loadHeatmapGenes(controls);
+      await tick();
+      req.pending[0].reject(new Error('503'));
+      for (let i = 1; i < HEATMAP_FETCH_CONCURRENCY; i++) req.pending[i].resolve(new Float32Array(4));
+      await load;
+      expect(controls.continuousValues).toHaveBeenCalledTimes(HEATMAP_FETCH_CONCURRENCY);
+      expect(data.snapshot().heatmapRows).toHaveLength(HEATMAP_FETCH_CONCURRENCY - 1);
+      expect(data.notice).toBe('A gene could not be charted: 503');
+      expect(data.busy).toBe(false);
+    });
+
+    it('drops a load the next one overtook, and asks nothing more for it', async () => {
+      const req = held();
+      data.setHeatmapGenes(names(20));
+      const first = data.loadHeatmapGenes(controls);
+      await tick();
+      data.setHeatmapGenes(['Ttr']);
+      const second = data.loadHeatmapGenes(controls);
+      await tick();
+      for (const r of req.pending) r.resolve(new Float32Array(4));
+      await Promise.all([first, second]);
+      // The first load's eight, then the second's one: nothing more for the overtaken load.
+      expect(controls.continuousValues).toHaveBeenCalledTimes(HEATMAP_FETCH_CONCURRENCY + 1);
+      expect(data.snapshot().heatmapRows.map((r) => r.name)).toEqual(['Ttr']);
+      expect(data.busy).toBe(false);
+    });
   });
 
   it('keeps the rows of a whole-transcriptome dataset that does not inline its names', () => {

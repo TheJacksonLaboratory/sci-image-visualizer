@@ -38,6 +38,9 @@ file was added.
   - Changing the order redraws the matrix without computing it again. Clustering stops at
     1,000 genes or groups (about 0.25 s); past that, the axis keeps its order and the note
     says so.
+- **The heatmap fetches its genes 8 at a time**, instead of one after another. On the dev server,
+  500 genes (select all on Visium H&E) now load in about 5 s instead of 40 s. The first failed
+  request stops further ones; genes already fetched are kept, and the note says what failed.
 - **Select all in the gene pickers.** "Pick genes for the rows", "Show observations expressing" and
   the transcript genes picker have PrimeNG's select-all checkbox in their header. It selects every
   gene in the list, or only the ones the search shows, keeping those already picked. The list holds

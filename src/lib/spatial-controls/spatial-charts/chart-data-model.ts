@@ -8,6 +8,12 @@ import type { SpatialColorBy } from '../../contracts/display-types';
 import type { OmicsGrouping } from '../../implementations/plotly/omics-trace-builders';
 import { Supersede } from '../../util/supersede';
 
+/**
+ * Heatmap gene vectors requested at once. Over HTTP/2 they share one connection; over
+ * HTTP/1.1 a browser runs six per host and queues the rest, so more would only queue.
+ */
+export const HEATMAP_FETCH_CONCURRENCY = 8;
+
 /** What a colour-source load came to. */
 export type ValueLoad =
   /** Nothing to chart: no colour source, or no port. */
@@ -254,29 +260,39 @@ export class ChartDataModel {
   /**
    * Fetch any gene the heatmap needs and does not already hold.
    *
-   * Sequenced: each vector is a separate request, and a slower one must not paint rows
-   * for a gene list the user has already moved on from — nor land in the cache of a
-   * dataset it was not fetched for.
+   * Each vector is a separate request, so {@link HEATMAP_FETCH_CONCURRENCY} run at once.
+   * One after another, "select all" (500 genes) took ~40 s on the dev server; the requests
+   * are small and the server speaks HTTP/2, so they share one connection.
+   *
+   * Sequenced against the next load: a slower one must not paint rows for a gene list the
+   * user has already moved on from — nor land in the cache of a dataset it was not fetched
+   * for. The first failure stops any further request and is reported; requests already
+   * in flight finish and are kept.
    */
   async loadHeatmapGenes(controls: ISpatialControls | null): Promise<void> {
     if (!controls) return;
-    const missing = this.heatmapGenes.filter((n) => !this.geneCache.has(n));
-    if (missing.length === 0) return;
+    const queue = this.heatmapGenes.filter((n) => !this.geneCache.has(n));
+    if (queue.length === 0) return;
     const current = this.heatmapLoad.next();
     this.heatmapBusy = true;
-    try {
-      for (const name of missing) {
-        const values = await controls.continuousValues({ kind: 'feature', name });
-        if (!current()) return;
-        this.geneCache.set(name, values);
+    let failure: { error: unknown } | null = null;
+    const fetchNext = async (): Promise<void> => {
+      while (queue.length > 0 && !failure && current()) {
+        const name = queue.shift()!;
+        try {
+          const values = await controls.continuousValues({ kind: 'feature', name });
+          if (current()) this.geneCache.set(name, values);
+        } catch (error) {
+          failure ??= { error };
+        }
       }
-      this.notice = null;
-    } catch (err) {
-      if (!current()) return;
-      this.notice = `A gene could not be charted: ${(err as Error)?.message ?? err}`;
-    } finally {
-      if (current()) this.heatmapBusy = false;
-    }
+    };
+    const lanes = Math.min(HEATMAP_FETCH_CONCURRENCY, queue.length);
+    await Promise.all(Array.from({ length: lanes }, fetchNext));
+    if (!current()) return;
+    this.heatmapBusy = false;
+    const err = (failure as { error: unknown } | null)?.error;
+    this.notice = err === undefined ? null : `A gene could not be charted: ${(err as Error)?.message ?? err}`;
   }
 
   /** Draw `name` next, when the dataset offers it. @returns whether the choice changed. */
