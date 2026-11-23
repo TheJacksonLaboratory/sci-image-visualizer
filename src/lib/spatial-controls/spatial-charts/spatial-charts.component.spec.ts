@@ -938,6 +938,51 @@ describe('SpatialChartsComponent', () => {
       expect(layout.xaxis.title.text).toBe('region');
     });
 
+    it('reorders the rows and columns it drew, without computing the matrix again', async () => {
+      component['onKind']('heatmap');
+      await flush();
+      await component['onHeatmapGenes'](['Ttr', 'Mbp']);
+      await flush();
+      const compute = jest.spyOn(spatialMath, 'computeHeatmapMatrixAsync');
+
+      component['onHeatmapOrder']({ genes: 'name', groups: 'dataset' });
+      await flush();
+      // A–Z, flipped for Plotly: Mbp on top, so last in `y`.
+      expect(lastPlot().traces[0].y).toEqual(['Ttr', 'Mbp']);
+
+      // Both groups have four cells: a tie keeps the dataset order.
+      component['onHeatmapOrder']({ genes: 'peak', groups: 'cells' });
+      await flush();
+      const { traces } = lastPlot();
+      expect(traces[0].x).toEqual(['A', 'B']);
+      // Ttr peaks in B, Mbp (flat) in A: Mbp first, so last in `y`.
+      expect(traces[0].y).toEqual(['Ttr', 'Mbp']);
+      expect(traces[0].z[1]).toEqual([0, 0]);
+      expect(compute).not.toHaveBeenCalled();
+      compute.mockRestore();
+    });
+
+    it('draws every group as a column, past the forty it used to keep', async () => {
+      const categories = Array.from({ length: 60 }, (_, i) => `C${i}`);
+      const n = categories.length * 3;
+      controls.categoricalView = jest.fn(async (column: string) => ({
+        name: column,
+        categories,
+        colors: categories.map(() => '#888'),
+        codes: Uint16Array.from({ length: n }, (_, i) => i % categories.length),
+      }));
+      controls.continuousValues = jest.fn(async (_source: SpatialColorBy) =>
+        Float32Array.from({ length: n }, (_, i) => i),
+      );
+      component['onKind']('heatmap');
+      await flush();
+      await component['onGroupBy']('region');
+      await component['onHeatmapGenes'](['Ttr']);
+      await flush();
+      expect(lastPlot().traces[0].x).toHaveLength(60);
+      expect(component['heatmapNote']).not.toContain('strongest');
+    });
+
     it('narrows to the selection, and switches to per-cell columns for a small one', async () => {
       component['onKind']('heatmap');
       await flush();

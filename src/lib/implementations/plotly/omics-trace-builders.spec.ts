@@ -4,6 +4,7 @@ import {
   countByCategory,
   countsLayout,
   heatmapLayout,
+  HEATMAP_FIT_FROM_ROWS,
   OmicsGrouping,
   OmicsTraceInput,
   benefitsFromGrouping,
@@ -405,14 +406,16 @@ describe('omics-trace-builders', () => {
       expect(buildHeatmapTraces({ ...input, cols: [], values: new Float32Array(0) })).toEqual([]);
     });
 
-    it('grows its height with the gene count', () => {
+    it('grows its height with a few genes, and fills the container past them', () => {
+      const rows = (n: number) => Array.from({ length: n }, (_, i) => `g${i}`);
       const short = heatmapLayout(input) as any;
-      const tall = heatmapLayout({
-        ...input,
-        rows: Array.from({ length: 20 }, (_, i) => `g${i}`),
-      }) as any;
-      expect(tall.height).toBeGreaterThan(short.height);
+      const twelve = heatmapLayout({ ...input, rows: rows(HEATMAP_FIT_FROM_ROWS) }) as any;
+      expect(twelve.height).toBeGreaterThan(short.height);
       expect(short.xaxis.title.text).toBe('class');
+      // 500 genes would be 12,000 px tall: the plot fills its panel or window instead.
+      const many = heatmapLayout({ ...input, rows: rows(500) }) as any;
+      expect(many.height).toBeUndefined();
+      expect(many.autosize).toBe(true);
     });
   });
 });

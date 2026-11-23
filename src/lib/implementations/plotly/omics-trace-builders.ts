@@ -810,6 +810,20 @@ export function buildHeatmapTraces(input: OmicsHeatmapInput): unknown[] {
   ];
 }
 
+/**
+ * Up to this many genes the heatmap is as tall as its rows (24 px each); past it, it fills
+ * the panel or the detached window.
+ */
+export const HEATMAP_FIT_FROM_ROWS = 12;
+
+/**
+ * The heatmap's layout.
+ *
+ * A few genes keep a height of their own, so 3 rows are not stretched to the panel's. More
+ * fill the container whole — every row and every column on screen, whatever the count, with
+ * no scrolling. Their labels then do not all fit, and Plotly thins a category axis's labels
+ * to what its length holds (one per ~12 px at this font size); the hover names every cell.
+ */
 export function heatmapLayout(input: OmicsHeatmapInput): unknown {
   return {
     // Left margin grows with the longest gene name; the labels are the point.
@@ -818,7 +832,6 @@ export function heatmapLayout(input: OmicsHeatmapInput): unknown {
     hovermode: 'closest',
     xaxis: { automargin: true, tickangle: -45, tickfont: { size: 10 }, title: { text: input.groupLabel ?? '' } },
     yaxis: { automargin: true, tickfont: { size: 10 } },
-    // Grows with the gene count so 3 rows are not stretched to 20 rows' height.
-    height: Math.max(180, 24 * input.rows.length + 110),
+    ...(input.rows.length <= HEATMAP_FIT_FROM_ROWS ? { height: Math.max(180, 24 * input.rows.length + 110) } : {}),
   };
 }

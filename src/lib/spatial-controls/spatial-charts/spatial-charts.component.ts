@@ -25,6 +25,12 @@ import { SpatialDataset, SpatialEmbeddingMeta } from '../../contracts/spatial-da
 import { SpatialColorBy, SpatialViewState, DEFAULT_SPATIAL_VIEW } from '../../contracts/display-types';
 import { SpatialSelectionMask, emptySelection, maskToIndices } from '../../spatial/spatial-selection';
 import { HeatmapMatrix, cellsAsGroups } from '../../spatial/spatial-heatmap';
+import {
+  DEFAULT_HEATMAP_ORDER,
+  HEATMAP_CLUSTER_MAX,
+  HeatmapOrder,
+  orderHeatmap,
+} from '../../spatial/heatmap-order';
 import { computeHeatmapMatrixAsync } from '../../workers/spatial-math';
 import { Supersede } from '../../util/supersede';
 import {
@@ -281,17 +287,16 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    *  readable panel, so the columns go back to being classes. */
   private static readonly HEATMAP_CELL_COLUMNS = 200;
   /**
-   * Column cap for the grouped heatmap.
-   *
-   * Any categorical column can be the x axis, and they are not the same size:
-   * `neurotransmitter` has 9 categories, `class` 34, `subclass` 338. At 338 the
-   * panel is a texture — columns a couple of pixels wide, no readable label —
-   * so past this many the strongest columns are kept and the note says how many
-   * were dropped. See `maxCols` in `spatial-heatmap.ts`.
+   * The order of the heatmap's rows and columns. Every group is a column — `subclass`'s
+   * 338 included — and the plot fits the panel, so a sort order is how a wide or tall
+   * heatmap is read: markers on a diagonal, or similar genes and groups side by side.
    */
-  private static readonly HEATMAP_MAX_COLUMNS = 40;
-  /** Columns the cap dropped from the last render, for the note. */
-  private heatmapHidden = 0;
+  protected heatmapOrder: HeatmapOrder = DEFAULT_HEATMAP_ORDER;
+  /** Whether the last draw had too many genes (or groups) to cluster, for the note. */
+  private heatmapClusterSkipped = { genes: false, groups: false };
+  /** The last matrix computed, unordered, so a new sort order redraws without recomputing
+   *  it; null while one is being computed. */
+  private heatmapDrawn: { matrix: HeatmapMatrix; groupLabel: string } | null = null;
   /**
    * The heatmap's rows: the genes picked (a Plotly chart of their means per group), or every
    * gene against every cell (the zoomable gene heatmap, where the data source serves it).
@@ -549,16 +554,27 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
     void this.render();
   }
 
+  /** A sort order changed: reorder the matrix on screen, or draw afresh if there is none. */
+  protected onHeatmapOrder(order: HeatmapOrder): void {
+    this.heatmapOrder = order;
+    const drawn = this.heatmapDrawn;
+    if (this.kind === 'heatmap' && drawn && !this.showsGeneHeatmap && document.getElementById(this.plotTarget)) {
+      void this.drawHeatmap(drawn).finally(() => this.changed());
+    } else {
+      void this.render();
+    }
+  }
+
   /** What the heatmap is currently showing, said plainly. */
   protected get heatmapNote(): string {
     return heatmapNote({
       geneCount: this.heatmapGenes.length,
       selectionCount: this.selectionCount,
       zScore: this.heatmapZScore,
-      hidden: this.heatmapHidden,
       groupBy: this.groupBy,
-      maxColumns: SpatialChartsComponent.HEATMAP_MAX_COLUMNS,
       cellColumns: SpatialChartsComponent.HEATMAP_CELL_COLUMNS,
+      clusterSkipped: this.heatmapClusterSkipped,
+      clusterMax: HEATMAP_CLUSTER_MAX,
     });
   }
 
@@ -914,6 +930,7 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
    * question there, and each cell earns a column.
    */
   private async renderHeatmap(): Promise<void> {
+    this.heatmapDrawn = null;
     const { heatmapRows: genes, grouping } = this.data.snapshot();
     if (!this.controls || genes.length === 0 || !grouping) {
       this.purgePlot();
@@ -941,9 +958,8 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
           // Outside the per-cell view a selection still narrows the means, the way
           // the violin and box narrow rather than overlay.
           ...(!cells && selected ? { indices: selected } : {}),
-          // Only the grouped view: `cellsAsGroups` already caps by even thinning,
-          // and re-ranking those columns would lose the selection's spread.
-          ...(cells ? {} : { maxCols: SpatialChartsComponent.HEATMAP_MAX_COLUMNS }),
+          // Every group is a column: the plot fits the panel and thins the labels,
+          // and the sort orders make a wide matrix readable.
           zScore: this.heatmapZScore,
         },
         { signal: task.signal },
@@ -959,14 +975,21 @@ export class SpatialChartsComponent implements OnInit, AfterViewInit, OnDestroy 
       return;
     }
     this.notice = null;
-    this.heatmapHidden = matrix.hiddenCols;
+    this.heatmapDrawn = { matrix, groupLabel: cells ? 'selected cells' : (this.groupBy ?? '') };
+    await this.drawHeatmap(this.heatmapDrawn);
+  }
+
+  /** Draw a computed matrix in the current sort order. */
+  private async drawHeatmap(drawn: { matrix: HeatmapMatrix; groupLabel: string }): Promise<void> {
+    const { matrix, clusterSkipped } = orderHeatmap(drawn.matrix, this.heatmapOrder);
+    this.heatmapClusterSkipped = clusterSkipped;
     const input = {
       rows: matrix.rows,
       cols: matrix.cols,
       values: matrix.values,
       counts: matrix.counts,
       zScored: this.heatmapZScore,
-      groupLabel: cells ? 'selected cells' : (this.groupBy ?? ''),
+      groupLabel: drawn.groupLabel,
     };
     await this.draw(buildHeatmapTraces(input), heatmapLayout(input));
   }

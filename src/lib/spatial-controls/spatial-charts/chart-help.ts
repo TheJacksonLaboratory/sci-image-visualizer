@@ -177,13 +177,19 @@ export interface HeatmapNoteState {
   geneCount: number;
   selectionCount: number;
   zScore: boolean;
-  /** Columns the cap dropped from the last render. */
-  hidden: number;
   groupBy: string | null;
-  /** The grouped view's column cap. */
-  maxColumns: number;
   /** Up to this many selected cells, each is its own column. */
   cellColumns: number;
+  /** Whether the genes (or groups) were too many to cluster, and the limit. */
+  clusterSkipped?: { genes: boolean; groups: boolean };
+  clusterMax?: number;
+}
+
+/** Says so when an axis asked to be clustered kept its order: too many to cluster. */
+function unclustered(s: HeatmapNoteState): string {
+  const max = (s.clusterMax ?? 0).toLocaleString('en-US');
+  const what = [s.clusterSkipped?.genes ? 'genes' : '', s.clusterSkipped?.groups ? 'groups' : ''].filter(Boolean);
+  return what.length ? ` Too many ${what.join(' and ')} to cluster (over ${max}): kept in their order.` : '';
 }
 
 /** What the heatmap is currently showing, said plainly. */
@@ -193,18 +199,13 @@ export function heatmapNote(s: HeatmapNoteState): string {
   if (perCell) {
     return (
       `One column per selected cell (${s.selectionCount}). ` +
-      'Mean expression per cell, so the columns are cells rather than classes.'
+      'Mean expression per cell, so the columns are cells rather than classes.' +
+      unclustered(s)
     );
   }
   const scope = s.selectionCount > 0 ? 'the selected cells' : 'all cells';
   const scaled = s.zScore
     ? " Each gene is z-scored across the columns, so the colour is above or below that gene's own average."
     : ' Raw means, so a highly-expressed gene dominates the scale.';
-  // Saying so matters: without it the panel looks like the whole column.
-  const capped =
-    s.hidden > 0
-      ? ` Showing the ${s.maxColumns} strongest of ${s.maxColumns + s.hidden}, ` +
-        'ranked by the largest value any picked gene reaches.'
-      : '';
-  return `Mean expression of each gene within each ${s.groupBy ?? 'group'}, over ${scope}.${scaled}${capped}`;
+  return `Mean expression of each gene within each ${s.groupBy ?? 'group'}, over ${scope}.${scaled}${unclustered(s)}`;
 }

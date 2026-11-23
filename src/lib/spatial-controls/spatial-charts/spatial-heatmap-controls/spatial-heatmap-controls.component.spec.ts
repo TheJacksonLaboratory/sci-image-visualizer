@@ -1,6 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { MultiSelect } from 'primeng/multiselect';
+import { Select } from 'primeng/select';
+
+import type { HeatmapOrder } from '../../../spatial/heatmap-order';
 
 import { SpatialHeatmapControlsComponent } from './spatial-heatmap-controls.component';
 
@@ -48,5 +51,26 @@ describe('SpatialHeatmapControlsComponent', () => {
 
     toggleAll();
     expect(picked.at(-1)).toEqual(['Snap25', 'Ttr']);
+  });
+
+  it('labels the z-score checkbox (PrimeNG 18+ Checkbox has no label input)', () => {
+    const input = fixture.nativeElement.querySelector('#sx-zscore') as HTMLInputElement;
+    expect(input.labels?.[0]?.textContent?.trim()).toBe('z-score');
+  });
+
+  it('offers the gene and group sort orders, and says which changed', () => {
+    const orders: HeatmapOrder[] = [];
+    fixture.componentInstance.orderChange.subscribe((o) => orders.push(o));
+    const [genes, groups] = fixture.debugElement.queryAll(By.directive(Select));
+    const values = (s: typeof genes) => (s.componentInstance as Select).options!.map((o) => o.value);
+    expect(values(genes)).toEqual(['picked', 'peak', 'clustered', 'name']);
+    expect(values(groups)).toEqual(['dataset', 'clustered', 'cells']);
+
+    genes.triggerEventHandler('ngModelChange', 'peak');
+    groups.triggerEventHandler('ngModelChange', 'cells');
+    expect(orders).toEqual([
+      { genes: 'peak', groups: 'dataset' },
+      { genes: 'picked', groups: 'cells' },
+    ]);
   });
 });
