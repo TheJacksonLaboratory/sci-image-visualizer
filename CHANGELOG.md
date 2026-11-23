@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-11-23
+
 ### Fixed
 
 - **The heatmap's gene picker behaves as the panel's other gene pickers.** Ticking a gene in "Pick
@@ -3015,7 +3017,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.4...v0.21.0
 [0.20.4]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.20.3...v0.20.4
