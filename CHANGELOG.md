@@ -20,9 +20,24 @@ file was added.
   inline its gene names offered none to pick from. The picker now uses the same gene list and
   search as the panel's other gene pickers: it searches the data port as you type, and loads the
   whole list the first time it opens.
+- **The heatmap's z-score checkbox shows its label again.** PrimeNG 18+ Checkbox has no `label`
+  input, so the text was dropped.
 
 ### Added
 
+- **The heatmap fits its panel, with every group as a column.** It no longer keeps only the 40
+  groups with the strongest signal: every category is a column (`subclass`'s 338 included). Past
+  12 genes the plot fills the panel, or the detached window, instead of growing 24 px per gene,
+  so 500 genes no longer make it 12,000 px tall. Plotly thins the gene and group labels to what
+  fits, and the hover names every cell.
+- **Sort orders for the heatmap.**
+  - Sort genes: as picked; by peak group, which puts each gene under the group where it is
+    highest so the markers form a diagonal; clustered, with similar profiles side by side
+    (average linkage); or A–Z.
+  - Sort groups: dataset order; clustered; or most cells first.
+  - Changing the order redraws the matrix without computing it again. Clustering stops at
+    1,000 genes or groups (about 0.25 s); past that, the axis keeps its order and the note
+    says so.
 - **Select all in the gene pickers.** "Pick genes for the rows", "Show observations expressing" and
   the transcript genes picker have PrimeNG's select-all checkbox in their header. It selects every
   gene in the list, or only the ones the search shows, keeping those already picked. The list holds
