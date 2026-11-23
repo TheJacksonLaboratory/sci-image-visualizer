@@ -21,6 +21,14 @@ file was added.
   search as the panel's other gene pickers: it searches the data port as you type, and loads the
   whole list the first time it opens.
 
+### Added
+
+- **Select all in the gene pickers.** "Pick genes for the rows", "Show observations expressing" and
+  the transcript genes picker have PrimeNG's select-all checkbox in their header. It selects every
+  gene in the list, or only the ones the search shows, keeping those already picked. The list holds
+  the best 500 matches at most, so on a whole-transcriptome dataset it selects those 500, not every
+  gene.
+
 ## [0.22.0] — 2026-11-21
 
 ### Changed
