@@ -1,0 +1,847 @@
+{
+  "repository": "TheJacksonLaboratory/sci-image-visualizer",
+  "commit": "5db220689af85ac65dd20c94e445f4dbcece541f",
+  "harvested": "2026-11-25",
+  "labels": [
+    {
+      "key": "god-class|NapariSpatialTileLayers|src/lib/implementations/napari-js/napari-spatial-tiles.ts",
+      "rule": "god-class",
+      "verdict": "declined",
+      "reply": "Fair observation, but not addressed in this PR. NapariSpatialTileLayers is the one place that owns the napari layers and the stale-request token for the spatial overlays (cells, transcripts, density, hover). Splitting it means sharing that token and the layer registry across several classes, which is a refactor in its own right and would make this PR harder to review. The two long methods it conta",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962870"
+    },
+    {
+      "key": "long-function|planCells|src/lib/implementations/napari-js/napari-spatial-tiles.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Correct (82 lines). As of a456e56, loading the cell geometry (choosing the cell/nucleus set, fetching tiles and reusing cached rings, filtering hidden groups) is its own `cellGeometry()` method; planCells is now 72 lines and cellGeometry 46.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962975"
+    },
+    {
+      "key": "long-function|planTranscripts|src/lib/implementations/napari-js/napari-spatial-tiles.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Correct (104 lines). As of a456e56, the drawing is split out into `drawTranscriptCircles()` and `drawTranscriptGlyphs()`; planTranscripts now only plans (job, cache key, load, filter, colour) and is 56 lines.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150963096"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:'pointercancel'|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962131"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:'pointerdown'|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150961646"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:'pointerenter'|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962257"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:'pointermove'|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150961821"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:'pointerup'|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150961991"
+    },
+    {
+      "key": "resource-leak|NapariNavigator listener this.box:type|src/lib/implementations/napari-js/napari-navigator.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Partly correct. The listeners sit on `this.box`, the navigator's own element, which `destroy()` detaches and nothing else references, so they are collected along with it. In practice nothing leaks. Still, `destroy()` should not depend on that, so as of a456e56 every listener is added with one `AbortController` signal that `destroy()` aborts. A new test checks that pointer events on the box have no",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962405"
+    },
+    {
+      "key": "resource-leak|NapariSpatialTileLayers timeout this.hoverTimer|src/lib/implementations/napari-js/napari-spatial-tiles.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not correct as stated. As with `this.timer`, `drop()` only removes a layer group; teardown is `detach()`, which already clears `hoverTimer`, and `hoverAt()` clears the previous one before setting a new one. a456e56 also sets `hoverTimer` to null in `detach()` so the field never keeps a dead handle.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962678"
+    },
+    {
+      "key": "resource-leak|NapariSpatialTileLayers timeout this.timer|src/lib/implementations/napari-js/napari-spatial-tiles.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not correct. `drop(group)` is not teardown; it removes one layer group while the view stays live, and `this.timer` is the debounce for the next re-plan, so it is meant to survive a `drop`. The lifecycle end is `detach()`, which runs `clearTimeout(this.timer)` and sets it to null, and `schedule()` clears the previous timeout before setting a new one. No change for this one.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150962549"
+    },
+    {
+      "key": "stuck-state|SpatialControlsComponent.lastTranscriptMode|src/lib/spatial-controls/spatial-controls.component.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "Not correct. Line 901 assigns the live mode when transcripts are switched off (`this.lastTranscriptMode = this.view.transcriptMode`), so it moves to whatever mode was in use (circles, glyphs or density). `'circles'` is only the initial value. That is the computed write the note mentions. No change.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150963462"
+    },
+    {
+      "key": "unreachable-state|SpatialControlsComponent.lastTranscriptMode|src/lib/spatial-controls/spatial-controls.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not correct. `'glyphs'` reaches `lastTranscriptMode` through the same computed write at line 901, when the user had picked the \"Icons\" render option (spatial-controls.component.ts:670, `value: 'glyphs'`) before switching transcripts off. No change.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150963643"
+    },
+    {
+      "key": "unreachable-state|SpatialViewState.transcriptMode|src/lib/contracts/display-types.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not correct. `'off'` is the default (`DEFAULT_SPATIAL_VIEW.transcriptMode`, display-types.ts:306), and the Transcripts section's header switch sets it (`onTranscriptsOn(false)` → `setViewState({ transcriptMode: 'off' })`, spatial-controls.component.ts:902). The checker probably misses it because the write goes through `setViewState` with a partial object. No change.",
+      "pull": 33,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/33#discussion_r4150963305"
+    },
+    {
+      "key": "cannot-settle|ChannelHistogramComponent.activeAdjust|src/lib/channel-histogram/channel-histogram.component.ts",
+      "rule": "cannot-settle",
+      "verdict": "false-positive",
+      "reply": "It does settle: `markBusy()` (re)arms a 500 ms timeout whose callback sets `activeAdjust = null` and marks the view for check, and `ngOnDestroy` clears that timer. The analyser didn't follow the setTimeout callback; the state is the spinner's trailing heuristic described on the field.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258773039"
+    },
+    {
+      "key": "god-class|NapariVisualizerService|src/lib/implementations/napari-js/napari-visualizer.service.ts",
+      "rule": "god-class",
+      "verdict": "declined",
+      "reply": "Not splitting further. The class is 580 lines, under the 600 limit. Most of the 55 methods are the public `IViewerBackend`/`IToolController` contract, which the service has to expose, and most of those are one-line delegations. This PR already moved the actual work out into the scene classes, NapariTileClient, NapariToolBridge, NapariDisplayState and SpatialSession (review Appendix B). Only 13 met",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258777133"
+    },
+    {
+      "key": "god-class|Spatial2dScene|src/lib/implementations/napari-js/napari-spatial-2d-scene.ts",
+      "rule": "god-class",
+      "verdict": "fixed",
+      "reply": "Fixed in 221dc00. The rebuild split in 8e15e49 pushed the class from 598 to 620 lines. Its pure steps now live as module functions (`markerSizes`, `observationPositions`, and `slabAt` for the volume plane), which brings the class to 587 lines with 23 methods. It still has one job, the 2D spatial layers over the image, so a split by responsibility would only spread that state across classes. No beh",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258890684"
+    },
+    {
+      "key": "god-class|Spatial3dScene|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "god-class",
+      "verdict": "declined",
+      "reply": "Not splitting this one. Spatial3dScene is the 3D spatial view that this PR split out of NapariVisualizerService, and it has one job: the layers of the 3D cloud scene (cloud, reference volume, density volumes, gene map, scale bar, picking). It has about 20 methods, below the 30 limit, and about 300 of its lines are doc comments and blank lines. Splitting the volumes into their own class would sprea",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258776772"
+    },
+    {
+      "key": "god-class|SpatialObservationsPanelComponent|src/lib/spatial-controls/spatial-observations-panel/spatial-observations-panel.component.ts",
+      "rule": "god-class",
+      "verdict": "declined",
+      "reply": "The method count comes from the template: nearly all of the 33 members are 1 to 4 line handlers and getters for the panel's sliders and switches (`onPointScale`, `onGeneMap`, `sectionLabel`, ...) that forward to `ISpatialControls.setViewState`. The logic already lives in spatial-panel-model and the facade. At about 300 lines it is well under the 600-line limit, and splitting it would just move the",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258789331"
+    },
+    {
+      "key": "god-class|SpatialTranscriptsPanelComponent|src/lib/spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component.ts",
+      "rule": "god-class",
+      "verdict": "declined",
+      "reply": "As with the observations panel, the 35 members are mostly one-line `setViewState` bindings for the transcript and density controls, plus their getters. Gene menus, tile options and the density bar come from pure helpers. The component is about 400 lines, under the 600 limit, and a split would not remove any logic, so I'm leaving it.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258789665"
+    },
+    {
+      "key": "long-function|addWindowListeners|src/lib/visualizer.component.ts",
+      "rule": "long-function",
+      "verdict": "outdated",
+      "reply": "Already gone: 9b1bcb9 moved the keyboard, wheel and context-menu handling into `ViewerShortcuts`, and 5c1bec7 moved the inset's resize and drag into `<viz-intensity-inset>`. `addWindowListeners` no longer exists, and `ngAfterViewInit` now just creates and attaches `ViewerShortcuts`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258786850"
+    },
+    {
+      "key": "long-function|applyAtClient|src/lib/toolbar/brush/brush-tool.service.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "The brush and the wand opened `applyAtClient` with the same 17 lines (readback, regions, stale-stroke check, transform and matrix mapping, off-readback bail-out). In 13c4788 that moved to `MaskStrokeEditor.beginTick`, which brings the brush's `applyAtClient` down to 70 lines. The steps run in the same order, and the brush spec covers each early return.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258785874"
+    },
+    {
+      "key": "long-function|applyAtClient|src/lib/toolbar/vertex-eraser/vertex-eraser-tool.service.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Two lines over the limit, and the function reads top to bottom: map the cursor, then for each region erase the outer ring, then its holes, then drop or rebuild the region. The wand/brush tick helper from 13c4788 doesn't apply here, because the eraser needs no readback. Further splitting would only move the per-region loop body elsewhere.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258792695"
+    },
+    {
+      "key": "long-function|applyAtClient|src/lib/toolbar/wand/wand-tool.service.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Split in 13c4788. The shared tick start went to `MaskStrokeEditor.beginTick`, and the readback-frame image and the patch stamp (grow the stroke, then OR or AND-NOT the patch) went to `wandImage` and `stampPatch`, matching the brush's `stampDisc`. `applyAtClient` is now 54 lines. There is no behaviour change, and the 22 wand-tool specs pass unchanged.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258786384"
+    },
+    {
+      "key": "long-function|build|src/lib/spatial/spatial-controls.facade.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "`build()` is the `ISpatialControls` object literal: about 30 members, mostly one-line delegations to the port and the stores, each next to the comment explaining it. Splitting it into named groups would only scatter one interface's implementation across several helpers. Its only non-trivial members, the selection paths, already call pure functions in spatial-selection.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258790010"
+    },
+    {
+      "key": "long-function|detectHoles|src/lib/geometry/contour.ts",
+      "rule": "long-function",
+      "verdict": "outdated",
+      "reply": "Already gone: `detectHoles` was deleted in 5c01fa7. Holes now come back per blob from napari-js `traceContours`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258791617"
+    },
+    {
+      "key": "long-function|drawCloud|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in 221dc00: choosing the section and building the geometry and colour-source keys moved to the module function `cloudSubset`, so `drawCloud` is 70 lines. No behaviour change; the SPATIAL_OMICS_3D specs cover the section, colour-swap and selection paths.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258891603"
+    },
+    {
+      "key": "long-function|drawMarkers|src/lib/implementations/napari-js/napari-spatial-2d-scene.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in 221dc00: the marker sizing and the positions gather moved to the module functions `markerSizes` and `observationPositions`, so `drawMarkers` is 70 lines. It now reads as: sizes, drop a detached layer, restyle in place for a display-only change, otherwise add a new layer. No behaviour change.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258891108"
+    },
+    {
+      "key": "long-function|ensureDensityVolumes|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Slightly over the limit (88 lines), and it reads top to bottom: key, drop the old layers, grid and offset, groups, rasterise, add a volume per group. A good share of the length is the comments explaining the opacity budget and the blending. Splitting it would mean passing the supersede token and the key across the awaits, which would make it harder to read, not easier.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258779267"
+    },
+    {
+      "key": "long-function|ensureGeneMap|src/lib/implementations/napari-js/napari-spatial-2d-scene.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Leaving it as one method. It has three phases (the two-clock keys, the field estimate, then colouring and placing the layer under the markers). The middle phase re-checks the `geneMapLoads` supersede token and `geneMapKey` after each of its two awaits, and every early return depends on that shared state. Extracting it would pass seven or eight values (gene, port, slab, selection, smoothing, size, ",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258777859"
+    },
+    {
+      "key": "long-function|ensureGeneMap|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Same reasoning as the 2D `ensureGeneMap`. The 3D version has the same three phases: keys, the volume estimate (guarded by the supersede token and `geneMapKey` after each await), then encoding and adding the layer. Extracting the estimate would mean passing around eight values (gene, port, grid, section, interpolate, smoothing, selection, keys). It differs from 2D in the lattice, the section rule a",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258778829"
+    },
+    {
+      "key": "long-function|fetchSlice|src/lib/implementations/napari-js/napari-tile-client.ts",
+      "rule": "long-function",
+      "verdict": "outdated",
+      "reply": "`fetchSlice` is gone: 31028f6 replaced it with napari-js 0.15's `readLevel`/`assembleVolume`, which now handle the level choice, the bounded fetch pool, the stitch and the downscale it used to do itself. NapariTileClient no longer has a method of that length.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258779711"
+    },
+    {
+      "key": "long-function|groupTranscripts|src/lib/spatial/transcript-grouping.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "`groupTranscripts` is 10 lines over the limit and reads as three commented passes: bin extent, accumulate per (group, square), then write the aggregated tile. It runs on every pan and zoom and is written to allocate nothing per transcript. Splitting the passes would mean passing the shared extent and accumulators between helpers, which is not clearer, and transcript-grouping.spec.ts covers it as i",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258791962"
+    },
+    {
+      "key": "long-function|mount|src/lib/implementations/napari-js/napari-volume-scene.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Split: the per-channel assembly under the progress bar moved to `assembleChannels()` and the resolution-invariant world box to `worldBox()`, so `mount()` is about 55 lines. Every step runs in the same order as before (the view is still created before the first slice await). The service's volume specs cover the world box across resolutions, physical spacing, the Z handle and per-channel assembly (7",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258780534"
+    },
+    {
+      "key": "long-function|plan|src/lib/implementations/napari-js/spatial-tiles/cell-layers.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "The fill, outline and nucleus-outline upserts moved to `drawCells()`, and the colour result now has a type name (`CellColors`). `plan()` is down to level, geometry, keys and colours (about 65 lines). No behaviour change, and the cell specs in napari-spatial-tiles cover every draw mode and the nuclei (1dcbea3).",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258781977"
+    },
+    {
+      "key": "long-function|plan|src/lib/implementations/napari-js/spatial-tiles/transcript-layers.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "The 13-part plan key and the colour-view fallback (bins coloured by cell type, density-grid markers by cluster) were pure blocks written inline. They are now `transcriptPlanKey()` and `colorViewFor()`, which removes about twenty lines from `plan()`. No behaviour change, and the napari-spatial-tiles specs cover the unchanged-plan no-op and both fallbacks (e1e38e8).",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258781612"
+    },
+    {
+      "key": "long-function|plot|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in af29444: plot() built the same seven arguments three times; it is now 70 lines. The dedicated renderers (plotHeatmap, plotSurface, plotRGBHeatmap) and renderPlot now take one `FramePlot` (plot div, URLs, frames, extent, ratios, screen height, in-place flag) that plot() and the high-def zoom re-render build once, so the adjacent same-typed positional arguments are gone. No behaviour change",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258771550"
+    },
+    {
+      "key": "long-function|rebuild|src/lib/implementations/napari-js/napari-spatial-2d-scene.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Split as suggested: `rebuild()` now does only the async part (colours, the empty-dataset case, slab and gene map) and ends in `drawMarkers()`, which restyles the layer in place or adds a new one. The empty-dataset teardown is `removeLayers()`, matching the 3D scene. No behaviour change, and the service's marker specs cover both paths (8e15e49).",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258777512"
+    },
+    {
+      "key": "long-function|rebuild|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Split: `rebuild()` now covers the encoding, the reference volume, the density volumes, the gene map and the scale bar, then hands off to `drawCloud()` (section, keys, new layer or in-place colour swap). `cloudPositions()` builds the interleaved positions and `applySelection()` the per-point selection alphas. No behaviour change, and the SPATIAL_OMICS_3D specs cover the section, colour-swap and sel",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258778235"
+    },
+    {
+      "key": "long-function|regionsFromGeoJson|src/lib/models/region-geojson.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in 14cde44: the reader now handles one feature at a time (`regionFromFeature`: classification, then bounds), with the bezier, LineString, rectangle and freeform-polygon cases in named functions, and its input is typed (`GeoJsonFeature`) instead of `any`. No behaviour change: the output is byte-identical on every branch (checked against the old implementation), and new characterization specs ",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258767945"
+    },
+    {
+      "key": "long-function|regionsToGeoJson|src/lib/models/region-geojson.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in 14cde44: the writer builds one feature per region (`featureFromRegion`), with closed and open polygons in `polygonFeature` and the exterior and hole bezier flattening shared by `flattenBezier`. No behaviour change: the output is byte-identical on every branch (checked against the old implementation), and a new characterization spec pins a bezier donut's export.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258768490"
+    },
+    {
+      "key": "long-function|render|src/lib/render-session.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Leaving this one: `render` is 83 lines, and most of it is the RenderOrchestrator callback object, whose callbacks share the closure (`task`, `releaseOverlay`, `settle`, `screenHeight`). Extracting them would mean threading that state through parameters, which reads worse than the current top-to-bottom flow for three lines over the limit.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258772747"
+    },
+    {
+      "key": "long-function|traceMask|src/lib/geometry/contour.ts",
+      "rule": "long-function",
+      "verdict": "outdated",
+      "reply": "Already gone: `traceMask` was deleted in 5c01fa7, which switched tracing to napari-js `traceContours`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258791135"
+    },
+    {
+      "key": "many-parameters|clusterDensityJob|src/lib/implementations/napari-js/spatial-tiles/transcript-jobs.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed together with `geneBinsJob`: the view rect, its two quarter-view margins and the widened rect are now one `ClipWindow`, so the function takes five parameters. A new spec covers this job's key and the markers it loads from the density grids (it had no spec before) (c8d0415).",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258781230"
+    },
+    {
+      "key": "many-parameters|constructor|src/lib/implementations/napari-js/napari-visualizer.service.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "These are Angular DI parameters: an `@Injectable({ providedIn: 'root' })` service gets each collaborator and injection token (TILE_ACCESS_PORT, VIZ_CONFIG, CELL_SEGMENTER, SPATIAL_DATA_PORT) as its own constructor parameter. Grouping them into an options object would need a custom provider factory and change how hosts provide the service. Nobody calls this constructor by hand, so there are no argu",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258780116"
+    },
+    {
+      "key": "many-parameters|constructor|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "Leaving this one: these are Angular constructor injections (the tile and image-state ports, the tool services, the optional cell segmenter, the stores and the intensity service), not values a caller passes, so they can't be grouped into an options object without adding a provider. The constructor body only wires them into collaborators.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258771231"
+    },
+    {
+      "key": "many-parameters|constructor|src/lib/routing-visualizer.service.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "Leaving this one: the constructor parameters are Angular DI injections (the three backends, stores, config and the optional spatial-data port), which an options object can't replace without an extra provider.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258772461"
+    },
+    {
+      "key": "many-parameters|constructor|src/lib/spatial/spatial-hover.ts",
+      "rule": "many-parameters",
+      "verdict": "outdated",
+      "reply": "Already gone: the 8-parameter constructor was `PointGridIndex`'s, which c8006f6 deleted when hover picking moved to napari-js `PointsLayer.pick` / `PointPicker`. spatial-hover.ts now only formats the tooltip and has no class with a constructor.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258785208"
+    },
+    {
+      "key": "many-parameters|detectHoles|src/lib/geometry/contour.ts",
+      "rule": "many-parameters",
+      "verdict": "outdated",
+      "reply": "Already gone: `detectHoles` was deleted in 5c01fa7. napari-js's `traceContours` returns each blob's holes itself, and `toPolygon` only maps them to `Polygon.holes`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258784708"
+    },
+    {
+      "key": "many-parameters|drawTranscripts|src/lib/implementations/napari-js/spatial-tiles/transcript-layers.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "One over the limit, on a private method whose only two callers are a few lines above it in the same class. The layer placement is already grouped into a `Placement` object. The other arguments are mostly of different types (tile, sizes, colours, view, symbols or null, rim width), so the type checker would catch most swaps. An options object for two internal call sites would be churn.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258782428"
+    },
+    {
+      "key": "many-parameters|geneBinsJob|src/lib/implementations/napari-js/spatial-tiles/transcript-jobs.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed together with `clusterDensityJob`. Four of the eight parameters were the clip window in pieces, including two adjacent numbers (`mx`, `my`) that are easy to swap. `clipWindow(rect)` now builds the widened rect and its key once, and both jobs take a single `ClipWindow`, so they have five parameters each. I first added specs pinning both jobs' keys under a small and a large pan and what they l",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258780856"
+    },
+    {
+      "key": "many-parameters|maskToPolygons|src/lib/geometry/contour.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "`maskToPolygons` is now a one-call adapter over napari-js `traceContours`. Its parameters are the (mask, w, h, originX, originY) convention shared by `labelsToPolygons` and every mask producer in the tools, and the last two are optional with defaults. Every call site passes them in that order, and contour.golden.spec.ts covers the size and hole thresholds. An options object would touch every calle",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258783971"
+    },
+    {
+      "key": "many-parameters|maskToPolygons|src/lib/toolbar/wand/wand.service.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "`WandService` is a deprecated DI façade (\"kept for one release\") whose methods mirror the pure `geometry/` functions one to one. This method just forwards to `maskToPolygons` with the same signature (see the reply on contour.ts). Nothing in production calls it, and the service is due to be removed rather than reshaped.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258792291"
+    },
+    {
+      "key": "many-parameters|plotHeatmap|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed in af29444: plotHeatmap took frames, extent and ratios as adjacent arrays. The dedicated renderers (plotHeatmap, plotSurface, plotRGBHeatmap) and renderPlot now take one `FramePlot` (plot div, URLs, frames, extent, ratios, screen height, in-place flag) that plot() and the high-def zoom re-render build once, so the adjacent same-typed positional arguments are gone. No behaviour change; new ch",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258771865"
+    },
+    {
+      "key": "many-parameters|plotRGBHeatmap|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed in af29444: plotRGBHeatmap took two number[] and three numbers in a row (10 parameters with the channel planes); it now takes the FramePlot plus the image width, height and planes. The dedicated renderers (plotHeatmap, plotSurface, plotRGBHeatmap) and renderPlot now take one `FramePlot` (plot div, URLs, frames, extent, ratios, screen height, in-place flag) that plot() and the high-def zoom r",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258772199"
+    },
+    {
+      "key": "many-parameters|plotSurface|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed in af29444: plotSurface also took two parameters it ignored (`_trueImgSize`, `_ratios`). The dedicated renderers (plotHeatmap, plotSurface, plotRGBHeatmap) and renderPlot now take one `FramePlot` (plot div, URLs, frames, extent, ratios, screen height, in-place flag) that plot() and the high-def zoom re-render build once, so the adjacent same-typed positional arguments are gone. No behaviour ",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258769262"
+    },
+    {
+      "key": "many-parameters|renderPlot|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "many-parameters",
+      "verdict": "fixed",
+      "reply": "Fixed in af29444: renderPlot's 9 positional parameters included two adjacent numbers (slice count, screen height) and two booleans. The dedicated renderers (plotHeatmap, plotSurface, plotRGBHeatmap) and renderPlot now take one `FramePlot` (plot div, URLs, frames, extent, ratios, screen height, in-place flag) that plot() and the high-def zoom re-render build once, so the adjacent same-typed positio",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258769604"
+    },
+    {
+      "key": "many-parameters|startEdit|src/lib/implementations/osd/osd-region-overlay.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "Leaving this one: the four call sites are all in `onPress` just above, the parameters have distinct types except `vertexIndex` and `ring` (which are not adjacent), the last two are optional with defaults, and the body just copies them into `this.edit`. An options object would add churn without making a swap any less likely. OsdRegionOverlay's gesture state is also listed under \"Above the review's ",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258770840"
+    },
+    {
+      "key": "many-parameters|traceMask|src/lib/geometry/contour.ts",
+      "rule": "many-parameters",
+      "verdict": "outdated",
+      "reply": "Already gone: `traceMask` was deleted in 5c01fa7, when contour tracing moved to napari-js's `traceContours`. geometry/contour.ts is now `maskToPolygons` and `labelsToPolygons`, both thin adapters.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258784271"
+    },
+    {
+      "key": "observer-cannot-unsubscribe|SamSessionService.progressListeners (observer)|src/lib/toolbar/segmentation/sam-session.service.ts",
+      "rule": "observer-cannot-unsubscribe",
+      "verdict": "false-positive",
+      "reply": "Each listener is removed when its own call ends: `ensureSession` adds `onProgress` before awaiting the load and deletes it in the `finally` block (sam-session.service.ts:120), whether the load resolves, fails or is superseded. Listeners only last as long as the `ensureSession` call that registered them, and the shared-load spec checks that each caller gets its own progress.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258783251"
+    },
+    {
+      "key": "resource-leak|FloatingDragDirective listener window:'mousemove'|src/lib/visualizer/floating-drag.directive.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `onMouseDown` calls `this.end?.()` (floating-drag.directive.ts:33) before adding new listeners, which removes the previous drag's mousemove/mouseup. `end` is also called on mouseup and in `ngOnDestroy`, so at most one pair is ever registered.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258788073"
+    },
+    {
+      "key": "resource-leak|FloatingDragDirective listener window:'mouseup'|src/lib/visualizer/floating-drag.directive.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Same as the mousemove thread: the earlier pair is released by `this.end?.()` at the top of `onMouseDown` before the new pair is added, and again on mouseup and in `ngOnDestroy`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258788422"
+    },
+    {
+      "key": "resource-leak|IntensityInsetComponent listener window:'resize'|src/lib/intensity-inset/intensity-inset.component.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: Angular calls `ngOnInit` once per component instance, so the listener is added once, and `ngOnDestroy` removes it with the same `onResize` function reference. The second-`ngOnInit` sequence in the counterexample can't happen.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258787652"
+    },
+    {
+      "key": "resource-leak|OsdTileRecolorer subscription this.sub|src/lib/implementations/osd/tile-recolor.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `OsdTileRecolorer.unsubscribe()` is its dispose method; it unsubscribes `sub`, nulls it and cancels a queued invalidation frame, and OpenSeadragonVisualizerService.unsubscribe() calls it on VisualizerComponent teardown. `ensureSubscription()` returns early while `sub` is set, so it never reacquires over a live one, and the owner is a root singleton that is never discarded. The suggeste",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258768929"
+    },
+    {
+      "key": "resource-leak|PlotlyService subscription this.filenameSubscription|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak, for the same reason as `imageCachedSubscription`: `ensureSubscriptions()` returns while `channelSub` is set, `filenameSubscription` is created in the same call, and `unsubscribe()` releases and clears all three together, so a live `filenameSubscription` is never overwritten.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258770570"
+    },
+    {
+      "key": "resource-leak|PlotlyService subscription this.imageCachedSubscription|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `ensureSubscriptions()` returns early while `channelSub` is set, and the three subscriptions are created together in that one call and torn down together in `unsubscribe()` (which also clears all three fields). So a second call never reassigns a live `imageCachedSubscription`; the suggested unsubscribe-before-acquire would be unreachable.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258770274"
+    },
+    {
+      "key": "resource-leak|RegionEditorComponent subscription this._saveAsCheckSub|src/lib/region-editor/region-editor.component.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Already fixed on this branch: f5b5756 (refactor(region-editor): standalone + OnPush editor, DestroyRef teardown) removed `_saveAsCheckSub`; the exists-check subscription in ngOnInit now ends through `takeUntilDestroyed(this.destroyRef)`. Angular also calls ngOnInit once per component instance, so the two-ngOnInit counterexample can't happen.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258764257"
+    },
+    {
+      "key": "resource-leak|RegionEditorComponent subscription this._saveAsSub|src/lib/region-editor/region-editor.component.ts",
+      "rule": "resource-leak",
+      "verdict": "fixed",
+      "reply": "Correct for the folder-stack path, fixed in f8ff66b. `confirmSaveAs`/`doSave` is covered by the modal save dialog (Confirm hidden while busy), but a folder stack saves straight from the toolbar's Save button, which stays enabled, so a second click started a duplicate write of every slice and replaced `_saveAsSub`, leaving the first save uncancellable by ngOnDestroy. `saveStackSlices` now returns w",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258765605"
+    },
+    {
+      "key": "resource-leak|RegionEditorComponent subscription this.maskJob|src/lib/region-editor/region-editor.component.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `confirmSaveMask()` returns early while `maskBusy` is true, so `maskJob` is only reassigned after the previous export finished (`finishMask`), failed (`maskError`) or was cancelled (`cancelSaveMask`, which unsubscribes); and `ngOnDestroy` unsubscribes a running one. The dialog's Confirm button is also hidden while busy.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258765120"
+    },
+    {
+      "key": "resource-leak|RegionHistory timeout this.burstTimer|src/lib/store/region-history.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `burstTimer` is a one-shot 250 ms timeout that only flips `burstOpen` back to false on this object; `armBurst()` clears the previous handle before arming a new one, and undo/redo/reset/gestures clear it via `closeBurst()`. The owner is RegionStore, a root singleton, so the history is never discarded; even if it were, the pending timer would fire once and release itself.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258764658"
+    },
+    {
+      "key": "resource-leak|ScatterRegionsScene subscription this.regionSub|src/lib/implementations/napari-js/napari-image-2d-scene.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "The counterexample can't happen: the service calls `mount()` once per scene, on a scene it has just created. But checking it turned up a real leak nearby. If a newer plot resets the service while `await this.image.mount()` is pending, `dispose()` runs first and `mount()` then subscribes `regionSub` with nothing left to release it. `Image2dScene` and `Spatial2dScene` had the same gap, and theirs in",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258776431"
+    },
+    {
+      "key": "resource-leak|ToolOverlayCanvas observer this.resizeObserver|src/lib/toolbar/tool-kit/tool-overlay.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "The counterexample itself can't happen: `attach()` returns early while a canvas is attached, and `detach()` disconnects the observer. Checking the owners did turn up a real leak, though. The tools live on backends that outlive the view, and only OSD disarmed its tool on teardown. A Plotly or napari-js tool armed when the visualizer was destroyed kept its canvas, listeners and ResizeObserver on the",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258782814"
+    },
+    {
+      "key": "resource-leak|ViewerShortcuts listener window:type|src/lib/visualizer/viewer-shortcuts.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: `attach()` records every listener in `this.listeners`, and `detach()` removes all of them. `VisualizerComponent` calls `attach()` once from `ngAfterViewInit` on a fresh `ViewerShortcuts` and `detach()` from `ngOnDestroy`. There is no second `attach()` on the same instance, and even one would be fully undone by `detach()`.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258788887"
+    },
+    {
+      "key": "singleton-bypassed|SamSessionService (singleton)|src/lib/toolbar/segmentation/sam-tool.service.ts",
+      "rule": "singleton-bypassed",
+      "verdict": "false-positive",
+      "reply": "Under DI the default argument never runs: both tools are `@Injectable` and Angular's factory passes the root `SamSessionService`. The scope spec in sam-session.service.spec.ts checks that `SamToolService` and `SamPointToolService` in two `provideVisualization()` chains all get the same root instance. Only tests that call `new SamToolService()` directly use the default, and neither tool is exported",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258783667"
+    },
+    {
+      "key": "stuck-state|RegionEditorComponent.maskMode|src/lib/region-editor/region-editor.component.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "Not stuck: `maskMode` is two-way bound to the Save-mask dialog (`[(mode)]=\"maskMode\"` in region-editor.component.html), whose binary/multi-class choice writes it through `modeChange`, and `openSaveMaskDialog()` resets it to 'binary' each time the dialog opens. The analyser only saw the component's own assignment.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258766049"
+    },
+    {
+      "key": "stuck-state|RegionScopeCache.layout|src/lib/store/region-scope-cache.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "Not stuck: `layout` is reassigned from the `layout` argument every time `enterStack()` runs, i.e. on every stack load, and it is only read while in stack mode (`saveLayout` is documented as meaningless outside it). 'combined' is just the initial value.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258766959"
+    },
+    {
+      "key": "stuck-state|SpatialTranscriptsPanelComponent.lastTranscriptMode|src/lib/spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "`lastTranscriptMode` changes at line 188, where turning the section off stores the current `view.transcriptMode` (circles, glyphs or density). It is the mode the header switch restores, so it is never stuck. The spec 'the header switch turns transcripts off and back on in the last mode' covers a round trip through 'glyphs'.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258790415"
+    },
+    {
+      "key": "unreachable-state|NapariVisualizerService.mounted|src/lib/implementations/napari-js/napari-visualizer.service.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "'scatter3d' was reachable: `mounted` was assigned from `sceneKindOf(plotType)`, which returned 'scatter3d' for NAPARI_SCATTER3D (the computed write the note mentions). The field and its `SceneKind` union are gone anyway since 2043e1b, which moved each plot type into its own scene class; `setZIndex` now calls `scene.setZ()` instead of switching on a kind.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258776133"
+    },
+    {
+      "key": "unreachable-state|OsdRegionOverlay.mode|src/lib/implementations/osd/osd-region-overlay.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not dead: `mode` is set by `setMode(mode: RegionToolMode)`, the IRegionOverlay contract method, which the OSD service's `setDragMode` calls with the toolbar's draw mode (`'deletepoint'` is in OVERLAY_MODES and in the region tool buttons). The analyser didn't follow the value through the parameter; osd-region-overlay.spec.ts drives this mode.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258775108"
+    },
+    {
+      "key": "unreachable-state|PlotlyImageRecolor.kind|src/lib/implementations/plotly/plotly-image-recolor.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not dead: `kind` is assigned from `plot(kind, ...)`'s argument, which PlotlyService passes from `recolorKind()`, and that returns 'rgb' for an RGB image (`rgbChannels >= 3`). plotly-image-recolor.spec.ts covers the RGB recolour, e.g. the high-def zoom crop.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258775793"
+    },
+    {
+      "key": "unreachable-state|PlotlyService.plotType|src/lib/implementations/plotly/plotly.service.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not dead: `plotType` is assigned from `plot()`'s `plotType` argument and from `setPlotType()`, and PlotType.ISOSURFACE is a registry plot type the host's plot-type selector offers (Plotly advertises ViewerFeature.Isosurface); routing-visualizer.service.spec.ts plots it. The analyser didn't follow the value through the parameter.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258769932"
+    },
+    {
+      "key": "unreachable-state|RegionEditorComponent.maskMode|src/lib/region-editor/region-editor.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Reachable: 'multiclass' is set by the Save-mask dialog through the two-way binding `[(mode)]=\"maskMode\"` (SaveMaskDialogComponent emits it from its mask-type choice), and MaskExportService rasterizes it as a per-region-id mask. It is a template write the analyser didn't follow.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258766515"
+    },
+    {
+      "key": "unreachable-state|RegionScopeCache.layout|src/lib/store/region-scope-cache.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Reachable: `enterStack(slices, initialZ, layout)` takes the layout from the host through the public `enterStackMode(..., saveLayout?: 'combined' | 'per-slice-file')` contract (VisualizerContract / RoutingVisualizerService); a host passes 'per-slice-file' for a folder of numbered images (jit-ui#93), and the region-editor and store specs cover that path.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258767434"
+    },
+    {
+      "key": "unreachable-state|SpatialChartsComponent.kind|src/lib/spatial-controls/spatial-charts/spatial-charts.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "`kind` is set to `'heatmap'` from the chart-kind dropdown: the template's `(ngModelChange)=\"onKind($event)\"` assigns `this.kind = kind` (spatial-charts.component.ts:401). 'Heatmap' is one of `ALWAYS_KINDS` in chart-help.ts, so the dropdown always offers it. The branch is live.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258787246"
+    },
+    {
+      "key": "unreachable-state|SpatialTranscriptsPanelComponent.lastTranscriptMode|src/lib/spatial-controls/spatial-transcripts-panel/spatial-transcripts-panel.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "'glyphs' is set at line 188 (`this.lastTranscriptMode = this.view.transcriptMode`) whenever transcripts are switched off while drawn as icons. The panel spec covers this: it picks 'glyphs', switches off and on, and expects 'glyphs' back.",
+      "pull": 46,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/46#discussion_r4258790780"
+    },
+    {
+      "key": "long-function|paint|src/lib/section-pane/section-pane.component.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Fixed in a7232f7: `paint` now calls `paintRegions` and `paintCrosshair`.",
+      "pull": 49,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/49#discussion_r4284124148"
+    },
+    {
+      "key": "resource-leak|SectionPaneComponent observer this.resize|src/lib/section-pane/section-pane.component.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Fixed in a7232f7: the previous observer is disconnected before a new one is made. (Angular runs `ngAfterViewInit` once per instance, so this is defensive.)",
+      "pull": 49,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/49#discussion_r4284123463"
+    },
+    {
+      "key": "resource-leak|VolumeSections timeout this.scheduled|src/lib/visualizer/volume-sections.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak. `schedule()` returns early while a timeout is pending, so it never overwrites one. `regionsChanged()` clears the pending one before setting its own, and `stop()` (called from the router's `ngOnDestroy` and `detach`) clears it.",
+      "pull": 49,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/49#discussion_r4284123816"
+    },
+    {
+      "key": "stuck-state|SpatialControlsComponent.missedMode|src/lib/spatial-controls/spatial-controls.component.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "Not relevant: false positive, and the note's own caveat applies. The computed write at `spatial-controls.component.ts:319` (`this.missedMode = mode`) runs on every \"Select from ROIs\", so `'regions'` isn't stuck: the next selection run in class-volume mode moves it to `'class-volumes'`, and back again. `missedMode` isn't a lifecycle state that needs a reset either. It records which mode the last se",
+      "pull": 61,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/61#discussion_r4352064072"
+    },
+    {
+      "key": "unreachable-state|SpatialControlsComponent.missedMode|src/lib/spatial-controls/spatial-controls.component.html",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not relevant: false positive. `missedMode` does get set to `'class-volumes'`. `selectFromRegions()` reads the mode the selection will run in (`const mode = this.roiSelectionMode` → `controls.roiSelectionMode()`, `spatial-controls.component.ts:304`) and assigns it at line 319 (`this.missedMode = mode`). That write is computed rather than a literal, so the state-machine check doesn't see the transit",
+      "pull": 61,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/61#discussion_r4352063621"
+    },
+    {
+      "key": "cannot-settle|SpatialColorByComponent.pending|src/lib/spatial-controls/spatial-color-by/spatial-color-by.component.ts",
+      "rule": "cannot-settle",
+      "verdict": "false-positive",
+      "reply": "False positive: `pending` goes back to null when a gene or measurement is picked (`onGene`/`onMeasure`), when another mode is chosen (`onMode` clears it first), when the view reaches that mode (`ngOnChanges`), and when the dataset changes. Waiting in `'gene'` until the user picks a gene is the intended state, not a stuck one. The replay could not run here (Angular JIT compiler unavailable), so the",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469835"
+    },
+    {
+      "key": "long-function|resolveSelection|src/lib/spatial/spatial-controls.facade.ts",
+      "rule": "long-function",
+      "verdict": "declined",
+      "reply": "Noted, leaving it in this PR: `resolveSelection` (in `spatial-controls.facade.ts`) is one decision over the selection source (cells, types, regions) and place (3D, or a plane). Splitting it is a refactor for a follow-up, alongside the `transcriptsOf` split already done.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476470373"
+    },
+    {
+      "key": "many-parameters|planeGeometry|src/lib/implementations/napari-js/spatial-tiles/cell-layers.ts",
+      "rule": "many-parameters",
+      "verdict": "declined",
+      "reply": "Noted, leaving it for now: `planeGeometry` is private with a single call site. Its arguments are the caller's own locals for that plan pass (dataset, set, rect, zoom, hidden groups and key, plan context), so an options object would only rename them.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476470134"
+    },
+    {
+      "key": "resource-leak|Spatial3dScene subscription this.toolSub|src/lib/implementations/napari-js/napari-spatial-3d-scene.ts",
+      "rule": "resource-leak",
+      "verdict": "false-positive",
+      "reply": "Not a leak: the counterexample can't happen. `listenToRegionMeshes()` returns early when `meshPointer` is already set, which is before `toolSub` is acquired. So a second `mount()` subscribes nothing new, and `dispose()` unsubscribes `toolSub` and destroys the pointer. Leaving it as is.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476468856"
+    },
+    {
+      "key": "stuck-state|RoutingVisualizerService.cells3dMode|src/lib/routing-visualizer.service.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "False positive: the checker misses a computed write. `updateCells3d()` sets `cells3dMode` from the view state on every call (`this.cells3dMode = mode`, where `mode = currentSpatialView().cells3d ?? 'types'`). So it leaves `'types'` whenever the panel's \"In 3D\" switch writes `cells3d: 'cells'`, and returns when it is switched back.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469018"
+    },
+    {
+      "key": "stuck-state|SpatialViewState.cellColorMode|src/lib/contracts/display-types.ts",
+      "rule": "stuck-state",
+      "verdict": "false-positive",
+      "reply": "False positive: the checker misses computed writes. `cellColorMode` is written through `setViewState` partials by the colour control: `onGene` writes `'gene'`, `onMeasure` `'column'`, single colour `'single'`, and Group `'group'` again. So `'group'` is the default, not a dead end.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469341"
+    },
+    {
+      "key": "unreachable-state|RoutingVisualizerService.cells3dMode|src/lib/routing-visualizer.service.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "False positive, same computed write as the stuck-state finding above: `cells3dMode` takes `currentSpatialView().cells3d`, which the Cells panel sets to `'cells'` (covered by \"draws the set's classes as individual cells on the panel's switch\" in `routing-visualizer.service.spec`). The `'cells'` branch is live.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469181"
+    },
+    {
+      "key": "unreachable-state|SpatialColorByComponent.pending|src/lib/spatial-controls/spatial-color-by/spatial-color-by.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Intended: `pending` only holds a mode that needs a pick before anything is written (`'gene'` without a gene yet, `'measure'`). Group and single colour write the view state at once, so they never wait in `pending`. It shares the `ColorByMode` type for simplicity.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469661"
+    },
+    {
+      "key": "unreachable-state|SpatialObservationsPanelComponent.chosenShownAs|src/lib/spatial-controls/spatial-observations-panel/spatial-observations-panel.component.ts",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "False positive: `showAs(as)` sets `chosenShownAs = as`, and the \"Show as\" toggle calls it with `'cells'` (covered in `spatial-observations-panel.component.spec`, which checks for `showCells: true`). The toggle passes the value in, so the checker sees no literal assignment.",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469984"
+    },
+    {
+      "key": "unreachable-state|SpatialViewState.cellColorMode|src/lib/contracts/display-types.ts",
+      "rule": "unreachable-state",
+      "verdict": "fixed",
+      "reply": "Accurate for the built-in controls: since the colour control was unified (55e4812), no panel writes `'transcriptDensity'`. The same colouring is offered as Measurement → `transcript_density` (`'column'` mode on that continuous column). I'm keeping the value because `SpatialViewState` is public API: a host may still set it, and `cell-layers.ts` still renders it, so removing it would be a breaking c",
+      "pull": 77,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/77#discussion_r4476469505"
+    },
+    {
+      "key": "observer-cannot-unsubscribe|CellposeSegmenterService.progressListeners (observer)|src/lib/toolbar/segmentation/cellpose-segmenter.service.ts",
+      "rule": "observer-cannot-unsubscribe",
+      "verdict": "false-positive",
+      "reply": "Not a leak, so no code change: the listener **is** unsubscribed. `loadModel()` adds the caller's listener to `progressListeners` (line 143–144) and returns `this.loading.finally(...)`, which deletes it again (line 181–182) as soon as that caller's load settles, whether it succeeded or failed. A warm call returns before adding anything (line 142). There's no long-lived subscription that would need ",
+      "pull": 102,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/102#discussion_r4619301629"
+    },
+    {
+      "key": "observer-cannot-unsubscribe|CellposeSegmenterService.statusListeners (observer)|src/lib/toolbar/segmentation/cellpose-segmenter.service.ts",
+      "rule": "observer-cannot-unsubscribe",
+      "verdict": "false-positive",
+      "reply": "Not a leak, so no code change: the listener **is** unsubscribed. `loadModel()` adds the caller's listener to `statusListeners` (line 143–144) and returns `this.loading.finally(...)`, which deletes it again (line 181–182) as soon as that caller's load settles, whether it succeeded or failed. A warm call returns before adding anything (line 142). There's no long-lived subscription that would need an",
+      "pull": 102,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/102#discussion_r4619302071"
+    },
+    {
+      "key": "observer-cannot-unsubscribe|SamSessionService.progressListeners (observer)|src/lib/toolbar/segmentation/sam-session.service.ts",
+      "rule": "observer-cannot-unsubscribe",
+      "verdict": "false-positive",
+      "reply": "Not a leak, so no code change: the listener **is** unsubscribed. `acquire()` adds the caller's `onProgress` (line 172) inside a `try` whose `finally` deletes it again (line 181). This happens on every attempt, whether the load succeeds, fails, or is superseded and retried. A warm session returns before anything is added. It's the same add/delete pair as before, moved from `ensureSession()` into `a",
+      "pull": 102,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/102#discussion_r4619489388"
+    },
+    {
+      "key": "unreachable-state|SpatialControlsComponent.missedMode|src/lib/spatial-controls/spatial-controls.component.html",
+      "rule": "unreachable-state",
+      "verdict": "false-positive",
+      "reply": "Not a dead branch, so no change. `selectFromRegions()` stores the mode it ran in: `this.missedMode = mode` (`spatial-controls.component.ts:334`), where `mode` is `roiSelectionMode`, which is `'class-volumes'` for a picked 3D class-volume selection. `spatial-controls.component.spec.ts:509` asserts `missedMode` becomes `'class-volumes'`. This PR only re-indents the line (the control-flow migration);",
+      "pull": 111,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/111#discussion_r4655262647"
+    },
+    {
+      "key": "long-function|clusterOrder|src/lib/spatial/heatmap-order.ts",
+      "rule": "long-function",
+      "verdict": "fixed",
+      "reply": "Split in 5e10c06: `distances` (dense copy, `fullDistance` / `gappedDistance`) and `averageLinkageLeaves` (the NN-chain merge). Same leaf order as before on random inputs with 0 %, 5 % and 60 % gaps, and the same speed: 1000×338 takes 205 ms with no gaps and 405 ms with gaps.",
+      "pull": 116,
+      "url": "https://github.com/TheJacksonLaboratory/sci-image-visualizer/pull/116#discussion_r4670441504"
+    }
+  ]
+}
