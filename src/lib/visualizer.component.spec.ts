@@ -590,12 +590,24 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(c['showSpatialControls']).toBe(false);
 
         // Another dataset opens them again, as does the same one after the dataset was cleared.
-        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [], imageRef: { imageId: 'tissue' } });
+        dataset$.next({
+          id: 'visium',
+          name: 'V',
+          observations: { count: 2 },
+          columns: [],
+          imageRef: { imageId: 'tissue' },
+        });
         await flush();
         expect(c['showSpatialControls']).toBe(true);
         c['showSpatialControls'] = false;
         dataset$.next(null);
-        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [], imageRef: { imageId: 'tissue' } });
+        dataset$.next({
+          id: 'visium',
+          name: 'V',
+          observations: { count: 2 },
+          columns: [],
+          imageRef: { imageId: 'tissue' },
+        });
         await flush();
         expect(c['showSpatialControls']).toBe(true);
       });
