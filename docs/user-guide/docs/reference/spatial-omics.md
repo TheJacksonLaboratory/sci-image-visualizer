@@ -23,7 +23,7 @@ depends on the dataset:
 | Dataset brings | What you see first |
 | --- | --- |
 | A tissue image (Visium H&E, demo brain) | The tissue in the **Image** view. Pick **Spatial omics** in the dropdown. |
-| No image but a reference volume (Allen Brain Cell Atlas) | The volume in the **Image** view, as a z-stack. Pick **Spatial omics 3D**. |
+| No image but a reference volume (Allen Brain Cell Atlas) | **Spatial omics** over the volume, a z-stack: the slice slider shows each slice's cells. Pick **Spatial omics 3D** for the cloud. |
 | Neither (seqFISH) | **Spatial omics 3D** if the cells have a z, otherwise **Spatial omics**, directly. |
 
 When the dataset brings no tissue image or volume, the pixel plot types (**Image**, **Heatmap**,

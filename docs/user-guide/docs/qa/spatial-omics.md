@@ -11,7 +11,7 @@ Datasets are in the demo's **spatial-omics** gallery folder:
 | **Visium**   | Adult mouse brain Visium H&E · 2,688 spots                  | 2D over tissue, group/gene/measurement, selection, charts  |
 | **Demo**     | SYNTHETIC · fabricated expression · Visium geometry (demo) | Quick 2D checks                                            |
 | **seqFISH**  | Mouse embryo seqFISH · 19,416 cells                         | No tissue image, embeddings                                |
-| **ABC**      | Allen Brain Cell Atlas → Whole mouse brain MERFISH · 3D (and · 1-in-10) | 3D, volume, class tree, class volumes, large data |
+| **ABC**      | Whole mouse brain MERFISH · 3D (CCFv3), and · 3D · 1-in-10 (Allen Brain Cell Atlas; tiles directly in `spatial-omics`) | 3D, volume, class tree, class volumes, large data |
 
 Transcript, cell-segmentation and gene-heatmap "All genes" cases need a dataset that has them (in JIT).
 
