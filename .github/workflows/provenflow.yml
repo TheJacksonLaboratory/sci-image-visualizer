@@ -3,7 +3,9 @@ name: ProvenFlow review
 # Model-checks the code a pull request changes (state machines, resource lifecycles such as
 # subscriptions and timers, design-pattern contracts) and runs Semgrep, then reviews the pull
 # request: findings on the changed lines, verified fixes as one-click suggestions.
-# https://github.com/belkassaby/provenflow/blob/v0.1.0/docs/code-model-checking.md#the-github-action
+# https://github.com/belkassaby/provenflow/blob/v0.2.0/docs/code-model-checking.md#the-github-action
+# Findings answered as false positives in provenflow-feedback.json (from `pflow feedback
+# TheJacksonLaboratory/sci-image-visualizer`) are not commented inline again.
 on:
   pull_request:
     branches:
@@ -29,6 +31,6 @@ jobs:
       # type-checked with npm run typecheck before they are marked verified.
       - name: Install dependencies
         run: npm ci
-      - uses: belkassaby/provenflow@v0
+      - uses: belkassaby/provenflow@b96ba637151b489d84f6d554584b4793e5425279 # v0.2.0
         with:
           fail-on: none # comments only; set to error to fail the check on errors
