@@ -13,7 +13,8 @@ in a browser with WebGPU (recent Chrome or Edge). See [Limits and requirements](
 1. In the gallery, open the **spatial-omics** folder.
 2. Click **Adult mouse brain Visium H&E · 2,688 spots**. The tissue image loads first.
 3. Open the plot-type dropdown and pick **Spatial omics**.
-4. Click ![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics controls** in the toolbar.
+4. The **Spatial omics** panel opened with the dataset. If you closed it, click
+   ![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics controls** in the toolbar.
 
 **What you should see:** one marker per Visium spot over the H&E image, coloured by the first group column
 (the clusters). The **Spatial omics** panel opens on the left; its header shows the dataset name and
@@ -101,8 +102,8 @@ read the same selection.
 
 ## 7. A 3D atlas
 
-1. Open **spatial-omics → Allen Brain Cell Atlas → Whole mouse brain MERFISH · 3D · 1-in-10**. The
-   reference volume opens first in the **Image** view.
+1. Open **spatial-omics → Whole mouse brain MERFISH · 3D · 1-in-10** (a tile directly in the folder). It
+   opens in **Spatial omics** over its reference volume, one slice at a time.
 2. Pick **Spatial omics 3D** in the plot-type dropdown. About 374,000 cells are drawn in 3D.
 3. Drag to rotate, scroll to zoom, and use <i class="pi pi-home"></i> **Reset camera** to start again.
 4. Load the atlas regions. Open the Region Editor, click <i class="pi pi-upload"></i> **Import regions**

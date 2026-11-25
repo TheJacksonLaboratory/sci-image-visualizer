@@ -23,7 +23,7 @@ depends on the dataset:
 | Dataset brings | What you see first |
 | --- | --- |
 | A tissue image (Visium H&E, demo brain) | The tissue in the **Image** view. Pick **Spatial omics** in the dropdown. |
-| No image but a reference volume (Allen Brain Cell Atlas) | The volume in the **Image** view, as a z-stack. Pick **Spatial omics 3D**. |
+| No image but a reference volume (Allen Brain Cell Atlas) | **Spatial omics** over the volume, a z-stack: the slice slider shows each slice's cells. Pick **Spatial omics 3D** for the cloud. |
 | Neither (seqFISH) | **Spatial omics 3D** if the cells have a z, otherwise **Spatial omics**, directly. |
 
 When the dataset brings no tissue image or volume, the pixel plot types (**Image**, **Heatmap**,
@@ -43,10 +43,11 @@ See [Limits and requirements](limits.md#browser-and-graphics).
 
 ## The Spatial omics panel
 
-Open it with the ![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics
-controls** button. The button is only in the toolbar while a Spatial omics plot type is shown. The panel
-is a floating, resizable window that opens on the left. Its header shows the dataset name and the number
-of observations.
+The panel opens by itself with each dataset you open. Once closed, open it again with the
+![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics controls** button. The button is only
+in the toolbar while a Spatial omics plot type is shown. The panel is a floating, resizable window that
+opens on the left (an application embedding the viewer can put it on the right). Its header shows the
+dataset name and the number of observations.
 
 ![The Spatial omics panel with its sections: Images, Observations, Regions and Distribution](../assets/screenshots/spatial-panel.png){ width="420" }
 

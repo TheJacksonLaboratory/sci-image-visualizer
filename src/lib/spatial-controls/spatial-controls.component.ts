@@ -104,6 +104,8 @@ export class SpatialControlsComponent implements OnInit {
    *  MEANS — a screen-space lasso cutting through the cloud's full depth rather
    *  than a shape in tissue coordinates — so the hint below it says so. */
   @Input() is3d = false;
+  /** The side of the page the dialog opens on. */
+  @Input() position: 'left' | 'right' = 'left';
   /** The dialog was opened or closed; two-way with {@link visible}. */
   @Output() visibleChange = new EventEmitter<boolean>();
 

@@ -125,7 +125,7 @@ gallery of samples on the left and the viewer on the right. The whole-slide (**W
 | `spatial-omics` → Adult mouse brain Visium H&E   | 2,688 spots, 18,078 genes, H&E image           | Spatial omics 2D, colour by group/gene/measurement, Select from ROIs, all distribution charts |
 | `spatial-omics` → SYNTHETIC demo-brain           | ~2,000 spots, synthetic H&E, fabricated values | Spatial omics 2D (small, fast)                                                                |
 | `spatial-omics` → Mouse embryo seqFISH           | 19,416 cells, no image, 6 embeddings           | Dataset without image (pixel modes withheld), Embedding chart, lasso                          |
-| `spatial-omics` → Allen Brain Cell Atlas         | MERFISH 3D, 3.7 M cells (and 1-in-10 subset), CCF volume | Spatial omics 3D, volume, class tree, class-volume selection, large data             |
+| `spatial-omics` → Whole mouse brain MERFISH · 3D | Allen Brain Cell Atlas MERFISH, 3.7 M cells (and the · 1-in-10 subset), CCF volume | Spatial omics 3D, volume, class tree, class-volume selection, large data             |
 
 !!! note "What the demo cannot test"
     The demo server has no transcript (Xenium) dataset, no gene-heatmap **All genes** data, no cell

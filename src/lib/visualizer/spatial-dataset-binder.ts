@@ -18,6 +18,8 @@ export interface SpatialBinderHost {
   /** Whether an image is loaded. */
   hasImage(): boolean;
   selectPlotType(type: PlotType): void;
+  /** Open the spatial-omics controls (a dataset was just opened). */
+  openSpatialControls(): void;
   /** Re-plot the current mode. */
   replot(): void;
   /** Publish an image as the host's current one. */
@@ -31,7 +33,8 @@ export interface SpatialBinderHost {
 /**
  * Binds the viewer to the spatial-omics dataset on `SPATIAL_DATA_PORT`: the gates it
  * puts on the plot-type selector ({@link gates}), the mode an image-less dataset opens
- * on, and publishing a dataset's registered volume AS the image.
+ * on, publishing a dataset's registered volume AS the image, and opening the
+ * spatial-omics controls on each dataset opened.
  *
  * No-op when the host provides no port — the spatial types then stay hidden.
  */
@@ -52,6 +55,8 @@ export class SpatialDatasetBinder implements SpatialGates {
   private volumeImageKey: string | null = null;
   /** Blob URLs backing that image — ours to revoke. */
   private volumeImageUrls: string[] = [];
+  /** The dataset the controls were last opened for, so a re-emission does not reopen them. */
+  private openedId: string | null = null;
 
   constructor(
     private readonly port: SpatialDataPort | undefined,
@@ -97,10 +102,15 @@ export class SpatialDatasetBinder implements SpatialGates {
     // stay on offer — Volume and Isosurface are exactly how a 3D omics dataset is read.
     this.hasPixels = !!dataset?.imageRef || hasVolume;
     this.host.gatesChanged();
+    // Another dataset (not a re-emission of this one): its controls are how it is read,
+    // so they open with it. Closed by the user, they stay closed until the next dataset.
+    if (dataset && dataset.id !== this.openedId) this.host.openSpatialControls();
+    this.openedId = dataset?.id ?? null;
     if (dataset && !dataset.imageRef && hasVolume) {
       // No section to draw observations over (a cloud registered into a common frame,
-      // the Allen CCF), but a registered VOLUME: make that the image and open on it,
-      // slice bar and all. Ordered after the gates so the type is on offer first.
+      // the Allen CCF), but a registered VOLUME: make that the image and open the
+      // Spatial omics view over it, slice bar and all (each slice draws the observations
+      // in it). Ordered after the gates so the type is on offer first.
       void this.showVolumeAsImage(dataset);
     } else {
       // Anything else means a published volume image is no longer what is on screen.
@@ -125,9 +135,10 @@ export class SpatialDatasetBinder implements SpatialGates {
   }
 
   /**
-   * Publish a dataset's reference volume AS the image, and open the 2D Image view on it:
-   * the slice bar scrubs z, and the contrast window, colormaps and region tools all work
-   * because the volume genuinely is the image now. The 3D cloud stays one pick away.
+   * Publish a dataset's reference volume AS the image, and open the 2D Spatial omics view
+   * over it: the slice bar scrubs z and shows the observations in that slice, and the
+   * contrast window, colormaps and region tools all work because the volume genuinely is
+   * the image now. The Image view and the 3D cloud stay one pick away.
    *
    * Keyed by dataset + geometry: the dataset stream re-emits on things like a
    * colour-column change, and rebuilding then would re-fetch the voxels and throw the
@@ -154,7 +165,7 @@ export class SpatialDatasetBinder implements SpatialGates {
         return;
       }
       // Pick the mode first so the image lands in the view that will show it.
-      if (this.host.selectedId() !== PlotType.IMAGE) this.host.selectPlotType(PlotType.IMAGE);
+      if (this.host.selectedId() !== PlotType.SPATIAL_OMICS) this.host.selectPlotType(PlotType.SPATIAL_OMICS);
       this.revokeVolumeImageUrls();
       this.volumeImageUrls = built.urls;
       this.host.publishImage(built.info);
