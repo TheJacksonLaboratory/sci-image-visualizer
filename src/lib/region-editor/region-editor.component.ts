@@ -67,6 +67,8 @@ const REGION_FILL_OPACITY = 0.6;
 
 /** "Select all" takes at most this many region-source features into the regions. */
 const SELECT_ALL_SOURCE_LIMIT = 5000;
+/** Numbers each editor's confirm-dialog key (see {@link RegionEditorComponent.confirmKey}). */
+let confirmKeySeq = 0;
 
 @Component({
   selector: 'region-editor',
@@ -254,6 +256,14 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
   /** Physical pixel size (µm/pixel) of the active image, for region areas in
    *  µm²; empty when the format reports no physical size. */
   protected mpp: PixelSize = {};
+
+  /**
+   * This editor's own key for its `<p-confirmDialog>`. Every `<visualizer>` creates a region editor
+   * even while its dialog is hidden, and all of them share the root ConfirmationService: with one
+   * fixed key, a host with two visualizers (jit-ui's diagram and pipeline preview) opened the
+   * "delete all regions" confirmation twice, and the second one could only be closed with its X.
+   */
+  protected readonly confirmKey = `region-editor-confirm-${++confirmKeySeq}`;
 
   constructor(
     @Inject(REGION_EDITOR_API) private regionApi: IRegionEditorApi,
@@ -868,7 +878,7 @@ export class RegionEditorComponent implements OnInit, OnDestroy {
 
   protected clearAllRegions() {
     this.confirmationService.confirm({
-      key: 'positionDialog',
+      key: this.confirmKey,
       message: 'Are you sure you want to delete all regions?',
       accept: () => {
         this.selectedRegions = [];

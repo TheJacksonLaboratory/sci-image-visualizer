@@ -9,6 +9,12 @@ file was added.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Delete all regions" asks once.** In a host with two `<visualizer>`s, such as jit-ui's image view
+  and pipeline preview, the confirmation opened twice, and the second one could only be closed with its
+  X. Each region editor now has its own confirmation.
+
 ## [0.22.3] — 2026-11-25
 
 ### Changed
