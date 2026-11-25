@@ -9,6 +9,20 @@ file was added.
 
 ## [Unreleased]
 
+### Changed
+
+- **A dataset with a reference volume opens in Spatial omics.** A dataset registered to a volume and
+  with no tissue image, such as the Allen Brain Cell Atlas MERFISH, opened its volume in the Image view,
+  so its cells were one pick away. It now opens in Spatial omics over that volume: the slice slider moves
+  through the volume and shows the cells in each slice. Image and Spatial omics 3D are still offered.
+- **The Spatial omics panel opens with each dataset.** It no longer waits for the toolbar button. Closed,
+  it stays closed while the same dataset is shown, and opens again with the next one.
+
+### Added
+
+- **`spatialControlsPosition`** on `<visualizer>`: the side the Spatial omics panel opens on, `'left'`
+  (the default) or `'right'`, for a host whose left-hand side holds its own panel.
+
 ## [0.22.2] — 2026-11-23
 
 ### Fixed

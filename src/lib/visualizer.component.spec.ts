@@ -545,7 +545,7 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(offeredTypes).toContain(PlotType.NAPARI_ISOSURFACE);
       });
 
-      it('publishes the volume AS the image and opens the 2D Image view on it', async () => {
+      it('publishes the volume AS the image and opens the 2D Spatial omics view over it', async () => {
         plotService.getPlotTypeDescriptors.mockReturnValue([
           PLOT_TYPE_DESCRIPTORS[PlotType.IMAGE],
           SPATIAL_DESCRIPTOR,
@@ -566,7 +566,46 @@ describe('VisualizerComponent (UI shell)', () => {
         expect(published).toMatchObject({ isStack: true, isGrayscale: true, tiled: false });
         expect(published.imageMeta[0].z).toBe(4);
         expect(published.urls.length).toBe(4);
-        expect(plotService.setPlotType).toHaveBeenCalledWith(PlotType.IMAGE);
+        expect(plotService.setPlotType).toHaveBeenLastCalledWith(PlotType.SPATIAL_OMICS);
+      });
+
+      it('opens the spatial-omics controls with each dataset opened, not on a re-emission', async () => {
+        port.getVolume = jest.fn().mockResolvedValue(new Uint8Array(4 * 4 * 4));
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        expect(c['showSpatialControls']).toBe(false);
+        const withVolume = {
+          ...VOLUME_DATASET,
+          volume: { width: 4, height: 4, depth: 4, voxelSize: [40, 40, 200] },
+        };
+
+        dataset$.next(withVolume);
+        await flush();
+        expect(c['showSpatialControls']).toBe(true);
+
+        // Closed by the user: a re-emission of the same dataset (a colour change) leaves it closed.
+        c['showSpatialControls'] = false;
+        dataset$.next({ ...withVolume });
+        await flush();
+        expect(c['showSpatialControls']).toBe(false);
+
+        // Another dataset opens them again, as does the same one after the dataset was cleared.
+        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [], imageRef: { imageId: 'tissue' } });
+        await flush();
+        expect(c['showSpatialControls']).toBe(true);
+        c['showSpatialControls'] = false;
+        dataset$.next(null);
+        dataset$.next({ id: 'visium', name: 'V', observations: { count: 2 }, columns: [], imageRef: { imageId: 'tissue' } });
+        await flush();
+        expect(c['showSpatialControls']).toBe(true);
+      });
+
+      it('leaves the controls closed when no dataset is published', async () => {
+        const c = makeComponent(plotService, port);
+        (c as any).watchSpatialDataset();
+        dataset$.next(null);
+        await flush();
+        expect(c['showSpatialControls']).toBe(false);
       });
 
       it('does not refetch the voxels when the same dataset is re-emitted', async () => {

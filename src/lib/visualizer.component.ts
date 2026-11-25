@@ -207,6 +207,11 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
   @Input()
   testMode = false;
 
+  /** The side of the page the Spatial omics controls open on: the left by default, the
+   *  right for a host whose left-hand side holds its own panel (a file browser). */
+  @Input()
+  spatialControlsPosition: 'left' | 'right' = 'left';
+
   /** Image-smoothing state for the toolbar's Smoothen toggle (OSD only).
    *  Defaults to `false` so OSD shows raw pixels (nearest-neighbour). */
   protected imageSmoothingEnabled = false;
@@ -663,6 +668,7 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
       basePlotType: () => this.basePlotType,
       hasImage: () => !!this.imageInfo,
       selectPlotType: (type) => this.onSelectPlotType(type),
+      openSpatialControls: () => this.openSpatialControls(),
       replot: () => this.reloadAndPlot(),
       publishImage: (info) => this.state.setImageInfo(info),
       setImageLoading: (loading) => this.state.setImageLoading(loading),
@@ -1053,9 +1059,10 @@ export class VisualizerComponent implements OnInit, OnChanges, AfterViewInit, On
     this.showChannelHistogram = true;
   }
 
-  /** Toolbar → open the spatial-omics controls. */
+  /** Open the spatial-omics controls: the toolbar button, and each dataset opened. */
   protected openSpatialControls(): void {
     this.showSpatialControls = true;
+    this.changed();
   }
 
   /** Open the Region Editor dialog (toolbar button). The editor stays linked to

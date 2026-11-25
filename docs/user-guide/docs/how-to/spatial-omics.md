@@ -6,13 +6,16 @@ described in [Spatial omics](../reference/spatial-omics.md) and
 
 ## Open a dataset in the spatial view
 
-1. Open the dataset (in the demo: the **spatial-omics** folder of the gallery).
+1. Open the dataset (in the demo: the **spatial-omics** folder of the gallery). The Spatial omics panel
+   opens with it.
 2. If it has a tissue image, the image opens first: pick **Spatial omics** in the plot-type dropdown. If its
    cells have z coordinates you can pick **Spatial omics 3D** instead.
-3. Click ![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics controls** to open the panel.
+3. If you closed the panel, click ![](../assets/icons/spatial-omics.svg){ .siv-icon } **Spatial omics
+   controls** to open it again.
 
 A dataset with no image and no volume (such as seqFISH) opens directly in a spatial view. A dataset with a
-reference volume (such as the Allen Brain Cell Atlas) opens the volume in the **Image** view first.
+reference volume (such as the Allen Brain Cell Atlas) opens in **Spatial omics** over that volume: the
+slice slider moves through the volume and shows the cells in each slice.
 
 ## Colour observations by cell type or cluster
 

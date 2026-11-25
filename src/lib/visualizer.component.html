@@ -254,7 +254,7 @@ the whole page rather than being clipped to the canvas. -->
 
 <!-- Spatial-omics controls. Renders its own empty state when no dataset (or no
 SPATIAL_DATA_PORT) is present, so it is always safe to host. -->
-<spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode"></spatial-controls>
+<spatial-controls [(visible)]="showSpatialControls" [is3d]="isSpatial3dMode" [position]="spatialControlsPosition"></spatial-controls>
 
 <!-- Side panel of the active contributed plot mode (PLOT_TYPE_CONTRIBUTIONS),
 in the same right-hand area as the spatial controls and the Region Editor.
