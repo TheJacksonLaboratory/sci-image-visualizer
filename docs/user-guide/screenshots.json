@@ -374,7 +374,7 @@
    "steps": [
     "Open the 'spatial-omics' folder, click 'Adult mouse brain Visium H&E · 2,688 spots'.",
     "Pick 'Spatial omics' in the plot-type dropdown.",
-    "Open the Spatial omics panel (toolbar button). Colour by → Group → cluster.",
+    "The Spatial omics panel opens with the dataset. Colour by → Group → cluster.",
     "Capture the viewer area with the panel on the left."
    ]
   },
@@ -773,6 +773,25 @@
     "Open the Region Editor, give these regions the class 'Tumor' (Edit class on selected rows).",
     "Close the slice editor. In the Classes panel click the box icon 'Show in the volume, in 3D' next to 'Tumor'.",
     "Rotate so the surface is visible inside the volume and capture the viewer area with the Region Editor."
+   ]
+  },
+  {
+   "id": "spatial-volume-2d",
+   "file": "spatial-volume-2d.png",
+   "section": "How-to guides",
+   "page": "how-to/spatial-omics.md",
+   "usedBy": [
+    "how-to/spatial-omics.md"
+   ],
+   "title": "A dataset with a reference volume, opened in Spatial omics",
+   "sample": "spatial-omics → Whole mouse brain MERFISH · 3D · 1-in-10",
+   "capture": "Viewer area with the panel",
+   "steps": [
+    "Open the 'spatial-omics' folder and click 'Whole mouse brain MERFISH · 3D · 1-in-10'.",
+    "Wait for loading: the view opens in 'Spatial omics' and the panel opens on the left.",
+    "Drag the slice slider to the middle of the brain.",
+    "In the panel, Colour by → Group → class.",
+    "Capture the viewer area with the toolbar and the panel."
    ]
   },
   {

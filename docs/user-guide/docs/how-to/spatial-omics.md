@@ -17,6 +17,8 @@ A dataset with no image and no volume (such as seqFISH) opens directly in a spat
 reference volume (such as the Allen Brain Cell Atlas) opens in **Spatial omics** over that volume: the
 slice slider moves through the volume and shows the cells in each slice.
 
+![The Allen Brain Cell Atlas 1-in-10 subset opened in Spatial omics over its reference volume, coloured by class, with the Spatial omics panel](../assets/screenshots/spatial-volume-2d.png)
+
 ## Colour observations by cell type or cluster
 
 1. In the panel, **Observations → Colour by**, choose **Group**.
