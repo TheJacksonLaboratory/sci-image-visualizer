@@ -1,4 +1,11 @@
 {
   "include": ["src/**"],
-  "exclude": ["**/*.spec.ts", "src/test-setup.ts", "examples/**", "docs/**", "scripts/**"]
+  "exclude": ["**/*.spec.ts", "src/test-setup.ts", "examples/**", "docs/**", "scripts/**"],
+  "review": {
+    "rules": {
+      "resource-leak": "inline",
+      "unreachable-state": "inline",
+      "stuck-state": "inline"
+    }
+  }
 }
