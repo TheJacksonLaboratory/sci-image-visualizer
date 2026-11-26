@@ -9,6 +9,8 @@ file was added.
 
 ## [Unreleased]
 
+## [0.22.4] — 2026-11-26
+
 ### Fixed
 
 - **"Delete all regions" asks once.** In a host with two `<visualizer>`s, such as jit-ui's image view
@@ -3052,7 +3054,8 @@ Backfilled: 0.3.1 was published without an entry.
   napari-js WebGPU renderings, regions & annotation, channels/colormaps, and
   browser-side SAM and cellpose segmentation.
 
-[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.3...HEAD
+[Unreleased]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.4...HEAD
+[0.22.4]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.3...v0.22.4
 [0.22.3]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.2...v0.22.3
 [0.22.2]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.1...v0.22.2
 [0.22.1]: https://github.com/TheJacksonLaboratory/sci-image-visualizer/compare/v0.22.0...v0.22.1
