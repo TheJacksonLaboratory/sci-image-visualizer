@@ -239,4 +239,34 @@ describe('RegionEditorComponent (DOM)', () => {
     );
     expect(values).toEqual(expect.arrayContaining(['slide.geojson', 'slide_mask.png']));
   });
+  it('a second region editor does not open its own "delete all regions" confirmation', async () => {
+    // A host with two <visualizer>s (jit-ui's diagram and pipeline preview) has two region editors,
+    // both alive while hidden and sharing the root ConfirmationService.
+    const other = TestBed.createComponent(RegionEditorComponent);
+    other.detectChanges();
+    const confirmations = () =>
+      Array.from(document.querySelectorAll('.p-dialog')).filter((d) =>
+        d.textContent?.includes('Are you sure you want to delete all regions?'),
+      );
+    try {
+      (el.querySelector('p-button[icon="pi pi-times-circle"] button') as HTMLButtonElement).click();
+      render();
+      other.detectChanges();
+      await fixture.whenStable();
+      expect(confirmations().length).toBe(1);
+
+      const yes = Array.from(confirmations()[0].querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === 'Yes',
+      ) as HTMLButtonElement;
+      yes.click();
+      render();
+      other.detectChanges();
+      await fixture.whenStable();
+      render();
+      expect(store.getRegions().filter((r) => !r.isProfile())).toEqual([]);
+      expect(confirmations().filter((d) => getComputedStyle(d).display !== 'none').length).toBe(0);
+    } finally {
+      other.destroy();
+    }
+  });
 });
